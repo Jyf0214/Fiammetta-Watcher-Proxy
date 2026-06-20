@@ -29,9 +29,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache wget
 
 # 复制构建产物
-COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# public 目录从构建上下文直接复制（standalone 模式不包含）
+COPY public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
