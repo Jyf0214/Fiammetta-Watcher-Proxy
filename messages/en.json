@@ -1,0 +1,122 @@
+{
+  "common": {
+    "app_name": "Fiammetta Watcher Proxy",
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "confirm": "Confirm",
+    "success": "Success",
+    "error": "Error",
+    "yes": "Yes",
+    "no": "No",
+    "enable": "Enable",
+    "disable": "Disable",
+    "status": "Status",
+    "actions": "Actions",
+    "created_at": "Created At",
+    "updated_at": "Updated At",
+    "total": "Total",
+    "page": "Page",
+    "per_page": "Per Page",
+    "no_data": "No Data",
+    "confirm_delete": "Confirm Delete?",
+    "confirm_delete_desc": "This action cannot be undone. Are you sure?"
+  },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "username": "Username",
+    "password": "Password",
+    "login_success": "Login successful",
+    "login_failed": "Login failed",
+    "logout_success": "Logged out",
+    "unauthorized": "Unauthorized, please login first"
+  },
+  "admin": {
+    "dashboard": "Dashboard",
+    "platforms": "Platforms",
+    "keys": "API Keys",
+    "models": "Model Mapping",
+    "logs": "Request Logs",
+    "audit": "Audit Logs",
+    "system": "System Config",
+    "events": "System Events"
+  },
+  "platform": {
+    "name": "Platform Name",
+    "base_url": "Base URL",
+    "api_key": "API Key",
+    "type": "Platform Type",
+    "priority": "Priority",
+    "weight": "Weight",
+    "rpm_limit": "RPM Limit",
+    "tpm_limit": "TPM Limit",
+    "status_healthy": "Healthy",
+    "status_degraded": "Degraded",
+    "status_down": "Down",
+    "create_platform": "Create Platform",
+    "edit_platform": "Edit Platform"
+  },
+  "api_key": {
+    "key": "API Key",
+    "name": "Key Name",
+    "plan": "Plan",
+    "quota": "Quota",
+    "used_tokens": "Used Tokens",
+    "call_limit": "Call Limit",
+    "token_limit": "Token Limit",
+    "reset_period": "Reset Period",
+    "expires_at": "Expires At",
+    "status_active": "Active",
+    "status_disabled": "Disabled",
+    "status_expired": "Expired",
+    "create_key": "Create Key",
+    "edit_key": "Edit Key"
+  },
+  "plan": {
+    "name": "Plan Name",
+    "token_quota": "Token Quota",
+    "call_limit": "Call Limit",
+    "rpm_limit": "RPM Limit",
+    "tpm_limit": "TPM Limit",
+    "reset_period": "Reset Period"
+  },
+  "model_map": {
+    "alias": "Model Alias",
+    "target_model": "Target Model",
+    "platform": "Platform",
+    "create_mapping": "Create Mapping",
+    "edit_mapping": "Edit Mapping"
+  },
+  "log": {
+    "model": "Model",
+    "status_code": "Status Code",
+    "tokens": "Tokens",
+    "duration": "Duration",
+    "is_error": "Error",
+    "error_message": "Error Message",
+    "platform": "Platform",
+    "api_key": "API Key"
+  },
+  "dashboard": {
+    "total_requests": "Total Requests",
+    "total_tokens": "Total Tokens",
+    "active_keys": "Active Keys",
+    "active_platforms": "Active Platforms",
+    "requests_trend": "Requests Trend",
+    "token_usage": "Token Usage",
+    "top_models": "Top Models",
+    "platform_stats": "Platform Stats"
+  },
+  "system": {
+    "admin_init": "Admin Initialization",
+    "admin_init_desc": "Admin account set via environment variables, created automatically on first start",
+    "db_status": "Database Status",
+    "db_connected": "Connected",
+    "db_disconnected": "Disconnected"
+  }
+}

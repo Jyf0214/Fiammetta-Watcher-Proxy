@@ -1,0 +1,176 @@
+// Fiammetta Watcher Proxy — Prisma Schema
+// 数据库仅用于授权验证、管理员身份校验、必要的草稿存储与最小化运行支撑
+// 默认使用 PostgreSQL，MySQL 用户请通过 prisma.config.ts 切换 provider
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 管理员账户 ====================
+
+model Admin {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@map("admins")
+}
+
+// ==================== 上游平台 ====================
+
+model Platform {
+  id           String   @id @default(cuid())
+  name         String
+  baseUrl      String
+  apiKey       String
+  type         String   @default("openai") // openai | azure | custom
+  enabled      Boolean  @default(true)
+  priority     Int      @default(0) // 数值越大优先级越高
+  weight       Int      @default(1) // 负载均衡权重
+  rpmLimit     Int?     // 每分钟请求限制
+  tpmLimit     Int?     // 每分钟 token 限制
+  status       String   @default("healthy") // healthy | degraded | down
+  failCount    Int      @default(0) // 连续失败次数
+  lastFailAt   DateTime?
+  cooldownEnd  DateTime? // 熔断冷却结束时间
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  modelMaps  ModelMap[]
+  requestLogs RequestLog[]
+
+  @@map("platforms")
+}
+
+// ==================== API Key ====================
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  key        String    @unique
+  name       String
+  planId     String?   // 可选：关联套餐模板
+  quota      Decimal?  @default(0) // 自定义额度（null 表示使用 Plan 默认值）
+  usedTokens BigInt   @default(0) // 已使用 token 数
+  rpmLimit   Int?      // 每分钟请求限制（null 表示使用 Plan 默认值）
+  tpmLimit   Int?      // 每分钟 token 限制（null 表示使用 Plan 默认值）
+  callLimit  Int?      // 总调用次数限制（null 表示使用 Plan 默认值）
+  tokenLimit BigInt?   // 总 token 限制（null 表示使用 Plan 默认值）
+  resetPeriod String?  @default("monthly") // monthly | daily | never
+  status     String    @default("active") // active | disabled | expired
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  plan       Plan?      @relation(fields: [planId], references: [id])
+  requestLogs RequestLog[]
+
+  @@map("api_keys")
+}
+
+// ==================== 套餐模板 ====================
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  tokenQuota  BigInt   // 总 token 额度
+  callLimit   Int      // 总调用次数限制
+  rpmLimit    Int      // 每分钟请求限制
+  tpmLimit    Int      // 每分钟 token 限制
+  resetPeriod String   @default("monthly") // monthly | daily | never
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  apiKeys ApiKey[]
+
+  @@map("plans")
+}
+
+// ==================== 模型映射 ====================
+
+model ModelMap {
+  id          String   @id @default(cuid())
+  alias       String   // 客户端请求的模型名（别名）
+  targetModel String   // 实际转发到上游的模型名
+  platformId  String?  // 绑定到特定平台（null 表示使用路由引擎自动选择）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  platform Platform? @relation(fields: [platformId], references: [id])
+
+  @@unique([alias, platformId])
+  @@map("model_maps")
+}
+
+// ==================== 请求日志 ====================
+
+model RequestLog {
+  id          String   @id @default(cuid())
+  keyId       String?
+  platformId  String?
+  model       String
+  status      Int      // HTTP 状态码
+  tokens      Int      @default(0) // token 用量
+  duration    Int      @default(0) // 耗时（毫秒）
+  isError     Boolean  @default(false)
+  errorMessage String?
+  createdAt   DateTime @default(now())
+
+  key      ApiKey?    @relation(fields: [keyId], references: [id])
+  platform Platform?  @relation(fields: [platformId], references: [id])
+
+  @@index([keyId])
+  @@index([platformId])
+  @@index([createdAt])
+  @@map("request_logs")
+}
+
+// ==================== 审计日志 ====================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String?
+  action    String   // 操作类型（login, create_platform, update_key 等）
+  detail    String?  // 操作详情（JSON）
+  ip        String?
+  createdAt DateTime @default(now())
+
+  admin Admin? @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==================== 系统事件 ====================
+
+model SystemEvent {
+  id        String   @id @default(cuid())
+  level     String   // info | warning | error | critical
+  message   String
+  detail    String?  // 详细信息（JSON）
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([createdAt])
+  @@map("system_events")
+}
+
+// ==================== 系统配置 ====================
+
+model Config {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("configs")
+}

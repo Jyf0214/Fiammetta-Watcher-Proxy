@@ -1,0 +1,53 @@
+{
+  "name": "fiammetta-watcher-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.6.1",
+    "@ant-design/pro-components": "^2.8.7",
+    "@prisma/client": "^6.19.3",
+    "@tailwindcss/postcss": "^4.3.1",
+    "antd": "^5.26.1",
+    "autoprefixer": "^10.5.0",
+    "chart.js": "^4.4.0",
+    "chartjs-adapter-moment": "^1.0.1",
+    "clsx": "^2.1.1",
+    "dayjs": "^1.11.13",
+    "i18next": "^26.3.1",
+    "i18next-browser-languagedetector": "^8.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.21.0",
+    "moment": "^2.29.4",
+    "motion": "^12.40.0",
+    "next": "^16.2.9",
+    "react": "^19.1.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^19.1.0",
+    "react-i18next": "^15.6.1",
+    "react-router-dom": "^7.8.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "eslint": "^9.25.1",
+    "eslint-config-next": "^16.2.9",
+    "postcss": "^8.5.3",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.61.1"
+  }
+}
