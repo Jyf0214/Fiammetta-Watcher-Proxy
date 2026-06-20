@@ -25,19 +25,22 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# 安装 wget 用于健康检查
+# 安装 wget 用于健康检查 + 安装所有生产依赖（含 prisma）
 RUN apk add --no-cache wget
+
+# 复制 package.json 并安装生产依赖（确保 prisma 及其所有依赖可用）
+COPY --from=builder /app/package.json /app/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
 
 # 复制构建产物
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/package.json ./package.json
 # public 目录从构建上下文直接复制（standalone 模式不包含）
 COPY public ./public
 COPY --from=builder /app/prisma ./prisma
+# Prisma Client 运行时文件
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 
 # 复制启动脚本（含 prisma db push）
 COPY docker-entrypoint.sh ./
@@ -52,7 +55,7 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/ || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
