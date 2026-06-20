@@ -37,6 +37,10 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+# 复制启动脚本（含 prisma db push）
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+
 # 创建数据目录
 RUN mkdir -p /app/data
 
@@ -46,7 +50,7 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/ || exit 1
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
