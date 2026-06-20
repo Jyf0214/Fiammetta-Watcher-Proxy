@@ -31,6 +31,7 @@ RUN apk add --no-cache wget
 # 复制构建产物
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/package.json ./package.json
 # public 目录从构建上下文直接复制（standalone 模式不包含）
 COPY public ./public
 COPY --from=builder /app/prisma ./prisma
