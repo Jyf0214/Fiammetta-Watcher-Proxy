@@ -36,6 +36,7 @@ COPY public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 
 # 复制启动脚本（含 prisma db push）
 COPY docker-entrypoint.sh ./

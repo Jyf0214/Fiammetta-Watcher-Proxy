@@ -2,7 +2,7 @@
 set -e
 
 echo "[启动] 运行数据库迁移..."
-npx prisma db push --skip-generate
+./node_modules/.bin/prisma db push
 echo "[启动] 数据库迁移完成"
 
 echo "[启动] 启动应用..."
