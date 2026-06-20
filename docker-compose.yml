@@ -6,9 +6,10 @@ services:
     container_name: fiammetta-watcher-proxy
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     environment:
       - NODE_ENV=production
+      - PORT=${PORT:-3000}
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/fiammetta_proxy}
       - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-change-in-production}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
