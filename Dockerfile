@@ -3,9 +3,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# 安装依赖
+# 安装依赖（跳过 postinstall，因为 Prisma schema 尚未复制）
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # 复制 Prisma schema 并生成客户端
 COPY prisma ./prisma/
