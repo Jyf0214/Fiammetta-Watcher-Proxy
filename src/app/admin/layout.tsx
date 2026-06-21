@@ -35,6 +35,12 @@ export default function AdminPageLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [username, setUsername] = useState("");
 
+  // 登录页不使用管理后台布局
+  const isLoginPage = pathname === "/admin/login";
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
   useEffect(() => {
     checkAuth();
     // 移动端自动折叠侧边栏
