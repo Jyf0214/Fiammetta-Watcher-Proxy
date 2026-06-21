@@ -34,16 +34,11 @@ export default function AdminPageLayout({
   const { mode, cycle, isDark } = useThemeMode();
   const [collapsed, setCollapsed] = useState(false);
   const [username, setUsername] = useState("");
-
-  // 登录页不使用管理后台布局
   const isLoginPage = pathname === "/admin/login";
-  if (isLoginPage) {
-    return <>{children}</>;
-  }
 
   useEffect(() => {
+    if (isLoginPage) return;
     checkAuth();
-    // 移动端自动折叠侧边栏
     const handleResize = () => {
       if (window.innerWidth < 768) {
         setCollapsed(true);
@@ -52,7 +47,7 @@ export default function AdminPageLayout({
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
+  }, [isLoginPage]);
 
   const checkAuth = async () => {
     try {
@@ -133,6 +128,11 @@ export default function AdminPageLayout({
     );
     return matched?.label ?? t("admin.dashboard");
   })();
+
+  // 登录页不使用管理后台布局
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
 
   return (
     <Layout className={`min-h-screen ${isDark ? "dark" : ""}`}>
