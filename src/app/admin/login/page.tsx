@@ -42,10 +42,10 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900 px-4">
       <Card
         title={t("common.app_name")}
-        className="w-96 shadow-lg"
+        className="w-full max-w-96 shadow-lg"
         styles={{ header: { textAlign: "center", fontWeight: 700 } }}
       >
         <Form onFinish={onFinish} autoComplete="off">

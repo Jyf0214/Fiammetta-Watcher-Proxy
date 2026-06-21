@@ -19,6 +19,31 @@ body {
   color: #f4f4f5;
 }
 
+/* 管理后台移动端适配 */
+@media (max-width: 768px) {
+  /* 侧边栏在移动端隐藏文字，只显示图标 */
+  .ant-layout-sider {
+    position: fixed !important;
+    z-index: 100;
+    height: 100vh;
+  }
+
+  /* 表格在移动端水平滚动 */
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+
+  /* 弹窗在移动端全屏 */
+  .ant-modal {
+    margin: 0 !important;
+    max-width: 100vw !important;
+  }
+
+  .ant-modal-content {
+    border-radius: 0 !important;
+  }
+}
+
 /* 文章主色调：使用封面提取的主色调 */
 article header h1 {
   color: var(--main-tone, #18181b) !important;
