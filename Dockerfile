@@ -44,6 +44,7 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # 复制启动脚本（含 prisma db push）
 COPY docker-entrypoint.sh ./
+COPY scripts ./scripts/
 RUN chmod +x docker-entrypoint.sh
 
 # 创建数据目录
