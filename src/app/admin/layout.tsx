@@ -33,6 +33,15 @@ export default function AdminPageLayout({
 
   useEffect(() => {
     checkAuth();
+    // 移动端自动折叠侧边栏
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setCollapsed(true);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const checkAuth = async () => {
@@ -137,30 +146,32 @@ export default function AdminPageLayout({
         />
       </Sider>
       <Layout>
-        <Header className="bg-white px-4 flex items-center justify-between shadow-sm">
-          <Space>
-            <Tag color="blue">{currentPageTitle}</Tag>
+        <Header className="bg-white px-4 flex items-center justify-between shadow-sm overflow-x-auto">
+          <Space size="small">
+            <Tag color="blue" className="hidden sm:inline-block">{currentPageTitle}</Tag>
           </Space>
-          <Space>
+          <Space size="small" wrap>
             <Button
               icon={<GlobalOutlined />}
               onClick={toggleLanguage}
               type="text"
+              size="small"
             >
-              {i18n.language === "zh" ? "EN" : "中文"}
+              <span className="hidden md:inline">{i18n.language === "zh" ? "EN" : "中文"}</span>
             </Button>
-            <Tag>{username}</Tag>
+            <Tag className="hidden sm:inline-block">{username}</Tag>
             <Button
               icon={<LogoutOutlined />}
               onClick={handleLogout}
               type="text"
               danger
+              size="small"
             >
-              {t("auth.logout")}
+              <span className="hidden md:inline">{t("auth.logout")}</span>
             </Button>
           </Space>
         </Header>
-        <Content className="m-4 p-6 bg-white rounded-lg shadow-sm min-h-[280px]">
+        <Content className="m-2 sm:m-4 p-3 sm:p-6 bg-white rounded-lg shadow-sm min-h-[280px]">
           {children}
         </Content>
       </Layout>
