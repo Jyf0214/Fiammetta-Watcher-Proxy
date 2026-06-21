@@ -42,10 +42,10 @@ export default function AdminPageLayout({
       if (data.success) {
         setUsername(data.data.username);
       } else {
-        router.push("/");
+        router.push("/admin/login");
       }
     } catch {
-      router.push("/");
+      router.push("/admin/login");
     }
   };
 
