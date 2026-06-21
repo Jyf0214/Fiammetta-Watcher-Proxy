@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Table, Tag, message } from "antd";
+import { Table, Tag, message, type TableColumnsType } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 
@@ -52,12 +52,12 @@ export default function AuditPage() {
     create_model_map: "green",
   };
 
-  const columns = [
+  const columns: TableColumnsType<AuditEntry> = [
     {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 180,
+      width: 160,
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
@@ -73,26 +73,39 @@ export default function AuditPage() {
         <Tag color={actionColorMap[v] || "default"}>{v}</Tag>
       ),
     },
-    { title: "详情", dataIndex: "detail", key: "detail", ellipsis: true },
-    { title: "IP", dataIndex: "ip", key: "ip" },
+    {
+      title: "详情",
+      dataIndex: "detail",
+      key: "detail",
+      ellipsis: true,
+      responsive: ["md"],
+    },
+    {
+      title: "IP",
+      dataIndex: "ip",
+      key: "ip",
+      responsive: ["lg"],
+    },
   ];
 
   return (
     <div>
       <h3 className="mb-4">{t("admin.audit")}</h3>
-      <Table
-        columns={columns}
-        dataSource={logs}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: setPage,
-          showTotal: (count) => `共 ${count} 条`,
-        }}
-      />
+      <div className="overflow-x-auto">
+        <Table
+          columns={columns}
+          dataSource={logs}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: setPage,
+            showTotal: (count) => `共 ${count} 条`,
+          }}
+        />
+      </div>
     </div>
   );
 }

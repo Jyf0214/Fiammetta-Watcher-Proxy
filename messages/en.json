@@ -118,5 +118,9 @@
     "db_status": "Database Status",
     "db_connected": "Connected",
     "db_disconnected": "Disconnected"
+  },
+  "theme": {
+    "light": "Switch to light mode",
+    "dark": "Switch to dark mode"
   }
 }

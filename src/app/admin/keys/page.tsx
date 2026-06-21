@@ -14,6 +14,7 @@ import {
   message,
   Popconfirm,
   Tooltip,
+  type TableColumnsType,
 } from "antd";
 import {
   PlusOutlined,
@@ -111,14 +112,15 @@ export default function KeysPage() {
     message.success("已复制到剪贴板");
   };
 
-  const columns = [
+  const columns: TableColumnsType<ApiKeyItem> = [
     { title: t("api_key.name"), dataIndex: "name", key: "name" },
     {
       title: t("api_key.key"),
       dataIndex: "key",
       key: "key",
+      ellipsis: true,
       render: (v: string) => (
-        <Space>
+        <Space size="small">
           <span className="font-mono text-xs">{v.substring(0, 16)}...</span>
           <Tooltip title="复制">
             <Button
@@ -136,6 +138,7 @@ export default function KeysPage() {
       dataIndex: "usedTokens",
       key: "usedTokens",
       render: (v: number) => v.toLocaleString(),
+      responsive: ["md"],
     },
     {
       title: t("common.status"),
@@ -155,18 +158,19 @@ export default function KeysPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       render: (v: string) => new Date(v).toLocaleString(),
+      responsive: ["lg"],
     },
     {
       title: t("common.actions"),
       key: "actions",
+      fixed: "right",
+      width: 80,
       render: (_: unknown, record: ApiKeyItem) => (
         <Popconfirm
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button size="small" danger icon={<DeleteOutlined />}>
-            {t("common.delete")}
-          </Button>
+          <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
     },
@@ -188,13 +192,15 @@ export default function KeysPage() {
         </Button>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={keys}
-        rowKey="id"
-        loading={loading}
-        pagination={{ pageSize: 20 }}
-      />
+      <div className="overflow-x-auto">
+        <Table
+          columns={columns}
+          dataSource={keys}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 20 }}
+        />
+      </div>
 
       <Modal
         title={t("api_key.create_key")}
@@ -205,6 +211,8 @@ export default function KeysPage() {
         }}
         onOk={handleSubmit}
         confirmLoading={submitting}
+        width="min(90vw, 520px)"
+        styles={{ body: { padding: '16px 24px' } }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -244,8 +252,10 @@ export default function KeysPage() {
         title="API Key 已创建"
         open={newKeyVisible}
         onCancel={() => setNewKeyVisible(false)}
+        width="min(90vw, 520px)"
+        styles={{ body: { padding: '16px 24px' } }}
         footer={[
-          <Button key="close" onClick={() => setNewKeyVisible(false)}>
+          <Button key="close" onClick={() => setNewKeyVisible(false)} className="w-full sm:w-auto">
             关闭
           </Button>,
         ]}
@@ -255,7 +265,7 @@ export default function KeysPage() {
           {newKeyValue}
         </div>
         <Button
-          className="mt-3"
+          className="mt-3 w-full sm:w-auto"
           icon={<CopyOutlined />}
           onClick={() => copyToClipboard(newKeyValue)}
         >

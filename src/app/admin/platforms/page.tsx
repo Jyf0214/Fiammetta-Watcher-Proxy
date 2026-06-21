@@ -14,6 +14,7 @@ import {
   Switch,
   message,
   Popconfirm,
+  type TableColumnsType,
 } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -123,28 +124,47 @@ export default function PlatformsPage() {
     }
   };
 
-  const columns = [
+  const columns: TableColumnsType<Platform> = [
     { title: t("platform.name"), dataIndex: "name", key: "name" },
-    { title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true },
+    {
+      title: t("platform.base_url"),
+      dataIndex: "baseUrl",
+      key: "baseUrl",
+      ellipsis: true,
+      responsive: ["md"],
+    },
     {
       title: t("platform.type"),
       dataIndex: "type",
       key: "type",
       render: (v: string) => <Tag>{v}</Tag>,
+      responsive: ["sm"],
     },
-    { title: t("platform.priority"), dataIndex: "priority", key: "priority" },
-    { title: t("platform.weight"), dataIndex: "weight", key: "weight" },
+    {
+      title: t("platform.priority"),
+      dataIndex: "priority",
+      key: "priority",
+      responsive: ["lg"],
+    },
+    {
+      title: t("platform.weight"),
+      dataIndex: "weight",
+      key: "weight",
+      responsive: ["lg"],
+    },
     {
       title: t("platform.rpm_limit"),
       dataIndex: "rpmLimit",
       key: "rpmLimit",
       render: (v: number | null) => v ?? "-",
+      responsive: ["xl"],
     },
     {
       title: t("platform.tpm_limit"),
       dataIndex: "tpmLimit",
       key: "tpmLimit",
       render: (v: number | null) => v ?? "-",
+      responsive: ["xl"],
     },
     {
       title: t("common.status"),
@@ -161,8 +181,10 @@ export default function PlatformsPage() {
     {
       title: t("common.actions"),
       key: "actions",
+      fixed: "right",
+      width: 140,
       render: (_: unknown, record: Platform) => (
-        <Space>
+        <Space size="small">
           <Button
             size="small"
             icon={<EditOutlined />}
@@ -171,16 +193,12 @@ export default function PlatformsPage() {
               form.setFieldsValue(record);
               setModalOpen(true);
             }}
-          >
-            {t("common.edit")}
-          </Button>
+          />
           <Popconfirm
             title={t("common.confirm_delete")}
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              {t("common.delete")}
-            </Button>
+            <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),
@@ -204,13 +222,15 @@ export default function PlatformsPage() {
         </Button>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={platforms}
-        rowKey="id"
-        loading={loading}
-        pagination={{ pageSize: 20 }}
-      />
+      <div className="overflow-x-auto">
+        <Table
+          columns={columns}
+          dataSource={platforms}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 20 }}
+        />
+      </div>
 
       <Modal
         title={editing ? t("platform.edit_platform") : t("platform.create_platform")}
@@ -222,6 +242,8 @@ export default function PlatformsPage() {
         }}
         onOk={handleSubmit}
         confirmLoading={submitting}
+        width="min(90vw, 520px)"
+        styles={{ body: { padding: '16px 24px' } }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -252,22 +274,22 @@ export default function PlatformsPage() {
               <Select.Option value="custom">Custom</Select.Option>
             </Select>
           </Form.Item>
-          <Space>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item name="priority" label={t("platform.priority")} initialValue={0}>
-              <InputNumber min={0} />
+              <InputNumber min={0} className="w-full" />
             </Form.Item>
             <Form.Item name="weight" label={t("platform.weight")} initialValue={1}>
-              <InputNumber min={1} />
+              <InputNumber min={1} className="w-full" />
             </Form.Item>
-          </Space>
-          <Space>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
-              <InputNumber min={0} placeholder="不限" />
+              <InputNumber min={0} placeholder="不限" className="w-full" />
             </Form.Item>
             <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
-              <InputNumber min={0} placeholder="不限" />
+              <InputNumber min={0} placeholder="不限" className="w-full" />
             </Form.Item>
-          </Space>
+          </div>
         </Form>
       </Modal>
     </div>

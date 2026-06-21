@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Table, Tag, Select, Space, Button, message } from "antd";
+import { Table, Tag, Select, Space, Button, message, type TableColumnsType } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -55,13 +55,14 @@ export default function LogsPage() {
     }
   };
 
-  const columns = [
+  const columns: TableColumnsType<LogEntry> = [
     {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 180,
+      width: 160,
       render: (v: string) => new Date(v).toLocaleString(),
+      responsive: ["sm"],
     },
     {
       title: t("log.api_key"),
@@ -72,12 +73,19 @@ export default function LogsPage() {
       title: t("log.platform"),
       key: "platformName",
       render: (_: unknown, record: LogEntry) => record.platform?.name || "-",
+      responsive: ["md"],
     },
-    { title: t("log.model"), dataIndex: "model", key: "model" },
+    {
+      title: t("log.model"),
+      dataIndex: "model",
+      key: "model",
+      ellipsis: true,
+    },
     {
       title: t("log.status_code"),
       dataIndex: "status",
       key: "status",
+      width: 80,
       render: (v: number) => (
         <Tag color={v >= 200 && v < 300 ? "green" : v >= 400 ? "red" : "orange"}>
           {v}
@@ -89,17 +97,20 @@ export default function LogsPage() {
       dataIndex: "tokens",
       key: "tokens",
       render: (v: number) => v.toLocaleString(),
+      responsive: ["lg"],
     },
     {
       title: t("log.duration"),
       dataIndex: "duration",
       key: "duration",
+      responsive: ["lg"],
       render: (v: number) => `${v}ms`,
     },
     {
       title: t("log.is_error"),
       dataIndex: "isError",
       key: "isError",
+      width: 80,
       render: (v: boolean) => (
         <Tag color={v ? "red" : "green"}>{v ? "错误" : "正常"}</Tag>
       ),
@@ -108,9 +119,9 @@ export default function LogsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex justify-between items-center">
+      <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
         <h3 className="m-0">{t("admin.logs")}</h3>
-        <Space>
+        <div className="flex flex-wrap gap-2">
           <Select
             placeholder="状态码筛选"
             allowClear
@@ -136,22 +147,24 @@ export default function LogsPage() {
           <Button icon={<ReloadOutlined />} onClick={fetchLogs}>
             刷新
           </Button>
-        </Space>
+        </div>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={logs}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: setPage,
-          showTotal: (count) => `共 ${count} 条`,
-        }}
-      />
+      <div className="overflow-x-auto">
+        <Table
+          columns={columns}
+          dataSource={logs}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: setPage,
+            showTotal: (count) => `共 ${count} 条`,
+          }}
+        />
+      </div>
     </div>
   );
 }
