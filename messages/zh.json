@@ -24,7 +24,8 @@
     "per_page": "每页",
     "no_data": "暂无数据",
     "confirm_delete": "确认删除？",
-    "confirm_delete_desc": "此操作不可撤销，确定要删除吗？"
+    "confirm_delete_desc": "此操作不可撤销，确定要删除吗？",
+    "back": "返回"
   },
   "auth": {
     "login": "登录",
@@ -34,7 +35,11 @@
     "login_success": "登录成功",
     "login_failed": "登录失败",
     "logout_success": "已退出登录",
-    "unauthorized": "未授权，请先登录"
+    "unauthorized": "未授权，请先登录",
+    "welcome_back": "欢迎回来",
+    "login_subtitle": "输入用户名继续",
+    "input_password": "输入密码以登录",
+    "admin_only": "仅限管理员登录"
   },
   "admin": {
     "dashboard": "仪表盘",
