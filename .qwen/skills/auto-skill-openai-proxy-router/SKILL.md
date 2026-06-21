@@ -2,7 +2,7 @@
 name: openai-proxy-router
 description: 构建 OpenAI 兼容 API 中转站的完整架构模式：路由引擎、负载均衡、熔断器、速率限制、SSE 流式透传
 source: auto-skill
-extracted_at: '2026-06-20T22:41:30.504Z'
+extracted_at: '2026-06-21T00:30:00.000Z'
 ---
 
 # OpenAI 兼容 API 中转站架构

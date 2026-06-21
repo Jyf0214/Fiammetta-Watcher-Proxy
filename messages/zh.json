@@ -118,5 +118,9 @@
     "db_status": "数据库状态",
     "db_connected": "已连接",
     "db_disconnected": "未连接"
+  },
+  "theme": {
+    "light": "切换到浅色模式",
+    "dark": "切换到深色模式"
   }
 }

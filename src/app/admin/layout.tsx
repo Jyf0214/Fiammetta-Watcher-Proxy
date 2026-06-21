@@ -14,8 +14,11 @@ import {
   AlertOutlined,
   LogoutOutlined,
   GlobalOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { useThemeMode } from "@/hooks/use-theme-mode";
 import "@/lib/i18n";
 
 const { Sider, Content, Header } = Layout;
@@ -28,6 +31,7 @@ export default function AdminPageLayout({
   const { t, i18n } = useTranslation();
   const router = useRouter();
   const pathname = usePathname();
+  const { mode, cycle, isDark } = useThemeMode();
   const [collapsed, setCollapsed] = useState(false);
   const [username, setUsername] = useState("");
 
@@ -125,12 +129,13 @@ export default function AdminPageLayout({
   })();
 
   return (
-    <Layout className="min-h-screen">
+    <Layout className={`min-h-screen ${isDark ? "dark" : ""}`}>
       <Sider
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
         theme="dark"
+        className="!z-[100]"
       >
         <div className="p-4 text-center">
           <h2 className="text-white text-lg font-bold m-0">
@@ -146,11 +151,18 @@ export default function AdminPageLayout({
         />
       </Sider>
       <Layout>
-        <Header className="bg-white px-4 flex items-center justify-between shadow-sm overflow-x-auto">
+        <Header className="bg-white dark:bg-[#1f1f1f] px-4 flex items-center justify-between shadow-sm overflow-x-auto !h-auto !leading-normal">
           <Space size="small">
             <Tag color="blue" className="hidden sm:inline-block">{currentPageTitle}</Tag>
           </Space>
           <Space size="small" wrap>
+            <Button
+              icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+              onClick={cycle}
+              type="text"
+              size="small"
+              title={mode === "dark" ? t("theme.light") : t("theme.dark")}
+            />
             <Button
               icon={<GlobalOutlined />}
               onClick={toggleLanguage}
@@ -159,7 +171,7 @@ export default function AdminPageLayout({
             >
               <span className="hidden md:inline">{i18n.language === "zh" ? "EN" : "中文"}</span>
             </Button>
-            <Tag className="hidden sm:inline-block">{username}</Tag>
+            <Tag className="hidden sm:inline-block dark:bg-[#262626] dark:border-[#434343] dark:text-[#d9d9d9]">{username}</Tag>
             <Button
               icon={<LogoutOutlined />}
               onClick={handleLogout}
@@ -171,7 +183,7 @@ export default function AdminPageLayout({
             </Button>
           </Space>
         </Header>
-        <Content className="m-2 sm:m-4 p-3 sm:p-6 bg-white rounded-lg shadow-sm min-h-[280px]">
+        <Content className="m-2 sm:m-4 p-3 sm:p-6 bg-white dark:bg-[#141414] rounded-lg shadow-sm dark:shadow-none dark:border dark:border-[#303030] min-h-[280px]">
           {children}
         </Content>
       </Layout>

@@ -2,7 +2,7 @@
 name: admin-auth-security
 description: 管理后台认证安全模式：登录速率限制、PBKDF2 密码哈希、JWT 安全配置
 source: auto-skill
-extracted_at: '2026-06-20T22:41:30.504Z'
+extracted_at: '2026-06-21T00:30:00.000Z'
 ---
 
 # 管理后台认证安全模式
