@@ -15,7 +15,7 @@ async function initAdmin() {
   }
 }
 
-export async function middleware(request: NextRequest) {
+export async function middleware(_request: NextRequest) {
   // 仅在首次请求时初始化
   if (!initialized) {
     await initAdmin();
