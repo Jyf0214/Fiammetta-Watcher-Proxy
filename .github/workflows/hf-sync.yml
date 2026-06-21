@@ -1,0 +1,68 @@
+name: HF Space 同步
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # HF Space 仓库（格式：用户名/空间名）
+  HF_REPO: ${{ vars.HF_REPO }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # 未配置 HF_REPO 或 HF_TOKEN 时跳过
+    if: ${{ vars.HF_REPO != '' && secrets.HF_TOKEN != '' }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Git 身份
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 添加 HF 远程仓库
+        run: |
+          # 使用 HF_TOKEN 认证
+          git remote add hf "https://oauth2:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/${{ env.HF_REPO }}.git"
+          git fetch hf main --depth=1
+
+      - name: 检查差异
+        id: diff
+        run: |
+          # 比较本地 main 与 HF main
+          LOCAL=$(git rev-parse HEAD)
+          HF=$(git rev-parse hf/main 2>/dev/null || echo "none")
+          
+          echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
+          echo "hf=$HF" >> "$GITHUB_OUTPUT"
+          
+          if [ "$LOCAL" = "$HF" ]; then
+            echo "synced=true" >> "$GITHUB_OUTPUT"
+            echo "✅ HF Space 已是最新，无需同步"
+          else
+            echo "synced=false" >> "$GITHUB_OUTPUT"
+            echo "⚡ HF Space 需要同步"
+            echo "  本地: $LOCAL"
+            echo "  HF:   $HF"
+          fi
+
+      - name: 同步到 HF Space
+        if: steps.diff.outputs.synced == 'false'
+        run: |
+          echo "🚀 正在推送至 HF Space (${{ env.HF_REPO }})..."
+          git push hf main:main --force
+          echo "✅ 同步完成"
+
+      - name: 同步结果
+        run: |
+          if [ "${{ steps.diff.outputs.synced }}" = "true" ]; then
+            echo "HF Space 同步状态: ✅ 已同步"
+          else
+            echo "HF Space 同步状态: 🔄 已推送更新"
+          fi
