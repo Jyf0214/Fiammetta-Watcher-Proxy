@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Input, Form, message } from "antd";
-import { Mail, Lock, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthCard from "@/components/auth/AuthCard";
+import { Mail, Lock, ChevronRight, ArrowLeft } from "lucide-react";
 import "@/lib/i18n";
 
 export default function AdminLoginPage() {
@@ -15,54 +14,74 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<"username" | "password">("username");
   const [username, setUsername] = useState("");
-  const inputRef = useRef<React.ComponentRef<typeof Input>>(null);
-  const [form] = Form.useForm();
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
+  // 自动聚焦
   useEffect(() => {
-    inputRef.current?.focus();
+    const el = document.getElementById(
+      step === "username" ? "login-username" : "login-password"
+    );
+    el?.focus();
   }, [step]);
 
-  const handleCheckUser = (values: { username: string }) => {
-    setUsername(values.username);
+  const handleSubmitUsername = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    if (!username.trim()) {
+      setError(t("auth.username") + "不能为空");
+      return;
+    }
     setStep("password");
   };
 
-  const handleLogin = async (values: { password: string }) => {
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!password) {
+      setError(t("auth.password") + "不能为空");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/admin/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password: values.password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
 
       const data = await res.json();
 
       if (data.success) {
-        message.success(data.message || t("auth.login_success"));
-        router.push("/admin");
+        setSuccess(data.message || t("auth.login_success"));
+        setTimeout(() => router.push("/admin"), 800);
       } else {
-        message.error(data.error || t("auth.login_failed"));
+        setError(data.error || t("auth.login_failed"));
       }
     } catch {
-      message.error(t("auth.login_failed"));
+      setError(t("auth.login_failed"));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBackToUsername = () => {
+  const handleBack = () => {
     setStep("username");
-    setUsername("");
+    setPassword("");
+    setError("");
+    setSuccess("");
   };
 
-  const inputStyle = {
-    padding: "14px 16px",
-    height: 56,
-    fontSize: 16,
-    lineHeight: 1.6,
-    borderRadius: 12,
-  };
+  const inputStyle =
+    "w-full px-4 py-3.5 text-base rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-transparent transition-all";
+
+  const btnPrimary =
+    "w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-base";
 
   const renderUsernameStep = () => (
     <AuthCard
@@ -76,32 +95,41 @@ export default function AdminLoginPage() {
         </div>
       }
     >
-      <Form form={form} layout="vertical" onFinish={handleCheckUser}>
-        <Form.Item
-          name="username"
-          rules={[
-            { required: true, message: t("auth.username") + "不能为空" },
-          ]}
-          style={{ marginBottom: 0 }}
-        >
-          <Input
-            placeholder={t("auth.username")}
-            ref={inputRef}
-            size="large"
-            prefix={<Mail size={16} className="mx-2 text-zinc-400" />}
-            style={inputStyle}
-            suffix={
-              <button
-                type="button"
-                onClick={() => form.submit()}
-                className="flex items-center justify-center w-10 h-10 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 transition-opacity"
-              >
-                <ChevronRight size={16} />
-              </button>
-            }
+      <form onSubmit={handleSubmitUsername} className="flex flex-col gap-4">
+        <div className="relative">
+          <Mail
+            size={16}
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400"
           />
-        </Form.Item>
-      </Form>
+          <input
+            id="login-username"
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder={t("auth.username")}
+            className={inputStyle + " pl-11 pr-4"}
+            autoComplete="username"
+            autoFocus
+          />
+        </div>
+
+        {error && (
+          <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <button type="submit" className={btnPrimary} disabled={loading}>
+          <ChevronRight size={18} />
+          {t("auth.login") || "下一步"}
+        </button>
+      </form>
     </AuthCard>
   );
 
@@ -110,57 +138,64 @@ export default function AdminLoginPage() {
       title={t("auth.welcome_back") || "欢迎回来"}
       subtitle={t("auth.input_password") || "输入密码以登录"}
       footer={
-        <div className="flex flex-col gap-4">
-          <button
-            type="button"
-            onClick={handleBackToUsername}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium"
-          >
-            <ChevronRight size={14} className="rotate-180" />
-            {t("common.back") || "返回"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium mt-4"
+        >
+          <ArrowLeft size={14} />
+          {t("common.back") || "返回"}
+        </button>
       }
     >
-      <span className="text-lg text-zinc-900 dark:text-zinc-100 font-medium">
+      <div className="text-base text-zinc-900 dark:text-zinc-100 font-medium mb-4">
         {username}
-      </span>
-      <Form
-        form={form}
-        layout="vertical"
-        style={{ marginTop: 16 }}
-        onFinish={handleLogin}
-      >
-        <Form.Item
-          name="password"
-          rules={[
-            { required: true, message: t("auth.password") + "不能为空" },
-          ]}
-          style={{ marginBottom: 0 }}
-        >
-          <Input.Password
-            placeholder={t("auth.password")}
-            ref={inputRef}
-            size="large"
-            prefix={<Lock size={16} className="mx-2 text-zinc-400" />}
-            style={inputStyle}
-            suffix={
-              <button
-                type="button"
-                onClick={() => form.submit()}
-                disabled={loading}
-                className="flex items-center justify-center w-10 h-10 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
-              </button>
-            }
+      </div>
+      <form onSubmit={handleLogin} className="flex flex-col gap-4">
+        <div className="relative">
+          <Lock
+            size={16}
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400"
           />
-        </Form.Item>
-      </Form>
+          <input
+            id="login-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t("auth.password")}
+            className={inputStyle + " pl-11 pr-4"}
+            autoComplete="current-password"
+            autoFocus
+          />
+        </div>
+
+        {error && (
+          <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          className={btnPrimary}
+          disabled={loading}
+        >
+          {loading ? (
+            <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <>
+              <ChevronRight size={18} />
+              {t("auth.login") || "登录"}
+            </>
+          )}
+        </button>
+      </form>
     </AuthCard>
   );
 
