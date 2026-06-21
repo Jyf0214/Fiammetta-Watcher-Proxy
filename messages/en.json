@@ -24,7 +24,8 @@
     "per_page": "Per Page",
     "no_data": "No Data",
     "confirm_delete": "Confirm Delete?",
-    "confirm_delete_desc": "This action cannot be undone. Are you sure?"
+    "confirm_delete_desc": "This action cannot be undone. Are you sure?",
+    "back": "Back"
   },
   "auth": {
     "login": "Login",
@@ -34,7 +35,11 @@
     "login_success": "Login successful",
     "login_failed": "Login failed",
     "logout_success": "Logged out",
-    "unauthorized": "Unauthorized, please login first"
+    "unauthorized": "Unauthorized, please login first",
+    "welcome_back": "Welcome back",
+    "login_subtitle": "Enter your username to continue",
+    "input_password": "Enter your password to login",
+    "admin_only": "Admin access only"
   },
   "admin": {
     "dashboard": "Dashboard",
