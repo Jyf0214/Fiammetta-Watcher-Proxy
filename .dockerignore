@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.github
+.qwen
+.idx
+*.md
+!README.md
+.env*
+docker-compose.yml
+.dockerignore
+data
