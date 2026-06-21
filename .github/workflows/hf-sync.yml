@@ -12,20 +12,23 @@ jobs:
     steps:
       - name: 检查配置
         id: check
+        env:
+          HF_REPO: ${{ secrets.HF_REPO }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -z "${{ secrets.HF_REPO }}" ]; then
+          if [ -z "$HF_REPO" ]; then
             echo "❌ 未配置 HF_REPO 密钥，跳过同步"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ -z "${{ secrets.HF_TOKEN }}" ]; then
+          if [ -z "$HF_TOKEN" ]; then
             echo "❌ 未配置 HF_TOKEN 密钥，跳过同步"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "✅ HF 配置检查通过"
           echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "repo=${{ secrets.HF_REPO }}" >> "$GITHUB_OUTPUT"
+          echo "repo=$HF_REPO" >> "$GITHUB_OUTPUT"
 
       - name: 检出代码
         if: steps.check.outputs.skip != 'true'
@@ -41,8 +44,11 @@ jobs:
 
       - name: 添加 HF 远程仓库
         if: steps.check.outputs.skip != 'true'
+        env:
+          HF_REPO: ${{ secrets.HF_REPO }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git remote add hf "https://oauth2:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/${{ steps.check.outputs.repo }}.git"
+          git remote add hf "https://oauth2:$HF_TOKEN@huggingface.co/spaces/$HF_REPO.git"
           git fetch hf main --depth=1
 
       - name: 检查差异
@@ -67,16 +73,21 @@ jobs:
 
       - name: 同步到 HF Space
         if: steps.check.outputs.skip != 'true' && steps.diff.outputs.synced == 'false'
+        env:
+          HF_REPO: ${{ secrets.HF_REPO }}
         run: |
-          echo "🚀 正在推送至 HF Space (${{ steps.check.outputs.repo }})..."
+          echo "🚀 正在推送至 HF Space ($HF_REPO)..."
           git push hf main:main --force
           echo "✅ 同步完成"
 
       - name: 同步结果
         if: steps.check.outputs.skip != 'true'
+        env:
+          HF_REPO: ${{ secrets.HF_REPO }}
         run: |
+          echo "HF Space ($HF_REPO) 同步状态:"
           if [ "${{ steps.diff.outputs.synced }}" = "true" ]; then
-            echo "HF Space 同步状态: ✅ 已同步"
+            echo "✅ 已同步"
           else
-            echo "HF Space 同步状态: 🔄 已推送更新"
+            echo "🔄 已推送更新"
           fi
