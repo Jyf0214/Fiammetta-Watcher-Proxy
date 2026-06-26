@@ -47,17 +47,21 @@ export default function SystemPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <GlobalLoading size="large" />
-      </div>
-    );
+    return <GlobalLoading size="large" />;
   }
 
   return (
     <div>
-      <h3 className="mb-4">{t("admin.system")}</h3>
-      <Card>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-1">
+          {t("admin.system")}
+        </h1>
+        <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+          {t("system.db_status")}
+        </p>
+      </div>
+
+      <Card className="dark:bg-zinc-900 dark:border-zinc-800">
         <Descriptions column={1} bordered>
           <Descriptions.Item label={t("system.admin_init")}>
             {info?.adminUsername || t("common.not_set")}

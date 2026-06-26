@@ -8,8 +8,10 @@ import {
   Form,
   Input,
   Select,
+  Card,
   message,
   Popconfirm,
+  type TableColumnsType,
 } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -106,18 +108,31 @@ export default function ModelsPage() {
     }
   };
 
-  const columns = [
-    { title: t("model_map.alias"), dataIndex: "alias", key: "alias" },
-    { title: t("model_map.target_model"), dataIndex: "targetModel", key: "targetModel" },
+  const columns: TableColumnsType<ModelMap> = [
+    {
+      title: t("model_map.alias"),
+      dataIndex: "alias",
+      key: "alias",
+      width: 200,
+    },
+    {
+      title: t("model_map.target_model"),
+      dataIndex: "targetModel",
+      key: "targetModel",
+      width: 240,
+    },
     {
       title: t("model_map.platform"),
       key: "platform",
+      width: 160,
       render: (_: unknown, record: ModelMap) =>
         record.platform?.name || t("model_map.auto_route"),
     },
     {
       title: t("common.actions"),
       key: "actions",
+      width: 100,
+      align: "center",
       render: (_: unknown, record: ModelMap) => (
         <Popconfirm
           title={t("common.confirm_delete")}
@@ -137,27 +152,37 @@ export default function ModelsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex justify-between items-center">
-        <h3 className="m-0">{t("admin.models")}</h3>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setModalOpen(true);
-          }}
-        >
-          {t("model_map.create_mapping")}
-        </Button>
-      </div>
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
+        {t("admin.models")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.models_desc")}
+      </p>
 
-      <Table
-        columns={columns}
-        dataSource={models}
-        rowKey="id"
-        loading={loading}
-        pagination={{ pageSize: 20 }}
-      />
+      <Card>
+        <div className="mb-4 flex justify-end">
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              form.resetFields();
+              setModalOpen(true);
+            }}
+          >
+            {t("model_map.create_mapping")}
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={models}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 20 }}
+          />
+        </div>
+      </Card>
 
       <Modal
         title={t("model_map.create_mapping")}
@@ -169,7 +194,7 @@ export default function ModelsPage() {
         onOk={handleSubmit}
         confirmLoading={submitting}
         width="min(90vw, 520px)"
-        styles={{ body: { padding: '16px 24px' } }}
+        styles={{ body: { padding: "16px 24px" } }}
       >
         <Form form={form} layout="vertical">
           <Form.Item

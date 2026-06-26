@@ -11,6 +11,7 @@ import {
   Input,
   InputNumber,
   Select,
+  Card,
   message,
   Popconfirm,
   Tooltip,
@@ -113,8 +114,20 @@ export default function KeysPage() {
     message.success(t("common.copied"));
   };
 
+  const statusColorMap: Record<string, string> = {
+    active: "green",
+    disabled: "red",
+    expired: "orange",
+  };
+
   const columns: TableColumnsType<ApiKeyItem> = [
-    { title: t("api_key.name"), dataIndex: "name", key: "name" },
+    {
+      title: t("api_key.name"),
+      dataIndex: "name",
+      key: "name",
+      width: 140,
+      ellipsis: true,
+    },
     {
       title: t("api_key.key"),
       dataIndex: "key",
@@ -138,6 +151,8 @@ export default function KeysPage() {
       title: t("api_key.used_tokens"),
       dataIndex: "usedTokens",
       key: "usedTokens",
+      width: 120,
+      align: "right",
       render: (v: number) => v.toLocaleString(),
       responsive: ["md"],
     },
@@ -145,19 +160,17 @@ export default function KeysPage() {
       title: t("common.status"),
       dataIndex: "status",
       key: "status",
-      render: (v: string) => {
-        const colorMap: Record<string, string> = {
-          active: "green",
-          disabled: "red",
-          expired: "orange",
-        };
-        return <Tag color={colorMap[v] || "default"}>{v}</Tag>;
-      },
+      width: 100,
+      align: "center",
+      render: (v: string) => (
+        <Tag color={statusColorMap[v] || "default"}>{v}</Tag>
+      ),
     },
     {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
+      width: 180,
       render: (v: string) => new Date(v).toLocaleString(),
       responsive: ["lg"],
     },
@@ -166,6 +179,7 @@ export default function KeysPage() {
       key: "actions",
       fixed: "right",
       width: 80,
+      align: "center",
       render: (_: unknown, record: ApiKeyItem) => (
         <Popconfirm
           title={t("common.confirm_delete")}
@@ -183,29 +197,42 @@ export default function KeysPage() {
 
   return (
     <div>
-      <div className="mb-4 flex justify-between items-center">
-        <h3 className="m-0">{t("admin.keys")}</h3>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setModalOpen(true);
-          }}
-        >
-          {t("api_key.create_key")}
-        </Button>
-      </div>
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+        {t("admin.keys")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.keys_desc")}
+      </p>
 
-      <div className="overflow-x-auto">
+      <Card>
+        <div className="mb-4 flex justify-between items-center">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            {t("common.total")}: {keys.length}
+          </span>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              form.resetFields();
+              setModalOpen(true);
+            }}
+          >
+            {t("api_key.create_key")}
+          </Button>
+        </div>
+
         <Table
           columns={columns}
           dataSource={keys}
           rowKey="id"
           loading={loading}
-          pagination={{ pageSize: 20 }}
+          pagination={{
+            pageSize: 20,
+            showTotal: (total) => t("common.pagination_total", { count: total }),
+          }}
+          scroll={{ x: 700 }}
         />
-      </div>
+      </Card>
 
       <Modal
         title={t("api_key.create_key")}
@@ -217,7 +244,7 @@ export default function KeysPage() {
         onOk={handleSubmit}
         confirmLoading={submitting}
         width="min(90vw, 520px)"
-        styles={{ body: { padding: '16px 24px' } }}
+        styles={{ body: { padding: "16px 24px" } }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -228,16 +255,32 @@ export default function KeysPage() {
             <Input />
           </Form.Item>
           <Form.Item name="tokenLimit" label={t("api_key.token_limit")}>
-            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <InputNumber
+              min={0}
+              className="w-full"
+              placeholder={t("common.unlimited")}
+            />
           </Form.Item>
           <Form.Item name="callLimit" label={t("api_key.call_limit")}>
-            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <InputNumber
+              min={0}
+              className="w-full"
+              placeholder={t("common.unlimited")}
+            />
           </Form.Item>
           <Form.Item name="rpmLimit" label={t("api_key.rpm_limit")}>
-            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <InputNumber
+              min={0}
+              className="w-full"
+              placeholder={t("common.unlimited")}
+            />
           </Form.Item>
           <Form.Item name="tpmLimit" label={t("api_key.tpm_limit")}>
-            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <InputNumber
+              min={0}
+              className="w-full"
+              placeholder={t("common.unlimited")}
+            />
           </Form.Item>
           <Form.Item
             name="resetPeriod"
@@ -245,9 +288,15 @@ export default function KeysPage() {
             initialValue="monthly"
           >
             <Select>
-              <Select.Option value="monthly">{t("api_key.reset_monthly")}</Select.Option>
-              <Select.Option value="daily">{t("api_key.reset_daily")}</Select.Option>
-              <Select.Option value="never">{t("api_key.reset_never")}</Select.Option>
+              <Select.Option value="monthly">
+                {t("api_key.reset_monthly")}
+              </Select.Option>
+              <Select.Option value="daily">
+                {t("api_key.reset_daily")}
+              </Select.Option>
+              <Select.Option value="never">
+                {t("api_key.reset_never")}
+              </Select.Option>
             </Select>
           </Form.Item>
         </Form>
@@ -258,15 +307,21 @@ export default function KeysPage() {
         open={newKeyVisible}
         onCancel={() => setNewKeyVisible(false)}
         width="min(90vw, 520px)"
-        styles={{ body: { padding: '16px 24px' } }}
+        styles={{ body: { padding: "16px 24px" } }}
         footer={[
-          <Button key="close" onClick={() => setNewKeyVisible(false)} className="w-full sm:w-auto">
+          <Button
+            key="close"
+            onClick={() => setNewKeyVisible(false)}
+            className="w-full sm:w-auto"
+          >
             {t("common.close")}
           </Button>,
         ]}
       >
-        <p>{t("api_key.save_warning")}</p>
-        <div className="bg-gray-100 p-3 rounded font-mono text-sm break-all">
+        <p className="text-zinc-600 dark:text-zinc-400 mb-3">
+          {t("api_key.save_warning")}
+        </p>
+        <div className="bg-zinc-100 dark:bg-zinc-800 p-3 rounded-lg font-mono text-sm break-all text-zinc-800 dark:text-zinc-200">
           {newKeyValue}
         </div>
         <Button

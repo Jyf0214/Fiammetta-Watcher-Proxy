@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Table, Tag, Select, Space, Button, message, type TableColumnsType } from "antd";
+import {
+  Table,
+  Card,
+  Tag,
+  Select,
+  Button,
+  message,
+  type TableColumnsType,
+} from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -61,18 +69,20 @@ export default function LogsPage() {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 160,
+      width: 170,
       render: (v: string) => new Date(v).toLocaleString(),
       responsive: ["sm"],
     },
     {
       title: t("log.api_key"),
       key: "keyName",
+      width: 140,
       render: (_: unknown, record: LogEntry) => record.key?.name || "-",
     },
     {
       title: t("log.platform"),
       key: "platformName",
+      width: 120,
       render: (_: unknown, record: LogEntry) => record.platform?.name || "-",
       responsive: ["md"],
     },
@@ -86,7 +96,8 @@ export default function LogsPage() {
       title: t("log.status_code"),
       dataIndex: "status",
       key: "status",
-      width: 80,
+      width: 90,
+      align: "center",
       render: (v: number) => (
         <Tag color={v >= 200 && v < 300 ? "green" : v >= 400 ? "red" : "orange"}>
           {v}
@@ -97,6 +108,8 @@ export default function LogsPage() {
       title: t("log.tokens"),
       dataIndex: "tokens",
       key: "tokens",
+      width: 100,
+      align: "right",
       render: (v: number) => v.toLocaleString(),
       responsive: ["lg"],
     },
@@ -104,6 +117,8 @@ export default function LogsPage() {
       title: t("log.duration"),
       dataIndex: "duration",
       key: "duration",
+      width: 90,
+      align: "right",
       responsive: ["lg"],
       render: (v: number) => `${v}ms`,
     },
@@ -111,9 +126,12 @@ export default function LogsPage() {
       title: t("log.is_error"),
       dataIndex: "isError",
       key: "isError",
-      width: 80,
+      width: 90,
+      align: "center",
       render: (v: boolean) => (
-        <Tag color={v ? "red" : "green"}>{v ? t("log.filter_error_only") : t("log.filter_normal_only")}</Tag>
+        <Tag color={v ? "red" : "green"}>
+          {v ? t("log.filter_error_only") : t("log.filter_normal_only")}
+        </Tag>
       ),
     },
   ];
@@ -124,52 +142,64 @@ export default function LogsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-        <h3 className="m-0">{t("admin.logs")}</h3>
-        <div className="flex flex-wrap gap-2">
-          <Select
-            placeholder={t("log.status_filter_placeholder")}
-            allowClear
-            className="w-32"
-            onChange={(v) => setStatusFilter(v)}
-          >
-            <Select.Option value="200">200</Select.Option>
-            <Select.Option value="400">400</Select.Option>
-            <Select.Option value="401">401</Select.Option>
-            <Select.Option value="429">429</Select.Option>
-            <Select.Option value="500">500</Select.Option>
-            <Select.Option value="503">503</Select.Option>
-          </Select>
-          <Select
-            placeholder={t("log.error_filter_placeholder")}
-            allowClear
-            className="w-32"
-            onChange={(v) => setErrorFilter(v)}
-          >
-            <Select.Option value="true">{t("log.filter_error_only")}</Select.Option>
-            <Select.Option value="false">{t("log.filter_normal_only")}</Select.Option>
-          </Select>
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
+        {t("admin.logs")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.logs_desc")}
+      </p>
+
+      <Card>
+        <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="flex flex-wrap gap-2">
+            <Select
+              placeholder={t("log.status_filter_placeholder")}
+              allowClear
+              className="w-36"
+              onChange={(v) => setStatusFilter(v)}
+            >
+              <Select.Option value="200">200</Select.Option>
+              <Select.Option value="400">400</Select.Option>
+              <Select.Option value="401">401</Select.Option>
+              <Select.Option value="429">429</Select.Option>
+              <Select.Option value="500">500</Select.Option>
+              <Select.Option value="503">503</Select.Option>
+            </Select>
+            <Select
+              placeholder={t("log.error_filter_placeholder")}
+              allowClear
+              className="w-36"
+              onChange={(v) => setErrorFilter(v)}
+            >
+              <Select.Option value="true">
+                {t("log.filter_error_only")}
+              </Select.Option>
+              <Select.Option value="false">
+                {t("log.filter_normal_only")}
+              </Select.Option>
+            </Select>
+          </div>
           <Button icon={<ReloadOutlined />} onClick={fetchLogs}>
             {t("common.refresh")}
           </Button>
         </div>
-      </div>
 
-      <div className="overflow-x-auto">
-        <Table
-          columns={columns}
-          dataSource={logs}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: page,
-            total,
-            pageSize: 20,
-            onChange: setPage,
-            showTotal: (count) => t("common.pagination_total", { count }),
-          }}
-        />
-      </div>
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={logs}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: page,
+              total,
+              pageSize: 20,
+              onChange: setPage,
+              showTotal: (count) => t("common.pagination_total", { count }),
+            }}
+          />
+        </div>
+      </Card>
     </div>
   );
 }

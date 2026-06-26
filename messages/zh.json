@@ -78,12 +78,18 @@
   "admin": {
     "dashboard": "仪表盘",
     "platforms": "平台管理",
+    "platforms_desc": "管理上游平台的 API 接入配置，包括负载均衡、限流和优先级设置",
     "keys": "API Key 管理",
+    "keys_desc": "管理 API Key 的创建、配额控制和访问权限",
     "models": "模型映射",
+    "models_desc": "管理模型别名到目标模型的映射关系",
     "logs": "请求日志",
+    "logs_desc": "查看 API 调用日志与请求统计",
     "audit": "审计日志",
+    "audit_desc": "查看管理员操作审计记录",
     "system": "系统配置",
-    "events": "系统事件"
+    "events": "系统事件",
+    "events_desc": "查看系统事件和告警信息"
   },
   "platform": {
     "name": "平台名称",
@@ -178,11 +184,17 @@
     "total_tokens": "总 Token 用量",
     "active_keys": "活跃 Key 数",
     "active_platforms": "活跃平台数",
+    "total_requests_desc": "所有 API 请求的累计数量",
+    "total_tokens_desc": "所有请求消耗的 Token 总量",
+    "active_keys_desc": "当前启用的 API Key 数量",
+    "active_platforms_desc": "当前活跃的上游平台数量",
     "requests_trend": "请求趋势",
     "token_usage": "Token 用量",
     "top_models": "热门模型",
     "platform_stats": "平台统计",
     "recent_events": "最近事件",
+    "adminConsole": "控制台",
+    "adminConsoleDesc": "系统管理与监控面板",
     "fetch_failed": "获取统计数据失败"
   },
   "event": {

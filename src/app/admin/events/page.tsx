@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Table, Tag, message } from "antd";
+import { Table, Card, Tag, message, type TableColumnsType } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -50,28 +50,36 @@ export default function EventsPage() {
     critical: "magenta",
   };
 
-  const columns = [
+  const columns: TableColumnsType<EventEntry> = [
     {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 180,
+      width: 170,
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
       title: t("event.level"),
       dataIndex: "level",
       key: "level",
+      width: 100,
+      align: "center",
       render: (v: string) => (
         <Tag color={levelColorMap[v] || "default"}>{v}</Tag>
       ),
     },
-    { title: t("common.message"), dataIndex: "message", key: "message" },
+    {
+      title: t("common.message"),
+      dataIndex: "message",
+      key: "message",
+      ellipsis: true,
+    },
     {
       title: t("common.detail"),
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
+      responsive: ["md"],
       render: (v: string | null) => {
         if (!v) return "-";
         try {
@@ -90,20 +98,30 @@ export default function EventsPage() {
 
   return (
     <div>
-      <h3 className="mb-4">{t("admin.events")}</h3>
-      <Table
-        columns={columns}
-        dataSource={events}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: setPage,
-          showTotal: (count) => t("common.pagination_total", { count }),
-        }}
-      />
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
+        {t("admin.events")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.events_desc")}
+      </p>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={events}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: page,
+              total,
+              pageSize: 20,
+              onChange: setPage,
+              showTotal: (count) => t("common.pagination_total", { count }),
+            }}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
