@@ -61,12 +61,12 @@ export default function AuditPage() {
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: "管理员",
+      title: t("audit.admin"),
       key: "admin",
       render: (_: unknown, record: AuditEntry) => record.admin?.username || "-",
     },
     {
-      title: "操作",
+      title: t("common.action"),
       dataIndex: "action",
       key: "action",
       render: (v: string) => (
@@ -74,7 +74,7 @@ export default function AuditPage() {
       ),
     },
     {
-      title: "详情",
+      title: t("common.detail"),
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
@@ -102,7 +102,7 @@ export default function AuditPage() {
             total,
             pageSize: 20,
             onChange: setPage,
-            showTotal: (count) => `共 ${count} 条`,
+            showTotal: (count) => t("common.pagination_total", { count }),
           }}
         />
       </div>

@@ -112,7 +112,7 @@ export default function LogsPage() {
       key: "isError",
       width: 80,
       render: (v: boolean) => (
-        <Tag color={v ? "red" : "green"}>{v ? "错误" : "正常"}</Tag>
+        <Tag color={v ? "red" : "green"}>{v ? t("log.filter_error_only") : t("log.filter_normal_only")}</Tag>
       ),
     },
   ];
@@ -123,7 +123,7 @@ export default function LogsPage() {
         <h3 className="m-0">{t("admin.logs")}</h3>
         <div className="flex flex-wrap gap-2">
           <Select
-            placeholder="状态码筛选"
+            placeholder={t("log.status_filter_placeholder")}
             allowClear
             className="w-32"
             onChange={(v) => setStatusFilter(v)}
@@ -136,16 +136,16 @@ export default function LogsPage() {
             <Select.Option value="503">503</Select.Option>
           </Select>
           <Select
-            placeholder="错误筛选"
+            placeholder={t("log.error_filter_placeholder")}
             allowClear
             className="w-32"
             onChange={(v) => setErrorFilter(v)}
           >
-            <Select.Option value="true">仅错误</Select.Option>
-            <Select.Option value="false">仅正常</Select.Option>
+            <Select.Option value="true">{t("log.filter_error_only")}</Select.Option>
+            <Select.Option value="false">{t("log.filter_normal_only")}</Select.Option>
           </Select>
           <Button icon={<ReloadOutlined />} onClick={fetchLogs}>
-            刷新
+            {t("common.refresh")}
           </Button>
         </div>
       </div>
@@ -161,7 +161,7 @@ export default function LogsPage() {
             total,
             pageSize: 20,
             onChange: setPage,
-            showTotal: (count) => `共 ${count} 条`,
+            showTotal: (count) => t("common.pagination_total", { count }),
           }}
         />
       </div>

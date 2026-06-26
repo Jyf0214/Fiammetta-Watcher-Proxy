@@ -109,7 +109,7 @@ export default function KeysPage() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    message.success("已复制到剪贴板");
+    message.success(t("common.copied"));
   };
 
   const columns: TableColumnsType<ApiKeyItem> = [
@@ -122,7 +122,7 @@ export default function KeysPage() {
       render: (v: string) => (
         <Space size="small">
           <span className="font-mono text-xs">{v.substring(0, 16)}...</span>
-          <Tooltip title="复制">
+          <Tooltip title={t("common.copy")}>
             <Button
               size="small"
               type="text"
@@ -223,16 +223,16 @@ export default function KeysPage() {
             <Input />
           </Form.Item>
           <Form.Item name="tokenLimit" label={t("api_key.token_limit")}>
-            <InputNumber min={0} className="w-full" placeholder="不限" />
+            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
           </Form.Item>
           <Form.Item name="callLimit" label={t("api_key.call_limit")}>
-            <InputNumber min={0} className="w-full" placeholder="不限" />
+            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
           </Form.Item>
           <Form.Item name="rpmLimit" label={t("api_key.rpm_limit")}>
-            <InputNumber min={0} className="w-full" placeholder="不限" />
+            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
           </Form.Item>
           <Form.Item name="tpmLimit" label={t("api_key.tpm_limit")}>
-            <InputNumber min={0} className="w-full" placeholder="不限" />
+            <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
           </Form.Item>
           <Form.Item
             name="resetPeriod"
@@ -240,27 +240,27 @@ export default function KeysPage() {
             initialValue="monthly"
           >
             <Select>
-              <Select.Option value="monthly">每月</Select.Option>
-              <Select.Option value="daily">每日</Select.Option>
-              <Select.Option value="never">不重置</Select.Option>
+              <Select.Option value="monthly">{t("api_key.reset_monthly")}</Select.Option>
+              <Select.Option value="daily">{t("api_key.reset_daily")}</Select.Option>
+              <Select.Option value="never">{t("api_key.reset_never")}</Select.Option>
             </Select>
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="API Key 已创建"
+        title={t("api_key.created_title")}
         open={newKeyVisible}
         onCancel={() => setNewKeyVisible(false)}
         width="min(90vw, 520px)"
         styles={{ body: { padding: '16px 24px' } }}
         footer={[
           <Button key="close" onClick={() => setNewKeyVisible(false)} className="w-full sm:w-auto">
-            关闭
+            {t("common.close")}
           </Button>,
         ]}
       >
-        <p>请妥善保存此 Key，它不会再次显示：</p>
+        <p>{t("api_key.save_warning")}</p>
         <div className="bg-gray-100 p-3 rounded font-mono text-sm break-all">
           {newKeyValue}
         </div>
@@ -269,7 +269,7 @@ export default function KeysPage() {
           icon={<CopyOutlined />}
           onClick={() => copyToClipboard(newKeyValue)}
         >
-          复制 Key
+          {t("api_key.copy_key")}
         </Button>
       </Modal>
     </div>

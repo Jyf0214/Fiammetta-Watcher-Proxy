@@ -59,7 +59,7 @@ export default function SystemPage() {
       <Card>
         <Descriptions column={1} bordered>
           <Descriptions.Item label={t("system.admin_init")}>
-            {info?.adminUsername || "未设置"}
+            {info?.adminUsername || t("common.not_set")}
           </Descriptions.Item>
           <Descriptions.Item label={t("system.db_status")}>
             <Tag color={info?.dbConnected ? "green" : "red"}>

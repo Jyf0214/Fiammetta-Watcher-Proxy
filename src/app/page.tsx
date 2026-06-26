@@ -14,39 +14,8 @@ import {
   Server,
 } from "lucide-react";
 import Link from "next/link";
-
-const features = [
-  {
-    icon: <Globe className="text-2xl" />,
-    title: "多平台路由",
-    desc: "支持任意 OpenAI 兼容平台，权重负载均衡与自动故障转移",
-  },
-  {
-    icon: <Zap className="text-2xl" />,
-    title: "SSE 流式响应",
-    desc: "完整支持 Chat Completions / Completions 流式与非流式代理",
-  },
-  {
-    icon: <Key className="text-2xl" />,
-    title: "API Key 管理",
-    desc: "灵活的 Key 分发、额度控制、套餐模板与用量追踪",
-  },
-  {
-    icon: <Shield className="text-2xl" />,
-    title: "熔断与限流",
-    desc: "自动熔断恢复、平台级 RPM/TPM 速率限制，保障系统稳定",
-  },
-  {
-    icon: <BarChart3 className="text-2xl" />,
-    title: "用量统计",
-    desc: "详细的请求日志、Token 用量统计、审计日志与系统事件",
-  },
-  {
-    icon: <Activity className="text-2xl" />,
-    title: "SDK 兼容",
-    desc: "标准 /v1 路径，兼容 OpenAI SDK，修改 base_url 即可接入",
-  },
-];
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n";
 
 const quickStartCode = `import OpenAI from 'openai';
 
@@ -66,6 +35,41 @@ for await (const chunk of response) {
 }`;
 
 export default function HomePage() {
+  const { t } = useTranslation();
+
+  const features = [
+    {
+      icon: <Globe className="text-2xl" />,
+      title: t("home.feature_multi_platform_title"),
+      desc: t("home.feature_multi_platform_desc"),
+    },
+    {
+      icon: <Zap className="text-2xl" />,
+      title: t("home.feature_sse_title"),
+      desc: t("home.feature_sse_desc"),
+    },
+    {
+      icon: <Key className="text-2xl" />,
+      title: t("home.feature_key_mgmt_title"),
+      desc: t("home.feature_key_mgmt_desc"),
+    },
+    {
+      icon: <Shield className="text-2xl" />,
+      title: t("home.feature_circuit_breaker_title"),
+      desc: t("home.feature_circuit_breaker_desc"),
+    },
+    {
+      icon: <BarChart3 className="text-2xl" />,
+      title: t("home.feature_usage_title"),
+      desc: t("home.feature_usage_desc"),
+    },
+    {
+      icon: <Activity className="text-2xl" />,
+      title: t("home.feature_sdk_compat_title"),
+      desc: t("home.feature_sdk_compat_desc"),
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950">
       {/* 导航栏 */}
@@ -84,19 +88,19 @@ export default function HomePage() {
               href="#features"
               className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
-              功能
+              {t("home.nav_features")}
             </Link>
             <Link
               href="#quickstart"
               className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
-              快速开始
+              {t("home.nav_quickstart")}
             </Link>
             <Link
               href="/admin/login"
               className="text-sm px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 transition-opacity font-medium"
             >
-              管理后台
+              {t("home.nav_admin")}
             </Link>
           </div>
           {/* 移动端仅显示管理后台入口 */}
@@ -104,7 +108,7 @@ export default function HomePage() {
             href="/admin/login"
             className="md:hidden text-sm px-3 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 transition-opacity font-medium"
           >
-            管理后台
+            {t("home.nav_admin")}
           </Link>
         </div>
       </nav>
@@ -139,8 +143,7 @@ export default function HomePage() {
             transition={{ delay: 0.2 }}
             className="text-base sm:text-lg text-zinc-500 dark:text-zinc-400 max-w-2xl mb-8 sm:mb-10 leading-relaxed"
           >
-            智能 OpenAI API 中转站路由代理。多平台负载均衡、自动熔断恢复、
-            SSE 流式响应、Token 额度管理 — 一行配置接入，SDK 无缝兼容。
+            {t("home.hero_description")}
           </motion.p>
 
           <motion.div
@@ -154,7 +157,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl font-medium hover:opacity-90 transition-opacity text-sm sm:text-base"
             >
               <BookOpen size={18} />
-              快速开始
+              {t("home.nav_quickstart")}
             </Link>
             <Link
               href="https://github.com/Jyf0214/Fiammetta-Watcher-Proxy"
@@ -178,10 +181,10 @@ export default function HomePage() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-4">
-              核心功能
+              {t("home.section_core_features")}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
-              为 OpenAI API 提供企业级代理能力，开箱即用
+              {t("home.section_core_features_desc")}
             </p>
           </motion.div>
 
@@ -220,10 +223,10 @@ export default function HomePage() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-4">
-              快速开始
+              {t("home.nav_quickstart")}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
-              修改 base_url 即可接入，SDK 无缝兼容
+              {t("home.section_quickstart_desc")}
             </p>
           </motion.div>
 
@@ -251,18 +254,18 @@ export default function HomePage() {
             {[
               {
                 step: "01",
-                title: "配置环境",
-                desc: "设置 DATABASE_URL、JWT_SECRET、ADMIN 等环境变量",
+                title: t("home.step_config_env_title"),
+                desc: t("home.step_config_env_desc"),
               },
               {
                 step: "02",
-                title: "启动服务",
-                desc: "docker-compose up -d 一键启动，自动初始化数据库",
+                title: t("home.step_start_service_title"),
+                desc: t("home.step_start_service_desc"),
               },
               {
                 step: "03",
-                title: "接入使用",
-                desc: "在管理后台添加上游平台和 API Key，SDK 修改 base_url 即可",
+                title: t("home.step_get_started_title"),
+                desc: t("home.step_get_started_desc"),
               },
             ].map((item, i) => (
               <motion.div
@@ -311,7 +314,7 @@ export default function HomePage() {
               href="/admin/login"
               className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors flex items-center gap-1"
             >
-              管理后台 <ArrowRight size={14} />
+              {t("home.nav_admin")} <ArrowRight size={14} />
             </Link>
           </div>
         </div>
