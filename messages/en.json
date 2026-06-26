@@ -78,12 +78,18 @@
   "admin": {
     "dashboard": "Dashboard",
     "platforms": "Platforms",
+    "platforms_desc": "Manage upstream platform API configurations including load balancing, rate limiting, and priority settings",
     "keys": "API Keys",
+    "keys_desc": "Manage API Key creation, quota control, and access permissions",
     "models": "Model Mapping",
+    "models_desc": "Manage model alias to target model mappings",
     "logs": "Request Logs",
+    "logs_desc": "View API call logs and request statistics",
     "audit": "Audit Logs",
+    "audit_desc": "View admin operation audit records",
     "system": "System Config",
-    "events": "System Events"
+    "events": "System Events",
+    "events_desc": "View system events and alert information"
   },
   "platform": {
     "name": "Platform Name",
@@ -178,11 +184,17 @@
     "total_tokens": "Total Tokens",
     "active_keys": "Active Keys",
     "active_platforms": "Active Platforms",
+    "total_requests_desc": "Cumulative number of all API requests",
+    "total_tokens_desc": "Total tokens consumed by all requests",
+    "active_keys_desc": "Number of currently enabled API keys",
+    "active_platforms_desc": "Number of currently active upstream platforms",
     "requests_trend": "Requests Trend",
     "token_usage": "Token Usage",
     "top_models": "Top Models",
     "platform_stats": "Platform Stats",
     "recent_events": "Recent Events",
+    "adminConsole": "Dashboard",
+    "adminConsoleDesc": "System management and monitoring panel",
     "fetch_failed": "Failed to fetch statistics"
   },
   "event": {

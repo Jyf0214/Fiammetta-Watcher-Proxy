@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Table, Tag, message, type TableColumnsType } from "antd";
+import { Table, Card, Tag, message, type TableColumnsType } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -58,18 +58,21 @@ export default function AuditPage() {
       title: t("common.created_at"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 160,
+      width: 170,
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
       title: t("audit.admin"),
       key: "admin",
-      render: (_: unknown, record: AuditEntry) => record.admin?.username || "-",
+      width: 120,
+      render: (_: unknown, record: AuditEntry) =>
+        record.admin?.username || "-",
     },
     {
       title: t("common.action"),
       dataIndex: "action",
       key: "action",
+      width: 180,
       render: (v: string) => (
         <Tag color={actionColorMap[v] || "default"}>{v}</Tag>
       ),
@@ -85,6 +88,7 @@ export default function AuditPage() {
       title: "IP",
       dataIndex: "ip",
       key: "ip",
+      width: 140,
       responsive: ["lg"],
     },
   ];
@@ -95,22 +99,30 @@ export default function AuditPage() {
 
   return (
     <div>
-      <h3 className="mb-4">{t("admin.audit")}</h3>
-      <div className="overflow-x-auto">
-        <Table
-          columns={columns}
-          dataSource={logs}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: page,
-            total,
-            pageSize: 20,
-            onChange: setPage,
-            showTotal: (count) => t("common.pagination_total", { count }),
-          }}
-        />
-      </div>
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
+        {t("admin.audit")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.audit_desc")}
+      </p>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={logs}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: page,
+              total,
+              pageSize: 20,
+              onChange: setPage,
+              showTotal: (count) => t("common.pagination_total", { count }),
+            }}
+          />
+        </div>
+      </Card>
     </div>
   );
 }

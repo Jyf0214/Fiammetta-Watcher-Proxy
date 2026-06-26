@@ -12,6 +12,7 @@ import {
   InputNumber,
   Select,
   Switch,
+  Card,
   message,
   Popconfirm,
   type TableColumnsType,
@@ -126,7 +127,13 @@ export default function PlatformsPage() {
   };
 
   const columns: TableColumnsType<Platform> = [
-    { title: t("platform.name"), dataIndex: "name", key: "name" },
+    {
+      title: t("platform.name"),
+      dataIndex: "name",
+      key: "name",
+      width: 140,
+      ellipsis: true,
+    },
     {
       title: t("platform.base_url"),
       dataIndex: "baseUrl",
@@ -138,6 +145,7 @@ export default function PlatformsPage() {
       title: t("platform.type"),
       dataIndex: "type",
       key: "type",
+      width: 100,
       render: (v: string) => <Tag>{v}</Tag>,
       responsive: ["sm"],
     },
@@ -145,18 +153,24 @@ export default function PlatformsPage() {
       title: t("platform.priority"),
       dataIndex: "priority",
       key: "priority",
+      width: 80,
+      align: "center",
       responsive: ["lg"],
     },
     {
       title: t("platform.weight"),
       dataIndex: "weight",
       key: "weight",
+      width: 80,
+      align: "center",
       responsive: ["lg"],
     },
     {
       title: t("platform.rpm_limit"),
       dataIndex: "rpmLimit",
       key: "rpmLimit",
+      width: 100,
+      align: "center",
       render: (v: number | null) => v ?? "-",
       responsive: ["xl"],
     },
@@ -164,12 +178,16 @@ export default function PlatformsPage() {
       title: t("platform.tpm_limit"),
       dataIndex: "tpmLimit",
       key: "tpmLimit",
+      width: 100,
+      align: "center",
       render: (v: number | null) => v ?? "-",
       responsive: ["xl"],
     },
     {
       title: t("common.status"),
       key: "enabled",
+      width: 100,
+      align: "center",
       render: (_: unknown, record: Platform) => (
         <Switch
           checked={record.enabled}
@@ -183,7 +201,8 @@ export default function PlatformsPage() {
       title: t("common.actions"),
       key: "actions",
       fixed: "right",
-      width: 140,
+      width: 120,
+      align: "center",
       render: (_: unknown, record: Platform) => (
         <Space size="small">
           <Button
@@ -212,33 +231,48 @@ export default function PlatformsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex justify-between items-center">
-        <h3 className="m-0">{t("admin.platforms")}</h3>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditing(null);
-            form.resetFields();
-            setModalOpen(true);
-          }}
-        >
-          {t("platform.create_platform")}
-        </Button>
-      </div>
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+        {t("admin.platforms")}
+      </h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        {t("admin.platforms_desc")}
+      </p>
 
-      <div className="overflow-x-auto">
+      <Card>
+        <div className="mb-4 flex justify-between items-center">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            {t("common.total")}: {platforms.length}
+          </span>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditing(null);
+              form.resetFields();
+              setModalOpen(true);
+            }}
+          >
+            {t("platform.create_platform")}
+          </Button>
+        </div>
+
         <Table
           columns={columns}
           dataSource={platforms}
           rowKey="id"
           loading={loading}
-          pagination={{ pageSize: 20 }}
+          pagination={{
+            pageSize: 20,
+            showTotal: (total) => t("common.pagination_total", { count: total }),
+          }}
+          scroll={{ x: 900 }}
         />
-      </div>
+      </Card>
 
       <Modal
-        title={editing ? t("platform.edit_platform") : t("platform.create_platform")}
+        title={
+          editing ? t("platform.edit_platform") : t("platform.create_platform")
+        }
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
@@ -248,7 +282,7 @@ export default function PlatformsPage() {
         onOk={handleSubmit}
         confirmLoading={submitting}
         width="min(90vw, 520px)"
-        styles={{ body: { padding: '16px 24px' } }}
+        styles={{ body: { padding: "16px 24px" } }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -272,7 +306,11 @@ export default function PlatformsPage() {
           >
             <Input.Password />
           </Form.Item>
-          <Form.Item name="type" label={t("platform.type")} initialValue="openai">
+          <Form.Item
+            name="type"
+            label={t("platform.type")}
+            initialValue="openai"
+          >
             <Select>
               <Select.Option value="openai">OpenAI</Select.Option>
               <Select.Option value="azure">Azure</Select.Option>
@@ -280,19 +318,35 @@ export default function PlatformsPage() {
             </Select>
           </Form.Item>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item name="priority" label={t("platform.priority")} initialValue={0}>
+            <Form.Item
+              name="priority"
+              label={t("platform.priority")}
+              initialValue={0}
+            >
               <InputNumber min={0} className="w-full" />
             </Form.Item>
-            <Form.Item name="weight" label={t("platform.weight")} initialValue={1}>
+            <Form.Item
+              name="weight"
+              label={t("platform.weight")}
+              initialValue={1}
+            >
               <InputNumber min={1} className="w-full" />
             </Form.Item>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
-              <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
+              <InputNumber
+                min={0}
+                placeholder={t("common.unlimited")}
+                className="w-full"
+              />
             </Form.Item>
             <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
-              <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
+              <InputNumber
+                min={0}
+                placeholder={t("common.unlimited")}
+                className="w-full"
+              />
             </Form.Item>
           </div>
         </Form>
