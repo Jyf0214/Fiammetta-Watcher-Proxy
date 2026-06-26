@@ -116,6 +116,8 @@
     "used_tokens": "Used Tokens",
     "call_limit": "Call Limit",
     "token_limit": "Token Limit",
+    "rpm_limit": "RPM Limit",
+    "tpm_limit": "TPM Limit",
     "reset_period": "Reset Period",
     "expires_at": "Expires At",
     "status_active": "Active",
