@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Table, Tag, message } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface EventEntry {
   id: string;
@@ -82,6 +83,10 @@ export default function EventsPage() {
       },
     },
   ];
+
+  if (loading && events.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>

@@ -14,6 +14,7 @@ import {
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface ModelMap {
   id: string;
@@ -129,6 +130,10 @@ export default function ModelsPage() {
       ),
     },
   ];
+
+  if (loading && models.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>

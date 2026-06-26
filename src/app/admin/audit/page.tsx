@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Table, Tag, message, type TableColumnsType } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface AuditEntry {
   id: string;
@@ -87,6 +88,10 @@ export default function AuditPage() {
       responsive: ["lg"],
     },
   ];
+
+  if (loading && logs.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>
