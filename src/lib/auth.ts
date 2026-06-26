@@ -6,27 +6,121 @@ import { hashPassword, verifyPassword } from "./auth-helpers";
 const TOKEN_EXPIRY = "7d";
 const COOKIE_NAME = "admin_token";
 
-/**
- * 获取 JWT 密钥，未配置时抛出错误
- */
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET 环境变量未配置，无法生成或验证 Token");
-  }
-  return secret;
-}
-
 export interface AdminPayload {
   adminId: string;
   username: string;
+}
+
+// ---------- JWT 密钥格式识别 ----------
+
+interface Hs256Config {
+  type: "hs256";
+  secret: string;
+}
+
+interface Rs256Config {
+  type: "rs256";
+  key: string;
+  algorithm: "RS256";
+}
+
+type JwtConfig = Hs256Config | Rs256Config;
+
+let cachedConfig: JwtConfig | null = null;
+
+/**
+ * 解析 JWT_SECRET 环境变量，自动识别密钥格式：
+ * - JWKS JSON（含 "keys" 数组且含 "d" 私钥字段）→ RS256，提取第一个密钥
+ * - 单个 JWK JSON（含 "kty" 和 "d" 字段）→ RS256
+ * - PEM 私钥（-----BEGIN PRIVATE KEY-----）→ RS256
+ * - 其他字符串 → HS256
+ *
+ * 不支持的格式直接抛出错误
+ */
+function parseJwtConfig(): JwtConfig {
+  if (cachedConfig) return cachedConfig;
+
+  const raw = process.env.JWT_SECRET;
+  if (!raw) {
+    throw new Error("JWT_SECRET 环境变量未配置，无法生成或验证 Token");
+  }
+
+  const trimmed = raw.trim();
+
+  // 尝试解析为 JSON
+  if (trimmed.startsWith("{")) {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new Error("JWT_SECRET 是无效的 JSON 格式");
+    }
+
+    // JWKS 格式：{ keys: [...] }
+    if (Array.isArray(parsed.keys) && parsed.keys.length > 0) {
+      const jwk = parsed.keys[0] as Record<string, unknown>;
+      if (typeof jwk.kty === "string" && typeof jwk.d === "string") {
+        cachedConfig = {
+          type: "rs256",
+          key: JSON.stringify(jwk),
+          algorithm: "RS256",
+        };
+        console.log("[auth] JWT 模式: RS256 (JWKS)");
+        return cachedConfig;
+      }
+      throw new Error("JWKS 中的密钥缺少 kty 或 d 字段（需要包含私钥）");
+    }
+
+    // 单个 JWK 格式：{ kty: "...", d: "..." }
+    if (typeof parsed.kty === "string" && typeof parsed.d === "string") {
+      cachedConfig = {
+        type: "rs256",
+        key: trimmed,
+        algorithm: "RS256",
+      };
+      console.log("[auth] JWT 模式: RS256 (JWK)");
+      return cachedConfig;
+    }
+
+    throw new Error(
+      "JWT_SECRET 是 JSON 格式但不是有效的 JWK 或 JWKS（需要包含 kty 和 d 字段，或 keys 数组）"
+    );
+  }
+
+  // PEM 格式：-----BEGIN ... PRIVATE KEY-----
+  if (trimmed.includes("-----BEGIN") && trimmed.includes("PRIVATE KEY")) {
+    cachedConfig = {
+      type: "rs256",
+      key: trimmed,
+      algorithm: "RS256",
+    };
+    console.log("[auth] JWT 模式: RS256 (PEM)");
+    return cachedConfig;
+  }
+
+  // 默认：HS256 对称密钥
+  cachedConfig = {
+    type: "hs256",
+    secret: trimmed,
+  };
+  console.log("[auth] JWT 模式: HS256");
+  return cachedConfig;
 }
 
 /**
  * 生成 JWT Token
  */
 export function generateToken(payload: AdminPayload): string {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: TOKEN_EXPIRY });
+  const config = parseJwtConfig();
+
+  if (config.type === "rs256") {
+    return jwt.sign(payload, config.key, {
+      algorithm: config.algorithm,
+      expiresIn: TOKEN_EXPIRY,
+    });
+  }
+
+  return jwt.sign(payload, config.secret, { expiresIn: TOKEN_EXPIRY });
 }
 
 /**
@@ -34,7 +128,15 @@ export function generateToken(payload: AdminPayload): string {
  */
 export function verifyToken(token: string): AdminPayload | null {
   try {
-    return jwt.verify(token, getJwtSecret()) as AdminPayload;
+    const config = parseJwtConfig();
+
+    if (config.type === "rs256") {
+      return jwt.verify(token, config.key, {
+        algorithms: [config.algorithm],
+      }) as AdminPayload;
+    }
+
+    return jwt.verify(token, config.secret) as AdminPayload;
   } catch {
     return null;
   }
