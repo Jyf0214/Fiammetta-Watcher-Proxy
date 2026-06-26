@@ -40,9 +40,10 @@ let cachedConfig: JwtConfig | null = null;
 function parseJwtConfig(): JwtConfig {
   if (cachedConfig) return cachedConfig;
 
-  const raw = process.env.JWT_SECRET;
+  // 优先读取 JWKS_KEY，其次 JWT_SECRET
+  const raw = process.env.JWKS_KEY || process.env.JWT_SECRET;
   if (!raw) {
-    throw new Error("JWT_SECRET 环境变量未配置，无法生成或验证 Token");
+    throw new Error("JWKS_KEY 或 JWT_SECRET 环境变量均未配置，无法生成或验证 Token");
   }
 
   const trimmed = raw.trim();
@@ -53,7 +54,7 @@ function parseJwtConfig(): JwtConfig {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      throw new Error("JWT_SECRET 是无效的 JSON 格式");
+      throw new Error("JWKS_KEY/JWT_SECRET 是无效的 JSON 格式");
     }
 
     // JWKS 格式：{ keys: [...] }
@@ -83,7 +84,7 @@ function parseJwtConfig(): JwtConfig {
     }
 
     throw new Error(
-      "JWT_SECRET 是 JSON 格式但不是有效的 JWK 或 JWKS（需要包含 kty 和 d 字段，或 keys 数组）"
+      "JWKS_KEY/JWT_SECRET 是 JSON 格式但不是有效的 JWK 或 JWKS（需要包含 kty 和 d 字段，或 keys 数组）"
     );
   }
 

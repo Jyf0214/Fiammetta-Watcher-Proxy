@@ -7,8 +7,13 @@ const RESET_FLAG_KEY = "admin_reset_password";
  * 环境变量校验 — 缺少必需变量时直接崩溃，阻止启动
  */
 function validateRequiredEnvVars(): void {
-  const required = ["JWT_SECRET", "ADMIN_USERNAME", "ADMIN_PASSWORD", "DATABASE_URL"];
+  const required = ["ADMIN_USERNAME", "ADMIN_PASSWORD", "DATABASE_URL"];
   const missing = required.filter((key) => !process.env[key]);
+
+  // JWT 密钥需要 JWKS_KEY 或 JWT_SECRET 至少配一个
+  if (!process.env.JWKS_KEY && !process.env.JWT_SECRET) {
+    missing.push("JWKS_KEY 或 JWT_SECRET");
+  }
 
   if (missing.length > 0) {
     const msg = `[致命错误] 缺少必需环境变量: ${missing.join(", ")}。系统无法启动，请配置后重试`;
