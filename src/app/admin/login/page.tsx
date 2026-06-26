@@ -31,7 +31,7 @@ export default function AdminLoginPage() {
     setError("");
     setSuccess("");
     if (!username.trim()) {
-      setError(t("auth.username") + "不能为空");
+      setError(t("auth.username") + t("validation.field_required"));
       return;
     }
     setStep("password");
@@ -43,7 +43,7 @@ export default function AdminLoginPage() {
     setSuccess("");
 
     if (!password) {
-      setError(t("auth.password") + "不能为空");
+      setError(t("auth.password") + t("validation.field_required"));
       return;
     }
 
@@ -87,12 +87,12 @@ export default function AdminLoginPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setSuccess(data.message || "密码重置请求已提交，服务将在下次启动时更新密码");
+        setSuccess(data.message || t("auth.reset_password_submitted"));
       } else {
-        setError(data.error || "提交密码重置请求失败");
+        setError(data.error || t("auth.reset_password_failed"));
       }
     } catch {
-      setError("网络请求失败");
+      setError(t("common.network_error"));
     } finally {
       setLoading(false);
     }
@@ -148,7 +148,7 @@ export default function AdminLoginPage() {
 
         <button type="submit" className={btnPrimary} disabled={loading}>
           <ChevronRight size={18} />
-          {t("auth.login") || "下一步"}
+          {t("common.next")}
         </button>
       </form>
     </AuthCard>
@@ -175,7 +175,7 @@ export default function AdminLoginPage() {
             className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium"
           >
             <ArrowLeft size={14} />
-            {t("common.back") || "返回"}
+            {t("common.back")}
           </button>
         </div>
       }
@@ -223,7 +223,7 @@ export default function AdminLoginPage() {
           ) : (
             <>
               <ChevronRight size={18} />
-              {t("auth.login") || "登录"}
+              {t("auth.login")}
             </>
           )}
         </button>

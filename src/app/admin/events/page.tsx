@@ -58,16 +58,16 @@ export default function EventsPage() {
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: "级别",
+      title: t("event.level"),
       dataIndex: "level",
       key: "level",
       render: (v: string) => (
         <Tag color={levelColorMap[v] || "default"}>{v}</Tag>
       ),
     },
-    { title: "消息", dataIndex: "message", key: "message" },
+    { title: t("common.message"), dataIndex: "message", key: "message" },
     {
-      title: "详情",
+      title: t("common.detail"),
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
@@ -96,7 +96,7 @@ export default function EventsPage() {
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) => `共 ${count} 条`,
+          showTotal: (count) => t("common.pagination_total", { count }),
         }}
       />
     </div>

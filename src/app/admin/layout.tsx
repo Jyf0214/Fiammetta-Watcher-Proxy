@@ -175,7 +175,7 @@ export default function AdminPageLayout({
               type="text"
               size="small"
             >
-              <span className="hidden md:inline">{i18n.language === "zh" ? "EN" : "中文"}</span>
+              <span className="hidden md:inline">{i18n.language === "zh" ? "EN" : t("common.chinese")}</span>
             </Button>
             <Tag className="hidden sm:inline-block dark:bg-[#262626] dark:border-[#434343] dark:text-[#d9d9d9]">{username}</Tag>
             <Button

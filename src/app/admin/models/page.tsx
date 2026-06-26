@@ -112,7 +112,7 @@ export default function ModelsPage() {
       title: t("model_map.platform"),
       key: "platform",
       render: (_: unknown, record: ModelMap) =>
-        record.platform?.name || "自动路由",
+        record.platform?.name || t("model_map.auto_route"),
     },
     {
       title: t("common.actions"),
@@ -172,7 +172,7 @@ export default function ModelsPage() {
             label={t("model_map.alias")}
             rules={[{ required: true }]}
           >
-            <Input placeholder="gpt-4o 或 gpt-*" />
+            <Input placeholder={t("model_map.alias_placeholder")} />
           </Form.Item>
           <Form.Item
             name="targetModel"
@@ -182,7 +182,7 @@ export default function ModelsPage() {
             <Input placeholder="gpt-4o-2024-08-06" />
           </Form.Item>
           <Form.Item name="platformId" label={t("model_map.platform")}>
-            <Select allowClear placeholder="自动选择">
+            <Select allowClear placeholder={t("common.auto_select")}>
               {platforms.map((p) => (
                 <Select.Option key={p.id} value={p.id}>
                   {p.name}

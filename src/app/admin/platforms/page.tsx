@@ -284,10 +284,10 @@ export default function PlatformsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
-              <InputNumber min={0} placeholder="不限" className="w-full" />
+              <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
             </Form.Item>
             <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
-              <InputNumber min={0} placeholder="不限" className="w-full" />
+              <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
             </Form.Item>
           </div>
         </Form>

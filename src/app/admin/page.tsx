@@ -65,7 +65,7 @@ export default function DashboardPage() {
         return <Tag color={colorMap[level] || "default"}>{level}</Tag>;
       },
     },
-    { title: "消息", dataIndex: "message", key: "message" },
+    { title: t("common.message"), dataIndex: "message", key: "message" },
     {
       title: t("common.created_at"),
       dataIndex: "createdAt",
@@ -119,7 +119,7 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      <Card title="最近事件" className="mt-4">
+      <Card title={t("dashboard.recent_events")} className="mt-4">
         <Table
           columns={eventColumns}
           dataSource={stats?.recentEvents || []}
