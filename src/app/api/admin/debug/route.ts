@@ -8,7 +8,12 @@ export async function GET() {
   const username = process.env.ADMIN_USERNAME;
   const password = process.env.ADMIN_PASSWORD;
   const databaseUrl = process.env.DATABASE_URL;
-  const jwtSecret = process.env.JWT_SECRET;
+  const jwtKey = process.env.JWKS_KEY || process.env.JWT_SECRET;
+  const jwtSource = process.env.JWKS_KEY
+    ? "JWKS_KEY"
+    : process.env.JWT_SECRET
+      ? "JWT_SECRET"
+      : null;
 
   const adminCount = await prisma.admin.count();
   const admins = await prisma.admin.findMany({
@@ -22,8 +27,8 @@ export async function GET() {
       DATABASE_URL: databaseUrl
         ? `已设置 (${databaseUrl.substring(0, 30)}...)`
         : "未设置",
-      JWT_SECRET: jwtSecret
-        ? `已设置 (长度: ${jwtSecret.length})`
+      JWT_KEY: jwtKey
+        ? `已设置 (来源: ${jwtSource}, 长度: ${jwtKey.length})`
         : "未设置 ⚠️ 登录将失败",
     },
     adminCount,
