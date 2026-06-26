@@ -1,49 +1,111 @@
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 
+const RESET_FLAG_KEY = "admin_reset_password";
+
 /**
  * 管理员初始化服务
- * 首次启动时通过环境变量自动创建管理员账户
+ *
+ * 启动时执行以下逻辑：
+ * 1. 若数据库无管理员 → 从 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量创建
+ * 2. 若数据库已有管理员且存在重置标志 → 强制更新密码
+ * 3. 重置时检测 ADMIN_USERNAME 与现有管理员是否匹配，不匹配则报错退出
  */
 export async function initializeAdmin(): Promise<void> {
   const username = process.env.ADMIN_USERNAME;
   const password = process.env.ADMIN_PASSWORD;
 
+  // ---- 场景 1：首次创建管理员 ----
+  const adminCount = await prisma.admin.count();
+
+  if (adminCount === 0) {
+    if (!username || !password) {
+      console.warn(
+        "[初始化] 未设置 ADMIN_USERNAME 或 ADMIN_PASSWORD 环境变量，跳过管理员初始化"
+      );
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    await prisma.admin.create({
+      data: { username, passwordHash },
+    });
+
+    console.log(`[初始化] 管理员账户 "${username}" 创建成功`);
+
+    await prisma.systemEvent.create({
+      data: {
+        level: "info",
+        message: "系统初始化完成",
+        detail: JSON.stringify({
+          adminCreated: true,
+          username,
+          timestamp: new Date().toISOString(),
+        }),
+      },
+    });
+    return;
+  }
+
+  // ---- 场景 2：管理员已存在，检查重置标志 ----
+  const resetFlag = await prisma.config.findUnique({
+    where: { key: RESET_FLAG_KEY },
+  });
+
+  if (!resetFlag || resetFlag.value !== "pending") {
+    // 无重置标志，正常跳过
+    return;
+  }
+
+  // 有重置标志，执行密码重置
   if (!username || !password) {
-    console.warn(
-      "[初始化] 未设置 ADMIN_USERNAME 或 ADMIN_PASSWORD 环境变量，跳过管理员初始化"
+    console.error(
+      "[初始化] 检测到密码重置标志，但未设置 ADMIN_USERNAME 或 ADMIN_PASSWORD 环境变量，跳过重置"
     );
     return;
   }
 
-  // 检查是否已存在管理员
-  const existingAdmin = await prisma.admin.findUnique({
-    where: { username },
-  });
-
-  if (existingAdmin) {
-    console.log(`[初始化] 管理员账户 "${username}" 已存在，跳过创建`);
+  const admin = await prisma.admin.findFirst();
+  if (!admin) {
+    console.error("[初始化] 检测到密码重置标志，但数据库中无管理员账户");
     return;
   }
 
-  // 创建管理员账户
-  const passwordHash = await hashPassword(password);
-  await prisma.admin.create({
-    data: {
-      username,
-      passwordHash,
-    },
+  // 检测管理员名称是否匹配
+  if (admin.username !== username) {
+    const msg = `[初始化] 错误：环境变量 ADMIN_USERNAME="${username}" 与数据库管理员 "${admin.username}" 不匹配。请修改 ADMIN_USERNAME 环境变量为 "${admin.username}" 后重启`;
+    console.error(msg);
+    await prisma.systemEvent.create({
+      data: {
+        level: "error",
+        message: "密码重置失败：管理员名称不匹配",
+        detail: JSON.stringify({
+          envUsername: username,
+          dbUsername: admin.username,
+          timestamp: new Date().toISOString(),
+        }),
+      },
+    });
+    return;
+  }
+
+  // 执行密码更新
+  const newPasswordHash = await hashPassword(password);
+  await prisma.admin.update({
+    where: { id: admin.id },
+    data: { passwordHash: newPasswordHash },
   });
 
-  console.log(`[初始化] 管理员账户 "${username}" 创建成功`);
+  // 清除重置标志
+  await prisma.config.delete({ where: { key: RESET_FLAG_KEY } });
 
-  // 记录系统事件
+  console.log(`[初始化] 管理员 "${username}" 密码已重置`);
+
   await prisma.systemEvent.create({
     data: {
       level: "info",
-      message: "系统初始化完成",
+      message: "管理员密码已重置",
       detail: JSON.stringify({
-        adminCreated: true,
         username,
         timestamp: new Date().toISOString(),
       }),
@@ -52,8 +114,7 @@ export async function initializeAdmin(): Promise<void> {
 }
 
 /**
- * 数据库迁移（通过 prisma db push 实现）
- * 仅在 pre-start 脚本中调用，不在运行时执行
+ * 数据库连接检查
  */
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
