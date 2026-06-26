@@ -4,16 +4,34 @@ import { hashPassword } from "@/lib/auth";
 const RESET_FLAG_KEY = "admin_reset_password";
 
 /**
+ * 环境变量校验 — 缺少必需变量时直接崩溃，阻止启动
+ */
+function validateRequiredEnvVars(): void {
+  const required = ["JWT_SECRET", "ADMIN_USERNAME", "ADMIN_PASSWORD", "DATABASE_URL"];
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    const msg = `[致命错误] 缺少必需环境变量: ${missing.join(", ")}。系统无法启动，请配置后重试`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+}
+
+/**
  * 管理员初始化服务
  *
  * 启动时执行以下逻辑：
- * 1. 若数据库无管理员 → 从 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量创建
- * 2. 若数据库已有管理员且存在重置标志 → 强制更新密码
+ * 0. 校验必需环境变量（JWT_SECRET / ADMIN_USERNAME / ADMIN_PASSWORD / DATABASE_URL）
+ * 1. 若数据库无管理员 → 从环境变量创建
+ * 2. 若数据库已有管理员且存在重置标志 → 用环境变量密码强制更新
  * 3. 重置时检测 ADMIN_USERNAME 与现有管理员是否匹配，不匹配则报错退出
  */
 export async function initializeAdmin(): Promise<void> {
-  const username = process.env.ADMIN_USERNAME;
-  const password = process.env.ADMIN_PASSWORD;
+  // 校验必需环境变量
+  validateRequiredEnvVars();
+
+  const username = process.env.ADMIN_USERNAME!;
+  const password = process.env.ADMIN_PASSWORD!;
 
   // ---- 场景 1：首次创建管理员 ----
   const adminCount = await prisma.admin.count();
