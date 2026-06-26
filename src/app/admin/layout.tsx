@@ -23,8 +23,8 @@ import {
   ChevronDown,
   ChevronRight,
   Shield,
-  Loader2,
 } from "lucide-react";
+import GlobalLoading from "@/components/Loading";
 import "@/lib/i18n";
 
 // ---------- 类型定义 ----------
@@ -47,11 +47,11 @@ const menuItems: MenuItem[] = [
   { key: "admin.system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
-const groupLabels: Record<string, string> = {
-  overview: "概览",
-  manage: "管理",
-  monitor: "监控",
-  system: "系统",
+const groupI18nKeys: Record<string, string> = {
+  overview: "admin.group_overview",
+  manage: "admin.group_manage",
+  monitor: "admin.group_monitor",
+  system: "admin.group_system",
 };
 
 // ---------- SidebarItem ----------
@@ -117,9 +117,10 @@ function SidebarGroup({
       <button
         onClick={onToggle}
         className="flex items-center justify-between w-full px-3 mb-1"
+        aria-label={t("common.collapse")}
       >
         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 dark:text-zinc-600">
-          {groupLabels[group] ?? group}
+          {t(groupI18nKeys[group] ?? group)}
         </span>
         <ChevronDown
           size={12}
@@ -190,10 +191,12 @@ function MobileToggle({
   isOpen: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       onClick={onClick}
-      aria-label={isOpen ? "关闭侧边栏" : "打开侧边栏"}
+      aria-label={isOpen ? t("common.close_sidebar") : t("common.open_sidebar")}
+      aria-expanded={isOpen}
       className={`md:hidden ${isOpen ? "hidden" : ""} fixed top-6 left-6 z-[9999] rounded-2xl p-3.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-2xl shadow-zinc-900/20 hover:scale-110 active:scale-95 transition-transform`}
     >
       {isOpen ? <X size={22} /> : <Menu size={22} />}
@@ -253,12 +256,14 @@ function TopHeader({
           onClick={cycle}
           className="p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
           title={mode === "dark" ? t("theme.light") : t("theme.dark")}
+          aria-label={mode === "dark" ? t("theme.light") : t("theme.dark")}
         >
           {isDark ? <Sun size={18} /> : <Moon size={18} />}
         </button>
         <button
           onClick={toggleLanguage}
           className="p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          aria-label={t("common.language")}
         >
           <Globe size={18} />
         </button>
@@ -347,7 +352,7 @@ export default function AdminPageLayout({
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        <Loader2 size={32} className="animate-spin text-zinc-300 dark:text-zinc-600" />
+        <GlobalLoading size="large" />
       </div>
     );
   }
@@ -374,7 +379,7 @@ export default function AdminPageLayout({
         <button
           onClick={close}
           className="md:hidden p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
-          aria-label="关闭侧边栏"
+          aria-label={t("common.close_sidebar")}
         >
           <X size={18} />
         </button>

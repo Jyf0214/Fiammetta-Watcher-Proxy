@@ -41,7 +41,11 @@
     "message": "Message",
     "detail": "Detail",
     "chinese": "中文",
-    "action": "Action"
+    "action": "Action",
+    "language": "Language",
+    "collapse": "Collapse",
+    "close_sidebar": "Close sidebar",
+    "open_sidebar": "Open sidebar"
   },
   "validation": {
     "field_required": " is required"
@@ -89,7 +93,11 @@
     "audit_desc": "View admin operation audit records",
     "system": "System Config",
     "events": "System Events",
-    "events_desc": "View system events and alert information"
+    "events_desc": "View system events and alert information",
+    "group_overview": "Overview",
+    "group_manage": "Manage",
+    "group_monitor": "Monitor",
+    "group_system": "System"
   },
   "platform": {
     "name": "Platform Name",

@@ -138,7 +138,7 @@ export default function ModelsPage() {
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button size="small" danger icon={<DeleteOutlined />}>
+          <Button size="small" danger icon={<DeleteOutlined />} aria-label={t("common.delete")}>
             {t("common.delete")}
           </Button>
         </Popconfirm>
@@ -152,18 +152,21 @@ export default function ModelsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
-        {t("admin.models")}
-      </h1>
-      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-        {t("admin.models_desc")}
-      </p>
+      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+          {t("admin.models")}
+        </h1>
+        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+          {t("admin.models_desc")}
+        </p>
+      </div>
 
-      <Card>
+      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-4 flex justify-end">
           <Button
             type="primary"
             icon={<PlusOutlined />}
+            aria-label={t("model_map.create_mapping")}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);
@@ -180,6 +183,7 @@ export default function ModelsPage() {
             rowKey="id"
             loading={loading}
             pagination={{ pageSize: 20 }}
+            aria-label={t("admin.models")}
           />
         </div>
       </Card>

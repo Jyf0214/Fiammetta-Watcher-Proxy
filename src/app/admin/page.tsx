@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Row, Col, Statistic, Table, Tag, message } from "antd";
+import { Card, Table, Tag, message } from "antd";
 import {
   CloudServerOutlined,
   KeyOutlined,
@@ -133,6 +133,8 @@ export default function DashboardPage() {
             {statCards.map((card) => (
               <div
                 key={card.key}
+                role="article"
+                aria-label={card.title}
                 className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5 hover:shadow-lg hover:shadow-zinc-100 dark:hover:shadow-zinc-800/50 transition-all duration-300 group"
               >
                 <div className="flex items-start justify-between mb-4">
@@ -161,20 +163,23 @@ export default function DashboardPage() {
                 {t("dashboard.recent_events")}
               </span>
             }
-            className="dark:bg-zinc-900 dark:border-zinc-800"
+            className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900"
             styles={{
               header: {
                 borderBottom: "1px solid #f4f4f5",
               },
             }}
           >
-            <Table
-              columns={eventColumns}
-              dataSource={stats?.recentEvents || []}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+            <div className="overflow-x-auto">
+              <Table
+                columns={eventColumns}
+                dataSource={stats?.recentEvents || []}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                aria-label={t("dashboard.recent_events")}
+              />
+            </div>
           </Card>
         </>
       )}

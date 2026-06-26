@@ -142,14 +142,16 @@ export default function LogsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
-        {t("admin.logs")}
-      </h1>
-      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-        {t("admin.logs_desc")}
-      </p>
+      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+          {t("admin.logs")}
+        </h1>
+        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+          {t("admin.logs_desc")}
+        </p>
+      </div>
 
-      <Card>
+      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div className="flex flex-wrap gap-2">
             <Select
@@ -179,7 +181,7 @@ export default function LogsPage() {
               </Select.Option>
             </Select>
           </div>
-          <Button icon={<ReloadOutlined />} onClick={fetchLogs}>
+          <Button icon={<ReloadOutlined />} aria-label={t("common.refresh")} onClick={fetchLogs}>
             {t("common.refresh")}
           </Button>
         </div>
@@ -197,6 +199,7 @@ export default function LogsPage() {
               onChange: setPage,
               showTotal: (count) => t("common.pagination_total", { count }),
             }}
+            aria-label={t("admin.logs")}
           />
         </div>
       </Card>

@@ -41,7 +41,11 @@
     "message": "消息",
     "detail": "详情",
     "chinese": "中文",
-    "action": "操作"
+    "action": "操作",
+    "language": "语言",
+    "collapse": "折叠",
+    "close_sidebar": "关闭侧边栏",
+    "open_sidebar": "打开侧边栏"
   },
   "validation": {
     "field_required": "不能为空"
@@ -89,7 +93,11 @@
     "audit_desc": "查看管理员操作审计记录",
     "system": "系统配置",
     "events": "系统事件",
-    "events_desc": "查看系统事件和告警信息"
+    "events_desc": "查看系统事件和告警信息",
+    "group_overview": "概览",
+    "group_manage": "管理",
+    "group_monitor": "监控",
+    "group_system": "系统"
   },
   "platform": {
     "name": "平台名称",
