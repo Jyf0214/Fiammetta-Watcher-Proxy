@@ -143,8 +143,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 验证密码
+    // 验证密码（仅与数据库存储的哈希对比，不使用环境变量）
     const valid = await verifyPassword(password, admin.passwordHash);
+
     if (!valid) {
       recordLoginFailure(clientIp);
 
