@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { createPrivateKey } from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
 import { hashPassword, verifyPassword } from "./auth-helpers";
@@ -20,7 +21,7 @@ interface Hs256Config {
 
 interface Rs256Config {
   type: "rs256";
-  key: string;
+  keyObject: ReturnType<typeof createPrivateKey>;
   algorithm: "RS256";
 }
 
@@ -61,26 +62,36 @@ function parseJwtConfig(): JwtConfig {
     if (Array.isArray(parsed.keys) && parsed.keys.length > 0) {
       const jwk = parsed.keys[0] as Record<string, unknown>;
       if (typeof jwk.kty === "string" && typeof jwk.d === "string") {
-        cachedConfig = {
-          type: "rs256",
-          key: JSON.stringify(jwk),
-          algorithm: "RS256",
-        };
-        console.log("[auth] JWT 模式: RS256 (JWKS)");
-        return cachedConfig;
+        try {
+          const keyObject = createPrivateKey({ key: jwk as Record<string, unknown> as never, format: "jwk" });
+          cachedConfig = {
+            type: "rs256",
+            keyObject,
+            algorithm: "RS256",
+          };
+          console.log("[auth] JWT 模式: RS256 (JWKS)");
+          return cachedConfig;
+        } catch (e) {
+          throw new Error(`JWKS 私钥解析失败: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       throw new Error("JWKS 中的密钥缺少 kty 或 d 字段（需要包含私钥）");
     }
 
     // 单个 JWK 格式：{ kty: "...", d: "..." }
     if (typeof parsed.kty === "string" && typeof parsed.d === "string") {
-      cachedConfig = {
-        type: "rs256",
-        key: trimmed,
-        algorithm: "RS256",
-      };
-      console.log("[auth] JWT 模式: RS256 (JWK)");
-      return cachedConfig;
+      try {
+        const keyObject = createPrivateKey({ key: parsed as Record<string, unknown> as never, format: "jwk" });
+        cachedConfig = {
+          type: "rs256",
+          keyObject,
+          algorithm: "RS256",
+        };
+        console.log("[auth] JWT 模式: RS256 (JWK)");
+        return cachedConfig;
+      } catch (e) {
+        throw new Error(`JWK 私钥解析失败: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
 
     throw new Error(
@@ -90,13 +101,18 @@ function parseJwtConfig(): JwtConfig {
 
   // PEM 格式：-----BEGIN ... PRIVATE KEY-----
   if (trimmed.includes("-----BEGIN") && trimmed.includes("PRIVATE KEY")) {
-    cachedConfig = {
-      type: "rs256",
-      key: trimmed,
-      algorithm: "RS256",
-    };
-    console.log("[auth] JWT 模式: RS256 (PEM)");
-    return cachedConfig;
+    try {
+      const keyObject = createPrivateKey(trimmed);
+      cachedConfig = {
+        type: "rs256",
+        keyObject,
+        algorithm: "RS256",
+      };
+      console.log("[auth] JWT 模式: RS256 (PEM)");
+      return cachedConfig;
+    } catch (e) {
+      throw new Error(`PEM 私钥解析失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // 默认：HS256 对称密钥
@@ -115,7 +131,7 @@ export function generateToken(payload: AdminPayload): string {
   const config = parseJwtConfig();
 
   if (config.type === "rs256") {
-    return jwt.sign(payload, config.key, {
+    return jwt.sign(payload, config.keyObject, {
       algorithm: config.algorithm,
       expiresIn: TOKEN_EXPIRY,
     });
@@ -132,7 +148,7 @@ export function verifyToken(token: string): AdminPayload | null {
     const config = parseJwtConfig();
 
     if (config.type === "rs256") {
-      return jwt.verify(token, config.key, {
+      return jwt.verify(token, config.keyObject, {
         algorithms: [config.algorithm],
       }) as AdminPayload;
     }
