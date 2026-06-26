@@ -143,8 +143,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 验证密码（仅与数据库存储的哈希对比，不使用环境变量）
-    const valid = await verifyPassword(password, admin.passwordHash);
+    // 处理密码重置标志：检测到 pending 标志时，用正确算法重新哈希密码并更新
+    let targetHash = admin.passwordHash;
+    const resetFlag = await prisma.config.findUnique({
+      where: { key: "admin_reset_password" },
+    });
+    if (resetFlag && resetFlag.value === "pending") {
+      const envPassword = process.env.ADMIN_PASSWORD;
+      if (envPassword) {
+        try {
+          const { hashPassword } = await import("@/lib/auth");
+          const newHash = await hashPassword(envPassword);
+          await prisma.admin.update({
+            where: { id: admin.id },
+            data: { passwordHash: newHash },
+          });
+          await prisma.config.delete({
+            where: { key: "admin_reset_password" },
+          });
+          console.log(`[auth] 密码重置标志已处理，密码已更新: ${admin.username}`);
+          targetHash = newHash;
+        } catch (e) {
+          console.error("[auth] 密码重置处理失败:", e);
+        }
+      }
+    }
+
+    // 验证密码（仅与数据库哈希对比）
+    const valid = await verifyPassword(password, targetHash);
 
     if (!valid) {
       recordLoginFailure(clientIp);
