@@ -52,7 +52,7 @@ export default function SystemPage() {
 
   return (
     <div>
-      <div className="mb-8">
+      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-1">
           {t("admin.system")}
         </h1>
@@ -61,7 +61,7 @@ export default function SystemPage() {
         </p>
       </div>
 
-      <Card className="dark:bg-zinc-900 dark:border-zinc-800">
+      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900" aria-label={t("admin.system")}>
         <Descriptions column={1} bordered>
           <Descriptions.Item label={t("system.admin_init")}>
             {info?.adminUsername || t("common.not_set")}

@@ -208,6 +208,7 @@ export default function PlatformsPage() {
           <Button
             size="small"
             icon={<EditOutlined />}
+            aria-label={t("common.edit")}
             onClick={() => {
               setEditing(record);
               form.setFieldsValue(record);
@@ -218,7 +219,12 @@ export default function PlatformsPage() {
             title={t("common.confirm_delete")}
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t("common.delete")}
+            />
           </Popconfirm>
         </Space>
       ),
@@ -231,14 +237,16 @@ export default function PlatformsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-        {t("admin.platforms")}
-      </h1>
-      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-        {t("admin.platforms_desc")}
-      </p>
+      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+          {t("admin.platforms")}
+        </h1>
+        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+          {t("admin.platforms_desc")}
+        </p>
+      </div>
 
-      <Card>
+      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-4 flex justify-between items-center">
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
             {t("common.total")}: {platforms.length}
@@ -246,6 +254,7 @@ export default function PlatformsPage() {
           <Button
             type="primary"
             icon={<PlusOutlined />}
+            aria-label={t("platform.create_platform")}
             onClick={() => {
               setEditing(null);
               form.resetFields();
@@ -256,17 +265,20 @@ export default function PlatformsPage() {
           </Button>
         </div>
 
-        <Table
-          columns={columns}
-          dataSource={platforms}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            pageSize: 20,
-            showTotal: (total) => t("common.pagination_total", { count: total }),
-          }}
-          scroll={{ x: 900 }}
-        />
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={platforms}
+            rowKey="id"
+            loading={loading}
+            aria-label={t("admin.platforms")}
+            pagination={{
+              pageSize: 20,
+              showTotal: (total) => t("common.pagination_total", { count: total }),
+            }}
+            scroll={{ x: 900 }}
+          />
+        </div>
       </Card>
 
       <Modal

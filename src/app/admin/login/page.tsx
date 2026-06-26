@@ -136,18 +136,18 @@ export default function AdminLoginPage() {
         </div>
 
         {error && (
-          <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+          <div role="alert" className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
+          <div role="alert" className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
             {success}
           </div>
         )}
 
-        <button type="submit" className={btnPrimary} disabled={loading}>
+        <button type="submit" className={btnPrimary} disabled={loading} aria-label={t("common.next")}>
           <ChevronRight size={18} />
           {t("common.next")}
         </button>
@@ -166,6 +166,7 @@ export default function AdminLoginPage() {
             onClick={handleForgotPassword}
             disabled={loading}
             className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium disabled:opacity-50"
+            aria-label={t("auth.forgot_password")}
           >
             <KeyRound size={14} />
             {t("auth.forgot_password") || "忘记密码"}
@@ -174,6 +175,7 @@ export default function AdminLoginPage() {
             type="button"
             onClick={handleBack}
             className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium"
+            aria-label={t("common.back")}
           >
             <ArrowLeft size={14} />
             {t("common.back")}
@@ -203,13 +205,13 @@ export default function AdminLoginPage() {
         </div>
 
         {error && (
-          <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+          <div role="alert" className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
+          <div role="alert" className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 text-sm">
             {success}
           </div>
         )}
@@ -218,6 +220,7 @@ export default function AdminLoginPage() {
           type="submit"
           className={btnPrimary}
           disabled={loading}
+          aria-label={t("auth.login")}
         >
           {loading ? (
             <LoadingSpinner />

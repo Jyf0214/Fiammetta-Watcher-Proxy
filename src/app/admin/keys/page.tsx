@@ -141,6 +141,7 @@ export default function KeysPage() {
               size="small"
               type="text"
               icon={<CopyOutlined />}
+              aria-label={t("common.copy")}
               onClick={() => copyToClipboard(v)}
             />
           </Tooltip>
@@ -185,7 +186,12 @@ export default function KeysPage() {
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button size="small" danger icon={<DeleteOutlined />} />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            aria-label={t("common.delete")}
+          />
         </Popconfirm>
       ),
     },
@@ -197,14 +203,16 @@ export default function KeysPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-        {t("admin.keys")}
-      </h1>
-      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-        {t("admin.keys_desc")}
-      </p>
+      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+          {t("admin.keys")}
+        </h1>
+        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+          {t("admin.keys_desc")}
+        </p>
+      </div>
 
-      <Card>
+      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-4 flex justify-between items-center">
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
             {t("common.total")}: {keys.length}
@@ -212,6 +220,7 @@ export default function KeysPage() {
           <Button
             type="primary"
             icon={<PlusOutlined />}
+            aria-label={t("api_key.create_key")}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);
@@ -221,17 +230,20 @@ export default function KeysPage() {
           </Button>
         </div>
 
-        <Table
-          columns={columns}
-          dataSource={keys}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            pageSize: 20,
-            showTotal: (total) => t("common.pagination_total", { count: total }),
-          }}
-          scroll={{ x: 700 }}
-        />
+        <div className="overflow-x-auto">
+          <Table
+            columns={columns}
+            dataSource={keys}
+            rowKey="id"
+            loading={loading}
+            aria-label={t("admin.keys")}
+            pagination={{
+              pageSize: 20,
+              showTotal: (total) => t("common.pagination_total", { count: total }),
+            }}
+            scroll={{ x: 700 }}
+          />
+        </div>
       </Card>
 
       <Modal
@@ -327,6 +339,7 @@ export default function KeysPage() {
         <Button
           className="mt-3 w-full sm:w-auto"
           icon={<CopyOutlined />}
+          aria-label={t("api_key.copy_key")}
           onClick={() => copyToClipboard(newKeyValue)}
         >
           {t("api_key.copy_key")}
