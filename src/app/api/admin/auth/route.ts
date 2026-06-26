@@ -111,6 +111,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查是否存在管理员，不存在则从环境变量自动创建
+    const adminCount = await prisma.admin.count();
+    if (adminCount === 0) {
+      const envUsername = process.env.ADMIN_USERNAME;
+      const envPassword = process.env.ADMIN_PASSWORD;
+      if (envUsername && envPassword) {
+        try {
+          const { hashPassword } = await import("@/lib/auth");
+          const passwordHash = await hashPassword(envPassword);
+          await prisma.admin.create({
+            data: { username: envUsername, passwordHash },
+          });
+          console.log(`[auth] 首次登录自动创建管理员: ${envUsername}`);
+        } catch (e) {
+          console.error("[auth] 自动创建管理员失败:", e);
+        }
+      }
+    }
+
     // 查找管理员
     const admin = await prisma.admin.findUnique({
       where: { username },
