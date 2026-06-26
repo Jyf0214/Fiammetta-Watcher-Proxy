@@ -17,6 +17,9 @@ COPY . .
 # 构建 Next.js 应用
 RUN npm run build
 
+# 预压缩静态文件（生成 .gz 和 .br 副本）
+RUN node scripts/compress-static.js
+
 # ==================== 运行阶段 ====================
 FROM node:22-alpine AS runner
 
