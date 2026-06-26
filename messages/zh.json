@@ -39,7 +39,8 @@
     "welcome_back": "欢迎回来",
     "login_subtitle": "输入用户名继续",
     "input_password": "输入密码以登录",
-    "admin_only": "仅限管理员登录"
+    "admin_only": "仅限管理员登录",
+    "forgot_password": "忘记密码"
   },
   "admin": {
     "dashboard": "仪表盘",

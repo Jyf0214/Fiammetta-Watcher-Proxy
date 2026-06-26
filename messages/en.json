@@ -39,7 +39,8 @@
     "welcome_back": "Welcome back",
     "login_subtitle": "Enter your username to continue",
     "input_password": "Enter your password to login",
-    "admin_only": "Admin access only"
+    "admin_only": "Admin access only",
+    "forgot_password": "Forgot Password"
   },
   "admin": {
     "dashboard": "Dashboard",
