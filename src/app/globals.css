@@ -256,3 +256,222 @@ pre:hover .code-copy-btn {
   border-bottom: 1px solid #303030;
 }
 
+/* Modal */
+.dark .ant-modal-content {
+  background: #1f1f1f;
+  border-radius: 16px;
+}
+.dark .ant-modal-header {
+  background: #1f1f1f;
+  border-bottom: 1px solid #303030;
+}
+.dark .ant-modal-title {
+  color: #e4e4e7;
+}
+.dark .ant-modal-close {
+  color: #71717a;
+}
+.dark .ant-modal-close:hover {
+  color: #d4d4d8;
+}
+.dark .ant-modal-mask {
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+/* Input */
+.dark .ant-input,
+.dark .ant-input-affix-wrapper {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+.dark .ant-input::placeholder {
+  color: #71717a;
+}
+.dark .ant-input:focus,
+.dark .ant-input-affix-wrapper-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+
+/* InputNumber */
+.dark .ant-input-number {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-input-number-input {
+  color: #e4e4e7;
+}
+.dark .ant-input-number-input::placeholder {
+  color: #71717a;
+}
+.dark .ant-input-number:hover {
+  border-color: #52525b;
+}
+.dark .ant-input-number-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+.dark .ant-input-number-affix-wrapper {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-input-number-affix-wrapper:hover {
+  border-color: #52525b;
+}
+.dark .ant-input-number-affix-wrapper-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+.dark .ant-input-number-handler-wrap {
+  background: #27272a;
+  border-inline-start: 1px solid #3f3f46;
+}
+.dark .ant-input-number-handler {
+  color: #a1a1aa;
+}
+.dark .ant-input-number-handler:hover .ant-input-number-handler-up-inner,
+.dark .ant-input-number-handler:hover .ant-input-number-handler-down-inner {
+  color: #e4e4e7;
+}
+
+/* Select */
+.dark .ant-select-selector {
+  background: #27272a !important;
+  border-color: #3f3f46 !important;
+  color: #e4e4e7 !important;
+}
+.dark .ant-select-selection-placeholder {
+  color: #71717a !important;
+}
+.dark .ant-select-selection-item {
+  color: #e4e4e7 !important;
+}
+.dark .ant-select:hover .ant-select-selector {
+  border-color: #52525b !important;
+}
+.dark .ant-select-focused .ant-select-selector {
+  border-color: #52525b !important;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15) !important;
+}
+.dark .ant-select-arrow {
+  color: #71717a;
+}
+.dark .ant-select-clear {
+  color: #71717a;
+  background: #27272a;
+}
+.dark .ant-select-clear:hover {
+  color: #e4e4e7;
+}
+
+/* Select 下拉菜单 */
+.dark .ant-select-dropdown {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+}
+.dark .ant-select-item {
+  color: #d4d4d8;
+}
+.dark .ant-select-item-option-active {
+  background: #3f3f46;
+}
+.dark .ant-select-item-option-selected {
+  background: #3f3f46;
+  color: #fff;
+}
+
+/* Form */
+.dark .ant-form-item-label > label {
+  color: #d4d4d8;
+}
+.dark .ant-form-item-explain-error {
+  color: #f87171;
+}
+
+/* Modal Footer 按钮 */
+.dark .ant-btn-default {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+.dark .ant-btn-default:hover {
+  background: #3f3f46;
+  border-color: #52525b;
+  color: #e4e4e7;
+}
+.dark .ant-btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.dark .ant-btn-primary:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* Popconfirm / Tooltip 深色 */
+.dark .ant-popover-inner {
+  background: #27272a;
+}
+.dark .ant-popconfirm-message-title {
+  color: #d4d4d8;
+}
+
+/* Table 深色 */
+.dark .ant-table {
+  background: transparent;
+}
+.dark .ant-table-thead > tr > th {
+  background: #27272a;
+  color: #a1a1aa;
+  border-bottom: 1px solid #3f3f46;
+}
+.dark .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #3f3f46;
+  color: #d4d4d8;
+}
+.dark .ant-table-tbody > tr:hover > td {
+  background: #27272a;
+}
+.dark .ant-pagination .ant-pagination-item {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-pagination .ant-pagination-item a {
+  color: #d4d4d8;
+}
+.dark .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.dark .ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+
+/* Switch 开关 */
+.dark .ant-switch {
+  background: #3f3f46;
+}
+.dark .ant-switch-checked {
+  background: #3b82f6;
+}
+.dark .ant-switch-handle::before {
+  background: #fff;
+}
+.dark .ant-switch:hover:not(.ant-switch-disabled) {
+  background: #52525b;
+}
+.dark .ant-switch-checked:hover:not(.ant-switch-disabled) {
+  background: #2563eb;
+}
+
+/* Tag 标签 */
+.dark .ant-tag {
+  border-color: #3f3f46;
+}
+.dark .ant-tag-default {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+

@@ -256,44 +256,37 @@ export default function KeysPage() {
         onOk={handleSubmit}
         confirmLoading={submitting}
         width="min(90vw, 520px)"
-        className="dark"
-        styles={{
-          header: { backgroundColor: "#1f1f1f", borderBottomColor: "#303030" },
-          content: { backgroundColor: "#1f1f1f", borderRadius: "16px" },
-          body: { padding: "16px 24px" },
-          mask: { backgroundColor: "rgba(0,0,0,0.65)" },
-        }}
       >
-        <Form form={form} layout="vertical" className="dark">
+        <Form form={form} layout="vertical">
           <Form.Item
             name="name"
-            label={<span className="text-zinc-200">{t("api_key.name")}</span>}
+            label={t("api_key.name")}
             rules={[{ required: true }]}
           >
-            <Input className="dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-100" />
+            <Input />
           </Form.Item>
-          <Form.Item name="tokenLimit" label={<span className="text-zinc-200">{t("api_key.token_limit")}</span>}>
+          <Form.Item name="tokenLimit" label={t("api_key.token_limit")}>
             <InputNumber
               min={0}
               className="w-full"
               placeholder={t("common.unlimited")}
             />
           </Form.Item>
-          <Form.Item name="callLimit" label={<span className="text-zinc-200">{t("api_key.call_limit")}</span>}>
+          <Form.Item name="callLimit" label={t("api_key.call_limit")}>
             <InputNumber
               min={0}
               className="w-full"
               placeholder={t("common.unlimited")}
             />
           </Form.Item>
-          <Form.Item name="rpmLimit" label={<span className="text-zinc-200">{t("api_key.rpm_limit")}</span>}>
+          <Form.Item name="rpmLimit" label={t("api_key.rpm_limit")}>
             <InputNumber
               min={0}
               className="w-full"
               placeholder={t("common.unlimited")}
             />
           </Form.Item>
-          <Form.Item name="tpmLimit" label={<span className="text-zinc-200">{t("api_key.tpm_limit")}</span>}>
+          <Form.Item name="tpmLimit" label={t("api_key.tpm_limit")}>
             <InputNumber
               min={0}
               className="w-full"
@@ -302,7 +295,7 @@ export default function KeysPage() {
           </Form.Item>
           <Form.Item
             name="resetPeriod"
-            label={<span className="text-zinc-200">{t("api_key.reset_period")}</span>}
+            label={t("api_key.reset_period")}
             initialValue="monthly"
           >
             <Select>
@@ -325,13 +318,6 @@ export default function KeysPage() {
         open={newKeyVisible}
         onCancel={() => setNewKeyVisible(false)}
         width="min(90vw, 520px)"
-        className="dark"
-        styles={{
-          header: { backgroundColor: "#1f1f1f", borderBottomColor: "#303030" },
-          content: { backgroundColor: "#1f1f1f", borderRadius: "16px" },
-          body: { padding: "16px 24px" },
-          mask: { backgroundColor: "rgba(0,0,0,0.65)" },
-        }}
         footer={[
           <Button
             key="close"
