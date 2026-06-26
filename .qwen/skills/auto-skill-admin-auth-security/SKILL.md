@@ -1,8 +1,8 @@
 ---
 name: admin-auth-security
-description: 管理后台认证安全模式：登录速率限制、PBKDF2 密码哈希、JWT 安全配置
+description: 管理后台认证安全模式：登录速率限制、PBKDF2 密码哈希、JWT RS256/HS256 自动识别、Cookie 代理适配、管理员自动初始化与密码重置
 source: auto-skill
-extracted_at: '2026-06-21T00:30:00.000Z'
+extracted_at: '2026-06-26T13:59:34.117Z'
 ---
 
 # 管理后台认证安全模式
@@ -178,3 +178,119 @@ if (!valid) {
   return NextResponse.json({ success: false, error: "用户名或密码错误" }, { status: 401 });
 }
 ```
+
+## 9. JWT RS256/HS256 自动识别（支持 JWKS/JWK/PEM/字符串）
+
+环境变量 `JWKS_KEY`（优先）或 `JWT_SECRET` 自动识别密钥格式：
+
+```ts
+import jwt from "jsonwebtoken";
+import { createPrivateKey, createPublicKey } from "crypto";
+
+interface Hs256Config { type: "hs256"; secret: string }
+interface Rs256Config { type: "rs256"; privateKey: KeyObject; publicKey: KeyObject }
+type JwtConfig = Hs256Config | Rs256Config;
+
+function parseJwtConfig(): JwtConfig {
+  const raw = process.env.JWKS_KEY || process.env.JWT_SECRET;
+  if (!raw) throw new Error("JWKS_KEY 或 JWT_SECRET 未配置");
+
+  const trimmed = raw.trim();
+
+  // JWKS: { keys: [{ kty: "RSA", d: "..." }] }
+  if (trimmed.startsWith("{")) {
+    const parsed = JSON.parse(trimmed);
+    const jwk = parsed.keys?.[0] ?? parsed;
+    if (jwk.kty && jwk.d) {
+      const privateKey = createPrivateKey({ key: jwk, format: "jwk" });
+      const publicKey = createPublicKey(privateKey); // 从私钥推导公钥
+      return { type: "rs256", privateKey, publicKey };
+    }
+    throw new Error("JSON 不是有效的 JWK/JWKS（需包含 kty 和 d 字段）");
+  }
+
+  // PEM: -----BEGIN PRIVATE KEY-----
+  if (trimmed.includes("-----BEGIN") && trimmed.includes("PRIVATE KEY")) {
+    const privateKey = createPrivateKey(trimmed);
+    const publicKey = createPublicKey(privateKey);
+    return { type: "rs256", privateKey, publicKey };
+  }
+
+  // 默认 HS256
+  return { type: "hs256", secret: trimmed };
+}
+```
+
+**关键规则：**
+- `jwt.sign` → 用 `privateKey` 签名
+- `jwt.verify` → 用 `publicKey` 验证（**不能用私钥验证，会静默失败**）
+- 从私钥推导公钥：`createPublicKey(privateKey)`
+
+## 10. Cookie 代理适配（HF Space / Vercel / Cloudflare）
+
+```ts
+// ❌ 错误：代理后 secure 可能导致 Cookie 未被设置
+cookieStore.set(COOKIE_NAME, token, {
+  secure: process.env.NODE_ENV === "production", // 代理后 Node.js 看到 HTTP
+});
+
+// ✅ 正确：代理环境设为 false，让浏览器自行决定
+cookieStore.set(COOKIE_NAME, token, {
+  httpOnly: true,
+  secure: false, // HF Space 代理后必须为 false
+  sameSite: "lax",
+  maxAge: 7 * 24 * 60 * 60,
+  path: "/",
+});
+```
+
+**原因：** HF Space / Vercel 等平台的反向代理终止 HTTPS 后转发 HTTP 到 Node.js。`secure: true` 时，Node.js 设置 `Set-Cookie: ...; Secure`，但某些代理会剥离或忽略该标志，导致浏览器未存储 Cookie，后续请求无 Cookie → 401 → 重定向到登录页。
+
+## 11. 管理员自动初始化（登录时兜底）
+
+在登录 API 中检测数据库管理员数量，无管理员时从环境变量创建：
+
+```ts
+// POST /api/admin/auth 登录处理中
+const adminCount = await prisma.admin.count();
+if (adminCount === 0) {
+  const envUsername = process.env.ADMIN_USERNAME;
+  const envPassword = process.env.ADMIN_PASSWORD;
+  if (envUsername && envPassword) {
+    const { hashPassword } = await import("@/lib/auth");
+    const passwordHash = await hashPassword(envPassword);
+    await prisma.admin.create({
+      data: { username: envUsername, passwordHash },
+    });
+  }
+}
+```
+
+**配合忘记密码功能：** 用户点击「忘记密码」→ POST 写入 `Config` 表 `admin_reset_password: "pending"` → 下次登录时检测标志，用 `ADMIN_PASSWORD` 环境变量重新哈希密码并更新。
+
+## 12. 密码重置标志处理（登录时）
+
+```ts
+// 检测重置标志
+const resetFlag = await prisma.config.findUnique({
+  where: { key: "admin_reset_password" },
+});
+if (resetFlag && resetFlag.value === "pending") {
+  const envPassword = process.env.ADMIN_PASSWORD;
+  if (envPassword) {
+    const { hashPassword } = await import("@/lib/auth");
+    const newHash = await hashPassword(envPassword);
+    await prisma.admin.update({
+      where: { id: admin.id },
+      data: { passwordHash: newHash },
+    });
+    await prisma.config.delete({ where: { key: "admin_reset_password" } });
+    targetHash = newHash; // 用新哈希验证
+  }
+}
+```
+
+**安全约束：**
+- 重置后严禁使用环境变量密码直接登录，必须经过哈希对比
+- 若数据库存在多个管理员，拒绝重置（需手动统一）
+- 若 `ADMIN_USERNAME` 与现有管理员不匹配，拒绝重置

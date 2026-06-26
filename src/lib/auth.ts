@@ -61,7 +61,8 @@ function parseJwtConfig(): JwtConfig {
       if (typeof jwk.kty === "string" && typeof jwk.d === "string") {
         try {
           const privateKey = createPrivateKey({ key: jwk as Record<string, unknown> as never, format: "jwk" });
-          const publicKey = createPublicKey(privateKey);
+          // TypeScript 6.x 对 createPublicKey 参数类型检查更严格，KeyObject 需要显式类型断言
+          const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
           cachedConfig = { type: "rs256", privateKey, publicKey };
           console.log("[auth] JWT 模式: RS256 (JWKS)");
           return cachedConfig;
@@ -76,7 +77,8 @@ function parseJwtConfig(): JwtConfig {
     if (typeof parsed.kty === "string" && typeof parsed.d === "string") {
       try {
         const privateKey = createPrivateKey({ key: parsed as Record<string, unknown> as never, format: "jwk" });
-        const publicKey = createPublicKey(privateKey);
+        // TypeScript 6.x 对 createPublicKey 参数类型检查更严格，KeyObject 需要显式类型断言
+        const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
         cachedConfig = { type: "rs256", privateKey, publicKey };
         console.log("[auth] JWT 模式: RS256 (JWK)");
         return cachedConfig;
@@ -94,7 +96,8 @@ function parseJwtConfig(): JwtConfig {
   if (trimmed.includes("-----BEGIN") && trimmed.includes("PRIVATE KEY")) {
     try {
       const privateKey = createPrivateKey(trimmed);
-      const publicKey = createPublicKey(privateKey);
+      // TypeScript 6.x 对 createPublicKey 参数类型检查更严格，KeyObject 需要显式类型断言
+      const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
       cachedConfig = { type: "rs256", privateKey, publicKey };
       console.log("[auth] JWT 模式: RS256 (PEM)");
       return cachedConfig;
