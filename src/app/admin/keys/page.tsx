@@ -23,6 +23,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface ApiKeyItem {
   id: string;
@@ -175,6 +176,10 @@ export default function KeysPage() {
       ),
     },
   ];
+
+  if (loading && keys.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>

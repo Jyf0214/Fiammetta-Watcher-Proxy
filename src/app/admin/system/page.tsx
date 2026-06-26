@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Descriptions, Tag, Spin } from "antd";
+import { Card, Descriptions, Tag } from "antd";
+import GlobalLoading from "@/components/Loading";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 
@@ -48,7 +49,7 @@ export default function SystemPage() {
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Spin size="large" />
+        <GlobalLoading size="large" />
       </div>
     );
   }

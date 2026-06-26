@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronRight,
   Shield,
+  Loader2,
 } from "lucide-react";
 import "@/lib/i18n";
 
@@ -279,6 +280,7 @@ export default function AdminPageLayout({
   const [username, setUsername] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
 
   const isLoginPage = pathname === "/admin/login";
 
@@ -301,6 +303,8 @@ export default function AdminPageLayout({
       }
     } catch {
       router.push("/admin/login");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -337,6 +341,15 @@ export default function AdminPageLayout({
   // 登录页不使用管理后台布局
   if (isLoginPage) {
     return <>{children}</>;
+  }
+
+  // 加载中显示旋转图标
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-zinc-50 dark:bg-zinc-950">
+        <Loader2 size={32} className="animate-spin text-zinc-300 dark:text-zinc-600" />
+      </div>
+    );
   }
 
   const sidebarContent = (

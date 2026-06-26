@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface Stats {
   totalPlatforms: number;
@@ -76,6 +77,10 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {loading && !stats ? (
+        <GlobalLoading size="large" />
+      ) : (
+      <>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
@@ -128,6 +133,8 @@ export default function DashboardPage() {
           size="small"
         />
       </Card>
+      </>
+      )}
     </div>
   );
 }

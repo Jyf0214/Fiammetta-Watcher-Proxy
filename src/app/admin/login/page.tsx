@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthCard from "@/components/auth/AuthCard";
 import { Mail, Lock, ChevronRight, ArrowLeft, KeyRound } from "lucide-react";
+import { LoadingSpinner } from "@/components/ui/Button/LoadingSpinner";
 import "@/lib/i18n";
 
 export default function AdminLoginPage() {
@@ -219,7 +220,7 @@ export default function AdminLoginPage() {
           disabled={loading}
         >
           {loading ? (
-            <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            <LoadingSpinner />
           ) : (
             <>
               <ChevronRight size={18} />

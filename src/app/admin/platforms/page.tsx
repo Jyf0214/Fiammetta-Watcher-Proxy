@@ -19,6 +19,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface Platform {
   id: string;
@@ -204,6 +205,10 @@ export default function PlatformsPage() {
       ),
     },
   ];
+
+  if (loading && platforms.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>

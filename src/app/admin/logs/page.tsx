@@ -5,6 +5,7 @@ import { Table, Tag, Select, Space, Button, message, type TableColumnsType } fro
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import GlobalLoading from "@/components/Loading";
 
 interface LogEntry {
   id: string;
@@ -116,6 +117,10 @@ export default function LogsPage() {
       ),
     },
   ];
+
+  if (loading && logs.length === 0) {
+    return <GlobalLoading size="large" />;
+  }
 
   return (
     <div>
