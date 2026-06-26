@@ -116,6 +116,8 @@
     "used_tokens": "已用 Token",
     "call_limit": "调用次数限制",
     "token_limit": "Token 限制",
+    "rpm_limit": "RPM 限制",
+    "tpm_limit": "TPM 限制",
     "reset_period": "重置周期",
     "expires_at": "过期时间",
     "status_active": "正常",
