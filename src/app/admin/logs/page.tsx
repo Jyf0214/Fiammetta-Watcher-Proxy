@@ -6,10 +6,10 @@ import {
   Card,
   Tag,
   Select,
-  Button,
   message,
   type TableColumnsType,
 } from "antd";
+import { Button } from "@/components/ui/Button";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -35,11 +35,7 @@ export default function LogsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const [errorFilter, setErrorFilter] = useState<boolean | undefined>();
-
-  useEffect(() => {
-    fetchLogs();
-  }, [page, statusFilter, errorFilter]);
+  const [errorFilter, setErrorFilter] = useState<string>("");
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -49,7 +45,7 @@ export default function LogsPage() {
         pageSize: "20",
       });
       if (statusFilter) params.set("status", statusFilter);
-      if (errorFilter !== undefined) params.set("isError", String(errorFilter));
+      if (errorFilter) params.set("isError", errorFilter);
 
       const res = await fetch(`/api/admin/logs?${params}`);
       const data = await res.json();
@@ -57,12 +53,18 @@ export default function LogsPage() {
         setLogs(data.data.items);
         setTotal(data.data.total);
       }
-    } catch {
+    } catch (err) {
+      console.error("获取日志失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchLogs();
+  }, [page, statusFilter, errorFilter]);
 
   const columns: TableColumnsType<LogEntry> = [
     {
@@ -181,7 +183,7 @@ export default function LogsPage() {
               </Select.Option>
             </Select>
           </div>
-          <Button icon={<ReloadOutlined />} aria-label={t("common.refresh")} onClick={fetchLogs}>
+          <Button variant="default" icon={<ReloadOutlined />} aria-label={t("common.refresh")} onClick={fetchLogs} disabled={loading}>
             {t("common.refresh")}
           </Button>
         </div>

@@ -1,6 +1,6 @@
 import type { RateLimitResult } from "@/types";
 
-// 内存存储的滑动窗口计数器
+// 内存存储的固定窗口计数器
 // 生产环境建议使用 Redis
 interface WindowEntry {
   count: number;
@@ -67,11 +67,14 @@ export function getPlatformRateStatus(platformId: string) {
   };
 }
 
+// 清理定时器 ID，用于导出 stopRateLimitCleanup 时清除
+let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+
 /**
- * 定期清理过期窗口
+ * 启动定期清理过期窗口的定时器
  */
 export function startRateLimitCleanup() {
-  setInterval(() => {
+  cleanupIntervalId = setInterval(() => {
     const now = Date.now();
     for (const [platformId, entry] of platformWindows.entries()) {
       if (now - entry.windowStart >= 120_000) {
@@ -80,6 +83,16 @@ export function startRateLimitCleanup() {
       }
     }
   }, CLEANUP_INTERVAL);
+}
+
+/**
+ * 停止清理定时器（用于进程优雅退出时调用）
+ */
+export function stopRateLimitCleanup() {
+  if (cleanupIntervalId) {
+    clearInterval(cleanupIntervalId);
+    cleanupIntervalId = null;
+  }
 }
 
 // 模块自初始化：首次导入时自动启动清理定时器，防止 Map 无限增长

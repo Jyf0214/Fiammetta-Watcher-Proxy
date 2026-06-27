@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Shield,
 } from "lucide-react";
+import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
 import "@/lib/i18n";
 
@@ -81,7 +82,7 @@ function SidebarItem({
       <Icon
         size={18}
         className={`shrink-0 transition-colors ${
-          isActive ? "text-white" : "text-zinc-300 dark:text-zinc-600"
+          isActive ? "text-white dark:text-zinc-900" : "text-zinc-300 dark:text-zinc-600"
         }`}
       />
       <span className={`truncate ${isActive ? "font-bold" : "font-medium"}`}>
@@ -150,10 +151,12 @@ function SidebarGroup({
 function SidebarUserMenu({
   username,
   onLogout,
+  logoutLoading,
   t,
 }: {
   username: string;
   onLogout: () => void;
+  logoutLoading: boolean;
   t: (key: string) => string;
 }) {
   return (
@@ -172,11 +175,16 @@ function SidebarUserMenu({
         </div>
         <button
           onClick={onLogout}
-          className="p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors text-zinc-400 hover:text-red-500"
+          disabled={logoutLoading}
+          className={`p-2 rounded-xl transition-colors ${
+            logoutLoading
+              ? "text-zinc-300 dark:text-zinc-600 cursor-not-allowed"
+              : "text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-red-500"
+          }`}
           title={t("auth.logout")}
           aria-label={t("auth.logout")}
         >
-          <LogOut size={18} />
+          <LogOut size={18} className={logoutLoading ? "animate-spin" : ""} />
         </button>
       </div>
     </div>
@@ -199,7 +207,7 @@ function MobileToggle({
       aria-expanded={isOpen}
       className={`md:hidden ${isOpen ? "hidden" : ""} fixed top-6 left-6 z-[9999] rounded-2xl p-3.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-2xl shadow-zinc-900/20 hover:scale-110 active:scale-95 transition-transform`}
     >
-      {isOpen ? <X size={22} /> : <Menu size={22} />}
+      <Menu size={22} />
     </button>
   );
 }
@@ -211,7 +219,6 @@ function TopHeader({
   isDark,
   cycle,
   mode,
-  i18n,
   toggleLanguage,
 }: {
   pathname: string;
@@ -219,7 +226,6 @@ function TopHeader({
   isDark: boolean;
   cycle: () => void;
   mode: string;
-  i18n: { language: string; changeLanguage: (lang: string) => void };
   toggleLanguage: () => void;
 }) {
   const breadcrumbMap: Record<string, string> = {
@@ -235,14 +241,16 @@ function TopHeader({
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";
   const breadcrumb = t(breadcrumbKey);
+  // 仪表盘页不显示第二级面包屑，避免"仪表盘 > 仪表盘"重复
+  const showSecondLevel = pathname !== "/admin";
 
   return (
     <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
       <nav className="flex items-center gap-1.5 text-sm text-zinc-400">
         <span className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
-          {t("admin.dashboard")}
+          {t("admin.system")}
         </span>
-        {breadcrumb && (
+        {showSecondLevel && breadcrumb && (
           <>
             <ChevronRight size={14} className="text-zinc-300 dark:text-zinc-600 shrink-0" />
             <span className="font-medium text-zinc-700 dark:text-zinc-200">
@@ -286,22 +294,18 @@ export default function AdminPageLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   const isLoginPage = pathname === "/admin/login";
 
   const open = useCallback(() => setSidebarOpen(true), []);
   const close = useCallback(() => setSidebarOpen(false), []);
 
-  useEffect(() => {
-    if (isLoginPage) return;
-    checkAuth();
-  }, [isLoginPage]);
-
   const checkAuth = async () => {
     try {
       const res = await fetch("/api/admin/auth");
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.data?.username) {
         setUsername(data.data.username);
       } else {
         router.push("/admin/login");
@@ -313,12 +317,24 @@ export default function AdminPageLayout({
     }
   };
 
+  useEffect(() => {
+    if (isLoginPage) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    checkAuth();
+  }, [isLoginPage]);
+
   const handleLogout = async () => {
+    if (logoutLoading) return;
+    setLogoutLoading(true);
     try {
-      await fetch("/api/admin/auth", { method: "DELETE" });
+      const res = await fetch("/api/admin/auth", { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      message.success(t("auth.logout_success") || "退出成功");
       router.push("/");
     } catch {
-      // 忽略
+      message.error(t("auth.logout_failed") || "退出失败，请重试");
+    } finally {
+      setLogoutLoading(false);
     }
   };
 
@@ -386,7 +402,7 @@ export default function AdminPageLayout({
       </div>
 
       {/* 用户信息 */}
-      <SidebarUserMenu username={username} onLogout={handleLogout} t={t} />
+      <SidebarUserMenu username={username} onLogout={handleLogout} logoutLoading={logoutLoading} t={t} />
 
       {/* 菜单 */}
       <nav className="flex-1 overflow-y-auto px-3 py-6 space-y-7 custom-scrollbar">
@@ -444,7 +460,6 @@ export default function AdminPageLayout({
           isDark={isDark}
           cycle={cycle}
           mode={mode}
-          i18n={i18n}
           toggleLanguage={toggleLanguage}
         />
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden">{children}</main>

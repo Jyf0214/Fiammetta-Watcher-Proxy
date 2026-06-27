@@ -107,6 +107,12 @@ function parseJwtConfig(): JwtConfig {
   }
 
   // 默认：HS256 对称密钥
+  // OWASP 建议 HMAC 密钥至少 256 位（32 字节），防止暴力破解
+  if (Buffer.byteLength(trimmed, "utf8") < 32) {
+    throw new Error(
+      "HS256 密钥长度不足：至少需要 32 字节（256 位）。请配置更强的密钥"
+    );
+  }
   cachedConfig = { type: "hs256", secret: trimmed };
   console.log("[auth] JWT 模式: HS256");
   return cachedConfig;
@@ -125,7 +131,11 @@ export function generateToken(payload: AdminPayload): string {
     });
   }
 
-  return jwt.sign(payload, config.secret, { expiresIn: TOKEN_EXPIRY });
+  // 显式指定 HS256 算法，防止算法混淆攻击（alg=none 注入）
+  return jwt.sign(payload, config.secret, {
+    algorithm: "HS256",
+    expiresIn: TOKEN_EXPIRY,
+  });
 }
 
 /**
@@ -141,7 +151,10 @@ export function verifyToken(token: string): AdminPayload | null {
       }) as AdminPayload;
     }
 
-    return jwt.verify(token, config.secret) as AdminPayload;
+    // 显式限制 algorithms，防止算法混淆攻击（如 alg=none 或 RSA 密钥混淆）
+    return jwt.verify(token, config.secret, {
+      algorithms: ["HS256"],
+    }) as AdminPayload;
   } catch {
     return null;
   }
@@ -176,7 +189,8 @@ export async function setAuthCookie(token: string) {
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: false,
+    // 生产环境启用 secure，确保 Cookie 仅通过 HTTPS 传输，防止中间人窃取
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60, // 7 天
     path: "/",

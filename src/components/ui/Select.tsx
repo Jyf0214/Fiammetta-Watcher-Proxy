@@ -73,7 +73,7 @@ export const Select = memo(
             sizeStyles[size],
             roundedStyles[rounded],
             ringStyles[ring],
-            'placeholder:text-zinc-400',
+            'placeholder:text-zinc-400 dark:placeholder:text-zinc-600',
             error && 'border-red-400 focus:border-red-500 focus:ring-red-500',
             className,
           )}

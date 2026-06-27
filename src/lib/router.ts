@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { checkAndUpdateCircuitBreakerState } from "./circuit-breaker";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 
 // 内存缓存，避免每次请求都查数据库
@@ -7,13 +8,32 @@ let modelMapCache: ModelMapConfig[] = [];
 let lastRefresh = 0;
 const CACHE_TTL = 30_000; // 30 秒缓存
 
+// 防惊群锁：避免多个并发请求同时穿透缓存执行数据库查询
+let refreshPromise: Promise<void> | null = null;
+
 /**
- * 刷新平台和模型映射缓存
+ * 刷新平台和模型映射缓存（带防并发穿透锁）
+ *
+ * 多个并发请求同时触发刷新时，只有第一个会真正执行数据库查询，
+ * 其余请求复用同一个 Promise，避免惊群效应。
  */
 async function refreshCache() {
   const now = Date.now();
   if (now - lastRefresh < CACHE_TTL && platformCache.length > 0) return;
+  if (refreshPromise) return refreshPromise;
 
+  refreshPromise = doRefresh();
+  try {
+    await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+/**
+ * 执行实际的缓存刷新（数据库查询 + 原子赋值）
+ */
+async function doRefresh() {
   const [platforms, modelMaps] = await Promise.all([
     prisma.platform.findMany({
       where: { enabled: true },
@@ -49,7 +69,7 @@ async function refreshCache() {
   // 原子赋值：两个缓存同时切换，避免读取方看到不一致的状态
   platformCache = newPlatforms;
   modelMapCache = newModelMaps;
-  lastRefresh = now;
+  lastRefresh = Date.now();
 }
 
 /**
@@ -67,6 +87,12 @@ function resolveModelMapping(
   requestedModel: string,
   platformId?: string | null
 ): { targetModel: string; targetPlatformId: string | null } {
+  // 校验模型名称格式：仅允许字母、数字、点、下划线、短横线、斜杠，最长 200 字符
+  const MODEL_NAME_PATTERN = /^[a-zA-Z0-9._\-/]{1,200}$/;
+  if (!MODEL_NAME_PATTERN.test(requestedModel)) {
+    return { targetModel: requestedModel, targetPlatformId: null };
+  }
+
   // 精确匹配：模型名 + 平台绑定
   const exactMatch = modelMapCache.find(
     (m) =>
@@ -123,9 +149,23 @@ function selectPlatformByWeight(
 
 /**
  * 检查平台是否可用（未处于熔断冷却期）
+ *
+ * 通过调用 checkAndUpdateCircuitBreakerState 触发 open → half-open 的自动转换，
+ * 使得冷却期过后的熔断器能进入探测阶段。
  */
 function isPlatformAvailable(platform: PlatformConfig): boolean {
   if (!platform.enabled) return false;
+
+  // 检查内存中的熔断器状态，触发 open → half-open 的自动转换
+  const breakerState = checkAndUpdateCircuitBreakerState(platform.id);
+
+  // 熔断器处于 open 状态且冷却期未过，平台不可用
+  if (breakerState === "open") return false;
+
+  // 熔断器处于 half-open 状态，允许探测请求通过
+  if (breakerState === "half-open") return true;
+
+  // 熔断器未记录或已恢复为 closed，检查数据库缓存的常规状态
   if (platform.status === "down") return false;
   if (platform.cooldownEnd && platform.cooldownEnd > new Date()) return false;
   return true;

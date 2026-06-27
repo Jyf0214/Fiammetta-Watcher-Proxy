@@ -41,6 +41,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 请求体大小限制（Route Handler 不受 serverActions.bodySizeLimit 影响，需手动检查）
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > 10 * 1024 * 1024) {
+    return Response.json(
+      { error: { message: "请求体过大", type: "invalid_request_error" } },
+      { status: 413 }
+    );
+  }
+
   // 2. 解析请求体
   let body: CompletionRequest;
   try {
@@ -86,6 +95,10 @@ export async function POST(request: NextRequest) {
   const upstreamUrl = `${route.platform.baseUrl}/completions`;
   const isStream = body.stream === true;
 
+  // 上游请求超时控制：2 分钟
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
   try {
     const upstreamResponse = await fetch(upstreamUrl, {
       method: "POST",
@@ -99,6 +112,7 @@ export async function POST(request: NextRequest) {
         // 流式请求强制要求上游返回 usage 数据，以便计费
         ...(isStream ? { stream_options: { include_usage: true } } : {}),
       }),
+      signal: controller.signal,
     });
 
     if (!upstreamResponse.ok) {
@@ -118,7 +132,24 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      return new Response(errorText, {
+      // 尝试解析上游返回的错误为 JSON，解析失败则包装为标准错误格式
+      let errorBody: string;
+      try {
+        JSON.parse(errorText);
+        // 上游返回的是合法 JSON，直接透传
+        errorBody = errorText;
+      } catch {
+        // 上游返回的不是 JSON（如纯文本、HTML 错误页），包装为标准错误响应
+        errorBody = JSON.stringify({
+          error: {
+            message: errorText.substring(0, 500) || "上游返回了非 JSON 格式的错误响应",
+            type: "upstream_error",
+            upstream_status: upstreamResponse.status,
+          },
+        });
+      }
+
+      return new Response(errorBody, {
         status: upstreamResponse.status,
         headers: { "Content-Type": "application/json" },
       });
@@ -139,9 +170,19 @@ export async function POST(request: NextRequest) {
 
       // 通过 TransformStream 拦截 SSE 流，在透传数据的同时提取 usage 信息
       let capturedUsage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
+      let lastChunkTime = Date.now();
+      const CHUNK_TIMEOUT_MS = 60_000;
 
       const usageTransformer = new TransformStream({
         transform(chunk, controller) {
+          // chunk 间超时检测：两个 chunk 间隔超过 60 秒则中断流
+          const now = Date.now();
+          if (now - lastChunkTime > CHUNK_TIMEOUT_MS) {
+            controller.error(new Error("流式响应超时"));
+            return;
+          }
+          lastChunkTime = now;
+
           // 原样透传 chunk 给客户端
           controller.enqueue(chunk);
 
@@ -171,43 +212,50 @@ export async function POST(request: NextRequest) {
             ? (capturedUsage.prompt_tokens || 0) + (capturedUsage.completion_tokens || 0)
             : 0;
 
-          // 更新 apiKey.usedTokens 和额度检查
-          const effectiveTokenLimit =
-            apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
-          if (effectiveTokenLimit !== null) {
-            await prisma.$transaction(async (tx) => {
-              const updated = await tx.apiKey.update({
+          // 此处的数据库错误不能 throw，因为流已经发送给客户端，
+          // throw 会导致未捕获异常并可能中断已部分发送的响应
+          try {
+            // 更新 apiKey.usedTokens 和额度检查
+            const effectiveTokenLimit =
+              apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
+            if (effectiveTokenLimit !== null) {
+              await prisma.$transaction(async (tx) => {
+                const updated = await tx.apiKey.update({
+                  where: { id: apiKey.id },
+                  data: { usedTokens: { increment: totalTokens } },
+                  select: { usedTokens: true },
+                });
+                if (Number(updated.usedTokens) >= effectiveTokenLimit) {
+                  await tx.apiKey.update({
+                    where: { id: apiKey.id },
+                    data: { status: "disabled" },
+                  });
+                }
+              });
+            } else {
+              await prisma.apiKey.update({
                 where: { id: apiKey.id },
                 data: { usedTokens: { increment: totalTokens } },
-                select: { usedTokens: true },
               });
-              if (Number(updated.usedTokens) >= effectiveTokenLimit) {
-                await tx.apiKey.update({
-                  where: { id: apiKey.id },
-                  data: { status: "disabled" },
-                });
-              }
-            });
-          } else {
-            await prisma.apiKey.update({
-              where: { id: apiKey.id },
-              data: { usedTokens: { increment: totalTokens } },
-            });
-          }
+            }
 
-          // 记录日志（包含实际 token 数）
-          const duration = Date.now() - startTime;
-          await prisma.requestLog.create({
-            data: {
-              keyId: apiKey.id,
-              platformId: route.platform.id,
-              model: body.model,
-              status: 200,
-              tokens: totalTokens,
-              duration,
-              isError: false,
-            },
-          });
+            // 记录日志（包含实际 token 数）
+            const duration = Date.now() - startTime;
+            await prisma.requestLog.create({
+              data: {
+                keyId: apiKey.id,
+                platformId: route.platform.id,
+                model: body.model,
+                status: 200,
+                tokens: totalTokens,
+                duration,
+                isError: false,
+              },
+            });
+          } catch (dbError) {
+            // 流式响应已发送给客户端，此处数据库失败只能记录日志，不能中断流
+            console.error("[completions] 流式响应 flush 阶段数据库操作失败:", dbError);
+          }
         },
       });
 
@@ -268,23 +316,35 @@ export async function POST(request: NextRequest) {
 
     return Response.json(responseData);
   } catch (error) {
-    await recordFailure(route.platform.id);
-    await prisma.requestLog.create({
-      data: {
-        keyId: apiKey.id,
-        platformId: route.platform.id,
-        model: body.model,
-        status: 500,
-        tokens: 0,
-        duration: Date.now() - startTime,
-        isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      },
-    });
+    // 记录失败状态和日志，但如果数据库操作也失败，不能让错误掩盖原始响应
+    try {
+      await recordFailure(route.platform.id);
+    } catch {
+      console.error("[completions] 熔断器记录失败:", error);
+    }
+
+    try {
+      await prisma.requestLog.create({
+        data: {
+          keyId: apiKey.id,
+          platformId: route.platform.id,
+          model: body.model,
+          status: 500,
+          tokens: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+    } catch (logError) {
+      console.error("[completions] 错误日志写入失败:", logError);
+    }
 
     return Response.json(
       { error: { message: "请求上游服务失败" } },
       { status: 500 }
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

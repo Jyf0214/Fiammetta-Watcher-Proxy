@@ -23,7 +23,7 @@ export function useErrorImg() {
   const onFlinkErrorRef = useRef(getHandler('flink'));
 
   useEffect(() => {
-    if (cachedConfig) { setLoaded(true); return; }
+    if (cachedConfig) { return; }
     const fetchConfig = async () => {
       try {
         const res = await fetch('/api/config');

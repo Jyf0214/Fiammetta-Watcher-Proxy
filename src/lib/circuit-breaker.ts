@@ -43,6 +43,16 @@ export function checkAndUpdateCircuitBreakerState(
     return "open";
   }
 
+  // half-open 状态下探测次数超限，重新打开熔断器（安全兜底）
+  if (
+    entry.state === "half-open" &&
+    entry.halfOpenAttempts >= DEFAULT_CONFIG.halfOpenMaxAttempts
+  ) {
+    entry.state = "open";
+    entry.cooldownEnd = Date.now() + DEFAULT_CONFIG.cooldownMs;
+    return "open";
+  }
+
   return entry.state;
 }
 
@@ -54,6 +64,13 @@ export async function recordSuccess(platformId: string): Promise<void> {
 
   if (entry?.state === "half-open") {
     entry.halfOpenAttempts += 1;
+
+    // 探测次数未达到上限，继续保持 half-open 状态
+    if (entry.halfOpenAttempts < DEFAULT_CONFIG.halfOpenMaxAttempts) {
+      return;
+    }
+
+    // 探测次数达到上限且全部成功，恢复为 closed 状态
     entry.state = "closed";
     entry.failureCount = 0;
     entry.halfOpenAttempts = 0;
@@ -115,14 +132,7 @@ export async function recordFailure(
   entry.lastFailureAt = Date.now();
 
   if (entry.state === "half-open") {
-    entry.halfOpenAttempts += 1;
-
-    // 探测次数未超限，继续留在 half-open 状态等待更多探测结果
-    if (entry.halfOpenAttempts < config.halfOpenMaxAttempts) {
-      return;
-    }
-
-    // 探测次数已达上限，重新打开熔断器
+    // half-open 状态下请求失败，立即重新打开熔断器并重置冷却时间
     entry.state = "open";
     entry.cooldownEnd = Date.now() + config.cooldownMs;
 
@@ -138,7 +148,7 @@ export async function recordFailure(
       });
     } catch (err) {
       console.error(
-        `[circuit-breaker] half-open 探测超限后数据库更新失败 (platformId=${platformId}):`,
+        `[circuit-breaker] half-open 状态失败后重新打开熔断器时数据库更新失败 (platformId=${platformId}):`,
         err
       );
     }

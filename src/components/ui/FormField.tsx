@@ -1,4 +1,3 @@
-import React from 'react';
 import { Select, Input as AntInput } from 'antd';
 import { Input } from '@/components/ui/Input';
 
@@ -25,7 +24,7 @@ export default function FormField({
 }: FormFieldProps) {
   return (
     <div className={className}>
-      <label className="block text-sm font-medium mb-2">{label}</label>
+      <label className="block text-sm font-medium mb-2 dark:text-zinc-300">{label}</label>
       {type === 'textarea' && (
         <AntInput.TextArea
           rows={rows}

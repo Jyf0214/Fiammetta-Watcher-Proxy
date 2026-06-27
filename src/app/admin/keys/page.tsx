@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import {
   Table,
-  Button,
   Space,
   Tag,
   Modal,
@@ -22,6 +21,7 @@ import {
   DeleteOutlined,
   CopyOutlined,
 } from "@ant-design/icons";
+import { Button } from "@/components/ui/Button";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -48,10 +48,6 @@ export default function KeysPage() {
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
 
-  useEffect(() => {
-    fetchKeys();
-  }, []);
-
   const fetchKeys = async () => {
     setLoading(true);
     try {
@@ -64,6 +60,11 @@ export default function KeysPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchKeys();
+  }, []);
 
   const handleSubmit = async () => {
     try {
@@ -99,19 +100,23 @@ export default function KeysPage() {
       const res = await fetch(`/api/admin/keys?id=${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        message.success(t("api_key.delete_success") || "删除成功");
         fetchKeys();
       } else {
-        message.error(data.error);
+        message.error(data.error || t("common.error"));
       }
     } catch {
       message.error(t("common.error"));
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    message.success(t("common.copied"));
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success(t("common.copied"));
+    } catch {
+      message.error(t("common.copy_failed") || "复制失败");
+    }
   };
 
   const statusColorMap: Record<string, string> = {
@@ -138,9 +143,10 @@ export default function KeysPage() {
           <span className="font-mono text-xs">{v.substring(0, 16)}...</span>
           <Tooltip title={t("common.copy")}>
             <Button
-              size="small"
-              type="text"
+              variant="ghost"
+              size="sm"
               icon={<CopyOutlined />}
+              iconOnly
               aria-label={t("common.copy")}
               onClick={() => copyToClipboard(v)}
             />
@@ -187,9 +193,10 @@ export default function KeysPage() {
           onConfirm={() => handleDelete(record.id)}
         >
           <Button
-            size="small"
-            danger
+            variant="dangerGhost"
+            size="sm"
             icon={<DeleteOutlined />}
+            iconOnly
             aria-label={t("common.delete")}
           />
         </Popconfirm>
@@ -218,7 +225,7 @@ export default function KeysPage() {
             {t("common.total")}: {keys.length}
           </span>
           <Button
-            type="primary"
+            variant="primary"
             icon={<PlusOutlined />}
             aria-label={t("api_key.create_key")}
             onClick={() => {
@@ -321,6 +328,7 @@ export default function KeysPage() {
         footer={[
           <Button
             key="close"
+            variant="default"
             onClick={() => setNewKeyVisible(false)}
             className="w-full sm:w-auto"
           >
@@ -335,6 +343,7 @@ export default function KeysPage() {
           {newKeyValue}
         </div>
         <Button
+          variant="default"
           className="mt-3 w-full sm:w-auto"
           icon={<CopyOutlined />}
           aria-label={t("api_key.copy_key")}

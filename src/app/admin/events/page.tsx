@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Table, Card, Tag, message, type TableColumnsType } from "antd";
+import { Button } from "@/components/ui/Button";
+import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -21,10 +23,6 @@ export default function EventsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    fetchEvents();
-  }, [page]);
-
   const fetchEvents = async () => {
     setLoading(true);
     try {
@@ -36,12 +34,18 @@ export default function EventsPage() {
         setEvents(data.data.items);
         setTotal(data.data.total);
       }
-    } catch {
+    } catch (err) {
+      console.error("获取系统事件失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchEvents();
+  }, [page]);
 
   const levelColorMap: Record<string, string> = {
     info: "blue",
@@ -108,6 +112,11 @@ export default function EventsPage() {
       </div>
 
       <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="mb-4 flex justify-end">
+          <Button variant="default" onClick={() => fetchEvents()} icon={<RefreshCw size={14} />} disabled={loading}>
+            {t("common.refresh") || "刷新"}
+          </Button>
+        </div>
         <div className="overflow-x-auto">
           <Table
             columns={columns}

@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -19,15 +22,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: 安装依赖
         run: npm ci
+
+      - name: 生成 Prisma Client
+        run: npx prisma generate
 
       - name: TypeScript 类型检查
         run: npx tsc --noEmit
 
       - name: ESLint 检查
         run: npx eslint src/
+
+      - name: 运行测试
+        run: npm test
 
       - name: 构建项目
         run: npm run build

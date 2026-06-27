@@ -54,7 +54,7 @@ export async function initializeAdmin(): Promise<void> {
       data: { username, passwordHash },
     });
 
-    console.log(`[初始化] 管理员账户 "${username}" 创建成功`);
+    console.log("[初始化] 管理员账户创建成功");
 
     await prisma.systemEvent.create({
       data: {
@@ -96,8 +96,7 @@ export async function initializeAdmin(): Promise<void> {
 
   // 检测管理员名称是否匹配
   if (admin.username !== username) {
-    const msg = `[初始化] 错误：环境变量 ADMIN_USERNAME="${username}" 与数据库管理员 "${admin.username}" 不匹配。请修改 ADMIN_USERNAME 环境变量为 "${admin.username}" 后重启`;
-    console.error(msg);
+    console.error("[初始化] 错误：环境变量 ADMIN_USERNAME 与数据库管理员名称不匹配。请修改 ADMIN_USERNAME 环境变量后重启");
     await prisma.systemEvent.create({
       data: {
         level: "error",
@@ -122,7 +121,7 @@ export async function initializeAdmin(): Promise<void> {
   // 清除重置标志
   await prisma.config.delete({ where: { key: RESET_FLAG_KEY } });
 
-  console.log(`[初始化] 管理员 "${username}" 密码已重置`);
+  console.log("[初始化] 管理员密码已重置");
 
   await prisma.systemEvent.create({
     data: {
@@ -141,7 +140,7 @@ export async function initializeAdmin(): Promise<void> {
  */
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.admin.count();
     return true;
   } catch {
     return false;

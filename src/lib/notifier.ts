@@ -54,7 +54,8 @@ async function sendExternalNotification(message: NotificationMessage) {
 
   if (telegramToken && telegramChatId) {
     try {
-      const text = `*[${message.level.toUpperCase()}]* ${message.title}\n\n${message.content}`;
+      // 使用纯文本发送，避免 Markdown 注入风险
+      const text = `[${message.level.toUpperCase()}] ${message.title}\n\n${message.content}`;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10_000);
       try {
@@ -66,7 +67,6 @@ async function sendExternalNotification(message: NotificationMessage) {
             body: JSON.stringify({
               chat_id: telegramChatId,
               text,
-              parse_mode: "Markdown",
             }),
             signal: controller.signal,
           }
@@ -74,8 +74,8 @@ async function sendExternalNotification(message: NotificationMessage) {
       } finally {
         clearTimeout(timeoutId);
       }
-    } catch {
-      // Telegram 通知失败静默处理
+    } catch (error) {
+      console.error("[notifier] Telegram 通知发送失败:", error);
     }
   }
 }

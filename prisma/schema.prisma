@@ -48,6 +48,7 @@ model Platform {
   modelMaps  ModelMap[]
   requestLogs RequestLog[]
 
+  @@index([enabled, status])
   @@map("platforms")
 }
 
@@ -73,6 +74,7 @@ model ApiKey {
   plan       Plan?      @relation(fields: [planId], references: [id])
   requestLogs RequestLog[]
 
+  @@index([status, expiresAt])
   @@map("api_keys")
 }
 
@@ -130,6 +132,8 @@ model RequestLog {
   @@index([keyId])
   @@index([platformId])
   @@index([createdAt])
+  @@index([keyId, createdAt])
+  @@index([platformId, createdAt]) // 按平台查询某时间段请求日志
   @@map("request_logs")
 }
 

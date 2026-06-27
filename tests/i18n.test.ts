@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { globSync } from "fs";
 
 const messagesDir = resolve(__dirname, "../messages");
 const srcDir = resolve(__dirname, "../src");
@@ -24,7 +23,7 @@ function flatten(obj: Record<string, unknown>, prefix = ""): Record<string, stri
 }
 
 function findTsxFiles(dir: string): string[] {
-  const { readdirSync, statSync } = require("fs");
+  const { readdirSync } = require("fs");
   const { join } = require("path");
   const results: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

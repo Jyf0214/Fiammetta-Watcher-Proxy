@@ -31,6 +31,7 @@
     "close": "Close",
     "copy": "Copy",
     "copied": "Copied to clipboard",
+    "copy_failed": "Copy failed",
     "unlimited": "Unlimited",
     "not_set": "Not Set",
     "set": "Set",
@@ -57,6 +58,7 @@
     "password": "Password",
     "login_success": "Login successful",
     "login_failed": "Login failed",
+    "redirecting": "Redirecting...",
     "logout_success": "Logged out",
     "unauthorized": "Unauthorized, please login first",
     "welcome_back": "Welcome back",
@@ -77,7 +79,17 @@
     "reset_pending": "Password reset flag written, the service will automatically update the password on next startup",
     "reset_failed": "Failed to submit password reset request",
     "logout_failed": "Logout failed",
-    "jwt_secret_missing": "JWT_SECRET environment variable not configured"
+    "jwt_secret_missing": "JWT_SECRET environment variable not configured",
+    "change_password": "Change Password",
+    "current_password": "Current Password",
+    "new_password": "New Password",
+    "confirm_password": "Confirm New Password",
+    "password_mismatch": "New passwords do not match",
+    "password_too_short": "New password must be at least 8 characters",
+    "password_changed": "Password changed successfully",
+    "password_change_failed": "Failed to change password",
+    "invalid_current_password": "Current password is incorrect",
+    "change_password_rate_limited": "Too many password change attempts, please try again later"
   },
   "admin": {
     "dashboard": "Dashboard",
@@ -149,7 +161,8 @@
     "invalid_date": "Invalid date format",
     "create_success": "API Key created successfully",
     "create_failed": "Failed to create key",
-    "fetch_failed": "Failed to fetch key list"
+    "fetch_failed": "Failed to fetch key list",
+    "delete_success": "API Key deleted successfully"
   },
   "plan": {
     "name": "Plan Name",
@@ -170,7 +183,8 @@
     "fields_required": "Model alias and target model are required",
     "create_success": "Model mapping created successfully",
     "create_failed": "Failed to create model mapping",
-    "fetch_failed": "Failed to fetch model mappings"
+    "fetch_failed": "Failed to fetch model mappings",
+    "delete_success": "Model mapping deleted successfully"
   },
   "log": {
     "model": "Model",

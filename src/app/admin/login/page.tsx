@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
+import { message } from "antd";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthCard from "@/components/auth/AuthCard";
-import { Mail, Lock, ChevronRight, ArrowLeft, KeyRound } from "lucide-react";
+import { Mail, Lock, ChevronRight, ArrowLeft, KeyRound, Copy, Check } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/Button/LoadingSpinner";
 import "@/lib/i18n";
 
@@ -18,6 +19,18 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  // 复制错误信息到剪贴板
+  const handleCopyError = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // 剪贴板 API 不可用时静默失败
+    }
+  };
 
   // 自动聚焦
   useEffect(() => {
@@ -60,12 +73,16 @@ export default function AdminLoginPage() {
 
       if (data.success) {
         setSuccess(data.message || t("auth.login_success"));
+        message.loading(t("auth.redirecting") || "正在跳转...", 0);
         setTimeout(() => router.push("/admin"), 800);
       } else {
         setError(data.error || t("auth.login_failed"));
       }
-    } catch {
-      setError(t("auth.login_failed"));
+    } catch (err) {
+      const msg = err instanceof TypeError && err.message.includes("fetch")
+        ? t("common.network_error")
+        : t("auth.login_failed");
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -136,8 +153,16 @@ export default function AdminLoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
-            {error}
+          <div role="alert" className="flex items-start justify-between gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+            <span className="break-all">{error}</span>
+            <button
+              type="button"
+              onClick={() => handleCopyError(error)}
+              className="shrink-0 mt-0.5 p-1 rounded hover:bg-red-100 dark:hover:bg-red-800/30 transition-colors"
+              aria-label="复制错误信息"
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
           </div>
         )}
 
@@ -148,8 +173,14 @@ export default function AdminLoginPage() {
         )}
 
         <button type="submit" className={btnPrimary} disabled={loading} aria-label={t("common.next")}>
-          <ChevronRight size={18} />
-          {t("common.next")}
+          {loading ? (
+            <LoadingSpinner />
+          ) : (
+            <>
+              <ChevronRight size={18} />
+              {t("common.next")}
+            </>
+          )}
         </button>
       </form>
     </AuthCard>
@@ -205,8 +236,16 @@ export default function AdminLoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
-            {error}
+          <div role="alert" className="flex items-start justify-between gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+            <span className="break-all">{error}</span>
+            <button
+              type="button"
+              onClick={() => handleCopyError(error)}
+              className="shrink-0 mt-0.5 p-1 rounded hover:bg-red-100 dark:hover:bg-red-800/30 transition-colors"
+              aria-label="复制错误信息"
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
           </div>
         )}
 

@@ -33,10 +33,6 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
   const fetchStats = async () => {
     try {
       const res = await fetch("/api/admin/stats");
@@ -44,12 +40,18 @@ export default function DashboardPage() {
       if (data.success) {
         setStats(data.data);
       }
-    } catch {
+    } catch (err) {
+      console.error("获取统计数据失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchStats();
+  }, []);
 
   const eventColumns = [
     {
