@@ -68,10 +68,19 @@ body {
   max-height: calc(100vh - 32px);
   margin: 16px auto;
 }
-/* 让 modal-body（表单内容区）可滚动，不动 container（有绝对定位子元素） */
+/* 表单内容区可滚动，防溢出 */
 .ant-modal-wrap.ant-modal-centered .ant-modal-body {
   overflow-y: auto;
   max-height: calc(100vh - 180px);
+  padding: 16px 20px !important;
+}
+/* 紧凑表单项间距 */
+.ant-modal-wrap.ant-modal-centered .ant-form-item {
+  margin-bottom: 12px !important;
+}
+/* footer 按钮区紧凑 */
+.ant-modal-wrap.ant-modal-centered .ant-modal-footer {
+  padding: 10px 20px !important;
 }
 @media (max-width: 768px) {
   .ant-modal-wrap.ant-modal-centered .ant-modal {
@@ -81,6 +90,7 @@ body {
   }
   .ant-modal-wrap.ant-modal-centered .ant-modal-body {
     max-height: calc(100vh - 120px);
+    padding: 12px 16px !important;
   }
 }
 
