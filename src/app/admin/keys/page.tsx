@@ -262,7 +262,9 @@ export default function KeysPage() {
         }}
         onOk={handleSubmit}
         confirmLoading={submitting}
-        width="min(90vw, 520px)"
+        centered
+        width={520}
+        style={{ maxWidth: "90vw" }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -324,7 +326,9 @@ export default function KeysPage() {
         title={t("api_key.created_title")}
         open={newKeyVisible}
         onCancel={() => setNewKeyVisible(false)}
-        width="min(90vw, 520px)"
+        centered
+        width={520}
+        style={{ maxWidth: "90vw" }}
         footer={[
           <Button
             key="close"

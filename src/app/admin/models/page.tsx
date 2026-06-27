@@ -205,7 +205,9 @@ export default function ModelsPage() {
         }}
         onOk={handleSubmit}
         confirmLoading={submitting}
-        width="min(90vw, 520px)"
+        centered
+        width={520}
+        style={{ maxWidth: "90vw" }}
         styles={{ body: { padding: "16px 24px" } }}
       >
         <Form form={form} layout="vertical">
