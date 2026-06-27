@@ -55,6 +55,7 @@ body {
   align-items: center !important;
   justify-content: center !important;
   text-align: unset !important;
+  max-height: 100vh;
 }
 .ant-modal-wrap.ant-modal-centered::before {
   display: none !important;
@@ -65,11 +66,21 @@ body {
   vertical-align: unset !important;
   flex-shrink: 0;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin: 16px auto;
+}
+.ant-modal-wrap.ant-modal-centered .ant-modal-container {
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
 }
 @media (max-width: 768px) {
   .ant-modal-wrap.ant-modal-centered .ant-modal {
     max-width: calc(100vw - 16px) !important;
-    margin: 0 8px !important;
+    max-height: calc(100vh - 16px);
+    margin: 8px auto !important;
+  }
+  .ant-modal-wrap.ant-modal-centered .ant-modal-container {
+    max-height: calc(100vh - 60px);
   }
 }
 
