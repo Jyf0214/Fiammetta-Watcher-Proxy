@@ -54,6 +54,49 @@ export function checkPlatformRateLimit(
 }
 
 /**
+ * 记录平台实际 token 用量（追溯性 TPM 追踪）
+ * 在请求完成后调用，仅更新 token 计数器，不重复计算 RPM。
+ * 返回 TPM 是否已超限（请求已完成，仅记录警告，不拒绝）。
+ */
+export function recordPlatformTokens(
+  platformId: string,
+  tpmLimit: number | null,
+  tokenCount: number
+): RateLimitResult {
+  if (tokenCount <= 0 || tpmLimit === null) {
+    return {
+      allowed: true,
+      remaining: Infinity,
+      resetAt: Date.now() + 60_000,
+    };
+  }
+
+  const now = Date.now();
+  const windowMs = 60_000;
+
+  let entry = platformWindows.get(platformId);
+
+  // 窗口过期，重置
+  if (!entry || now - entry.windowStart >= windowMs) {
+    entry = { count: 0, tokens: 0, windowStart: now };
+    platformWindows.set(platformId, entry);
+  }
+
+  // 先更新 token 记录，再检查是否超限
+  entry.tokens += tokenCount;
+
+  if (entry.tokens >= tpmLimit) {
+    return { allowed: false, remaining: 0, resetAt: entry.windowStart + windowMs };
+  }
+
+  return {
+    allowed: true,
+    remaining: tpmLimit - entry.tokens,
+    resetAt: entry.windowStart + windowMs,
+  };
+}
+
+/**
  * 获取平台当前速率限制状态
  */
 export function getPlatformRateStatus(platformId: string) {

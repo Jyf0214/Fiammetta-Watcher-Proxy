@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
-import { checkPlatformRateLimit } from "@/lib/rate-limiter";
+import { checkPlatformRateLimit, recordPlatformTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import type { ChatCompletionRequest } from "@/types";
 
@@ -290,6 +290,21 @@ export async function POST(request: NextRequest) {
                 isError: false,
               },
             });
+
+            // 追溯性 TPM 检查：流式响应已完成，记录实际 token 用量到平台计数器
+            if (totalTokens > 0) {
+              const tpmResult = recordPlatformTokens(
+                route.platform.id,
+                route.platform.tpmLimit,
+                totalTokens
+              );
+              if (!tpmResult.allowed) {
+                console.warn(
+                  `[chat/completions] 流式响应 平台 ${route.platform.id} TPM 已超限`,
+                  { totalTokens, tpmLimit: route.platform.tpmLimit }
+                );
+              }
+            }
           } catch (dbError) {
             // 数据库操作失败时仅记录错误，不中断流的正常关闭
             console.error("[chat/completions] flush 阶段数据库操作失败:", dbError);
@@ -359,6 +374,21 @@ export async function POST(request: NextRequest) {
       });
     } catch (txErr) {
       console.error("[token扣减失败]", txErr);
+    }
+
+    // 追溯性 TPM 检查：请求已完成，记录实际 token 用量到平台计数器
+    if (totalTokens > 0) {
+      const tpmResult = recordPlatformTokens(
+        route.platform.id,
+        route.platform.tpmLimit,
+        totalTokens
+      );
+      if (!tpmResult.allowed) {
+        console.warn(
+          `[chat/completions] 平台 ${route.platform.id} TPM 已超限`,
+          { totalTokens, tpmLimit: route.platform.tpmLimit }
+        );
+      }
     }
 
     return Response.json(responseData);
