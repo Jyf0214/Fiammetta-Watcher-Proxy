@@ -21,17 +21,25 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
+    // 掩码处理：列表接口不返回完整密钥值
+    const maskedKeys = keys.map((k) => ({
+      ...k,
+      key:
+        k.key.length > 12
+          ? k.key.substring(0, 8) + "..." + k.key.substring(k.key.length - 4)
+          : "***",
+    }));
+
     return NextResponse.json({
       success: true,
-      data: keys,
-      total: keys.length,
+      data: maskedKeys,
+      total: maskedKeys.length,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         success: false,
         error: "获取 Key 列表失败",
-        detail: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );
@@ -67,6 +75,13 @@ export async function POST(request: NextRequest) {
     if (!name) {
       return NextResponse.json(
         { success: false, error: "Key 名称不能为空" },
+        { status: 400 }
+      );
+    }
+
+    if (typeof name === "string" && name.length > 100) {
+      return NextResponse.json(
+        { success: false, error: "Key 名称不能超过 100 个字符" },
         { status: 400 }
       );
     }
@@ -116,12 +131,11 @@ export async function POST(request: NextRequest) {
       data: apiKey,
       message: "API Key 创建成功",
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         success: false,
         error: "创建 Key 失败",
-        detail: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );

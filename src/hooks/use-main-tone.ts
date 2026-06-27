@@ -70,6 +70,7 @@ export function useMainTone(
 
   useEffect(() => {
     if (!imageUrl || !enabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMainColor(null);
       setLoading(false);
       return;

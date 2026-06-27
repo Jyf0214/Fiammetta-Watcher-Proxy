@@ -17,14 +17,32 @@ export async function GET() {
 
   try {
     const models = await prisma.modelMap.findMany({
-      include: { platform: true },
+      include: {
+        platform: {
+          select: {
+            id: true,
+            name: true,
+            baseUrl: true,
+            type: true,
+            enabled: true,
+            priority: true,
+            weight: true,
+            status: true,
+            failCount: true,
+            lastFailAt: true,
+            cooldownEnd: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
 
     return NextResponse.json({ success: true, data: models });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: "获取模型映射失败", detail: String(error) },
+      { success: false, error: "获取模型映射失败" },
       { status: 500 }
     );
   }
@@ -53,6 +71,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const errors: string[] = [];
+    if (typeof alias === "string" && alias.length > 100) {
+      errors.push("模型别名不能超过 100 个字符");
+    }
+    if (typeof targetModel === "string" && targetModel.length > 200) {
+      errors.push("目标模型名称不能超过 200 个字符");
+    }
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { success: false, error: errors.join("; ") },
+        { status: 400 }
+      );
+    }
+
     const model = await prisma.modelMap.create({
       data: {
         alias,
@@ -77,9 +109,9 @@ export async function POST(request: NextRequest) {
       data: model,
       message: "模型映射创建成功",
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: "创建模型映射失败", detail: String(error) },
+      { success: false, error: "创建模型映射失败" },
       { status: 500 }
     );
   }

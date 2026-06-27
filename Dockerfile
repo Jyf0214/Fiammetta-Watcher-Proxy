@@ -50,7 +50,16 @@ RUN chmod +x docker-entrypoint.sh
 # 创建数据目录
 RUN mkdir -p /app/data
 
+# 创建非 root 用户运行应用
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# 确保应用目录和数据目录对 nextjs 用户可写
+RUN chown -R nextjs:nodejs /app
+
 EXPOSE 3000
+
+USER nextjs
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"

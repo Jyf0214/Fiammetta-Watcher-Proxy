@@ -78,8 +78,6 @@ export function useConfig(): {
 
   useEffect(() => {
     if (cachedConfig) {
-      setConfig(cachedConfig);
-      setLoading(false);
       return;
     }
 

@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import {
   Table,
-  Button,
   Space,
   Tag,
   Modal,
@@ -17,6 +16,7 @@ import {
   Popconfirm,
   type TableColumnsType,
 } from "antd";
+import { Button } from "@/components/ui/Button";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -44,10 +44,7 @@ export default function PlatformsPage() {
   const [editing, setEditing] = useState<Platform | null>(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    fetchPlatforms();
-  }, []);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchPlatforms = async () => {
     setLoading(true);
@@ -61,6 +58,11 @@ export default function PlatformsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPlatforms();
+  }, []);
 
   const handleSubmit = async () => {
     try {
@@ -102,10 +104,10 @@ export default function PlatformsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        message.success(t("platform.delete_success") || "删除成功");
         fetchPlatforms();
       } else {
-        message.error(data.error);
+        message.error(data.error || t("common.error"));
       }
     } catch {
       message.error(t("common.error"));
@@ -114,15 +116,22 @@ export default function PlatformsPage() {
 
   const handleToggle = async (platform: Platform) => {
     try {
+      setTogglingId(platform.id);
       const res = await fetch(`/api/admin/platforms?id=${platform.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !platform.enabled }),
       });
       const data = await res.json();
-      if (data.success) fetchPlatforms();
+      if (data.success) {
+        fetchPlatforms();
+      } else {
+        message.error(data.error || t("common.error"));
+      }
     } catch {
       message.error(t("common.error"));
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -191,6 +200,7 @@ export default function PlatformsPage() {
       render: (_: unknown, record: Platform) => (
         <Switch
           checked={record.enabled}
+          loading={togglingId === record.id}
           onChange={() => handleToggle(record)}
           checkedChildren={t("common.enable")}
           unCheckedChildren={t("common.disable")}
@@ -206,7 +216,9 @@ export default function PlatformsPage() {
       render: (_: unknown, record: Platform) => (
         <Space size="small">
           <Button
-            size="small"
+            variant="ghost"
+            size="sm"
+            iconOnly
             icon={<EditOutlined />}
             aria-label={t("common.edit")}
             onClick={() => {
@@ -220,8 +232,9 @@ export default function PlatformsPage() {
             onConfirm={() => handleDelete(record.id)}
           >
             <Button
-              size="small"
-              danger
+              variant="dangerGhost"
+              size="sm"
+              iconOnly
               icon={<DeleteOutlined />}
               aria-label={t("common.delete")}
             />
@@ -252,7 +265,7 @@ export default function PlatformsPage() {
             {t("common.total")}: {platforms.length}
           </span>
           <Button
-            type="primary"
+            variant="primary"
             icon={<PlusOutlined />}
             aria-label={t("platform.create_platform")}
             onClick={() => {

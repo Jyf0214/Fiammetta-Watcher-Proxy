@@ -62,20 +62,6 @@ article header h1 {
   color: var(--main-tone, #18181b) !important;
 }
 
-.prose h1,
-.prose h2,
-.prose h3 {
-  color: var(--main-tone, #18181b);
-}
-
-.prose a {
-  color: var(--main-tone, #18181b);
-}
-
-.prose blockquote {
-  border-left-color: var(--main-tone, #18181b);
-}
-
 /* 按钮轻加载动画 — 柔和的呼吸脉冲，配合 opacity 变淡 */
 @keyframes btn-loading-pulse {
   0%, 100% { opacity: 0.55; transform: scale(1); }
@@ -88,85 +74,6 @@ article header h1 {
   cursor: not-allowed;
 }
 
-/* 标题锚点复制按钮 */
-.anchor-copy-btn {
-  position: absolute;
-  left: -1.5em;
-  top: 50%;
-  transform: translateY(-50%);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  color: var(--main-tone, #18181b);
-  padding: 2px;
-  border-radius: 4px;
-  cursor: pointer;
-  background: none;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.group:hover > .anchor-copy-btn {
-  opacity: 0.4;
-}
-
-.anchor-copy-btn:hover {
-  opacity: 1 !important;
-  background: rgba(0, 0, 0, 0.05);
-}
-
-/* 标题锚点复制 Toast */
-.anchor-copy-toast {
-  position: absolute;
-  left: -1.5em;
-  bottom: 100%;
-  margin-bottom: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #fff;
-  background: #18181b;
-  border-radius: 6px;
-  white-space: nowrap;
-  pointer-events: none;
-  animation: anchor-toast-fade 2s ease forwards;
-}
-
-@keyframes anchor-toast-fade {
-  0% { opacity: 1; transform: translateY(0); }
-  75% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-4px); }
-}
-
-/* 代码块增强 */
-pre {
-  position: relative;
-}
-.code-lang-badge {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  font-size: 0.65rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.25rem;
-  background: rgba(255,255,255,0.1);
-  color: rgb(161 161 170);
-  text-transform: uppercase;
-  user-select: none;
-}
-.code-copy-btn {
-  position: absolute;
-  top: 0.5rem;
-  right: 4.5rem;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-pre:hover .code-copy-btn {
-  opacity: 1;
-}
-
 /* 全局焦点可见性样式 */
 *:focus-visible {
   outline: 2px solid rgb(113 113 122);
@@ -174,76 +81,9 @@ pre:hover .code-copy-btn {
   border-radius: 4px;
 }
 
-/* 跳过链接动画 */
-.skip-link:focus {
-  transform: translateY(0);
-}
-
 /* 图片懒加载淡入过渡 */
 .lazy-image {
   transition: opacity 0.3s ease-in-out;
-}
-
-/* === Markdown 渲染增强 === */
-
-/* 任务列表 */
-.markdown-content ul.contains-task-list {
-  list-style: none;
-  padding-left: 0;
-}
-.markdown-content li.task-list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-.markdown-content input[type="checkbox"] {
-  margin-top: 0.25rem;
-  accent-color: rgb(24 24 27);
-}
-
-/* 表格美化 */
-.markdown-content table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1.5rem 0;
-  font-size: 0.875rem;
-  display: block;
-  overflow-x: auto;
-}
-.markdown-content th {
-  background: rgb(244 244 245);
-  font-weight: 600;
-  text-align: left;
-  padding: 0.75rem 1rem;
-  border-bottom: 2px solid rgb(228 228 231);
-  white-space: nowrap;
-}
-.markdown-content td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgb(228 228 231);
-}
-.markdown-content tr:hover td {
-  background: rgb(250 250 250);
-}
-
-/* 引用块 */
-.markdown-content blockquote {
-  border-left: 4px solid rgb(212 212 216);
-  padding: 0.75rem 1rem;
-  margin: 1.5rem 0;
-  background: rgb(244 244 245);
-  border-radius: 0 0.5rem 0.5rem 0;
-  color: rgb(82 82 91);
-}
-.markdown-content blockquote p:last-child {
-  margin-bottom: 0;
-}
-
-/* 水平分割线 */
-.markdown-content hr {
-  border: none;
-  border-top: 1px solid rgb(228 228 231);
-  margin: 2rem 0;
 }
 
 /* ===== Antd 组件深色模式覆盖 ===== */
@@ -514,5 +354,55 @@ pre:hover .code-copy-btn {
   background: #27272a;
   border-color: #3f3f46;
   color: #d4d4d8;
+}
+
+/* Card 深色模式 */
+.dark .ant-card {
+  background-color: rgb(24 24 27);
+  border-color: rgb(39 39 42);
+}
+.dark .ant-card .ant-card-head {
+  color: rgb(244 244 245);
+  border-bottom-color: rgb(39 39 42);
+}
+.dark .ant-card .ant-card-body {
+  color: rgb(244 244 245);
+}
+
+/* message 弹窗深色模式 */
+.dark .ant-message-notice-content {
+  background-color: rgb(24 24 27);
+  color: rgb(244 244 245);
+}
+
+/* Tooltip 深色模式 */
+.dark .ant-tooltip-inner {
+  background-color: rgb(39 39 42);
+  color: rgb(244 244 245);
+}
+
+/* Descriptions 深色模式 */
+.dark .ant-descriptions-item-label,
+.dark .ant-descriptions-item-content {
+  color: rgb(244 244 245);
+  border-color: rgb(39 39 42);
+}
+.dark .ant-descriptions-title {
+  color: rgb(244 244 245);
+}
+
+/* Tag 带颜色变体深色模式 */
+.dark .ant-tag {
+  border-color: rgb(39 39 42);
+}
+
+/* Popconfirm 深色模式补充 */
+.dark .ant-popconfirm-description {
+  color: rgb(161 161 170);
+}
+.dark .ant-popconfirm .ant-btn-default {
+  background-color: rgb(39 39 42);
+  border-color: rgb(63 63 70);
+  color: rgb(244 244 245);
 }
 

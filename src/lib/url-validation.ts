@@ -1,0 +1,148 @@
+/**
+ * URL 校验与 SSRF 防护工具
+ *
+ * 验证 URL 格式合法性，阻止指向内网地址、链路本地地址、文件协议等
+ * 危险目标的 URL，防止服务端请求伪造（SSRF）攻击。
+ */
+
+/**
+ * 检查 IPv4 地址是否属于内网/保留地址段
+ * 涵盖：私有地址、链路本地、回环地址、0.0.0.0、广播地址等
+ */
+function isPrivateOrReservedIPv4(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
+    return false;
+  }
+
+  const [a, b] = parts;
+
+  // 0.0.0.0/8 — 当前网络
+  if (a === 0) return true;
+  // 10.0.0.0/8 — A 类私有地址
+  if (a === 10) return true;
+  // 127.0.0.0/8 — 回环地址
+  if (a === 127) return true;
+  // 169.254.0.0/16 — 链路本地地址
+  if (a === 169 && b === 254) return true;
+  // 172.16.0.0/12 — B 类私有地址
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  // 192.168.0.0/16 — C 类私有地址
+  if (a === 192 && b === 168) return true;
+
+  return false;
+}
+
+/**
+ * 检查 IPv6 地址是否属于内网/保留地址段
+ */
+function isPrivateOrReservedIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+
+  // 回环地址 ::1
+  if (normalized === "::1") return true;
+  // 链路本地 fe80::/10
+  if (normalized.startsWith("fe80")) return true;
+  // 唯一本地地址 fc00::/7
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  // 未指定地址 ::
+  if (normalized === "::") return true;
+
+  return false;
+}
+
+/**
+ * 从主机名中提取 IP 地址进行内网检测
+ * 处理 IPv4-mapped IPv6 格式（如 ::ffff:127.0.0.1）
+ */
+function isIpAddressInternal(hostname: string): boolean {
+  // 处理 IPv4-mapped IPv6
+  const ipv4MappedMatch = hostname.match(/^(?:::ffff:)(\d+\.\d+\.\d+\.\d+)$/i);
+  if (ipv4MappedMatch) {
+    return isPrivateOrReservedIPv4(ipv4MappedMatch[1]);
+  }
+
+  // 纯 IPv4
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return isPrivateOrReservedIPv4(hostname);
+  }
+
+  // 纯 IPv6（去掉方括号）
+  const ipv6 = hostname.replace(/^\[|\]$/g, "");
+  if (ipv6.includes(":")) {
+    return isPrivateOrReservedIPv6(ipv6);
+  }
+
+  return false;
+}
+
+/**
+ * 检查主机名是否属于危险的内网目标
+ */
+function isDangerousHostname(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+
+  // localhost 及其各种变体
+  if (
+    lower === "localhost" ||
+    lower.endsWith(".localhost") ||
+    lower === "local" ||
+    lower.endsWith(".local")
+  ) {
+    return true;
+  }
+
+  // 内网域名
+  if (lower.endsWith(".internal") || lower.endsWith(".intranet")) {
+    return true;
+  }
+
+  // IP 地址检测
+  if (isIpAddressInternal(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+export interface UrlValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * 校验 URL 格式并执行 SSRF 防护检查
+ *
+ * 检查内容：
+ * 1. URL 格式合法性（通过 new URL() 解析）
+ * 2. 协议白名单（仅允许 http/https）
+ * 3. 内网地址黑名单（localhost、私有 IP、链路本地地址等）
+ * 4. 文件协议禁止
+ */
+export function validateUrlSafe(url: string): UrlValidationResult {
+  // 格式校验
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { valid: false, error: "URL 格式无效，请提供有效的 URL" };
+  }
+
+  // 协议白名单：仅允许 http 和 https
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      valid: false,
+      error: `协议 ${parsed.protocol} 不被允许，仅支持 http 和 https`,
+    };
+  }
+
+  // SSRF 防护：阻止内网地址
+  if (isDangerousHostname(parsed.hostname)) {
+    return {
+      valid: false,
+      error: "URL 指向内网地址，出于安全考虑不被允许",
+    };
+  }
+
+  return { valid: true };
+}

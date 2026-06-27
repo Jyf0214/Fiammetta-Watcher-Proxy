@@ -1,5 +1,8 @@
 name: HF Space 同步
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -77,7 +80,7 @@ jobs:
           HF_REPO: ${{ secrets.HF_REPO }}
         run: |
           echo "🚀 正在推送至 HF Space ($HF_REPO)..."
-          git push hf main:main --force
+          git push hf main:main --force-with-lease
           echo "✅ 同步完成"
 
       - name: 同步结果

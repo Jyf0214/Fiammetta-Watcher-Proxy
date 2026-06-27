@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import {
   Table,
-  Button,
   Modal,
   Form,
   Input,
@@ -14,6 +13,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Button } from "@/components/ui/Button";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -40,18 +40,14 @@ export default function ModelsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchModels();
-    fetchPlatforms();
-  }, []);
-
   const fetchModels = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/models");
       const data = await res.json();
       if (data.success) setModels(data.data);
-    } catch {
+    } catch (err) {
+      console.error("获取模型列表失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
@@ -63,10 +59,17 @@ export default function ModelsPage() {
       const res = await fetch("/api/admin/platforms");
       const data = await res.json();
       if (data.success) setPlatforms(data.data);
-    } catch {
+    } catch (err) {
+      console.error("获取平台列表失败:", err);
       message.error(t("common.error"));
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchModels();
+    fetchPlatforms();
+  }, []);
 
   const handleSubmit = async () => {
     try {
@@ -88,8 +91,12 @@ export default function ModelsPage() {
       } else {
         message.error(data.error);
       }
-    } catch {
-      // 表单校验
+    } catch (err) {
+      // 表单校验失败时 antd Form 会自动显示错误，不需要额外处理
+      // 仅处理非表单校验的异常（如网络错误）
+      if (err instanceof Error && !err.message.includes('form')) {
+        message.error(t("common.error"));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -100,8 +107,10 @@ export default function ModelsPage() {
       const res = await fetch(`/api/admin/models?id=${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        message.success(data.message || t("model_map.delete_success") || "删除成功");
         fetchModels();
+      } else {
+        message.error(data.error || t("common.error"));
       }
     } catch {
       message.error(t("common.error"));
@@ -138,8 +147,7 @@ export default function ModelsPage() {
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button size="small" danger icon={<DeleteOutlined />} aria-label={t("common.delete")}>
-            {t("common.delete")}
+          <Button variant="dangerGhost" size="sm" icon={<DeleteOutlined />} iconOnly aria-label={t("common.delete")}>
           </Button>
         </Popconfirm>
       ),
@@ -164,7 +172,7 @@ export default function ModelsPage() {
       <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-4 flex justify-end">
           <Button
-            type="primary"
+            variant="primary"
             icon={<PlusOutlined />}
             aria-label={t("model_map.create_mapping")}
             onClick={() => {

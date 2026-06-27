@@ -10,3 +10,11 @@ node_modules
 docker-compose.yml
 .dockerignore
 data
+
+# 日志文件
+*.log
+
+# IDE 配置
+.vscode/
+.idea/
+.cursor/

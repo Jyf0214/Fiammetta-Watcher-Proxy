@@ -5,17 +5,17 @@ import { cn } from '@/lib/ui';
 export type StatusType = 'success' | 'warning' | 'error' | 'info';
 
 const statusBgMap: Record<StatusType, string> = {
-  success: 'bg-emerald-50 border-emerald-100',
-  warning: 'bg-amber-50 border-amber-100',
-  error: 'bg-red-50 border-red-100',
-  info: 'bg-blue-50 border-blue-100',
+  success: 'bg-emerald-50 dark:bg-emerald-950 border-emerald-100 dark:border-emerald-900',
+  warning: 'bg-amber-50 dark:bg-amber-950 border-amber-100 dark:border-amber-900',
+  error: 'bg-red-50 dark:bg-red-950 border-red-100 dark:border-red-900',
+  info: 'bg-blue-50 dark:bg-blue-950 border-blue-100 dark:border-blue-900',
 };
 
 const statusTextMap: Record<StatusType, string> = {
-  success: 'text-emerald-700',
-  warning: 'text-amber-700',
-  error: 'text-red-700',
-  info: 'text-blue-700',
+  success: 'text-emerald-700 dark:text-emerald-300',
+  warning: 'text-amber-700 dark:text-amber-300',
+  error: 'text-red-700 dark:text-red-300',
+  info: 'text-blue-700 dark:text-blue-300',
 };
 
 const statusIconMap: Record<StatusType, string> = {
@@ -48,7 +48,7 @@ export const StatusCard = memo<StatusCardProps>(({ icon, title, status, statusTy
       <span className={cn('flex-shrink-0', statusIconMap[statusType])}>{icon}</span>
       {/* 标题与状态文本 */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-zinc-900">{title}</div>
+        <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{title}</div>
         <div className={cn('text-xs font-medium', statusTextMap[statusType])}>{status}</div>
       </div>
     </div>

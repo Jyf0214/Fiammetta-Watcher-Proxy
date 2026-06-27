@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import { useId } from 'react';
 import { Switch } from 'antd';
 
 export interface ToggleFieldProps {
@@ -19,7 +19,7 @@ export default function ToggleField({
   const switchId = useId();
 
   return (
-    <div className={`flex items-center justify-between py-3 px-4 bg-zinc-50 rounded-xl ${className}`}>
+    <div className={`flex items-center justify-between py-3 px-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl ${className}`}>
       <div>
         <label htmlFor={switchId} className="text-sm font-medium text-zinc-900">{label}</label>
         {description && (

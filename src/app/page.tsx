@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion } from "motion/react";
 import {
   Zap,
@@ -36,6 +37,17 @@ for await (const chunk of response) {
 
 export default function HomePage() {
   const { t } = useTranslation();
+
+  // 深色模式初始化：从 localStorage 读取主题偏好，或跟随系统偏好
+  useEffect(() => {
+    const stored = localStorage.getItem("theme-mode");
+    if (
+      stored === "dark" ||
+      (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ) {
+      document.documentElement.classList.add("dark");
+    }
+  }, []);
 
   const features = [
     {
@@ -162,6 +174,7 @@ export default function HomePage() {
             <Link
               href="https://github.com/Jyf0214/Fiammetta-Watcher-Proxy"
               target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-2xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors text-sm sm:text-base"
             >
               <GitFork size={18} />
@@ -241,7 +254,7 @@ export default function HomePage() {
               <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
               <div className="w-3 h-3 rounded-full bg-green-500/80" />
               <span className="ml-2 text-zinc-500 text-xs font-mono">
-                quickstart.py
+                quickstart.js
               </span>
             </div>
             <pre className="text-xs sm:text-sm text-zinc-300 font-mono leading-relaxed whitespace-pre overflow-x-auto">
@@ -306,6 +319,7 @@ export default function HomePage() {
             <Link
               href="https://github.com/Jyf0214/Fiammetta-Watcher-Proxy"
               target="_blank"
+              rel="noopener noreferrer"
               className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
               <GitFork size={18} />

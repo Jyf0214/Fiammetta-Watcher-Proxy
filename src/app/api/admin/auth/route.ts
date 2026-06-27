@@ -4,6 +4,7 @@ import {
   generateToken,
   setAuthCookie,
   clearAuthCookie,
+  hashPassword,
   verifyPassword,
   getAdminFromRequest,
 } from "@/lib/auth";
@@ -111,31 +112,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查是否存在管理员，不存在则从环境变量自动创建
-    const adminCount = await prisma.admin.count();
-    if (adminCount === 0) {
-      const envUsername = process.env.ADMIN_USERNAME;
-      const envPassword = process.env.ADMIN_PASSWORD;
-      if (envUsername && envPassword) {
-        try {
-          const { hashPassword } = await import("@/lib/auth");
-          const passwordHash = await hashPassword(envPassword);
-          await prisma.admin.create({
-            data: { username: envUsername, passwordHash },
-          });
-          console.log(`[auth] 首次登录自动创建管理员: ${envUsername}`);
-        } catch (e) {
-          console.error("[auth] 自动创建管理员失败:", e);
-        }
-      }
-    }
-
     // 查找管理员
     const admin = await prisma.admin.findUnique({
       where: { username },
     });
 
     if (!admin) {
+      // 虚拟哈希计算，防止时序侧信道攻击（使不存在用户名的响应时间与存在用户名一致）
+      await hashPassword("dummy");
       recordLoginFailure(clientIp);
       return NextResponse.json(
         { success: false, error: "用户名或密码错误" },
@@ -161,7 +145,7 @@ export async function POST(request: NextRequest) {
           await prisma.config.delete({
             where: { key: "admin_reset_password" },
           });
-          console.log(`[auth] 密码重置标志已处理，密码已更新: ${admin.username}`);
+          console.log("[auth] 密码重置标志已处理，密码已更新");
           targetHash = newHash;
         } catch (e) {
           console.error("[auth] 密码重置处理失败:", e);
@@ -215,15 +199,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: { token, username: admin.username },
+      data: { username: admin.username },
       message: "登录成功",
     });
   } catch (error) {
+    console.error("[auth] 登录异常:", error);
     return NextResponse.json(
       {
         success: false,
         error: "登录失败",
-        detail: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );

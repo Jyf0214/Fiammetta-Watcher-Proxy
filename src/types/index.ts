@@ -19,6 +19,10 @@ export interface PlatformConfig {
   failCount: number;
   lastFailAt: Date | null;
   cooldownEnd: Date | null;
+  /** 创建时间（Prisma 查询未 select 时不存在） */
+  createdAt?: Date;
+  /** 更新时间（Prisma 查询未 select 时不存在） */
+  updatedAt?: Date;
 }
 
 // ==================== API Key 类型 ====================
@@ -32,15 +36,20 @@ export interface ApiKeyConfig {
   key: string;
   name: string;
   planId: string | null;
-  quota: number | null;
-  usedTokens: number;
+  /** Decimal 类型，Prisma Client 返回 Decimal 对象，JSON 序列化后为字符串 */
+  quota: string | null;
+  /** BigInt 类型，JSON 序列化后为字符串 */
+  usedTokens: bigint;
   rpmLimit: number | null;
   tpmLimit: number | null;
   callLimit: number | null;
-  tokenLimit: number | null;
+  /** BigInt 类型，JSON 序列化后为字符串 */
+  tokenLimit: bigint | null;
   resetPeriod: ResetPeriod;
   status: ApiKeyStatus;
   expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ==================== 套餐类型 ====================
@@ -48,11 +57,14 @@ export interface ApiKeyConfig {
 export interface PlanConfig {
   id: string;
   name: string;
-  tokenQuota: number;
+  /** BigInt 类型，JSON 序列化后为字符串 */
+  tokenQuota: bigint;
   callLimit: number;
   rpmLimit: number;
   tpmLimit: number;
   resetPeriod: ResetPeriod;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ==================== 模型映射类型 ====================
@@ -62,6 +74,44 @@ export interface ModelMapConfig {
   alias: string;
   targetModel: string;
   platformId: string | null;
+  /** 创建时间（Prisma 查询未 select 时不存在） */
+  createdAt?: Date;
+  /** 更新时间（Prisma 查询未 select 时不存在） */
+  updatedAt?: Date;
+}
+
+// ==================== 审计日志类型 ====================
+
+export interface AuditLog {
+  id: string;
+  adminId: string | null;
+  /** 操作类型（login, create_platform, update_key 等） */
+  action: string;
+  /** 操作详情（JSON 字符串） */
+  detail: string | null;
+  ip: string | null;
+  createdAt: Date;
+}
+
+// ==================== 系统事件类型 ====================
+
+export interface SystemEvent {
+  id: string;
+  /** 事件级别：info | warning | error | critical */
+  level: string;
+  message: string;
+  /** 详细信息（JSON 字符串） */
+  detail: string | null;
+  createdAt: Date;
+}
+
+// ==================== 系统配置类型 ====================
+
+export interface Config {
+  id: string;
+  key: string;
+  value: string;
+  updatedAt: Date;
 }
 
 // ==================== 路由决策类型 ====================
@@ -82,6 +132,7 @@ export interface RequestLogEntry {
   duration: number;
   isError: boolean;
   errorMessage: string | null;
+  createdAt: Date;
 }
 
 // ==================== 速率限制类型 ====================

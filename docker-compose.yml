@@ -10,15 +10,35 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=${PORT:-3000}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/fiammetta_proxy}
-      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-change-in-production}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-fiammetta_proxy}}
+      # 必须设置 JWT_SECRET，否则管理后台无法使用
+      - JWT_SECRET=${JWT_SECRET:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      # 必须设置 ADMIN_PASSWORD，否则管理员无法登录
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     depends_on:
       db:
         condition: service_healthy
+    # 容器安全加固：禁止提升权限、移除所有 Linux capabilities
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 资源限制：防止容器占用过多内存和 CPU
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    # 健康检查：定期检测应用是否正常响应
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - app_data:/app/data
 
@@ -27,11 +47,12 @@ services:
     container_name: fiammetta-proxy-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: fiammetta_proxy
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 文件中设置数据库密码}
+      POSTGRES_DB: ${POSTGRES_DB:-fiammetta_proxy}
+    # 安全加固：数据库端口仅绑定 127.0.0.1，禁止外部直接访问
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

@@ -59,12 +59,11 @@ export async function GET() {
         })),
       },
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         success: false,
         error: "获取统计数据失败",
-        detail: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );

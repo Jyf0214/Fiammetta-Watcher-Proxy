@@ -37,21 +37,23 @@ function applyClass(dark: boolean) {
  * - 在 <html> 元素上设置 / 移除 class="dark"
  */
 export function useThemeMode() {
-  const [mode, setModeState] = useState<ThemeMode>('system');
-  const [systemDark, setSystemDark] = useState(false);
+  const [mode, setModeState] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'system';
+    const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
+    return saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
+  });
+  const [systemDark, setSystemDark] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
   const [mounted, setMounted] = useState(false);
 
-  // 初始化：读取 localStorage + 监听系统偏好
+  // 初始化：监听系统偏好 + 标记已挂载
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-    const initial: ThemeMode = saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
-    setModeState(initial);
-
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    setSystemDark(mq.matches);
-
     const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
     mq.addEventListener('change', handler);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     return () => mq.removeEventListener('change', handler);
   }, []);
@@ -64,7 +66,11 @@ export function useThemeMode() {
 
   const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);
-    localStorage.setItem(STORAGE_KEY, next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // localStorage 不可用时（隐私模式/配额满）静默失败
+    }
   }, []);
 
   const cycle = useCallback(() => {

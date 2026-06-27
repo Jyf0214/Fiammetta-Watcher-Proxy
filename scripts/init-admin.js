@@ -2,7 +2,7 @@
 /**
  * 管理员初始化脚本
  * 仅通过 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量创建管理员账户
- * 密码哈希算法与 src/lib/auth-helpers.ts 一致：PBKDF2 10000 次 sha256
+ * 密码哈希算法与 src/lib/auth-helpers.ts 一致：PBKDF2 600000 次 sha256
  */
 const { PrismaClient } = require("@prisma/client");
 const crypto = require("crypto");
@@ -10,7 +10,8 @@ const crypto = require("crypto");
 const prisma = new PrismaClient();
 
 const SALT_LENGTH = 16;
-const HASH_ITERATIONS = 10000;
+// OWASP 2023 推荐 PBKDF2-SHA256 迭代次数为 600000，与 src/lib/auth-helpers.ts 保持一致
+const HASH_ITERATIONS = 600000;
 const KEY_LENGTH = 64;
 
 function hashPassword(password) {

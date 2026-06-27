@@ -89,12 +89,11 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(total / pageSize),
       },
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         success: false,
         error: "获取日志失败",
-        detail: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );

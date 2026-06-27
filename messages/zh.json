@@ -31,6 +31,7 @@
     "close": "关闭",
     "copy": "复制",
     "copied": "已复制到剪贴板",
+    "copy_failed": "复制失败",
     "unlimited": "不限",
     "not_set": "未设置",
     "set": "已设置",
@@ -57,6 +58,7 @@
     "password": "密码",
     "login_success": "登录成功",
     "login_failed": "登录失败",
+    "redirecting": "正在跳转...",
     "logout_success": "已退出登录",
     "unauthorized": "未授权，请先登录",
     "welcome_back": "欢迎回来",
@@ -77,7 +79,17 @@
     "reset_pending": "密码重置标志已写入，服务将在下次启动时自动更新密码",
     "reset_failed": "提交密码重置请求失败",
     "logout_failed": "登出失败",
-    "jwt_secret_missing": "JWT_SECRET 环境变量未配置"
+    "jwt_secret_missing": "JWT_SECRET 环境变量未配置",
+    "change_password": "修改密码",
+    "current_password": "当前密码",
+    "new_password": "新密码",
+    "confirm_password": "确认新密码",
+    "password_mismatch": "两次输入的新密码不一致",
+    "password_too_short": "新密码至少需要 8 个字符",
+    "password_changed": "密码修改成功",
+    "password_change_failed": "修改密码失败",
+    "invalid_current_password": "当前密码错误",
+    "change_password_rate_limited": "密码修改尝试次数过多，请稍后再试"
   },
   "admin": {
     "dashboard": "仪表盘",
@@ -149,7 +161,8 @@
     "invalid_date": "日期格式无效",
     "create_success": "API Key 创建成功",
     "create_failed": "创建 Key 失败",
-    "fetch_failed": "获取 Key 列表失败"
+    "fetch_failed": "获取 Key 列表失败",
+    "delete_success": "API Key 删除成功"
   },
   "plan": {
     "name": "套餐名称",
@@ -170,7 +183,8 @@
     "fields_required": "模型别名和目标模型不能为空",
     "create_success": "模型映射创建成功",
     "create_failed": "创建模型映射失败",
-    "fetch_failed": "获取模型映射失败"
+    "fetch_failed": "获取模型映射失败",
+    "delete_success": "模型映射删除成功"
   },
   "log": {
     "model": "模型",

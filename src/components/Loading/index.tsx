@@ -24,7 +24,7 @@ const textSizeMap = {
  */
 export default function GlobalLoading({ size = "large", tip }: GlobalLoadingProps) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[200px] gap-3">
+    <div className="flex flex-col items-center justify-center min-h-[200px] gap-3" role="status" aria-label="加载中">
       <Loader2
         size={sizeMap[size]}
         className="animate-spin text-zinc-300 dark:text-zinc-600"

@@ -130,6 +130,8 @@ model RequestLog {
   @@index([keyId])
   @@index([platformId])
   @@index([createdAt])
+  @@index([keyId, createdAt]) // 按 API Key 查询某时间段请求日志（与 PostgreSQL 版同步）
+  @@index([platformId, createdAt]) // 按平台查询某时间段请求日志
   @@map("request_logs")
 }
 

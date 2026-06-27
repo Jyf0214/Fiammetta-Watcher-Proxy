@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Table, Card, Tag, message, type TableColumnsType } from "antd";
+import { Button } from "@/components/ui/Button";
+import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -22,10 +24,6 @@ export default function AuditPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    fetchLogs();
-  }, [page]);
-
   const fetchLogs = async () => {
     setLoading(true);
     try {
@@ -35,12 +33,18 @@ export default function AuditPage() {
         setLogs(data.data.items);
         setTotal(data.data.total);
       }
-    } catch {
+    } catch (err) {
+      console.error("获取审计日志失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchLogs();
+  }, [page]);
 
   const actionColorMap: Record<string, string> = {
     login: "blue",
@@ -109,6 +113,11 @@ export default function AuditPage() {
       </div>
 
       <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="mb-4 flex justify-end">
+          <Button variant="default" onClick={() => fetchLogs()} icon={<RefreshCw size={14} />} disabled={loading}>
+            {t("common.refresh") || "刷新"}
+          </Button>
+        </div>
         <div className="overflow-x-auto">
           <Table
             columns={columns}
