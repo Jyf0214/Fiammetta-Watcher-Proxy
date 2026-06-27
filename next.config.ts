@@ -36,7 +36,6 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "2mb",
     },
     // 性能优化
-    optimizeCss: true,                    // CSS 优化，减少 CSS 包大小
     webpackBuildWorker: true,             // 独立进程构建，优化内存
     parallelServerCompiles: true,         // 并行编译服务端代码
     parallelServerBuildTraces: true,      // 并行收集构建追踪

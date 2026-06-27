@@ -49,27 +49,23 @@ body {
 }
 
 /* ===== Antd Modal 居中 + 响应式修复 ===== */
-/* 强制 flexbox 居中，覆盖 antd 6.x 的 ::before + inline-block 机制 */
-.ant-modal-wrap.ant-modal-centered {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: unset !important;
-  overflow: hidden !important;
-}
+/* 修复 antd 6.x ::before 居中机制被 Tailwind @layer base 重置干扰的问题 */
+/* 不用 flexbox（会破坏超长内容的滚动），而是重新声明 ::before 关键属性 */
 .ant-modal-wrap.ant-modal-centered::before {
-  display: none !important;
+  content: "" !important;
+  display: inline-block !important;
+  width: 0 !important;
+  height: 100% !important;
+  vertical-align: middle !important;
 }
 .ant-modal-wrap.ant-modal-centered .ant-modal {
   top: 0 !important;
-  display: block !important;
-  vertical-align: unset !important;
-  flex-shrink: 0;
+  display: inline-block !important;
+  vertical-align: middle !important;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
-  margin: 16px auto;
 }
-/* 表单内容区可滚动，防溢出 */
+/* 表单内容区可滚动 */
 .ant-modal-wrap.ant-modal-centered .ant-modal-body {
   overflow-y: auto;
   max-height: calc(100vh - 180px);
@@ -79,7 +75,7 @@ body {
 .ant-modal-wrap.ant-modal-centered .ant-form-item {
   margin-bottom: 12px !important;
 }
-/* footer 按钮区紧凑 */
+/* footer 紧凑 */
 .ant-modal-wrap.ant-modal-centered .ant-modal-footer {
   padding: 10px 20px !important;
 }
@@ -87,7 +83,6 @@ body {
   .ant-modal-wrap.ant-modal-centered .ant-modal {
     max-width: calc(100vw - 16px) !important;
     max-height: calc(100vh - 16px);
-    margin: 8px auto !important;
   }
   .ant-modal-wrap.ant-modal-centered .ant-modal-body {
     max-height: calc(100vh - 120px);
