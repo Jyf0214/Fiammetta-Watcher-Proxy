@@ -2,7 +2,7 @@
 name: ui-dependency-upgrade
 description: UI 依赖大版本升级策略：版本评估、依赖冲突处理、类型错误修复、构建验证
 source: auto-skill
-extracted_at: '2026-06-26T23:17:28.448Z'
+extracted_at: '2026-06-26T23:21:59.751Z'
 ---
 
 # UI 依赖升级策略
@@ -145,6 +145,66 @@ const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof cre
 ```bash
 npm run build  # ✅ 构建成功
 ```
+
+## 实际案例：antd 5.x → 6.x 升级（2026-06-26）
+
+### 升级背景
+项目需要从 antd 5.29.3 升级到 6.4.5，同时升级 TypeScript 5.9.3 → 6.0.3。
+
+### 升级过程
+
+#### 1. 检查依赖兼容性
+```bash
+npm outdated  # 查看所有过期依赖
+npm info antd@6.4.5 peerDependencies  # 需要 React >=18.0.0 ✅
+npm info @ant-design/pro-components@latest peerDependencies  # 仅支持 antd 4.x/5.x ❌
+```
+
+#### 2. 处理依赖冲突
+```bash
+# 检查代码中是否使用 pro-components
+grep -r "@ant-design/pro-components" src/  # 无结果
+
+# 安全移除
+npm uninstall @ant-design/pro-components
+```
+
+#### 3. 安装新版本
+```bash
+npm install antd@latest @ant-design/icons@latest motion@latest i18next@latest react-i18next@latest typescript-eslint@latest @types/node@latest typescript@latest
+```
+
+#### 4. 修复 TypeScript 6.x 类型错误
+
+**问题**：TypeScript 6.x 对 `crypto` 模块类型检查更严格，`createPublicKey(privateKey)` 不再接受 `KeyObject` 类型。
+
+**修复方案**：使用类型断言
+```typescript
+// ❌ 错误：TypeScript 6.x 更严格的类型检查
+const publicKey = createPublicKey(privateKey);
+
+// ✅ 修复：使用类型断言
+const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
+```
+
+**重要**：在类型断言处添加中文注释说明原因
+```typescript
+// TypeScript 6.x 对 createPublicKey 参数类型检查更严格，KeyObject 需要显式类型断言
+const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
+```
+
+#### 5. 验证
+```bash
+npm run build  # ✅ 构建成功
+npm test  # ✅ 测试通过
+```
+
+### 关键经验
+
+1. **依赖冲突优先移除未使用的包**：使用 `grep` 验证依赖是否被实际引用
+2. **TypeScript 大版本升级需注意类型检查变化**：特别是 Node.js 内置模块的类型定义
+3. **类型断言需添加注释**：说明断言原因，便于后续维护
+4. **构建验证是必须的**：确保升级后项目可正常构建
 
 ## 注意事项
 

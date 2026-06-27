@@ -448,6 +448,47 @@ pre:hover .code-copy-btn {
   color: #d4d4d8;
 }
 
+/* Text 类型按钮 */
+.dark .ant-btn-text {
+  color: #d4d4d8;
+}
+.dark .ant-btn-text:hover {
+  color: #e4e4e7;
+  background: #3f3f46;
+}
+
+/* Danger 按钮 */
+.dark .ant-btn-dangerous {
+  color: #f87171;
+  border-color: #7f1d1d;
+}
+.dark .ant-btn-dangerous:hover {
+  color: #fca5a5;
+  border-color: #991b1b;
+  background: #450a0a;
+}
+
+/* Danger + Default 组合按钮 */
+.dark .ant-btn-default.ant-btn-dangerous {
+  color: #f87171;
+  border-color: #7f1d1d;
+  background: transparent;
+}
+.dark .ant-btn-default.ant-btn-dangerous:hover {
+  color: #fca5a5;
+  border-color: #991b1b;
+  background: #450a0a;
+}
+
+/* Text + Danger 组合按钮 */
+.dark .ant-btn-text.ant-btn-dangerous {
+  color: #f87171;
+}
+.dark .ant-btn-text.ant-btn-dangerous:hover {
+  color: #fca5a5;
+  background: #450a0a;
+}
+
 /* Switch 开关 */
 .dark .ant-switch {
   background: #3f3f46;

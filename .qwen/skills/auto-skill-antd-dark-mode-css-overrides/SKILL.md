@@ -2,7 +2,7 @@
 name: antd-dark-mode-css-overrides
 description: Tailwind v4 类名暗色模式下 antd CSS-in-JS 组件 Portal 渲染导致 dark: 类无效的诊断与全局 CSS 覆盖解法
 source: auto-skill
-extracted_at: '2026-06-26T22:32:31.793Z'
+extracted_at: '2026-06-26T23:21:59.751Z'
 ---
 
 # antd 深色模式 CSS 覆盖方案
@@ -107,6 +107,9 @@ extracted_at: '2026-06-26T22:32:31.793Z'
 .dark .ant-form-item-label > label {
   color: #d4d4d8;
 }
+.dark .ant-form-item-explain-error {
+  color: #f87171;
+}
 
 /* Button */
 .dark .ant-btn-default {
@@ -118,6 +121,82 @@ extracted_at: '2026-06-26T22:32:31.793Z'
   background: #3f3f46;
   border-color: #52525b;
   color: #e4e4e7;
+}
+.dark .ant-btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.dark .ant-btn-primary:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* Table */
+.dark .ant-table {
+  background: transparent;
+}
+.dark .ant-table-thead > tr > th {
+  background: #27272a;
+  color: #a1a1aa;
+  border-bottom: 1px solid #3f3f46;
+}
+.dark .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #3f3f46;
+  color: #d4d4d8;
+}
+.dark .ant-table-tbody > tr:hover > td {
+  background: #27272a;
+}
+
+/* Pagination */
+.dark .ant-pagination .ant-pagination-item {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-pagination .ant-pagination-item a {
+  color: #d4d4d8;
+}
+.dark .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.dark .ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+
+/* Switch */
+.dark .ant-switch {
+  background: #3f3f46;
+}
+.dark .ant-switch-checked {
+  background: #3b82f6;
+}
+.dark .ant-switch-handle::before {
+  background: #fff;
+}
+.dark .ant-switch:hover:not(.ant-switch-disabled) {
+  background: #52525b;
+}
+.dark .ant-switch-checked:hover:not(.ant-switch-disabled) {
+  background: #2563eb;
+}
+
+/* Tag */
+.dark .ant-tag {
+  border-color: #3f3f46;
+}
+.dark .ant-tag-default {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+
+/* Popconfirm */
+.dark .ant-popover-inner {
+  background: #27272a;
+}
+.dark .ant-popconfirm-message-title {
+  color: #d4d4d8;
 }
 ```
 

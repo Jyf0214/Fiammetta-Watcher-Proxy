@@ -116,7 +116,7 @@ function SidebarGroup({
     <div className="space-y-1.5">
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full px-3 mb-1"
+        className="flex items-center justify-between w-full px-3 mb-1 rounded-lg transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
         aria-label={t("common.collapse")}
       >
         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 dark:text-zinc-600">
