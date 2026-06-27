@@ -3,6 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import crypto from "crypto";
 
+/** BigInt → string，防止 JSON.stringify 报错 */
+function serializeKey(k: Record<string, unknown>) {
+  return { ...k, usedTokens: String(k.usedTokens ?? 0) };
+}
+
 /**
  * GET /api/admin/keys — 获取 API Key 列表
  */
@@ -23,7 +28,7 @@ export async function GET() {
 
     // 掩码处理：列表接口不返回完整密钥值
     const maskedKeys = keys.map((k) => ({
-      ...k,
+      ...serializeKey(k),
       key:
         k.key.length > 12
           ? k.key.substring(0, 8) + "..." + k.key.substring(k.key.length - 4)
@@ -128,7 +133,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: apiKey,
+      data: serializeKey(apiKey),
       message: "API Key 创建成功",
     });
   } catch (err) {
