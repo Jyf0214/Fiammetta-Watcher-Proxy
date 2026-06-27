@@ -239,7 +239,8 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: "已退出登录",
     });
-  } catch {
+  } catch (err) {
+    console.error("[DELETE /api/admin/auth] 登出异常:", err);
     await clearAuthCookie();
     return NextResponse.json({ success: true, message: "已退出登录" });
   }
@@ -262,7 +263,8 @@ export async function GET() {
       success: true,
       data: { adminId: admin.adminId, username: admin.username },
     });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
     return NextResponse.json(
       { success: false, error: "未授权" },
       { status: 401 }

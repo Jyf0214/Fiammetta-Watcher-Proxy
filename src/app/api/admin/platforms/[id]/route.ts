@@ -116,7 +116,8 @@ export async function PUT(
       data: safePlatform,
       message: "平台更新成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[PUT /api/admin/platforms/[id]] 更新平台失败:", err);
     return NextResponse.json(
       {
         success: false,
@@ -175,7 +176,8 @@ export async function DELETE(
       success: true,
       message: "平台删除成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[DELETE /api/admin/platforms/[id]] 删除平台失败:", err);
     return NextResponse.json(
       {
         success: false,

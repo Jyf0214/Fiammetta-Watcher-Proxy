@@ -13,8 +13,7 @@ else
   echo "[启动] 警告：DATABASE_URL 协议无法识别，默认使用 PostgreSQL"
 fi
 
-node ./node_modules/prisma/build/index.js db push
-if [ $? -ne 0 ]; then
+if ! node ./node_modules/prisma/build/index.js db push; then
   echo "[错误] 数据库迁移失败，请检查 DATABASE_URL 配置和数据库连接状态"
   exit 1
 fi

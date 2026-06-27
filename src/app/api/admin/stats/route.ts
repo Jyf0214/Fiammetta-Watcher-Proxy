@@ -59,7 +59,8 @@ export async function GET() {
         })),
       },
     });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/admin/stats] 获取统计数据失败:", err);
     return NextResponse.json(
       {
         success: false,
