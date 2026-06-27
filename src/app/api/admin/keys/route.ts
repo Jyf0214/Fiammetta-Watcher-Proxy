@@ -131,7 +131,8 @@ export async function POST(request: NextRequest) {
       data: apiKey,
       message: "API Key 创建成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/admin/keys] 创建 Key 失败:", err);
     return NextResponse.json(
       {
         success: false,
