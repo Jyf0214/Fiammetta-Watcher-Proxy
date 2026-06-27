@@ -48,14 +48,13 @@ body {
   }
 }
 
-/* ===== Antd Modal 居中修复（强制 flexbox 居中） ===== */
-/* 覆盖 antd 6.x 的 ::before + inline-block 居中机制，改用更可靠的 flexbox */
+/* ===== Antd Modal 居中 + 响应式修复 ===== */
+/* 强制 flexbox 居中，覆盖 antd 6.x 的 ::before + inline-block 机制 */
 .ant-modal-wrap.ant-modal-centered {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   text-align: unset !important;
-  max-height: 100vh;
 }
 .ant-modal-wrap.ant-modal-centered::before {
   display: none !important;
@@ -69,9 +68,10 @@ body {
   max-height: calc(100vh - 32px);
   margin: 16px auto;
 }
-.ant-modal-wrap.ant-modal-centered .ant-modal-container {
-  max-height: calc(100vh - 100px);
+/* 让 modal-body（表单内容区）可滚动，不动 container（有绝对定位子元素） */
+.ant-modal-wrap.ant-modal-centered .ant-modal-body {
   overflow-y: auto;
+  max-height: calc(100vh - 180px);
 }
 @media (max-width: 768px) {
   .ant-modal-wrap.ant-modal-centered .ant-modal {
@@ -79,8 +79,8 @@ body {
     max-height: calc(100vh - 16px);
     margin: 8px auto !important;
   }
-  .ant-modal-wrap.ant-modal-centered .ant-modal-container {
-    max-height: calc(100vh - 60px);
+  .ant-modal-wrap.ant-modal-centered .ant-modal-body {
+    max-height: calc(100vh - 120px);
   }
 }
 
