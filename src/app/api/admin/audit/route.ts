@@ -45,7 +45,8 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(total / pageSize),
       },
     });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/admin/audit] 获取审计日志失败:", err);
     return NextResponse.json(
       {
         success: false,

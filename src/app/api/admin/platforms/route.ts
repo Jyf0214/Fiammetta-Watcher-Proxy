@@ -54,7 +54,8 @@ export async function GET() {
       data: platforms,
       total: platforms.length,
     });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/admin/platforms] 获取平台列表失败:", err);
     return NextResponse.json(
       {
         success: false,
@@ -163,7 +164,8 @@ export async function POST(request: NextRequest) {
       data: platform,
       message: "平台创建成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/admin/platforms] 创建平台失败:", err);
     return NextResponse.json(
       {
         success: false,

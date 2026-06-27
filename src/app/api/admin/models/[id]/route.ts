@@ -90,7 +90,8 @@ export async function PUT(
       data: updated,
       message: "模型映射更新成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[PUT /api/admin/models/[id]] 更新模型映射失败:", err);
     return NextResponse.json(
       {
         success: false,
@@ -145,7 +146,8 @@ export async function DELETE(
       success: true,
       message: "模型映射删除成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[DELETE /api/admin/models/[id]] 删除模型映射失败:", err);
     return NextResponse.json(
       {
         success: false,

@@ -40,7 +40,8 @@ export async function GET() {
     });
 
     return NextResponse.json({ success: true, data: models });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/admin/models] 获取模型映射失败:", err);
     return NextResponse.json(
       { success: false, error: "获取模型映射失败" },
       { status: 500 }
@@ -109,7 +110,8 @@ export async function POST(request: NextRequest) {
       data: model,
       message: "模型映射创建成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/admin/models] 创建模型映射失败:", err);
     return NextResponse.json(
       { success: false, error: "创建模型映射失败" },
       { status: 500 }

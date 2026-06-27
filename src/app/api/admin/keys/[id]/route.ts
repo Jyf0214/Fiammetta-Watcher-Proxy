@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
-
-/** BigInt → string，防止 JSON.stringify 报错 */
-function serializeKey(k: Record<string, unknown>) {
-  return { ...k, usedTokens: String(k.usedTokens ?? 0) };
-}
+import { serializeBigInt } from "@/lib/serialize";
 
 /**
  * PUT /api/admin/keys/[id] — 更新 API Key 属性
@@ -149,7 +145,7 @@ export async function PUT(
 
     return NextResponse.json({
       success: true,
-      data: serializeKey(updated),
+      data: serializeBigInt(updated),
       message: "API Key 更新成功",
     });
   } catch (err) {
