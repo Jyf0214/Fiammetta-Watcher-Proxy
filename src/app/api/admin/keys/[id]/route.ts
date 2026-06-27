@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 
+/** BigInt → string，防止 JSON.stringify 报错 */
+function serializeKey(k: Record<string, unknown>) {
+  return { ...k, usedTokens: String(k.usedTokens ?? 0) };
+}
+
 /**
  * PUT /api/admin/keys/[id] — 更新 API Key 属性
  */
@@ -144,10 +149,11 @@ export async function PUT(
 
     return NextResponse.json({
       success: true,
-      data: updated,
+      data: serializeKey(updated),
       message: "API Key 更新成功",
     });
-  } catch {
+  } catch (err) {
+    console.error("[PUT /api/admin/keys/[id]] 更新失败:", err);
     return NextResponse.json(
       {
         success: false,
@@ -211,7 +217,8 @@ export async function DELETE(
       message: "API Key 删除成功",
       deletedLogs: logCount,
     });
-  } catch {
+  } catch (err) {
+    console.error("[DELETE /api/admin/keys/[id]] 删除失败:", err);
     return NextResponse.json(
       {
         success: false,
