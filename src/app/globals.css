@@ -55,6 +55,7 @@ body {
   align-items: center !important;
   justify-content: center !important;
   text-align: unset !important;
+  overflow: hidden !important;
 }
 .ant-modal-wrap.ant-modal-centered::before {
   display: none !important;
