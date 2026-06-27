@@ -77,19 +77,37 @@ export async function PUT(
       );
     }
 
+    // 获取现有平台数据，用于编辑时保留未修改的字段
+    const existing = await prisma.platform.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, error: "平台不存在" },
+        { status: 404 }
+      );
+    }
+
+    // 构建更新数据
+    const updateData: Record<string, unknown> = {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.baseUrl !== undefined && { baseUrl: body.baseUrl }),
+      ...(body.type !== undefined && { type: body.type }),
+      ...(body.enabled !== undefined && { enabled: body.enabled }),
+      ...(body.priority !== undefined && { priority: body.priority }),
+      ...(body.weight !== undefined && { weight: body.weight }),
+      ...(body.rpmLimit !== undefined && { rpmLimit: body.rpmLimit ?? null }),
+      ...(body.tpmLimit !== undefined && { tpmLimit: body.tpmLimit ?? null }),
+    };
+
+    // apiKey 在编辑时可选（不提供则保留原值）
+    if (body.apiKey === undefined || body.apiKey === null || body.apiKey === "") {
+      updateData.apiKey = existing.apiKey;
+    } else {
+      updateData.apiKey = body.apiKey;
+    }
+
     const platform = await prisma.platform.update({
       where: { id },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.baseUrl !== undefined && { baseUrl: body.baseUrl }),
-        ...(body.apiKey !== undefined && { apiKey: body.apiKey }),
-        ...(body.type !== undefined && { type: body.type }),
-        ...(body.enabled !== undefined && { enabled: body.enabled }),
-        ...(body.priority !== undefined && { priority: body.priority }),
-        ...(body.weight !== undefined && { weight: body.weight }),
-        ...(body.rpmLimit !== undefined && { rpmLimit: body.rpmLimit ?? null }),
-        ...(body.tpmLimit !== undefined && { tpmLimit: body.tpmLimit ?? null }),
-      },
+      data: updateData,
     });
 
     await forceRefreshRouterCache();

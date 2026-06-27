@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+  let upstreamSucceeded = false;
   try {
     const upstreamResponse = await fetch(upstreamUrl, {
       method: "POST",
@@ -271,6 +272,7 @@ export async function POST(request: NextRequest) {
 
     // 非流式响应
     const responseData = await upstreamResponse.json();
+    upstreamSucceeded = true;
     await recordSuccess(route.platform.id);
 
     const usage = responseData.usage;
@@ -278,49 +280,56 @@ export async function POST(request: NextRequest) {
       ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0)
       : 0;
 
-    const effectiveTokenLimit =
-      apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
-    if (effectiveTokenLimit !== null) {
-      // 有额度限制：事务内原子递增 + 超限禁用
-      await prisma.$transaction(async (tx) => {
-        const updated = await tx.apiKey.update({
+    // token 扣减失败不应影响已成功的响应
+    try {
+      const effectiveTokenLimit =
+        apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
+      if (effectiveTokenLimit !== null) {
+        // 有额度限制：事务内原子递增 + 超限禁用
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.apiKey.update({
+            where: { id: apiKey.id },
+            data: { usedTokens: { increment: totalTokens } },
+            select: { usedTokens: true },
+          });
+          if (Number(updated.usedTokens) >= effectiveTokenLimit) {
+            await tx.apiKey.update({
+              where: { id: apiKey.id },
+              data: { status: "disabled" },
+            });
+          }
+        });
+      } else {
+        await prisma.apiKey.update({
           where: { id: apiKey.id },
           data: { usedTokens: { increment: totalTokens } },
-          select: { usedTokens: true },
         });
-        if (Number(updated.usedTokens) >= effectiveTokenLimit) {
-          await tx.apiKey.update({
-            where: { id: apiKey.id },
-            data: { status: "disabled" },
-          });
-        }
-      });
-    } else {
-      await prisma.apiKey.update({
-        where: { id: apiKey.id },
-        data: { usedTokens: { increment: totalTokens } },
-      });
-    }
+      }
 
-    await prisma.requestLog.create({
-      data: {
-        keyId: apiKey.id,
-        platformId: route.platform.id,
-        model: body.model,
-        status: 200,
-        tokens: totalTokens,
-        duration: Date.now() - startTime,
-        isError: false,
-      },
-    });
+      await prisma.requestLog.create({
+        data: {
+          keyId: apiKey.id,
+          platformId: route.platform.id,
+          model: body.model,
+          status: 200,
+          tokens: totalTokens,
+          duration: Date.now() - startTime,
+          isError: false,
+        },
+      });
+    } catch (txErr) {
+      console.error("[token扣减失败]", txErr);
+    }
 
     return Response.json(responseData);
   } catch (error) {
-    // 记录失败状态和日志，但如果数据库操作也失败，不能让错误掩盖原始响应
-    try {
-      await recordFailure(route.platform.id);
-    } catch {
-      console.error("[completions] 熔断器记录失败:", error);
+    // 仅在上游请求本身失败时记录熔断失败，避免误触发熔断
+    if (!upstreamSucceeded) {
+      try {
+        await recordFailure(route.platform.id);
+      } catch {
+        console.error("[completions] 熔断器记录失败:", error);
+      }
     }
 
     try {
