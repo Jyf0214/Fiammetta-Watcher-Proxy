@@ -41,7 +41,7 @@ body {
   }
   .ant-modal {
     margin: 0 auto !important;
-    max-width: 100vw !important;
+    max-width: calc(100vw - 16px) !important;
   }
   .ant-modal-content {
     border-radius: 0 !important;
@@ -64,6 +64,13 @@ body {
   display: block !important;
   vertical-align: unset !important;
   flex-shrink: 0;
+  max-width: calc(100vw - 32px);
+}
+@media (max-width: 768px) {
+  .ant-modal-wrap.ant-modal-centered .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    margin: 0 8px !important;
+  }
 }
 
 /* Antd 弹层 z-index 分层 */
