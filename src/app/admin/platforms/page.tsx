@@ -52,7 +52,8 @@ export default function PlatformsPage() {
       const res = await fetch("/api/admin/platforms");
       const data = await res.json();
       if (data.success) setPlatforms(data.data);
-    } catch {
+    } catch (err) {
+      console.error("获取数据失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
@@ -329,9 +330,11 @@ export default function PlatformsPage() {
           <Form.Item
             name="apiKey"
             label={t("platform.api_key")}
-            rules={[{ required: true }]}
+            rules={editing ? [] : [{ required: true }]}
           >
-            <Input.Password />
+            <Input.Password
+              placeholder={editing ? "留空则保持不变" : undefined}
+            />
           </Form.Item>
           <Form.Item
             name="type"

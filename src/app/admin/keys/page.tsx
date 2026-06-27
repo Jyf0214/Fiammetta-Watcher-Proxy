@@ -54,7 +54,8 @@ export default function KeysPage() {
       const res = await fetch("/api/admin/keys");
       const data = await res.json();
       if (data.success) setKeys(data.data);
-    } catch {
+    } catch (err) {
+      console.error("获取数据失败:", err);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
