@@ -246,3 +246,14 @@ export async function resetCircuitBreaker(platformId: string): Promise<void> {
 
   await forceRefreshRouterCache();
 }
+
+/**
+ * 清理已删除平台的断路器条目
+ */
+export function cleanupStaleBreakers(activePlatformIds: string[]) {
+  for (const [key] of breakers) {
+    if (!activePlatformIds.includes(key)) {
+      breakers.delete(key);
+    }
+  }
+}

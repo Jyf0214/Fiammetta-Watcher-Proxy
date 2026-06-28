@@ -88,6 +88,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // resetPeriod 枚举校验
+    const validResetPeriods = ["monthly", "daily", "never"];
+    if (resetPeriod && !validResetPeriods.includes(resetPeriod)) {
+      return NextResponse.json({ success: false, error: "重置周期必须是 monthly、daily 或 never" }, { status: 400 });
+    }
+    // 数值字段校验
+    if (quota !== undefined && quota !== null && (typeof quota !== "number" || !Number.isFinite(quota) || quota < 0)) {
+      return NextResponse.json({ success: false, error: "配额必须是非负数" }, { status: 400 });
+    }
+    if (body.rpmLimit !== undefined && body.rpmLimit !== null && (typeof body.rpmLimit !== "number" || !Number.isFinite(body.rpmLimit) || body.rpmLimit < 0)) {
+      return NextResponse.json({ success: false, error: "RPM 限制必须是非负数" }, { status: 400 });
+    }
+    if (body.tpmLimit !== undefined && body.tpmLimit !== null && (typeof body.tpmLimit !== "number" || !Number.isFinite(body.tpmLimit) || body.tpmLimit < 0)) {
+      return NextResponse.json({ success: false, error: "TPM 限制必须是非负数" }, { status: 400 });
+    }
+    if (body.callLimit !== undefined && body.callLimit !== null && (typeof body.callLimit !== "number" || !Number.isFinite(body.callLimit) || body.callLimit < 0)) {
+      return NextResponse.json({ success: false, error: "调用次数限制必须是非负数" }, { status: 400 });
+    }
+    if (body.tokenLimit !== undefined && body.tokenLimit !== null && (typeof body.tokenLimit !== "number" || !Number.isInteger(body.tokenLimit) || body.tokenLimit < 0)) {
+      return NextResponse.json({ success: false, error: "Token 限制必须是非负整数" }, { status: 400 });
+    }
+
     // 验证 expiresAt 是否为有效日期
     let expiresAtDate: Date | null = null;
     if (expiresAt) {
