@@ -202,6 +202,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // 上游已返回 200，标记成功，避免外层 catch 误调 recordFailure
+      upstreamSucceeded = true;
+
       // 记录成功
       await recordSuccess(route.platform.id);
 

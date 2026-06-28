@@ -121,7 +121,7 @@ export async function PUT(
         adminId: admin.adminId,
         action: "update_platform",
         detail: JSON.stringify({ platformId: id, changes: sanitized }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 
@@ -171,6 +171,7 @@ export async function DELETE(
     if (relatedModels.length > 0) {
       return NextResponse.json(
         {
+          success: false,
           error: `该平台被 ${relatedModels.length} 个模型映射引用，无法删除。请先删除相关映射。`,
         },
         { status: 400 }
@@ -186,7 +187,7 @@ export async function DELETE(
         adminId: admin.adminId,
         action: "delete_platform",
         detail: JSON.stringify({ platformId: id }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 

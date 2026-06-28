@@ -10,6 +10,7 @@ interface CircuitBreakerEntry {
   lastFailureAt: number;
   cooldownEnd: number;
   halfOpenAttempts: number;
+  halfOpenPending: number;
 }
 
 const breakers = new Map<string, CircuitBreakerEntry>();
@@ -43,17 +44,35 @@ export function checkAndUpdateCircuitBreakerState(
     return "open";
   }
 
-  // half-open 状态下探测次数超限，重新打开熔断器（安全兜底）
-  if (
-    entry.state === "half-open" &&
-    entry.halfOpenAttempts >= DEFAULT_CONFIG.halfOpenMaxAttempts
-  ) {
-    entry.state = "open";
-    entry.cooldownEnd = Date.now() + DEFAULT_CONFIG.cooldownMs;
-    return "open";
+  if (entry.state === "half-open") {
+    // 限制并发探测请求数为 halfOpenMaxAttempts
+    if (entry.halfOpenPending >= DEFAULT_CONFIG.halfOpenMaxAttempts) {
+      return "open" as const;
+    }
+    return "half-open" as const;
   }
 
   return entry.state;
+}
+
+/**
+ * 递增半开状态下的并发探测计数
+ */
+export function incrementHalfOpenPending(platformId: string): void {
+  const entry = breakers.get(platformId);
+  if (entry && entry.state === "half-open") {
+    entry.halfOpenPending += 1;
+  }
+}
+
+/**
+ * 递减半开状态下的并发探测计数
+ */
+export function decrementHalfOpenPending(platformId: string): void {
+  const entry = breakers.get(platformId);
+  if (entry && entry.halfOpenPending > 0) {
+    entry.halfOpenPending -= 1;
+  }
 }
 
 /**
@@ -64,6 +83,7 @@ export async function recordSuccess(platformId: string): Promise<void> {
 
   if (entry?.state === "half-open") {
     entry.halfOpenAttempts += 1;
+    decrementHalfOpenPending(platformId);
 
     // 探测次数未达到上限，继续保持 half-open 状态
     if (entry.halfOpenAttempts < DEFAULT_CONFIG.halfOpenMaxAttempts) {
@@ -124,6 +144,7 @@ export async function recordFailure(
       lastFailureAt: 0,
       cooldownEnd: 0,
       halfOpenAttempts: 0,
+      halfOpenPending: 0,
     };
     breakers.set(platformId, entry);
   }
@@ -133,6 +154,7 @@ export async function recordFailure(
 
   if (entry.state === "half-open") {
     // half-open 状态下请求失败，立即重新打开熔断器并重置冷却时间
+    decrementHalfOpenPending(platformId);
     entry.state = "open";
     entry.cooldownEnd = Date.now() + config.cooldownMs;
 

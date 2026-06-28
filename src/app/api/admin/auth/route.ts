@@ -127,34 +127,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 处理密码重置标志：检测到 pending 标志时，用正确算法重新哈希密码并更新
-    let targetHash = admin.passwordHash;
-    const resetFlag = await prisma.config.findUnique({
-      where: { key: "admin_reset_password" },
-    });
-    if (resetFlag && resetFlag.value === "pending") {
-      const envPassword = process.env.ADMIN_PASSWORD;
-      if (envPassword) {
-        try {
-          const { hashPassword } = await import("@/lib/auth");
-          const newHash = await hashPassword(envPassword);
-          await prisma.admin.update({
-            where: { id: admin.id },
-            data: { passwordHash: newHash },
-          });
-          await prisma.config.delete({
-            where: { key: "admin_reset_password" },
-          });
-          console.log("[auth] 密码重置标志已处理，密码已更新");
-          targetHash = newHash;
-        } catch (e) {
-          console.error("[auth] 密码重置处理失败:", e);
-        }
-      }
-    }
-
     // 验证密码（仅与数据库哈希对比）
-    const valid = await verifyPassword(password, targetHash);
+    const valid = await verifyPassword(password, admin.passwordHash);
 
     if (!valid) {
       recordLoginFailure(clientIp);
@@ -173,6 +147,29 @@ export async function POST(request: NextRequest) {
         { success: false, error: "用户名或密码错误" },
         { status: 401 }
       );
+    }
+
+    // 密码验证通过后，处理密码重置标志：检测到 pending 标志时，用正确算法重新哈希密码并更新
+    const resetFlag = await prisma.config.findUnique({
+      where: { key: "admin_reset_password" },
+    });
+    if (resetFlag && resetFlag.value === "pending") {
+      const envPassword = process.env.ADMIN_PASSWORD;
+      if (envPassword) {
+        try {
+          const newHash = await hashPassword(envPassword);
+          await prisma.admin.update({
+            where: { id: admin.id },
+            data: { passwordHash: newHash },
+          });
+          await prisma.config.delete({
+            where: { key: "admin_reset_password" },
+          });
+          console.log("[auth] 密码重置标志已处理，密码已更新");
+        } catch (e) {
+          console.error("[auth] 密码重置处理失败:", e);
+        }
+      }
     }
 
     // 登录成功，重置该 IP 的失败计数

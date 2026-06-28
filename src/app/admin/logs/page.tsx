@@ -50,8 +50,8 @@ export default function LogsPage() {
       const res = await fetch(`/api/admin/logs?${params}`);
       const data = await res.json();
       if (data.success) {
-        setLogs(data.data.items);
-        setTotal(data.data.total);
+        if (data.data?.items) setLogs(data.data.items);
+        if (data.data) setTotal(data.data.total);
       }
     } catch (err) {
       console.error("获取日志失败:", err);
@@ -160,7 +160,7 @@ export default function LogsPage() {
               placeholder={t("log.status_filter_placeholder")}
               allowClear
               className="w-36"
-              onChange={(v) => setStatusFilter(v)}
+              onChange={(v) => { setStatusFilter(v); setPage(1); }}
             >
               <Select.Option value="200">200</Select.Option>
               <Select.Option value="400">400</Select.Option>
@@ -173,7 +173,7 @@ export default function LogsPage() {
               placeholder={t("log.error_filter_placeholder")}
               allowClear
               className="w-36"
-              onChange={(v) => setErrorFilter(v)}
+              onChange={(v) => { setErrorFilter(v); setPage(1); }}
             >
               <Select.Option value="true">
                 {t("log.filter_error_only")}

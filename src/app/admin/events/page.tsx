@@ -31,8 +31,8 @@ export default function EventsPage() {
       );
       const data = await res.json();
       if (data.success) {
-        setEvents(data.data.items);
-        setTotal(data.data.total);
+        if (data.data?.items) setEvents(data.data.items);
+        if (data.data) setTotal(data.data.total);
       }
     } catch (err) {
       console.error("获取系统事件失败:", err);

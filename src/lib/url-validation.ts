@@ -9,26 +9,42 @@
  * 检查 IPv4 地址是否属于内网/保留地址段
  * 涵盖：私有地址、链路本地、回环地址、0.0.0.0、广播地址等
  */
-function isPrivateOrReservedIPv4(ip: string): boolean {
-  const parts = ip.split(".").map(Number);
+function isPrivateOrReservedIPv4(octets: number[] | string): boolean {
+  const parts = typeof octets === "string" ? octets.split(".").map(Number) : octets;
   if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
     return false;
   }
 
-  const [a, b] = parts;
+  const [a, b, c] = parts;
 
   // 0.0.0.0/8 — 当前网络
   if (a === 0) return true;
   // 10.0.0.0/8 — A 类私有地址
   if (a === 10) return true;
+  // 100.64.0.0/10 (RFC 6598 - CGN)
+  if (a === 100 && b >= 64 && b <= 127) return true;
   // 127.0.0.0/8 — 回环地址
   if (a === 127) return true;
   // 169.254.0.0/16 — 链路本地地址
   if (a === 169 && b === 254) return true;
   // 172.16.0.0/12 — B 类私有地址
   if (a === 172 && b >= 16 && b <= 31) return true;
+  // 192.0.0.0/24
+  if (a === 192 && b === 0 && c === 0) return true;
+  // 192.0.2.0/24 (TEST-NET-1)
+  if (a === 192 && b === 0 && c === 2) return true;
   // 192.168.0.0/16 — C 类私有地址
   if (a === 192 && b === 168) return true;
+  // 198.18.0.0/15
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  // 198.51.100.0/24 (TEST-NET-2)
+  if (a === 198 && b === 51 && c === 100) return true;
+  // 203.0.113.0/24 (TEST-NET-3)
+  if (a === 203 && b === 0 && c === 113) return true;
+  // 224.0.0.0/4 (组播)
+  if (a >= 224 && a <= 239) return true;
+  // 240.0.0.0/4 (保留)
+  if (a >= 240) return true;
 
   return false;
 }
@@ -81,6 +97,18 @@ function isIpAddressInternal(hostname: string): boolean {
  */
 function isDangerousHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
+
+  // 拦截十进制整数 IP 表示法（如 2130706433 = 127.0.0.1）
+  if (/^\d+$/.test(lower)) return true;
+  // 拦截十六进制格式（如 0x7f000001 = 127.0.0.1）
+  if (/^0x[0-9a-f]+$/i.test(lower)) return true;
+
+  // 拦截 IPv6 映射 IPv4 地址（如 ::ffff:127.0.0.1）
+  if (/^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/i.test(lower)) {
+    const [, a, b, c, d] = lower.match(/^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/i)!;
+    const ip = [parseInt(a), parseInt(b), parseInt(c), parseInt(d)];
+    if (isPrivateOrReservedIPv4(ip)) return true;
+  }
 
   // localhost 及其各种变体
   if (

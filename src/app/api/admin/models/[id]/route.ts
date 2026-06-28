@@ -81,7 +81,7 @@ export async function PUT(
         adminId: admin.adminId,
         action: "update_model_map",
         detail: JSON.stringify({ modelId: id, changes: sanitized }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 
@@ -138,7 +138,7 @@ export async function DELETE(
         adminId: admin.adminId,
         action: "delete_model_map",
         detail: JSON.stringify({ modelId: id, alias: existing.alias }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 

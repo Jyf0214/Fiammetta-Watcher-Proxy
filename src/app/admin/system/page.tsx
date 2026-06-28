@@ -27,7 +27,7 @@ export default function SystemPage() {
     try {
       const res = await fetch("/api/admin/stats");
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.data) {
         setInfo({
           adminUsername: data.data.adminUsername || "",
           dbConnected: data.data.dbConnected ?? false,

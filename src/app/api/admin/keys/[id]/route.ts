@@ -139,13 +139,20 @@ export async function PUT(
         adminId: admin.adminId,
         action: "update_api_key",
         detail: JSON.stringify({ keyId: id, changes: sanitized }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 
+    const serialized = serializeBigInt(updated);
+    // 列表/更新接口不返回完整密钥值
+    if (typeof serialized.key === "string" && serialized.key.length > 12) {
+      (serialized as Record<string, unknown>).key =
+        serialized.key.substring(0, 8) + "..." + serialized.key.substring(serialized.key.length - 4);
+    }
+
     return NextResponse.json({
       success: true,
-      data: serializeBigInt(updated),
+      data: serialized,
       message: "API Key 更新成功",
     });
   } catch (err) {
@@ -204,7 +211,7 @@ export async function DELETE(
         adminId: admin.adminId,
         action: "delete_api_key",
         detail: JSON.stringify({ keyId: id, name: existing.name, deletedLogs: logCount }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 
