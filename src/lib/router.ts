@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { checkAndUpdateCircuitBreakerState, incrementHalfOpenPending } from "./circuit-breaker";
+import { checkAndUpdateCircuitBreakerState, incrementHalfOpenPending, cleanupStaleBreakers } from "./circuit-breaker";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 
 // 内存缓存，避免每次请求都查数据库
@@ -72,6 +72,9 @@ async function doRefresh() {
   platformCache = newPlatforms;
   modelMapCache = newModelMaps;
   lastRefresh = Date.now();
+
+  // 清理已删除平台的断路器条目
+  cleanupStaleBreakers(platforms.map(p => p.id));
 }
 
 /**
