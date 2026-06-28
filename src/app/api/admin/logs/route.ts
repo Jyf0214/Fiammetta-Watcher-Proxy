@@ -57,7 +57,10 @@ export async function GET(request: NextRequest) {
 
     // 请求日志查询
     const where: Record<string, unknown> = {};
-    if (status) where.status = parseInt(status);
+    if (status) {
+      const n = parseInt(status, 10);
+      if (!isNaN(n)) where.status = n;
+    }
     if (isError !== null && isError !== undefined) {
       where.isError = isError === "true";
     }

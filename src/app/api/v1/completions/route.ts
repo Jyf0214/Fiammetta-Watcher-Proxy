@@ -120,18 +120,23 @@ export async function POST(request: NextRequest) {
       const errorText = await upstreamResponse.text();
       await recordFailure(route.platform.id);
 
-      await prisma.requestLog.create({
-        data: {
-          keyId: apiKey.id,
-          platformId: route.platform.id,
-          model: body.model,
-          status: upstreamResponse.status,
-          tokens: 0,
-          duration: Date.now() - startTime,
-          isError: true,
-          errorMessage: errorText.substring(0, 1000),
-        },
-      });
+      // 记录上游错误日志
+      try {
+        await prisma.requestLog.create({
+          data: {
+            keyId: apiKey.id,
+            platformId: route.platform.id,
+            model: body.model,
+            status: upstreamResponse.status,
+            tokens: 0,
+            duration: Date.now() - startTime,
+            isError: true,
+            errorMessage: errorText.substring(0, 1000),
+          },
+        });
+      } catch (logError) {
+        console.error("[completions] 记录上游错误日志失败:", logError);
+      }
 
       // 尝试解析上游返回的错误为 JSON，解析失败则包装为标准错误格式
       let errorBody: string;
@@ -166,6 +171,9 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      // 上游已返回 200，标记成功，避免外层 catch 误调 recordFailure
+      upstreamSucceeded = true;
 
       await recordSuccess(route.platform.id);
 
@@ -380,7 +388,7 @@ export async function POST(request: NextRequest) {
     }
 
     return Response.json(
-      { error: { message: "请求上游服务失败" } },
+      { error: { message: "请求上游服务失败", type: "server_error" } },
       { status: 500 }
     );
   } finally {

@@ -51,7 +51,7 @@ export default function PlatformsPage() {
     try {
       const res = await fetch("/api/admin/platforms");
       const data = await res.json();
-      if (data.success) setPlatforms(data.data);
+      if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       console.error("获取数据失败:", err);
       message.error(t("common.error"));
@@ -91,8 +91,8 @@ export default function PlatformsPage() {
       } else {
         message.error(data.error);
       }
-    } catch {
-      // 表单校验失败
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes("form"))) message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -333,7 +333,7 @@ export default function PlatformsPage() {
             rules={editing ? [] : [{ required: true }]}
           >
             <Input.Password
-              placeholder={editing ? "留空则保持不变" : undefined}
+              placeholder={editing ? t("platform.api_key_edit_hint") : undefined}
             />
           </Form.Item>
           <Form.Item

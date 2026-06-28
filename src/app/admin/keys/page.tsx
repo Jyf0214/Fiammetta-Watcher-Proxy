@@ -53,7 +53,7 @@ export default function KeysPage() {
     try {
       const res = await fetch("/api/admin/keys");
       const data = await res.json();
-      if (data.success) setKeys(data.data);
+      if (data.success && Array.isArray(data.data)) setKeys(data.data);
     } catch (err) {
       console.error("获取数据失败:", err);
       message.error(t("common.error"));
@@ -89,8 +89,8 @@ export default function KeysPage() {
       } else {
         message.error(data.error);
       }
-    } catch {
-      // 表单校验失败
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes("form"))) message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }

@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
         adminId: admin.adminId,
         action: "create_platform",
         detail: JSON.stringify({ platformId: platform.id, name }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 

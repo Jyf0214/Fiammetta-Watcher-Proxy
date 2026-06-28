@@ -20,6 +20,7 @@ export function checkPlatformRateLimit(
   tpmLimit: number | null,
   tokenCount: number = 0
 ): RateLimitResult {
+  if (tokenCount < 0) tokenCount = 0;
   const now = Date.now();
   const windowMs = 60_000; // 1 分钟窗口
 

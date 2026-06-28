@@ -1,14 +1,14 @@
 import { prisma } from "./prisma";
-import { checkAndUpdateCircuitBreakerState } from "./circuit-breaker";
+import { checkAndUpdateCircuitBreakerState, incrementHalfOpenPending } from "./circuit-breaker";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 
 // 内存缓存，避免每次请求都查数据库
 let platformCache: PlatformConfig[] = [];
 let modelMapCache: ModelMapConfig[] = [];
 let lastRefresh = 0;
-const CACHE_TTL = 30_000; // 30 秒缓存
+const CACHE_TTL = 30_000;
+const EMPTY_CACHE_RETRY = 5_000; // 空缓存时的重试间隔
 
-// 防惊群锁：避免多个并发请求同时穿透缓存执行数据库查询
 let refreshPromise: Promise<void> | null = null;
 
 /**
@@ -18,9 +18,11 @@ let refreshPromise: Promise<void> | null = null;
  * 其余请求复用同一个 Promise，避免惊群效应。
  */
 async function refreshCache() {
-  const now = Date.now();
-  if (now - lastRefresh < CACHE_TTL && platformCache.length > 0) return;
   if (refreshPromise) return refreshPromise;
+
+  const now = Date.now();
+  const ttl = platformCache.length > 0 ? CACHE_TTL : EMPTY_CACHE_RETRY;
+  if (now - lastRefresh < ttl) return;
 
   refreshPromise = doRefresh();
   try {
@@ -163,12 +165,19 @@ function isPlatformAvailable(platform: PlatformConfig): boolean {
   if (breakerState === "open") return false;
 
   // 熔断器处于 half-open 状态，允许探测请求通过
-  if (breakerState === "half-open") return true;
+  if (breakerState === "half-open") {
+    incrementHalfOpenPending(platform.id);
+    return true;
+  }
 
-  // 熔断器未记录或已恢复为 closed，检查数据库缓存的常规状态
-  if (platform.status === "down") return false;
-  if (platform.cooldownEnd && platform.cooldownEnd > new Date()) return false;
-  return true;
+  if (breakerState === "closed") {
+    // 断路器认为已恢复，以内存状态为准
+    // 不再检查缓存中的 status（可能因 DB 更新失败而过时）
+    if (platform.cooldownEnd && platform.cooldownEnd > new Date()) return false;
+    return true;
+  }
+
+  return false;
 }
 
 /**

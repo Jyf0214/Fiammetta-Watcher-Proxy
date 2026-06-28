@@ -132,7 +132,8 @@
     "update_failed": "更新平台失败",
     "delete_success": "平台删除成功",
     "delete_failed": "删除平台失败",
-    "fetch_failed": "获取平台列表失败"
+    "fetch_failed": "获取平台列表失败",
+    "api_key_edit_hint": "留空则保持不变"
   },
   "api_key": {
     "key": "API Key",

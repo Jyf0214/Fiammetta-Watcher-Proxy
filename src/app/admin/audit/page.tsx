@@ -30,8 +30,8 @@ export default function AuditPage() {
       const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`);
       const data = await res.json();
       if (data.success) {
-        setLogs(data.data.items);
-        setTotal(data.data.total);
+        if (data.data?.items) setLogs(data.data.items);
+        if (data.data) setTotal(data.data.total);
       }
     } catch (err) {
       console.error("获取审计日志失败:", err);

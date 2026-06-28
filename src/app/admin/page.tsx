@@ -37,7 +37,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/admin/stats");
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.data) {
         setStats(data.data);
       }
     } catch (err) {

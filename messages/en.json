@@ -132,7 +132,8 @@
     "update_failed": "Failed to update platform",
     "delete_success": "Platform deleted successfully",
     "delete_failed": "Failed to delete platform",
-    "fetch_failed": "Failed to fetch platform list"
+    "fetch_failed": "Failed to fetch platform list",
+    "api_key_edit_hint": "Leave empty to keep current"
   },
   "api_key": {
     "key": "API Key",

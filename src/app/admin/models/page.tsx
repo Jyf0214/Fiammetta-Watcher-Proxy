@@ -45,7 +45,7 @@ export default function ModelsPage() {
     try {
       const res = await fetch("/api/admin/models");
       const data = await res.json();
-      if (data.success) setModels(data.data);
+      if (data.success && Array.isArray(data.data)) setModels(data.data);
     } catch (err) {
       console.error("获取模型列表失败:", err);
       message.error(t("common.error"));
@@ -58,7 +58,7 @@ export default function ModelsPage() {
     try {
       const res = await fetch("/api/admin/platforms");
       const data = await res.json();
-      if (data.success) setPlatforms(data.data);
+      if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       console.error("获取平台列表失败:", err);
       message.error(t("common.error"));
@@ -92,11 +92,9 @@ export default function ModelsPage() {
         message.error(data.error);
       }
     } catch (err) {
-      // 表单校验失败时 antd Form 会自动显示错误，不需要额外处理
-      // 仅处理非表单校验的异常（如网络错误）
-      if (err instanceof Error && !err.message.includes('form')) {
-        message.error(t("common.error"));
-      }
+      // 表单校验失败由 antd Form 自动处理，此处只捕获网络/服务器错误
+      if (err instanceof Error && err.message.includes("validateFields")) return;
+      message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }

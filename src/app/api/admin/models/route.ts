@@ -72,6 +72,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 校验 platformId 是否存在（如果提供了的话）
+    if (body.platformId) {
+      const platform = await prisma.platform.findUnique({ where: { id: body.platformId } });
+      if (!platform) {
+        return NextResponse.json({ success: false, error: "指定的平台不存在" }, { status: 400 });
+      }
+    }
+
     const errors: string[] = [];
     if (typeof alias === "string" && alias.length > 100) {
       errors.push("模型别名不能超过 100 个字符");
@@ -101,7 +109,7 @@ export async function POST(request: NextRequest) {
         adminId: admin.adminId,
         action: "create_model_map",
         detail: JSON.stringify({ modelId: model.id, alias, targetModel }),
-        ip: request.headers.get("x-forwarded-for") || null,
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 

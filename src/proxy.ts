@@ -36,6 +36,15 @@ function cleanupAdminRateLimit() {
 }
 
 /**
+ * Base64URL 解码辅助函数，兼容 JWT 标准中的 Base64URL 编码（- 和 _）
+ */
+function base64UrlDecode(str: string): string {
+  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  return atob(base64);
+}
+
+/**
  * Proxy 安全中间件 — Next.js 16 proxy.ts 规范
  * - /api/admin/* 路由统一鉴权兜底（排除登录接口）
  * - /api/admin/* 路由 IP 级速率限制
@@ -75,7 +84,7 @@ export function proxy(request: NextRequest) {
       // Edge Runtime 无法使用 jsonwebtoken（依赖 Node.js API），
       // 此处仅做轻量级 JWT 过期检查，完整签名验证在路由处理器的 getAdminFromRequest 中进行
       try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
+        const payload = JSON.parse(base64UrlDecode(token.split(".")[1]));
         if (payload.exp && payload.exp * 1000 < Date.now()) {
           return NextResponse.json(
             { success: false, error: "登录已过期" },
