@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Table, Card, Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw } from "lucide-react";
@@ -18,6 +19,7 @@ interface EventEntry {
 
 export default function EventsPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -31,6 +33,11 @@ export default function EventsPage() {
         `/api/admin/logs?type=events&page=${page}&pageSize=20`,
         { signal }
       );
+      if (res.status === 401) {
+        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+        router.push("/admin/login");
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         if (data.data?.items) setEvents(data.data.items);

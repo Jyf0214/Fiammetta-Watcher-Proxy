@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Table, Card, Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw } from "lucide-react";
@@ -19,6 +20,7 @@ interface AuditEntry {
 
 export default function AuditPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -29,6 +31,11 @@ export default function AuditPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal });
+      if (res.status === 401) {
+        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+        router.push("/admin/login");
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         if (data.data?.items) setLogs(data.data.items);

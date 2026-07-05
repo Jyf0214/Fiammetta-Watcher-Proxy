@@ -33,13 +33,13 @@ export async function PUT(
 
     const body = await request.json();
 
-    // 数值类型校验
+    // 数值类型校验（含负数检查）
     const numericFields = ["quota", "rpmLimit", "tpmLimit", "callLimit"] as const;
     for (const field of numericFields) {
       if (body[field] !== undefined && body[field] !== null) {
-        if (typeof body[field] !== "number" || !Number.isFinite(body[field])) {
+        if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
           return NextResponse.json(
-            { success: false, error: `${field} 必须是有效数字` },
+            { success: false, error: `${field} 必须是非负数` },
             { status: 400 }
           );
         }
@@ -76,6 +76,17 @@ export async function PUT(
       if (!allowedStatuses.includes(body.status)) {
         return NextResponse.json(
           { success: false, error: `status 无效，允许值：${allowedStatuses.join(", ")}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // resetPeriod 枚举校验
+    if (body.resetPeriod !== undefined) {
+      const validResetPeriods = ["monthly", "daily", "never"];
+      if (!validResetPeriods.includes(body.resetPeriod)) {
+        return NextResponse.json(
+          { success: false, error: "重置周期必须是 monthly、daily 或 never" },
           { status: 400 }
         );
       }
@@ -199,17 +210,15 @@ export async function DELETE(
       console.log("[DEBUG] 删除 API Key:", { id, name: existing.name });
     }
 
-    // 检查关联的请求日志数量
-    const logCount = await prisma.requestLog.count({
-      where: { keyId: id },
+    // 使用事务保证日志清理与键删除的原子性
+    const logCount = await prisma.$transaction(async (tx) => {
+      const count = await tx.requestLog.count({ where: { keyId: id } });
+      if (count > 0) {
+        await tx.requestLog.deleteMany({ where: { keyId: id } });
+      }
+      await tx.apiKey.delete({ where: { id } });
+      return count;
     });
-
-    if (logCount > 0) {
-      // 存在关联日志，级联删除
-      await prisma.requestLog.deleteMany({ where: { keyId: id } });
-    }
-
-    await prisma.apiKey.delete({ where: { id } });
 
     await prisma.auditLog.create({
       data: {

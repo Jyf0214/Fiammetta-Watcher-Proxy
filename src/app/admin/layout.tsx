@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronRight,
   Shield,
+  BarChart3,
 } from "lucide-react";
 import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
@@ -42,6 +43,7 @@ const menuItems: MenuItem[] = [
   { key: "admin.platforms", icon: Server, href: "/admin/platforms", group: "manage" },
   { key: "admin.keys", icon: Key, href: "/admin/keys", group: "manage" },
   { key: "admin.models", icon: ArrowLeftRight, href: "/admin/models", group: "manage" },
+  { key: "admin.usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
   { key: "admin.logs", icon: FileText, href: "/admin/logs", group: "monitor" },
   { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
   { key: "admin.events", icon: Bell, href: "/admin/events", group: "monitor" },
@@ -233,6 +235,7 @@ function TopHeader({
     "/admin/platforms": "admin.platforms",
     "/admin/keys": "admin.keys",
     "/admin/models": "admin.models",
+    "/admin/usage": "admin.usage",
     "/admin/logs": "admin.logs",
     "/admin/audit": "admin.audit",
     "/admin/system": "admin.system",

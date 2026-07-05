@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Table,
   Card,
@@ -20,6 +21,9 @@ interface LogEntry {
   model: string;
   status: number;
   tokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  ttft: number;
   duration: number;
   isError: boolean;
   errorMessage: string | null;
@@ -30,6 +34,7 @@ interface LogEntry {
 
 export default function LogsPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -49,6 +54,11 @@ export default function LogsPage() {
       if (errorFilter) params.set("isError", errorFilter);
 
       const res = await fetch(`/api/admin/logs?${params}`, { signal });
+      if (res.status === 401) {
+        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+        router.push("/admin/login");
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         if (data.data?.items) setLogs(data.data.items);
@@ -121,6 +131,33 @@ export default function LogsPage() {
       align: "right",
       render: (v: number) => v.toLocaleString(),
       responsive: ["lg"],
+    },
+    {
+      title: t("log.prompt_tokens"),
+      dataIndex: "promptTokens",
+      key: "promptTokens",
+      width: 100,
+      align: "right",
+      render: (v: number) => v.toLocaleString(),
+      responsive: ["xl"],
+    },
+    {
+      title: t("log.completion_tokens"),
+      dataIndex: "completionTokens",
+      key: "completionTokens",
+      width: 100,
+      align: "right",
+      render: (v: number) => v.toLocaleString(),
+      responsive: ["xl"],
+    },
+    {
+      title: t("log.ttft"),
+      dataIndex: "ttft",
+      key: "ttft",
+      width: 90,
+      align: "right",
+      render: (v: number) => (v > 0 ? `${v}ms` : "-"),
+      responsive: ["xl"],
     },
     {
       title: t("log.duration"),

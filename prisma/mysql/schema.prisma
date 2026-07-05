@@ -113,16 +113,19 @@ model ModelMap {
 // ==================== 请求日志 ====================
 
 model RequestLog {
-  id          String   @id @default(cuid())
-  keyId       String?
-  platformId  String?
-  model       String
-  status      Int      // HTTP 状态码
-  tokens      Int      @default(0) // token 用量
-  duration    Int      @default(0) // 耗时（毫秒）
-  isError     Boolean  @default(false)
-  errorMessage String?
-  createdAt   DateTime @default(now())
+  id               String   @id @default(cuid())
+  keyId            String?
+  platformId       String?
+  model            String
+  status           Int      // HTTP 状态码
+  tokens           Int      @default(0) // token 总用量（prompt + completion）
+  promptTokens     Int      @default(0) // 输入 token 数
+  completionTokens Int      @default(0) // 输出 token 数
+  ttft             Int      @default(0) // 首个 token 时间（毫秒），仅流式响应有效
+  duration         Int      @default(0) // 耗时（毫秒）
+  isError          Boolean  @default(false)
+  errorMessage     String?
+  createdAt        DateTime @default(now())
 
   key      ApiKey?    @relation(fields: [keyId], references: [id])
   platform Platform?  @relation(fields: [platformId], references: [id])

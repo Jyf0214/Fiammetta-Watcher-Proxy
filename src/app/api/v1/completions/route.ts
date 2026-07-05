@@ -180,6 +180,7 @@ export async function POST(request: NextRequest) {
 
       // 通过 TransformStream 拦截 SSE 流，在透传数据的同时提取 usage 信息
       let capturedUsage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
+      let firstTokenTime: number | null = null;
       let lastChunkTime = Date.now();
       const CHUNK_TIMEOUT_MS = 60_000;
 
@@ -192,6 +193,11 @@ export async function POST(request: NextRequest) {
             return;
           }
           lastChunkTime = now;
+
+          // 记录首个 token 到达时间（TTFT）
+          if (firstTokenTime === null) {
+            firstTokenTime = now;
+          }
 
           // 原样透传 chunk 给客户端
           controller.enqueue(chunk);
@@ -218,9 +224,11 @@ export async function POST(request: NextRequest) {
         },
         async flush() {
           // 流结束：根据捕获的 usage 更新计费和日志
-          const totalTokens = capturedUsage
-            ? (capturedUsage.prompt_tokens || 0) + (capturedUsage.completion_tokens || 0)
-            : 0;
+          const promptTokens = capturedUsage?.prompt_tokens || 0;
+          const completionTokens = capturedUsage?.completion_tokens || 0;
+          const totalTokens = promptTokens + completionTokens;
+          // TTFT：首个 token 到达时间 - 请求开始时间
+          const ttft = firstTokenTime !== null ? firstTokenTime - startTime : 0;
 
           // 此处的数据库错误不能 throw，因为流已经发送给客户端，
           // throw 会导致未捕获异常并可能中断已部分发送的响应
@@ -249,7 +257,7 @@ export async function POST(request: NextRequest) {
               });
             }
 
-            // 记录日志（包含实际 token 数）
+            // 记录日志（包含实际 token 数和 TTFT）
             const duration = Date.now() - startTime;
             await prisma.requestLog.create({
               data: {
@@ -258,6 +266,9 @@ export async function POST(request: NextRequest) {
                 model: body.model,
                 status: 200,
                 tokens: totalTokens,
+                promptTokens,
+                completionTokens,
+                ttft,
                 duration,
                 isError: false,
               },
@@ -301,9 +312,9 @@ export async function POST(request: NextRequest) {
     await recordSuccess(route.platform.id);
 
     const usage = responseData.usage;
-    const totalTokens = usage
-      ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0)
-      : 0;
+    const promptTokens = usage?.prompt_tokens || 0;
+    const completionTokens = usage?.completion_tokens || 0;
+    const totalTokens = promptTokens + completionTokens;
 
     // token 扣减失败不应影响已成功的响应
     try {
@@ -338,6 +349,9 @@ export async function POST(request: NextRequest) {
           model: body.model,
           status: 200,
           tokens: totalTokens,
+          promptTokens,
+          completionTokens,
+          ttft: 0, // 非流式响应无 TTFT
           duration: Date.now() - startTime,
           isError: false,
         },

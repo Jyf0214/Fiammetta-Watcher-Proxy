@@ -129,19 +129,19 @@ export async function POST(request: NextRequest) {
     // priority 校验
     if (body.priority !== undefined && body.priority !== null) {
       if (typeof body.priority !== "number" || !Number.isInteger(body.priority) || body.priority < 0) {
-        return NextResponse.json({ success: false, error: "优先级必须是非负整数" }, { status: 400 });
+        errors.push("优先级必须是非负整数");
       }
     }
     // rpmLimit 校验
     if (body.rpmLimit !== undefined && body.rpmLimit !== null) {
       if (typeof body.rpmLimit !== "number" || !Number.isFinite(body.rpmLimit) || body.rpmLimit < 0) {
-        return NextResponse.json({ success: false, error: "RPM 限制必须是非负数" }, { status: 400 });
+        errors.push("RPM 限制必须是非负数");
       }
     }
     // tpmLimit 校验
     if (body.tpmLimit !== undefined && body.tpmLimit !== null) {
       if (typeof body.tpmLimit !== "number" || !Number.isFinite(body.tpmLimit) || body.tpmLimit < 0) {
-        return NextResponse.json({ success: false, error: "TPM 限制必须是非负数" }, { status: 400 });
+        errors.push("TPM 限制必须是非负数");
       }
     }
 
@@ -183,9 +183,13 @@ export async function POST(request: NextRequest) {
 
     forceRefreshRouterCache();
 
+    // 排除 apiKey 明文，避免敏感信息泄露到前端
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { apiKey: _, ...safePlatform } = platform;
+
     return NextResponse.json({
       success: true,
-      data: platform,
+      data: safePlatform,
       message: "平台创建成功",
     });
   } catch (err) {

@@ -187,6 +187,8 @@ export async function DELETE(
       console.log("[DEBUG] 删除平台:", { id });
     }
 
+    // 清理关联的请求日志，避免外键约束导致删除失败
+    await prisma.requestLog.deleteMany({ where: { platformId: id } });
     await prisma.platform.delete({ where: { id } });
 
     await forceRefreshRouterCache();
