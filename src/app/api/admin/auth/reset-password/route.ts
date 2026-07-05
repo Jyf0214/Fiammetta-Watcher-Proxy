@@ -1,31 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest } from "@/lib/auth";
 
-// 密码重置速率限制（24小时内最多3次）
+// 密码重置速率限制（24小时内最多3次，基于 IP）
 const resetAttempts = new Map<string, { count: number; resetAt: number }>();
 const RESET_RATE_LIMIT = 3;
 const RESET_RATE_WINDOW = 24 * 60 * 60 * 1000; // 24小时
 
 // 定期清理过期条目，防止内存泄漏
-// 使用全局变量确保只创建一个定时器
 const globalForResetCleanup = globalThis as unknown as { __resetCleanupTimer?: ReturnType<typeof setInterval> };
 if (!globalForResetCleanup.__resetCleanupTimer) {
   globalForResetCleanup.__resetCleanupTimer = setInterval(() => {
     const now = Date.now();
-    for (const [adminId, entry] of resetAttempts.entries()) {
+    for (const [key, entry] of resetAttempts.entries()) {
       if (now > entry.resetAt) {
-        resetAttempts.delete(adminId);
+        resetAttempts.delete(key);
       }
     }
-  }, 60 * 60 * 1000); // 每小时清理一次
+  }, 60 * 60 * 1000);
 }
 
-function checkResetRateLimit(adminId: string): boolean {
+function checkResetRateLimit(ip: string): boolean {
   const now = Date.now();
-  const entry = resetAttempts.get(adminId);
+  const entry = resetAttempts.get(ip);
   if (!entry || now > entry.resetAt) {
-    resetAttempts.set(adminId, { count: 1, resetAt: now + RESET_RATE_WINDOW });
+    resetAttempts.set(ip, { count: 1, resetAt: now + RESET_RATE_WINDOW });
     return true;
   }
   if (entry.count >= RESET_RATE_LIMIT) {
@@ -43,23 +41,15 @@ const FLAG_KEY = "admin_reset_password";
  * 写入数据库标志 admin_reset_password = "pending"
  * 下次服务启动时读取此标志，使用 ADMIN_PASSWORD 环境变量强制更新密码
  *
- * 安全约束：
- * - 仅已登录管理员可发起密码重置
- * - 若数据库中存在多个管理员，拒绝操作（需手动统一管理员名称）
- * - 若环境变量 ADMIN_USERNAME 与现有管理员不匹配，拒绝操作
+ * 安全约束（无需登录即可访问）：
+ * - IP 级别速率限制：24小时内最多3次
+ * - 仅当数据库中恰好有1个管理员时允许操作
+ * - 环境变量 ADMIN_USERNAME 必须与现有管理员匹配
  */
-export async function POST() {
-  // 身份验证：仅管理员可发起密码重置
-  const adminAuth = await getAdminFromRequest();
-  if (!adminAuth) {
-    return NextResponse.json(
-      { success: false, error: "未授权" },
-      { status: 401 }
-    );
-  }
-
-  // 速率限制：24小时内最多3次密码重置
-  if (!checkResetRateLimit(adminAuth.adminId)) {
+export async function POST(request: Request) {
+  // IP 级别速率限制
+  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+  if (!checkResetRateLimit(ip)) {
     return NextResponse.json(
       { success: false, error: "密码重置请求过于频繁，请24小时后再试" },
       { status: 429 }
