@@ -334,7 +334,12 @@ export default function PlatformsPage() {
             </div>
           }
         >
-          <Form form={form} layout="vertical" onFinish={handleSubmit}>
+          <Form form={form} layout="vertical" onFinish={handleSubmit} onFinishFailed={({ errorFields }) => {
+            // 表单校验失败时显示第一个错误
+            if (errorFields && errorFields.length > 0) {
+              message.error(errorFields[0].errors[0] || t("validation.field_required"));
+            }
+          }}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <Form.Item
                 name="name"
@@ -403,7 +408,7 @@ export default function PlatformsPage() {
               <Button variant="default" onClick={closeForm}>
                 {t("common.cancel")}
               </Button>
-              <Button variant="primary" type="submit" disabled={submitting}>
+              <Button variant="primary" type="submit" disabled={submitting} autoLoading={false}>
                 {submitting ? t("common.loading") : editing ? t("common.save") : t("common.create")}
               </Button>
             </div>
