@@ -5,7 +5,6 @@ import {
   Table,
   Space,
   Tag,
-  Modal,
   Form,
   Input,
   InputNumber,
@@ -17,7 +16,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
-import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -40,13 +39,12 @@ export default function PlatformsPage() {
   const { t } = useTranslation();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<Platform | null>(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  // 修复：将 fetchPlatforms 提取为独立函数，供 useEffect 和操作回调共用
   const fetchPlatforms = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -64,13 +62,31 @@ export default function PlatformsPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPlatforms(controller.signal);
     return () => controller.abort();
   }, []);
+
+  const openCreateForm = () => {
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
+    setFormVisible(true);
+  };
+
+  const openEditForm = (platform: Platform) => {
+    setEditing(platform);
+    form.setFieldsValue(platform);
+    setFormVisible(true);
+  };
+
+  const closeForm = () => {
+    setFormVisible(false);
+    setEditing(null);
+    form.resetFields();
+  };
 
   const handleSubmit = async () => {
     try {
@@ -91,9 +107,7 @@ export default function PlatformsPage() {
       const data = await res.json();
       if (data.success) {
         message.success(data.message);
-        setModalOpen(false);
-        form.resetFields();
-        setEditing(null);
+        closeForm();
         fetchPlatforms();
       } else {
         message.error(data.error);
@@ -107,9 +121,7 @@ export default function PlatformsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/platforms/${id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         message.success(t("platform.delete_success") || "删除成功");
@@ -229,11 +241,7 @@ export default function PlatformsPage() {
             iconOnly
             icon={<EditOutlined />}
             aria-label={t("common.edit")}
-            onClick={() => {
-              setEditing(record);
-              form.setFieldsValue(record);
-              setModalOpen(true);
-            }}
+            onClick={() => openEditForm(record)}
           />
           <Popconfirm
             title={t("common.confirm_delete")}
@@ -276,11 +284,7 @@ export default function PlatformsPage() {
             variant="primary"
             icon={<PlusOutlined />}
             aria-label={t("platform.create_platform")}
-            onClick={() => {
-              setEditing(null);
-              form.resetFields();
-              setModalOpen(true);
-            }}
+            onClick={openCreateForm}
           >
             {t("platform.create_platform")}
           </Button>
@@ -302,92 +306,102 @@ export default function PlatformsPage() {
         </div>
       </Card>
 
-      <Modal
-        title={
-          editing ? t("platform.edit_platform") : t("platform.create_platform")
-        }
-        open={modalOpen}
-        onCancel={() => {
-          setModalOpen(false);
-          setEditing(null);
-          form.resetFields();
-        }}
-        onOk={handleSubmit}
-        confirmLoading={submitting}
-        centered
-        width={520}
-        style={{ maxWidth: "90vw" }}
-        styles={{ body: { padding: "16px 24px" } }}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label={t("platform.name")}
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="baseUrl"
-            label={t("platform.base_url")}
-            rules={[{ required: true }]}
-          >
-            <Input placeholder="https://api.openai.com/v1" />
-          </Form.Item>
-          <Form.Item
-            name="apiKey"
-            label={t("platform.api_key")}
-            rules={editing ? [] : [{ required: true }]}
-          >
-            <Input.Password
-              placeholder={editing ? t("platform.api_key_edit_hint") : undefined}
-            />
-          </Form.Item>
-          <Form.Item
-            name="type"
-            label={t("platform.type")}
-            initialValue="openai"
-          >
-            <Select>
-              <Select.Option value="openai">OpenAI</Select.Option>
-              <Select.Option value="azure">Azure</Select.Option>
-              <Select.Option value="custom">Custom</Select.Option>
-            </Select>
-          </Form.Item>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item
-              name="priority"
-              label={t("platform.priority")}
-              initialValue={0}
-            >
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
-            <Form.Item
-              name="weight"
-              label={t("platform.weight")}
-              initialValue={1}
-            >
-              <InputNumber min={1} className="w-full" />
-            </Form.Item>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
-              <InputNumber
-                min={0}
-                placeholder={t("common.unlimited")}
-                className="w-full"
+      {/* 内联创建/编辑表单 */}
+      {formVisible && (
+        <Card
+          className="mt-6 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900"
+          title={
+            <div className="flex items-center justify-between">
+              <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                {editing ? t("platform.edit_platform") : t("platform.create_platform")}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                icon={<CloseOutlined />}
+                onClick={closeForm}
+                aria-label={t("common.close")}
               />
-            </Form.Item>
-            <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
-              <InputNumber
-                min={0}
-                placeholder={t("common.unlimited")}
-                className="w-full"
-              />
-            </Form.Item>
-          </div>
-        </Form>
-      </Modal>
+            </div>
+          }
+        >
+          <Form form={form} layout="vertical" onFinish={handleSubmit}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Form.Item
+                name="name"
+                label={t("platform.name")}
+                rules={[{ required: true }]}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="baseUrl"
+                label={t("platform.base_url")}
+                rules={[{ required: true }]}
+              >
+                <Input placeholder="https://api.openai.com/v1" />
+              </Form.Item>
+              <Form.Item
+                name="apiKey"
+                label={t("platform.api_key")}
+                rules={editing ? [] : [{ required: true }]}
+              >
+                <Input.Password
+                  placeholder={editing ? t("platform.api_key_edit_hint") : undefined}
+                />
+              </Form.Item>
+              <Form.Item
+                name="type"
+                label={t("platform.type")}
+                initialValue="openai"
+              >
+                <Select>
+                  <Select.Option value="openai">OpenAI</Select.Option>
+                  <Select.Option value="azure">Azure</Select.Option>
+                  <Select.Option value="custom">Custom</Select.Option>
+                </Select>
+              </Form.Item>
+              <Form.Item
+                name="priority"
+                label={t("platform.priority")}
+                initialValue={0}
+              >
+                <InputNumber min={0} className="w-full" />
+              </Form.Item>
+              <Form.Item
+                name="weight"
+                label={t("platform.weight")}
+                initialValue={1}
+              >
+                <InputNumber min={1} className="w-full" />
+              </Form.Item>
+              <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
+                <InputNumber
+                  min={0}
+                  placeholder={t("common.unlimited")}
+                  className="w-full"
+                />
+              </Form.Item>
+              <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
+                <InputNumber
+                  min={0}
+                  placeholder={t("common.unlimited")}
+                  className="w-full"
+                />
+              </Form.Item>
+            </div>
+            <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <Button variant="default" onClick={closeForm}>
+                {t("common.cancel")}
+              </Button>
+              <Button variant="primary" type="submit" disabled={submitting}>
+                {submitting ? t("common.loading") : editing ? t("common.save") : t("common.create")}
+              </Button>
+            </div>
+          </Form>
+        </Card>
+      )}
     </div>
   );
 }
