@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Table, Card, Tag, message, type TableColumnsType } from "antd";
+import { Card, Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -132,22 +133,20 @@ export default function AuditPage() {
             {t("common.refresh") || "刷新"}
           </Button>
         </div>
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={logs}
-            rowKey="id"
-            loading={loading}
-            pagination={{
-              current: page,
-              total,
-              pageSize: 20,
-              onChange: setPage,
-              showTotal: (count) => t("common.pagination_total", { count }),
-            }}
-            aria-label={t("admin.audit")}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={logs}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: setPage,
+            showTotal: (count) => t("common.pagination_total", { count }),
+          }}
+          aria-label={t("admin.audit")}
+        />
       </Card>
     </div>
   );

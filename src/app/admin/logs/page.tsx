@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Table,
   Card,
   Tag,
   Select,
@@ -11,6 +10,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -232,22 +232,20 @@ export default function LogsPage() {
           </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={logs}
-            rowKey="id"
-            loading={loading}
-            pagination={{
-              current: page,
-              total,
-              pageSize: 20,
-              onChange: setPage,
-              showTotal: (count) => t("common.pagination_total", { count }),
-            }}
-            aria-label={t("admin.logs")}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={logs}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: setPage,
+            showTotal: (count) => t("common.pagination_total", { count }),
+          }}
+          aria-label={t("admin.logs")}
+        />
       </Card>
     </div>
   );

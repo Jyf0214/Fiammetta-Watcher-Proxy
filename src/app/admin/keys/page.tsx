@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Table,
   Space,
   Tag,
   Modal,
@@ -22,6 +21,7 @@ import {
   CopyOutlined,
 } from "@ant-design/icons";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -245,20 +245,18 @@ export default function KeysPage() {
           </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={keys}
-            rowKey="id"
-            loading={loading}
-            aria-label={t("admin.keys")}
-            pagination={{
-              pageSize: 20,
-              showTotal: (total) => t("common.pagination_total", { count: total }),
-            }}
-            scroll={{ x: 700 }}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={keys}
+          rowKey="id"
+          loading={loading}
+          aria-label={t("admin.keys")}
+          pagination={{
+            pageSize: 20,
+            showTotal: (total) => t("common.pagination_total", { count: total }),
+          }}
+          scroll={{ x: 700 }}
+        />
       </Card>
 
       <Modal

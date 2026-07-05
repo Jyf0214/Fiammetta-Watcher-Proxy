@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Table,
   Modal,
   Form,
   Input,
@@ -14,6 +13,7 @@ import {
 } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -191,16 +191,14 @@ export default function ModelsPage() {
           </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={models}
-            rowKey="id"
-            loading={loading}
-            pagination={{ pageSize: 20 }}
-            aria-label={t("admin.models")}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={models}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 20 }}
+          aria-label={t("admin.models")}
+        />
       </Card>
 
       <Modal

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Table, Tag, message } from "antd";
+import { Card, Tag, message } from "antd";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import {
   CloudServerOutlined,
   KeyOutlined,
@@ -178,16 +179,14 @@ export default function DashboardPage() {
               },
             }}
           >
-            <div className="overflow-x-auto">
-              <Table
-                columns={eventColumns}
-                dataSource={stats?.recentEvents || []}
-                rowKey="id"
-                pagination={false}
-                size="small"
-                aria-label={t("dashboard.recent_events")}
-              />
-            </div>
+            <ResponsiveTable
+              columns={eventColumns}
+              dataSource={stats?.recentEvents || []}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              aria-label={t("dashboard.recent_events")}
+            />
           </Card>
         </>
       )}

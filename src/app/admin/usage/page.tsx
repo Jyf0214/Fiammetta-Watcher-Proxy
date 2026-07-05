@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Table,
   Card,
   Select,
   Tag,
@@ -10,6 +9,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -248,20 +248,18 @@ export default function UsagePage() {
           </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={usageData}
-            rowKey="id"
-            loading={loading}
-            pagination={{
-              pageSize: 20,
-              showTotal: (count) => t("common.pagination_total", { count }),
-            }}
-            scroll={{ x: 1400 }}
-            aria-label={t("admin.usage")}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={usageData}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            pageSize: 20,
+            showTotal: (count) => t("common.pagination_total", { count }),
+          }}
+          scroll={{ x: 1400 }}
+          aria-label={t("admin.usage")}
+        />
       </Card>
     </div>
   );

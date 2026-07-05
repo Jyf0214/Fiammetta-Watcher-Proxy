@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Table,
   Space,
   Tag,
   Form,
@@ -16,6 +15,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -298,20 +298,18 @@ export default function PlatformsPage() {
           </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table
-            columns={columns}
-            dataSource={platforms}
-            rowKey="id"
-            loading={loading}
-            aria-label={t("admin.platforms")}
-            pagination={{
-              pageSize: 20,
-              showTotal: (total) => t("common.pagination_total", { count: total }),
-            }}
-            scroll={{ x: 900 }}
-          />
-        </div>
+        <ResponsiveTable
+          columns={columns}
+          dataSource={platforms}
+          rowKey="id"
+          loading={loading}
+          aria-label={t("admin.platforms")}
+          pagination={{
+            pageSize: 20,
+            showTotal: (total) => t("common.pagination_total", { count: total }),
+          }}
+          scroll={{ x: 900 }}
+        />
       </Card>
 
       {/* 内联创建/编辑表单 */}
