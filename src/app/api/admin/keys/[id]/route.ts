@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { serializeBigInt } from "@/lib/serialize";
+import { isDebug } from "@/lib/auth-helpers";
 
 /**
  * PUT /api/admin/keys/[id] — 更新 API Key 属性
@@ -192,6 +193,10 @@ export async function DELETE(
         { success: false, error: "API Key 不存在" },
         { status: 404 }
       );
+    }
+
+    if (isDebug) {
+      console.log("[DEBUG] 删除 API Key:", { id, name: existing.name });
     }
 
     // 检查关联的请求日志数量

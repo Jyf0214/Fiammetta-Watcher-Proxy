@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshRouterCache } from "@/lib/router";
 import { validateUrlSafe } from "@/lib/url-validation";
+import { isDebug } from "@/lib/auth-helpers";
 
 /**
  * PUT /api/admin/platforms/[id] — 更新平台
@@ -84,6 +85,10 @@ export async function PUT(
         { success: false, error: "平台不存在" },
         { status: 404 }
       );
+    }
+
+    if (isDebug) {
+      console.log("[DEBUG] 更新平台:", { id, name: existing.name, changes: Object.keys(body) });
     }
 
     // 构建更新数据
@@ -176,6 +181,10 @@ export async function DELETE(
         },
         { status: 400 }
       );
+    }
+
+    if (isDebug) {
+      console.log("[DEBUG] 删除平台:", { id });
     }
 
     await prisma.platform.delete({ where: { id } });

@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { serializeBigInt } from "@/lib/serialize";
+import { isDebug } from "@/lib/auth-helpers";
 import crypto from "crypto";
 
 /**
@@ -125,6 +126,10 @@ export async function POST(request: NextRequest) {
 
     // 生成唯一 Key
     const key = `sk-${crypto.randomBytes(24).toString("hex")}`;
+
+    if (isDebug) {
+      console.log("[DEBUG] 创建 API Key:", { name, planId, quota, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt });
+    }
 
     const apiKey = await prisma.apiKey.create({
       data: {

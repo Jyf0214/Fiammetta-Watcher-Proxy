@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshRouterCache } from "@/lib/router";
 import { validateUrlSafe } from "@/lib/url-validation";
+import { isDebug } from "@/lib/auth-helpers";
 
 /**
  * 验证管理员身份的通用守卫
@@ -152,6 +153,10 @@ export async function POST(request: NextRequest) {
     }
 
     const platformType = VALID_PLATFORM_TYPES.includes(type) ? type : "openai";
+
+    if (isDebug) {
+      console.log("[DEBUG] 创建平台:", { name, baseUrl, type: platformType, priority, weight, rpmLimit, tpmLimit });
+    }
 
     const platform = await prisma.platform.create({
       data: {
