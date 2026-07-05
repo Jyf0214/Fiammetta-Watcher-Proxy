@@ -93,6 +93,8 @@ export default function PlatformsPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
+      console.log("[PlatformsPage] 提交数据:", values);
+
       const url = editing
         ? `/api/admin/platforms/${editing.id}`
         : "/api/admin/platforms";
@@ -104,16 +106,22 @@ export default function PlatformsPage() {
         body: JSON.stringify(values),
       });
 
+      console.log("[PlatformsPage] 响应状态:", res.status);
       const data = await res.json();
+      console.log("[PlatformsPage] 响应数据:", data);
+
       if (data.success) {
         message.success(data.message);
         closeForm();
         fetchPlatforms();
       } else {
-        message.error(data.error);
+        message.error(data.error || t("common.error"));
       }
     } catch (err) {
-      if (!(err instanceof Error && err.message.includes("form"))) message.error(t("common.error"));
+      console.error("[PlatformsPage] 提交异常:", err);
+      // antd Form 校验失败不显示错误提示
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }

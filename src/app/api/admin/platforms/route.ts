@@ -71,8 +71,10 @@ export async function GET() {
  * POST /api/admin/platforms — 创建平台
  */
 export async function POST(request: NextRequest) {
+  console.log("[POST /api/admin/platforms] 收到创建请求");
   const admin = await requireAdmin();
   if (!admin) {
+    console.log("[POST /api/admin/platforms] 未授权");
     return NextResponse.json(
       { success: false, error: "未授权" },
       { status: 401 }
@@ -81,6 +83,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
+    console.log("[POST /api/admin/platforms] 请求体:", { ...body, apiKey: body.apiKey ? "***" : undefined });
     const { name, baseUrl, apiKey, type, priority, weight, rpmLimit, tpmLimit } =
       body;
 
@@ -146,6 +149,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (errors.length > 0) {
+      console.log("[POST /api/admin/platforms] 校验失败:", errors);
       return NextResponse.json(
         { success: false, error: errors.join("; ") },
         { status: 400 }
@@ -182,6 +186,8 @@ export async function POST(request: NextRequest) {
     });
 
     forceRefreshRouterCache();
+
+    console.log("[POST /api/admin/platforms] 创建成功:", { id: platform.id, name: platform.name });
 
     // 排除 apiKey 明文，避免敏感信息泄露到前端
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
