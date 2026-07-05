@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
+import { getNextKey } from "@/lib/platform-keys";
 import { checkPlatformRateLimit, recordPlatformTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import type { ChatCompletionRequest } from "@/types";
@@ -107,6 +108,15 @@ export async function POST(request: NextRequest) {
   const upstreamUrl = `${route.platform.baseUrl}/chat/completions`;
   const isStream = body.stream === true;
 
+  // 轮询选择上游 API Key
+  const upstreamKey = getNextKey(route.platform);
+  if (!upstreamKey) {
+    return Response.json(
+      { error: { message: "平台没有可用的 API Key", type: "server_error" } },
+      { status: 503 }
+    );
+  }
+
   // 请求时无法预知流式响应的 token 数，因此 tokenCount 保持默认值 0，
   // 这是流式响应的固有限制——token 用量只能在流结束后从 usage chunk 中提取。
   const controller = new AbortController();
@@ -120,7 +130,7 @@ export async function POST(request: NextRequest) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${route.platform.apiKey}`,
+          Authorization: `Bearer ${upstreamKey}`,
         },
         body: JSON.stringify({
           ...body,

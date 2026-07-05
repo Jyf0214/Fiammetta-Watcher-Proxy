@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshRouterCache } from "@/lib/router";
 import { validateUrlSafe } from "@/lib/url-validation";
+import { serializeApiKeys } from "@/lib/platform-keys";
 import { isDebug } from "@/lib/auth-helpers";
 
 /**
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     console.log("[POST /api/admin/platforms] 请求体:", { ...body, apiKey: body.apiKey ? "***" : undefined });
-    const { name, baseUrl, apiKey, type, priority, weight, rpmLimit, tpmLimit } =
+    const { name, baseUrl, apiKey, apiKeys, type, priority, weight, rpmLimit, tpmLimit } =
       body;
 
     // 输入校验
@@ -114,6 +115,30 @@ export async function POST(request: NextRequest) {
 
     if (apiKey && typeof apiKey === "string" && apiKey.length > 500) {
       errors.push("API Key 不能超过 500 个字符");
+    }
+
+    // apiKeys 验证：JSON 数组格式，每个密钥不超过 500 字符
+    let parsedApiKeys: string[] = [];
+    if (apiKeys !== undefined && apiKeys !== null && apiKeys !== "") {
+      if (typeof apiKeys !== "string") {
+        errors.push("附加密钥必须为字符串数组格式");
+      } else {
+        try {
+          const parsed = JSON.parse(apiKeys);
+          if (!Array.isArray(parsed)) {
+            errors.push("附加密钥必须为数组格式");
+          } else {
+            parsedApiKeys = parsed.filter((k: unknown): k is string =>
+              typeof k === "string" && k.trim().length > 0 && k.length <= 500
+            );
+            if (parsedApiKeys.length !== parsed.length) {
+              errors.push("部分附加密钥格式无效或超过 500 字符，已自动过滤");
+            }
+          }
+        } catch {
+          errors.push("附加密钥 JSON 格式错误");
+        }
+      }
     }
 
     const VALID_PLATFORM_TYPES = ["openai", "azure", "custom"] as const;
@@ -167,6 +192,7 @@ export async function POST(request: NextRequest) {
         name,
         baseUrl,
         apiKey,
+        apiKeys: serializeApiKeys(parsedApiKeys),
         type: platformType,
         priority: priority ?? 0,
         weight: weight ?? 1,

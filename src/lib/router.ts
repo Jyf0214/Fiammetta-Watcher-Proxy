@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { checkAndUpdateCircuitBreakerState, incrementHalfOpenPending, cleanupStaleBreakers } from "./circuit-breaker";
+import { parseApiKeys } from "./platform-keys";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 
 // 内存缓存，避免每次请求都查数据库
@@ -49,6 +50,7 @@ async function doRefresh() {
     name: p.name,
     baseUrl: p.baseUrl,
     apiKey: p.apiKey,
+    apiKeys: parseApiKeys(p.apiKeys),
     type: p.type as PlatformConfig["type"],
     enabled: p.enabled,
     priority: p.priority,

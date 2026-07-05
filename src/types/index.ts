@@ -9,6 +9,8 @@ export interface PlatformConfig {
   name: string;
   baseUrl: string;
   apiKey: string;
+  /** 附加密钥 JSON 数组，与主密钥一起轮询 */
+  apiKeys: string[];
   type: PlatformType;
   enabled: boolean;
   priority: number;

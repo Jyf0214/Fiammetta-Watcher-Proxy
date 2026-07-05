@@ -31,7 +31,8 @@ model Platform {
   id           String   @id @default(cuid())
   name         String
   baseUrl      String
-  apiKey       String
+  apiKey       String   // 主密钥
+  apiKeys      String   @default("[]") // 附加密钥（JSON 数组），与主密钥一起轮询
   type         String   @default("openai") // openai | azure | custom
   enabled      Boolean  @default(true)
   priority     Int      @default(0) // 数值越大优先级越高

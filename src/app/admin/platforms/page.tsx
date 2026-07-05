@@ -26,6 +26,7 @@ interface Platform {
   name: string;
   baseUrl: string;
   apiKey: string;
+  apiKeys: string;
   type: string;
   enabled: boolean;
   priority: number;
@@ -78,7 +79,19 @@ export default function PlatformsPage() {
 
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
-    form.setFieldsValue(platform);
+    // 将 apiKeys JSON 数组转换为换行文本（供 Textarea 显示）
+    let apiKeysText = "";
+    if (platform.apiKeys) {
+      try {
+        const parsed = JSON.parse(platform.apiKeys);
+        if (Array.isArray(parsed)) {
+          apiKeysText = parsed.join("\n");
+        }
+      } catch {
+        // JSON 解析失败，忽略
+      }
+    }
+    form.setFieldsValue({ ...platform, apiKeys: apiKeysText });
     setFormVisible(true);
   };
 
@@ -93,7 +106,16 @@ export default function PlatformsPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
-      console.log("[PlatformsPage] 提交数据:", values);
+      // 将附加密钥文本行转换为 JSON 数组
+      if (typeof values.apiKeys === "string") {
+        const lines = values.apiKeys
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.length > 0);
+        values.apiKeys = JSON.stringify(lines);
+      }
+
+      console.log("[PlatformsPage] 提交数据:", { ...values, apiKey: values.apiKey ? "***" : undefined });
 
       const url = editing
         ? `/api/admin/platforms/${editing.id}`
@@ -360,6 +382,17 @@ export default function PlatformsPage() {
               >
                 <Input.Password
                   placeholder={editing ? t("platform.api_key_edit_hint") : undefined}
+                />
+              </Form.Item>
+              <Form.Item
+                name="apiKeys"
+                label={t("platform.additional_keys") || "附加密钥"}
+                tooltip={t("platform.additional_keys_tip") || "每行一个密钥，用于轮询负载均衡"}
+              >
+                <Input.TextArea
+                  rows={3}
+                  placeholder={t("platform.additional_keys_placeholder") || "每行一个密钥（可选）"}
+                  className="font-mono text-xs"
                 />
               </Form.Item>
               <Form.Item

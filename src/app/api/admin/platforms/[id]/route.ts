@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshRouterCache } from "@/lib/router";
 import { validateUrlSafe } from "@/lib/url-validation";
+import { serializeApiKeys } from "@/lib/platform-keys";
 import { isDebug } from "@/lib/auth-helpers";
 
 /**
@@ -108,6 +109,25 @@ export async function PUT(
       updateData.apiKey = existing.apiKey;
     } else {
       updateData.apiKey = body.apiKey;
+    }
+
+    // apiKeys 在编辑时可选（不提供则保留原值）
+    if (body.apiKeys !== undefined && body.apiKeys !== null) {
+      if (body.apiKeys === "") {
+        updateData.apiKeys = "[]";
+      } else if (typeof body.apiKeys === "string") {
+        try {
+          const parsed = JSON.parse(body.apiKeys);
+          if (Array.isArray(parsed)) {
+            const validKeys = parsed.filter((k: unknown): k is string =>
+              typeof k === "string" && k.trim().length > 0 && k.length <= 500
+            );
+            updateData.apiKeys = serializeApiKeys(validKeys);
+          }
+        } catch {
+          // JSON 解析失败，保留原值
+        }
+      }
     }
 
     const platform = await prisma.platform.update({
