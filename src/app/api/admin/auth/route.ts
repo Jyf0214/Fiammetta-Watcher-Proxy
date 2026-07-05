@@ -9,6 +9,7 @@ import {
   getAdminFromRequest,
 } from "@/lib/auth";
 import { isDebug } from "@/lib/auth-helpers";
+import { pbkdf2Sync } from "crypto";
 
 // ---------- 登录速率限制（内存实现） ----------
 
@@ -127,21 +128,27 @@ export async function POST(request: NextRequest) {
 
     // DEBUG 模式：打印密码哈希对比（服务器控制台）
     if (isDebug) {
-      const inputHash = await hashPassword(password);
       const envPassword = process.env.ADMIN_PASSWORD;
-      const envHash = envPassword ? await hashPassword(envPassword) : null;
-      console.log("[DEBUG] ===== 密码哈希对比 =====");
-      console.log("[DEBUG] 输入密码哈希:", inputHash);
-      console.log("[DEBUG] 数据库保留哈希:", admin.passwordHash);
-      console.log("[DEBUG] 环境变量密码哈希:", envHash || "未配置 ADMIN_PASSWORD");
+      // 从数据库哈希中提取盐值
+      const [dbSalt, dbHash] = admin.passwordHash.split(":");
+      // 用数据库的盐值重新计算输入密码的哈希
+      const recomputedHash = pbkdf2Sync(password, dbSalt, 600000, 64, "sha256").toString("hex");
+      // 用数据库的盐值重新计算环境变量密码的哈希
+      const envRecomputedHash = envPassword ? pbkdf2Sync(envPassword, dbSalt, 600000, 64, "sha256").toString("hex") : null;
+
+      console.log("[DEBUG] ===== 密码对比诊断 =====");
+      console.log("[DEBUG] 数据库盐值:", dbSalt);
+      console.log("[DEBUG] 数据库存储哈希:", dbHash);
+      console.log("[DEBUG] 用数据库盐值重算输入密码哈希:", recomputedHash);
+      console.log("[DEBUG] 输入密码哈希与数据库匹配:", recomputedHash === dbHash ? "✅ 匹配" : "❌ 不匹配");
+      if (envRecomputedHash) {
+        console.log("[DEBUG] 用数据库盐值重算环境变量密码哈希:", envRecomputedHash);
+        console.log("[DEBUG] 环境变量密码哈希与数据库匹配:", envRecomputedHash === dbHash ? "✅ 匹配" : "❌ 不匹配");
+      }
       console.log("[DEBUG] ===========================");
     }
 
     const valid = await verifyPassword(password, admin.passwordHash);
-
-    if (isDebug) {
-      console.log("[DEBUG] 密码验证结果:", valid ? "✅ 通过" : "❌ 失败");
-    }
 
     if (!valid) {
       recordLoginFailure(clientIp);
