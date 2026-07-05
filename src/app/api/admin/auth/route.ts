@@ -129,11 +129,10 @@ export async function POST(request: NextRequest) {
     if (isDebug) {
       const inputHash = await hashPassword(password);
       const envPassword = process.env.ADMIN_PASSWORD;
-      const envHash = envPassword ? await hashPassword(envPassword) : null;
       console.log("[DEBUG] ===== 密码哈希对比 =====");
       console.log("[DEBUG] 输入密码哈希:", inputHash);
       console.log("[DEBUG] 数据库保留哈希:", admin.passwordHash);
-      console.log("[DEBUG] 环境变量密码哈希:", envHash || "未配置 ADMIN_PASSWORD");
+      console.log("[DEBUG] 环境变量密码原文:", envPassword || "未配置 ADMIN_PASSWORD");
       console.log("[DEBUG] ===========================");
     }
 
