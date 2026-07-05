@@ -9,6 +9,8 @@ import {
   getAdminFromRequest,
 } from "@/lib/auth";
 
+const isDebug = process.env.LOGIN_DEBUG === "true";
+
 // ---------- 登录速率限制（内存实现） ----------
 
 interface LoginAttemptEntry {
@@ -119,6 +121,16 @@ export async function POST(request: NextRequest) {
       where: { username },
     });
 
+    if (isDebug) {
+      console.log("[LOGIN_DEBUG] 管理员查询结果:", {
+        username,
+        found: !!admin,
+        adminId: admin?.id,
+        hashPrefix: admin?.passwordHash?.substring(0, 40) || "N/A",
+        hashLength: admin?.passwordHash?.length || 0,
+      });
+    }
+
     if (!admin) {
       // 虚拟哈希计算，防止时序侧信道攻击（使不存在用户名的响应时间与存在用户名一致）
       await hashPassword("dummy");
@@ -130,7 +142,19 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证密码（仅与数据库哈希对比）
+    if (isDebug) {
+      console.log("[LOGIN_DEBUG] 开始密码验证:", {
+        passwordLength: password.length,
+        storedHashPrefix: admin.passwordHash.substring(0, 40) + "...",
+        storedHashLength: admin.passwordHash.length,
+      });
+    }
+
     const valid = await verifyPassword(password, admin.passwordHash);
+
+    if (isDebug) {
+      console.log("[LOGIN_DEBUG] 密码验证结果:", { valid });
+    }
 
     if (!valid) {
       recordLoginFailure(clientIp);
@@ -156,12 +180,34 @@ export async function POST(request: NextRequest) {
     const resetFlag = await prisma.config.findUnique({
       where: { key: "admin_reset_password" },
     });
+
+    if (isDebug) {
+      console.log("[LOGIN_DEBUG] 密码重置标志状态:", {
+        hasFlag: !!resetFlag,
+        flagValue: resetFlag?.value,
+        envUsername: process.env.ADMIN_USERNAME ? "已配置" : "未配置",
+        envPassword: process.env.ADMIN_PASSWORD ? "已配置" : "未配置",
+        adminUsername: admin.username,
+        usernameMatch: process.env.ADMIN_USERNAME === admin.username,
+      });
+    }
+
     if (resetFlag && resetFlag.value === "pending") {
       const envUsername = process.env.ADMIN_USERNAME;
       const envPassword = process.env.ADMIN_PASSWORD;
       if (envPassword && envUsername && admin.username === envUsername) {
         try {
           const newHash = await hashPassword(envPassword);
+
+          if (isDebug) {
+            console.log("[LOGIN_DEBUG] 密码重置处理:", {
+              oldHashPrefix: admin.passwordHash.substring(0, 40) + "...",
+              newHashPrefix: newHash.substring(0, 40) + "...",
+              envPasswordLength: envPassword.length,
+              passwordMatch: envPassword === password,
+            });
+          }
+
           await prisma.admin.update({
             where: { id: admin.id },
             data: { passwordHash: newHash },
