@@ -9,8 +9,6 @@ import {
   getAdminFromRequest,
 } from "@/lib/auth";
 
-const isDebug = process.env.LOGIN_DEBUG === "true";
-
 // ---------- 登录速率限制（内存实现） ----------
 
 interface LoginAttemptEntry {
@@ -35,7 +33,6 @@ function cleanupLoginAttempts() {
 }
 
 // 定期清理防止内存泄漏
-// 注意：Next.js Route Handler 模块可能被多次加载，使用全局变量确保只创建一个定时器
 const globalForLoginCleanup = globalThis as unknown as { __loginCleanupTimer?: ReturnType<typeof setInterval> };
 if (!globalForLoginCleanup.__loginCleanupTimer) {
   globalForLoginCleanup.__loginCleanupTimer = setInterval(cleanupLoginAttempts, LOGIN_CLEANUP_INTERVAL);
@@ -55,7 +52,6 @@ function checkLoginRateLimit(ip: string): NextResponse | null {
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
-  // 窗口已过期，重置
   if (!entry || now - entry.windowStart >= LOGIN_WINDOW_MS) {
     loginAttempts.set(ip, { count: 0, windowStart: now });
     return null;
@@ -100,7 +96,6 @@ export async function POST(request: NextRequest) {
   try {
     const clientIp = getClientIp(request);
 
-    // 速率限制检查
     const rateLimitResponse = checkLoginRateLimit(clientIp);
     if (rateLimitResponse) {
       return rateLimitResponse;
@@ -116,23 +111,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 查找管理员
     const admin = await prisma.admin.findUnique({
       where: { username },
     });
 
-    if (isDebug) {
-      console.log("[LOGIN_DEBUG] 管理员查询结果:", {
-        username,
-        found: !!admin,
-        adminId: admin?.id,
-        hashPrefix: admin?.passwordHash?.substring(0, 40) || "N/A",
-        hashLength: admin?.passwordHash?.length || 0,
-      });
-    }
-
     if (!admin) {
-      // 虚拟哈希计算，防止时序侧信道攻击（使不存在用户名的响应时间与存在用户名一致）
       await hashPassword("dummy");
       recordLoginFailure(clientIp);
       return NextResponse.json(
@@ -141,25 +124,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 验证密码（仅与数据库哈希对比）
-    if (isDebug) {
-      console.log("[LOGIN_DEBUG] 开始密码验证:", {
-        passwordLength: password.length,
-        storedHashPrefix: admin.passwordHash.substring(0, 40) + "...",
-        storedHashLength: admin.passwordHash.length,
-      });
-    }
-
     const valid = await verifyPassword(password, admin.passwordHash);
-
-    if (isDebug) {
-      console.log("[LOGIN_DEBUG] 密码验证结果:", { valid });
-    }
 
     if (!valid) {
       recordLoginFailure(clientIp);
-
-      // 记录失败审计日志（含 IP）
       await prisma.auditLog.create({
         data: {
           adminId: admin.id,
@@ -168,29 +136,16 @@ export async function POST(request: NextRequest) {
           ip: clientIp,
         },
       });
-
       return NextResponse.json(
         { success: false, error: "用户名或密码错误" },
         { status: 401 }
       );
     }
 
-    // 密码验证通过后，处理密码重置标志：检测到 pending 标志时，用正确算法重新哈希密码并更新
-    // 安全检查：必须同时匹配环境变量中的 ADMIN_USERNAME，防止误操作
+    // 密码验证通过后，处理密码重置标志
     const resetFlag = await prisma.config.findUnique({
       where: { key: "admin_reset_password" },
     });
-
-    if (isDebug) {
-      console.log("[LOGIN_DEBUG] 密码重置标志状态:", {
-        hasFlag: !!resetFlag,
-        flagValue: resetFlag?.value,
-        envUsername: process.env.ADMIN_USERNAME ? "已配置" : "未配置",
-        envPassword: process.env.ADMIN_PASSWORD ? "已配置" : "未配置",
-        adminUsername: admin.username,
-        usernameMatch: process.env.ADMIN_USERNAME === admin.username,
-      });
-    }
 
     if (resetFlag && resetFlag.value === "pending") {
       const envUsername = process.env.ADMIN_USERNAME;
@@ -198,16 +153,6 @@ export async function POST(request: NextRequest) {
       if (envPassword && envUsername && admin.username === envUsername) {
         try {
           const newHash = await hashPassword(envPassword);
-
-          if (isDebug) {
-            console.log("[LOGIN_DEBUG] 密码重置处理:", {
-              oldHashPrefix: admin.passwordHash.substring(0, 40) + "...",
-              newHashPrefix: newHash.substring(0, 40) + "...",
-              envPasswordLength: envPassword.length,
-              passwordMatch: envPassword === password,
-            });
-          }
-
           await prisma.admin.update({
             where: { id: admin.id },
             data: { passwordHash: newHash },
@@ -220,7 +165,6 @@ export async function POST(request: NextRequest) {
           console.error("[auth] 密码重置处理失败:", e);
         }
       } else {
-        // 用户名不匹配或环境变量未配置，跳过重置并删除标志，避免无限循环触发
         console.warn("[auth] 密码重置标志存在但环境变量不匹配或未配置，跳过重置");
         await prisma.config.delete({
           where: { key: "admin_reset_password" },
@@ -228,19 +172,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 登录成功，重置该 IP 的失败计数
     clearLoginFailures(clientIp);
 
-    // 生成 Token
     const token = generateToken({
       adminId: admin.id,
       username: admin.username,
     });
 
-    // 设置 Cookie
     await setAuthCookie(token);
 
-    // 记录审计日志
     await prisma.auditLog.create({
       data: {
         adminId: admin.id,
@@ -256,7 +196,6 @@ export async function POST(request: NextRequest) {
       message: "登录成功",
     });
   } catch (error) {
-    // 仅输出错误信息，避免泄露完整堆栈
     console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(
       {
