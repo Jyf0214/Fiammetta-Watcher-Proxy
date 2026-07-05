@@ -9,6 +9,8 @@ const SALT_LENGTH = 16;
 const HASH_ITERATIONS = 600000;
 const KEY_LENGTH = 64;
 
+export const isDebug = process.env.DEBUG === "true";
+
 /**
  * 哈希密码（带盐值）
  * 密码最大长度限制为 128 字节，防止超长密码在 PBKDF2 高迭代次数下消耗过多 CPU（DoS 防护）

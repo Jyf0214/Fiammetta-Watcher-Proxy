@@ -8,6 +8,7 @@ import {
   verifyPassword,
   getAdminFromRequest,
 } from "@/lib/auth";
+import { isDebug } from "@/lib/auth-helpers";
 
 // ---------- 登录速率限制（内存实现） ----------
 
@@ -122,6 +123,18 @@ export async function POST(request: NextRequest) {
         { success: false, error: "用户名或密码错误" },
         { status: 401 }
       );
+    }
+
+    // DEBUG 模式：打印密码哈希对比（服务器控制台）
+    if (isDebug) {
+      const inputHash = await hashPassword(password);
+      const envPassword = process.env.ADMIN_PASSWORD;
+      const envHash = envPassword ? await hashPassword(envPassword) : null;
+      console.log("[DEBUG] ===== 密码哈希对比 =====");
+      console.log("[DEBUG] 输入密码哈希:", inputHash);
+      console.log("[DEBUG] 数据库保留哈希:", admin.passwordHash);
+      console.log("[DEBUG] 环境变量密码哈希:", envHash || "未配置 ADMIN_PASSWORD");
+      console.log("[DEBUG] ===========================");
     }
 
     const valid = await verifyPassword(password, admin.passwordHash);
