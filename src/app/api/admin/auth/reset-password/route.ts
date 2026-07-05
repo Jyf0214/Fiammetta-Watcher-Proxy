@@ -7,6 +7,20 @@ const resetAttempts = new Map<string, { count: number; resetAt: number }>();
 const RESET_RATE_LIMIT = 3;
 const RESET_RATE_WINDOW = 24 * 60 * 60 * 1000; // 24小时
 
+// 定期清理过期条目，防止内存泄漏
+// 使用全局变量确保只创建一个定时器
+const globalForResetCleanup = globalThis as unknown as { __resetCleanupTimer?: ReturnType<typeof setInterval> };
+if (!globalForResetCleanup.__resetCleanupTimer) {
+  globalForResetCleanup.__resetCleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [adminId, entry] of resetAttempts.entries()) {
+      if (now > entry.resetAt) {
+        resetAttempts.delete(adminId);
+      }
+    }
+  }, 60 * 60 * 1000); // 每小时清理一次
+}
+
 function checkResetRateLimit(adminId: string): boolean {
   const now = Date.now();
   const entry = resetAttempts.get(adminId);
@@ -125,8 +139,8 @@ export async function POST() {
       message: "密码重置标志已写入，服务将在下次启动时自动更新密码",
     });
   } catch (error) {
-    // 服务端记录错误详情，不向客户端泄露
-    console.error("密码重置请求处理异常:", error);
+    // 服务端记录错误详情，不向客户端泄露，仅输出错误信息避免泄露堆栈
+    console.error("密码重置请求处理异常:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(
       {
         success: false,

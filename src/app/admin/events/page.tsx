@@ -23,11 +23,13 @@ export default function EventsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  const fetchEvents = async () => {
+  // 修复：将 fetchEvents 提取为独立函数，供 useEffect 和按钮 onClick 共用
+  const fetchEvents = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/admin/logs?type=events&page=${page}&pageSize=20`
+        `/api/admin/logs?type=events&page=${page}&pageSize=20`,
+        { signal }
       );
       const data = await res.json();
       if (data.success) {
@@ -35,16 +37,22 @@ export default function EventsPage() {
         if (data.data) setTotal(data.data.total);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("获取系统事件失败:", err);
       message.error(t("common.error"));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchEvents();
+    fetchEvents(controller.signal);
+    return () => controller.abort();
   }, [page]);
 
   const levelColorMap: Record<string, string> = {

@@ -156,6 +156,7 @@ export function verifyToken(token: string): AdminPayload | null {
       algorithms: ["HS256"],
     }) as AdminPayload;
   } catch {
+    // Token 验证失败（过期、签名无效等），返回 null 表示未认证
     return null;
   }
 }

@@ -48,23 +48,30 @@ export default function KeysPage() {
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
 
-  const fetchKeys = async () => {
+  // 修复：将 fetchKeys 提取为独立函数，供 useEffect 和操作回调共用
+  const fetchKeys = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/keys");
+      const res = await fetch("/api/admin/keys", { signal });
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) setKeys(data.data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("获取数据失败:", err);
       message.error(t("common.error"));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchKeys();
+    fetchKeys(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const handleSubmit = async () => {

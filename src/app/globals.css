@@ -389,9 +389,6 @@ article header h1 {
 }
 
 /* Tag 标签 */
-.dark .ant-tag {
-  border-color: #3f3f46;
-}
 .dark .ant-tag-default {
   background: #27272a;
   border-color: #3f3f46;

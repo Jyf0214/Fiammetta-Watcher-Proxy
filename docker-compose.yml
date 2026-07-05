@@ -11,10 +11,10 @@ services:
       - NODE_ENV=production
       - PORT=${PORT:-3000}
       - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-fiammetta_proxy}}
-      # 必须设置 JWT_SECRET，否则管理后台无法使用
+      # JWT 密钥：必须设置，否则管理后台将自动禁用（限制运行模式）
       - JWT_SECRET=${JWT_SECRET:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      # 必须设置 ADMIN_PASSWORD，否则管理员无法登录
+      # 管理员密码：必须设置，否则管理员无法登录（系统进入限制模式，前端仍可正常访问）
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}

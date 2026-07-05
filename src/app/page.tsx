@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { motion } from "motion/react";
 import {
   Zap,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
+import { useThemeMode } from "@/hooks/use-theme-mode";
 import "@/lib/i18n";
 
 const quickStartCode = `import OpenAI from 'openai';
@@ -37,17 +37,8 @@ for await (const chunk of response) {
 
 export default function HomePage() {
   const { t } = useTranslation();
-
-  // 深色模式初始化：从 localStorage 读取主题偏好，或跟随系统偏好
-  useEffect(() => {
-    const stored = localStorage.getItem("theme-mode");
-    if (
-      stored === "dark" ||
-      (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)
-    ) {
-      document.documentElement.classList.add("dark");
-    }
-  }, []);
+  // 修复：使用 useThemeMode() hook 统一深色模式管理，支持 light/dark/system 三态
+  useThemeMode();
 
   const features = [
     {

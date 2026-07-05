@@ -13,6 +13,8 @@ const ADMIN_RATE_WINDOW = 60_000;
  */
 function checkAdminRateLimit(ip: string): boolean {
   const now = Date.now();
+  // 先清理过期条目，避免延迟清理导致的内存积累
+  cleanupAdminRateLimit();
   const entry = adminRateLimit.get(ip);
   if (!entry || now > entry.resetAt) {
     adminRateLimit.set(ip, { count: 1, resetAt: now + ADMIN_RATE_WINDOW });
@@ -103,7 +105,7 @@ export function proxy(request: NextRequest) {
         request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
         request.headers.get("x-real-ip") ||
         "unknown";
-      cleanupAdminRateLimit();
+      // 先检查速率限制，再清理过期条目，防止清理后立即创建新条目绕过限制
       if (!checkAdminRateLimit(clientIp)) {
         return NextResponse.json(
           { success: false, error: "请求过于频繁，请稍后再试" },

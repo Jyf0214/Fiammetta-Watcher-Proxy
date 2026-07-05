@@ -14,9 +14,10 @@ export type ShortcutMap = Record<string, () => void>;
 export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
   const shortcutsRef = useRef(shortcuts);
 
+  // 修复：添加 shortcuts 依赖数组，避免每次渲染都执行
   useEffect(() => {
     shortcutsRef.current = shortcuts;
-  });
+  }, [shortcuts]);
 
   const handler = useCallback((e: KeyboardEvent) => {
     // 忽略 ctrl/meta/alt 组合键

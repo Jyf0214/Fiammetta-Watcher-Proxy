@@ -21,9 +21,7 @@ const loginAttempts = new Map<string, LoginAttemptEntry>();
 
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 分钟
-
-/** 过期清理定时器 */
-const LOGIN_CLEANUP_INTERVAL = 60_000;
+const LOGIN_CLEANUP_INTERVAL = 60_000; // 清理间隔
 
 function cleanupLoginAttempts() {
   const now = Date.now();
@@ -35,7 +33,11 @@ function cleanupLoginAttempts() {
 }
 
 // 定期清理防止内存泄漏
-setInterval(cleanupLoginAttempts, LOGIN_CLEANUP_INTERVAL);
+// 注意：Next.js Route Handler 模块可能被多次加载，使用全局变量确保只创建一个定时器
+const globalForLoginCleanup = globalThis as unknown as { __loginCleanupTimer?: ReturnType<typeof setInterval> };
+if (!globalForLoginCleanup.__loginCleanupTimer) {
+  globalForLoginCleanup.__loginCleanupTimer = setInterval(cleanupLoginAttempts, LOGIN_CLEANUP_INTERVAL);
+}
 
 /** 从请求中提取客户端 IP */
 function getClientIp(request: NextRequest): string {
@@ -150,12 +152,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 密码验证通过后，处理密码重置标志：检测到 pending 标志时，用正确算法重新哈希密码并更新
+    // 安全检查：必须同时匹配环境变量中的 ADMIN_USERNAME，防止误操作
     const resetFlag = await prisma.config.findUnique({
       where: { key: "admin_reset_password" },
     });
     if (resetFlag && resetFlag.value === "pending") {
+      const envUsername = process.env.ADMIN_USERNAME;
       const envPassword = process.env.ADMIN_PASSWORD;
-      if (envPassword) {
+      if (envPassword && envUsername && admin.username === envUsername) {
         try {
           const newHash = await hashPassword(envPassword);
           await prisma.admin.update({
@@ -169,6 +173,12 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           console.error("[auth] 密码重置处理失败:", e);
         }
+      } else {
+        // 用户名不匹配或环境变量未配置，跳过重置并删除标志，避免无限循环触发
+        console.warn("[auth] 密码重置标志存在但环境变量不匹配或未配置，跳过重置");
+        await prisma.config.delete({
+          where: { key: "admin_reset_password" },
+        });
       }
     }
 
@@ -200,7 +210,8 @@ export async function POST(request: NextRequest) {
       message: "登录成功",
     });
   } catch (error) {
-    console.error("[auth] 登录异常:", error);
+    // 仅输出错误信息，避免泄露完整堆栈
+    console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(
       {
         success: false,

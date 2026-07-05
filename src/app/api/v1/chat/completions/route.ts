@@ -163,7 +163,8 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (logError) {
-        console.error("[chat/completions] 记录上游错误日志失败:", logError);
+        // 仅输出错误信息，避免泄露完整堆栈
+        console.error("[chat/completions] 记录上游错误日志失败:", logError instanceof Error ? logError.message : String(logError));
       }
 
       // 安全处理上游返回的内容：尝试解析为 JSON，失败则包装为 JSON 错误响应
@@ -310,7 +311,8 @@ export async function POST(request: NextRequest) {
             }
           } catch (dbError) {
             // 数据库操作失败时仅记录错误，不中断流的正常关闭
-            console.error("[chat/completions] flush 阶段数据库操作失败:", dbError);
+            // 仅输出错误信息，避免泄露完整堆栈
+            console.error("[chat/completions] flush 阶段数据库操作失败:", dbError instanceof Error ? dbError.message : String(dbError));
           }
         },
       });

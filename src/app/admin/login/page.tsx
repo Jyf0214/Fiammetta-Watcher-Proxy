@@ -28,7 +28,23 @@ export default function AdminLoginPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // 剪贴板 API 不可用时静默失败
+      // 修复：复制失败时提供反馈
+      try {
+        // 回退方案：使用 textarea 选择复制
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // 最终回退：显示提示信息
+        message.error(t("common.copy_failed") || "复制失败，请手动复制");
+      }
     }
   };
 

@@ -40,35 +40,44 @@ export default function ModelsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchModels = async () => {
+  // 修复：将 fetchModels 提取为独立函数，供 useEffect 和操作回调共用
+  const fetchModels = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/models");
+      const res = await fetch("/api/admin/models", { signal });
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) setModels(data.data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("获取模型列表失败:", err);
       message.error(t("common.error"));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchPlatforms = async () => {
+  // 修复：将 fetchPlatforms 提取为独立函数
+  const fetchPlatforms = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/admin/platforms");
+      const res = await fetch("/api/admin/platforms", { signal });
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("获取平台列表失败:", err);
       message.error(t("common.error"));
     }
   };
 
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchModels();
-    fetchPlatforms();
+    fetchModels(controller.signal);
+    fetchPlatforms(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const handleSubmit = async () => {

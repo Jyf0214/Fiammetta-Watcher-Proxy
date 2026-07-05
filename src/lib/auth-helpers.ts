@@ -45,6 +45,7 @@ export async function verifyPassword(
 
     return timingSafeEqual(hashBuf, computedBuf);
   } catch {
+    // 验证过程中任何异常（如格式错误）都视为验证失败，返回 false
     return false;
   }
 }

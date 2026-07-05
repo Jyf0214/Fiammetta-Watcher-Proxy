@@ -23,9 +23,10 @@ export default function SystemPage() {
   const [passwordForm] = Form.useForm();
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
-  const fetchInfo = async () => {
+  // 修复：将 fetchInfo 提取为独立函数，供 useEffect 和按钮 onClick 共用
+  const fetchInfo = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/admin/stats");
+      const res = await fetch("/api/admin/stats", { signal });
       const data = await res.json();
       if (data.success && data.data) {
         setInfo({
@@ -39,16 +40,22 @@ export default function SystemPage() {
         setLoadError(true);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("获取系统信息失败:", err);
       setLoadError(true);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchInfo();
+    fetchInfo(controller.signal);
+    return () => controller.abort();
   }, []);
 
   /** 修改密码提交处理 */

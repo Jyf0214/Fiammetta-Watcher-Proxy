@@ -16,14 +16,18 @@ const CHANGE_MAX_ATTEMPTS = 5;
 const CHANGE_WINDOW_MS = 15 * 60 * 1000; // 15 分钟
 
 /** 过期清理定时器，每 60 秒清理一次过期条目，防止内存泄漏 */
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of changeAttempts.entries()) {
-    if (now - entry.windowStart >= CHANGE_WINDOW_MS) {
-      changeAttempts.delete(ip);
+// 使用全局变量确保只创建一个定时器，避免 Next.js 模块热重载导致的定时器累积
+const globalForChangeCleanup = globalThis as unknown as { __changeCleanupTimer?: ReturnType<typeof setInterval> };
+if (!globalForChangeCleanup.__changeCleanupTimer) {
+  globalForChangeCleanup.__changeCleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of changeAttempts.entries()) {
+      if (now - entry.windowStart >= CHANGE_WINDOW_MS) {
+        changeAttempts.delete(ip);
+      }
     }
-  }
-}, 60_000);
+  }, 60_000);
+}
 
 /** 从请求中提取客户端 IP */
 function getClientIp(request: NextRequest): string {
@@ -196,7 +200,8 @@ export async function POST(request: NextRequest) {
       message: "密码修改成功",
     });
   } catch (error) {
-    console.error("[auth] 修改密码异常:", error);
+    // 仅输出错误信息，避免泄露完整堆栈
+    console.error("[auth] 修改密码异常:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(
       { success: false, error: "密码修改失败，请稍后重试" },
       { status: 500 }

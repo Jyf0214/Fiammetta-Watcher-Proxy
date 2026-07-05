@@ -33,24 +33,30 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchStats = async () => {
-    try {
-      const res = await fetch("/api/admin/stats");
-      const data = await res.json();
-      if (data.success && data.data) {
-        setStats(data.data);
-      }
-    } catch (err) {
-      console.error("获取统计数据失败:", err);
-      message.error(t("common.error"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const controller = new AbortController();
+
+    const fetchStats = async () => {
+      try {
+        const res = await fetch("/api/admin/stats", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setStats(data.data);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("获取统计数据失败:", err);
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchStats();
+    return () => controller.abort();
   }, []);
 
   const eventColumns = [

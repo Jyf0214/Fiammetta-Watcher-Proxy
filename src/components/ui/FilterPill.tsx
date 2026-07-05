@@ -20,9 +20,10 @@ export function FilterPill({
   icon,
   className = '',
 }: FilterPillProps) {
-  const selectedStyles = 'bg-zinc-900 text-white shadow-sm';
+  // 修复：添加深色模式样式适配
+  const selectedStyles = 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900';
   const unselectedStyles =
-    'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-700';
+    'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:text-zinc-300';
 
   const classes = [
     baseStyles,

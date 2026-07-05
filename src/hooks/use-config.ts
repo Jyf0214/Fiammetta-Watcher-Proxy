@@ -76,17 +76,24 @@ export function useConfig(): {
   const [loading, setLoading] = useState(!cachedConfig);
   const [error, setError] = useState<string | null>(null);
 
+  // 修复：添加 AbortController 和 mounted 检查，防止组件卸载后调用 setState
   useEffect(() => {
     if (cachedConfig) {
       return;
     }
 
+    const controller = new AbortController();
+    let mounted = true;
+
     if (pendingPromise) {
-      pendingPromise.then(setConfig).catch(e => setError(e.message)).finally(() => setLoading(false));
-      return;
+      pendingPromise
+        .then(data => { if (mounted) setConfig(data); })
+        .catch(e => { if (mounted) setError(e.message); })
+        .finally(() => { if (mounted) setLoading(false); });
+      return () => { mounted = false; controller.abort(); };
     }
 
-    pendingPromise = fetch('/api/config')
+    pendingPromise = fetch('/api/config', { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error('无法加载配置');
         return res.json();
@@ -96,10 +103,18 @@ export function useConfig(): {
         return data;
       });
 
-    pendingPromise.then(setConfig).catch(e => setError(e.message)).finally(() => {
-      setLoading(false);
-      pendingPromise = null;
-    });
+    pendingPromise
+      .then(data => { if (mounted) setConfig(data); })
+      .catch(e => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        if (mounted) setError(e.message);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+        pendingPromise = null;
+      });
+
+    return () => { mounted = false; controller.abort(); };
   }, []);
 
   return { config, loading, error };

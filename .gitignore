@@ -48,3 +48,6 @@ docker-compose.override.yml
 .idea/
 .cursor/
 *.code-workspace
+
+# Qwen Code
+.qwen/

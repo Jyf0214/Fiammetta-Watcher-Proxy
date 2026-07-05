@@ -135,7 +135,8 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (logError) {
-        console.error("[completions] 记录上游错误日志失败:", logError);
+        // 仅输出错误信息，避免泄露完整堆栈
+        console.error("[completions] 记录上游错误日志失败:", logError instanceof Error ? logError.message : String(logError));
       }
 
       // 尝试解析上游返回的错误为 JSON，解析失败则包装为标准错误格式
@@ -278,7 +279,8 @@ export async function POST(request: NextRequest) {
             }
           } catch (dbError) {
             // 流式响应已发送给客户端，此处数据库失败只能记录日志，不能中断流
-            console.error("[completions] 流式响应 flush 阶段数据库操作失败:", dbError);
+            // 仅输出错误信息，避免泄露完整堆栈
+            console.error("[completions] 流式响应 flush 阶段数据库操作失败:", dbError instanceof Error ? dbError.message : String(dbError));
           }
         },
       });
@@ -366,7 +368,8 @@ export async function POST(request: NextRequest) {
       try {
         await recordFailure(route.platform.id);
       } catch {
-        console.error("[completions] 熔断器记录失败:", error);
+        // 仅输出错误信息，避免泄露完整堆栈
+        console.error("[completions] 熔断器记录失败:", error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -384,7 +387,8 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (logError) {
-      console.error("[completions] 错误日志写入失败:", logError);
+      // 仅输出错误信息，避免泄露完整堆栈
+      console.error("[completions] 错误日志写入失败:", logError instanceof Error ? logError.message : String(logError));
     }
 
     return Response.json(
