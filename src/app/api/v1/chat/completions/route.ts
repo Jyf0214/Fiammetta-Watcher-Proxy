@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
 import { getNextKey } from "@/lib/platform-keys";
+import { platformFetch } from "@/lib/platform-fetch";
 import { checkPlatformRateLimit, recordPlatformTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import type { ChatCompletionRequest } from "@/types";
@@ -119,14 +120,11 @@ export async function POST(request: NextRequest) {
 
   // 请求时无法预知流式响应的 token 数，因此 tokenCount 保持默认值 0，
   // 这是流式响应的固有限制——token 用量只能在流结束后从 usage chunk 中提取。
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 分钟超时
-
   let upstreamSucceeded = false;
   try {
     let upstreamResponse: Response;
     try {
-      upstreamResponse = await fetch(upstreamUrl, {
+      upstreamResponse = await platformFetch(upstreamUrl, route.platform, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -138,19 +136,16 @@ export async function POST(request: NextRequest) {
           // 流式请求强制要求上游返回 usage 数据，以便计费
           ...(isStream ? { stream_options: { include_usage: true } } : {}),
         }),
-        signal: controller.signal,
+        timeout: 120_000,
       });
     } catch (fetchError) {
-      // 区分超时中断和其他网络错误
       if (fetchError instanceof DOMException && fetchError.name === "AbortError") {
         return Response.json(
           { error: { message: "上游请求超时（2 分钟），请稍后重试", type: "timeout_error" } },
           { status: 504 }
         );
       }
-      throw fetchError; // 非超时错误继续向上抛出
-    } finally {
-      clearTimeout(timeoutId);
+      throw fetchError;
     }
 
     if (!upstreamResponse.ok) {

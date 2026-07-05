@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
 import { getNextKey } from "@/lib/platform-keys";
+import { platformFetch } from "@/lib/platform-fetch";
 import { checkPlatformRateLimit, recordPlatformTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import type { CompletionRequest } from "@/types";
@@ -105,13 +106,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 上游请求超时控制：2 分钟
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000);
-
   let upstreamSucceeded = false;
   try {
-    const upstreamResponse = await fetch(upstreamUrl, {
+    const upstreamResponse = await platformFetch(upstreamUrl, route.platform, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -123,7 +120,7 @@ export async function POST(request: NextRequest) {
         // 流式请求强制要求上游返回 usage 数据，以便计费
         ...(isStream ? { stream_options: { include_usage: true } } : {}),
       }),
-      signal: controller.signal,
+      timeout: 120_000,
     });
 
     if (!upstreamResponse.ok) {
@@ -419,7 +416,5 @@ export async function POST(request: NextRequest) {
       { error: { message: "请求上游服务失败", type: "server_error" } },
       { status: 500 }
     );
-  } finally {
-    clearTimeout(timeoutId);
   }
 }

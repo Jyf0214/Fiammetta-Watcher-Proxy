@@ -99,6 +99,8 @@
     "keys_desc": "Manage API Key creation, quota control, and access permissions",
     "models": "Model Mapping",
     "models_desc": "Manage model alias to target model mappings",
+    "proxies": "Proxies",
+    "proxies_desc": "Manage upstream proxy servers with HTTP/HTTPS/SOCKS5 support, auto health check and failover",
     "usage": "Usage Stats",
     "usage_desc": "View detailed usage statistics and performance metrics for each API Key",
     "logs": "Request Logs",
@@ -139,6 +141,23 @@
     "additional_keys": "Additional Keys",
     "additional_keys_tip": "One key per line, used for round-robin load balancing",
     "additional_keys_placeholder": "One key per line (optional)"
+  },
+  "proxy": {
+    "address": "Proxy Address",
+    "platform": "Platform",
+    "status": "Status",
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "down": "Down",
+    "banned": "Banned",
+    "fail_count": "Fail Count",
+    "create_proxy": "Add Proxy",
+    "create_success": "Proxy created successfully",
+    "delete_success": "Proxy deleted successfully",
+    "reset": "Reset",
+    "reset_success": "Reset successfully",
+    "filter_platform": "Filter by platform",
+    "select_platform": "Select platform"
   },
   "api_key": {
     "key": "API Key",

@@ -48,9 +48,30 @@ model Platform {
 
   modelMaps  ModelMap[]
   requestLogs RequestLog[]
+  proxies   Proxy[]
 
   @@index([enabled, status])
   @@map("platforms")
+}
+
+// ==================== 代理 ====================
+
+model Proxy {
+  id          String   @id @default(cuid())
+  address     String   // 格式：http://user:pass@host:port 或 socks5://host:port
+  platformId  String   // 绑定到特定平台
+  enabled     Boolean  @default(true)
+  status      String   @default("healthy") // healthy | degraded | down
+  failCount   Int      @default(0) // 连续失败次数
+  lastFailAt  DateTime?
+  cooldownEnd DateTime? // 熔断冷却结束时间（封禁 30 分钟）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  platform Platform @relation(fields: [platformId], references: [id])
+
+  @@index([platformId, enabled, status])
+  @@map("proxies")
 }
 
 // ==================== API Key ====================
