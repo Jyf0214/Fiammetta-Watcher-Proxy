@@ -89,7 +89,6 @@ export default function AdminLoginPage() {
 
       if (data.success) {
         setSuccess(data.message || t("auth.login_success"));
-        message.loading(t("auth.redirecting") || "正在跳转...", 0);
         setTimeout(() => router.push("/admin"), 800);
       } else {
         setError(data.error || t("auth.login_failed"));
