@@ -105,7 +105,7 @@ export default function KeysPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/keys?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         message.success(t("api_key.delete_success") || "删除成功");

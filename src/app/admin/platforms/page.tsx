@@ -78,7 +78,7 @@ export default function PlatformsPage() {
       setSubmitting(true);
 
       const url = editing
-        ? `/api/admin/platforms?id=${editing.id}`
+        ? `/api/admin/platforms/${editing.id}`
         : "/api/admin/platforms";
       const method = editing ? "PUT" : "POST";
 
@@ -107,7 +107,7 @@ export default function PlatformsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/platforms?id=${id}`, {
+      const res = await fetch(`/api/admin/platforms/${id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -125,7 +125,7 @@ export default function PlatformsPage() {
   const handleToggle = async (platform: Platform) => {
     try {
       setTogglingId(platform.id);
-      const res = await fetch(`/api/admin/platforms?id=${platform.id}`, {
+      const res = await fetch(`/api/admin/platforms/${platform.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !platform.enabled }),

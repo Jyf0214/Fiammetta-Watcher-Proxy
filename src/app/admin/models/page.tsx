@@ -111,7 +111,7 @@ export default function ModelsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/models?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         message.success(data.message || t("model_map.delete_success") || "删除成功");
