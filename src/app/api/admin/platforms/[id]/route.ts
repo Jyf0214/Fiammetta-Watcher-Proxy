@@ -207,8 +207,13 @@ export async function DELETE(
       console.log("[DEBUG] 删除平台:", { id });
     }
 
+    // 统计即将被级联删除的请求日志数量，确保用户知情
+    const logCount = await prisma.requestLog.count({ where: { platformId: id } });
+
     // 清理关联的请求日志，避免外键约束导致删除失败
-    await prisma.requestLog.deleteMany({ where: { platformId: id } });
+    if (logCount > 0) {
+      await prisma.requestLog.deleteMany({ where: { platformId: id } });
+    }
     await prisma.platform.delete({ where: { id } });
 
     await forceRefreshRouterCache();
@@ -224,7 +229,9 @@ export async function DELETE(
 
     return NextResponse.json({
       success: true,
-      message: "平台删除成功",
+      message: logCount > 0
+        ? `平台删除成功（同时清理了 ${logCount} 条关联请求日志）`
+        : "平台删除成功",
     });
   } catch (err) {
     console.error("[DELETE /api/admin/platforms/[id]] 删除平台失败:", err);

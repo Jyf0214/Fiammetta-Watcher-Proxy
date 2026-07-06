@@ -115,8 +115,6 @@ export default function PlatformsPage() {
         values.apiKeys = JSON.stringify(lines);
       }
 
-      console.log("[PlatformsPage] 提交数据:", { ...values, apiKey: values.apiKey ? "***" : undefined });
-
       const url = editing
         ? `/api/admin/platforms/${editing.id}`
         : "/api/admin/platforms";
@@ -128,9 +126,7 @@ export default function PlatformsPage() {
         body: JSON.stringify(values),
       });
 
-      console.log("[PlatformsPage] 响应状态:", res.status);
       const data = await res.json();
-      console.log("[PlatformsPage] 响应数据:", data);
 
       if (data.success) {
         message.success(data.message);

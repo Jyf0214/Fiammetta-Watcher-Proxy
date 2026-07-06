@@ -64,9 +64,9 @@ export default function ProxiesPage() {
     }
   };
 
-  const fetchPlatforms = async () => {
+  const fetchPlatforms = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/admin/platforms");
+      const res = await fetch("/api/admin/platforms", { signal });
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) {
         setPlatforms(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
@@ -78,7 +78,7 @@ export default function ProxiesPage() {
     const c = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProxies(c.signal);
-    fetchPlatforms();
+    fetchPlatforms(c.signal);
     return () => c.abort();
   }, [filterPlatform]);
 

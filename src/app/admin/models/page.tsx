@@ -101,8 +101,8 @@ export default function ModelsPage() {
         message.error(data.error);
       }
     } catch (err) {
-      // 表单校验失败由 antd Form 自动处理，此处只捕获网络/服务器错误
-      if (err instanceof Error && err.message.includes("validateFields")) return;
+      // antd Form 校验失败抛出含 errorFields 的对象，无需显示错误提示
+      if (err && typeof err === "object" && "errorFields" in err) return;
       message.error(t("common.error"));
     } finally {
       setSubmitting(false);

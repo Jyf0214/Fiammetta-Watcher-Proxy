@@ -19,17 +19,15 @@ export async function GET() {
     );
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  const jwtKey = process.env.JWKS_KEY || process.env.JWT_SECRET;
-
   const adminCount = await prisma.admin.count();
 
+  // 仅暴露配置是否存在，不泄露任何实际值或元信息（如密码长度、URL片段、密钥类型）
   return NextResponse.json({
     env: {
       ADMIN_USERNAME: process.env.ADMIN_USERNAME ? "已设置" : "未设置",
-      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ? "已设置（长度: " + process.env.ADMIN_PASSWORD.length + "）" : "未设置",
-      DATABASE_URL: databaseUrl ? "已设置（末尾: ..." + databaseUrl.slice(-8) + "）" : "未设置",
-      JWT_KEY: jwtKey ? "已设置（类型: " + (jwtKey.startsWith("{") ? "JSON" : jwtKey.includes("BEGIN") ? "PEM" : "字符串") + "）" : "未设置",
+      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ? "已设置" : "未设置",
+      DATABASE_URL: process.env.DATABASE_URL ? "已设置" : "未设置",
+      JWT_KEY: (process.env.JWKS_KEY || process.env.JWT_SECRET) ? "已设置" : "未设置",
     },
     adminCount,
   });
