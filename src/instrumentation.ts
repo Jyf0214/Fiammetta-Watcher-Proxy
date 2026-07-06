@@ -11,5 +11,25 @@ export async function register() {
     } catch (error) {
       console.error("[instrumentation] 管理员初始化失败:", error);
     }
+
+    // 启动代理健康检查后台服务（定期检测代理可用性，连续失败 3 次自动封禁）
+    try {
+      const { startProxyHealthChecker } = await import(
+        "./lib/proxy-health-checker"
+      );
+      startProxyHealthChecker();
+    } catch (error) {
+      console.error("[instrumentation] 代理健康检查服务启动失败:", error);
+    }
+
+    // 启动 API Key 用量自动重置调度器（根据 resetPeriod 定期归零 usedTokens）
+    try {
+      const { startApiKeyResetScheduler } = await import(
+        "./lib/api-key-reset"
+      );
+      startApiKeyResetScheduler();
+    } catch (error) {
+      console.error("[instrumentation] API Key 重置调度器启动失败:", error);
+    }
   }
 }

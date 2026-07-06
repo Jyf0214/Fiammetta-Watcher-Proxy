@@ -69,6 +69,7 @@ model Proxy {
 
   platform Platform @relation(fields: [platformId], references: [id])
 
+  @@index([platformId, enabled, status])
   @@map("proxies")
 }
 

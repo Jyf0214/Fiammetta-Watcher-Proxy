@@ -56,6 +56,16 @@ export async function PUT(
     const proxy = await prisma.proxy.update({ where: { id }, data: updateData });
     await forceRefreshProxyCache();
 
+    // 记录审计日志（与 DELETE 路由保持一致）
+    await prisma.auditLog.create({
+      data: {
+        adminId: admin.adminId,
+        action: "update_proxy",
+        detail: JSON.stringify({ proxyId: id, changes: updateData }),
+        ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
+      },
+    });
+
     return NextResponse.json({ success: true, data: proxy, message: "代理更新成功" });
   } catch (err) {
     console.error("[PUT /api/admin/proxies/[id]] 更新代理失败:", err);
