@@ -14,7 +14,7 @@ import {
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { PlusOutlined, DeleteOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -46,6 +46,10 @@ export default function ProxiesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState<string | undefined>();
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importPlatformId, setImportPlatformId] = useState<string | undefined>();
+  const [importing, setImporting] = useState(false);
   const [form] = Form.useForm();
 
   const fetchProxies = async (signal?: AbortSignal) => {
@@ -155,6 +159,41 @@ export default function ProxiesPage() {
     }
   };
 
+  const handleImport = async () => {
+    if (!importText.trim()) {
+      message.warning(t("proxy.import_empty") || "导入内容不能为空");
+      return;
+    }
+    if (!importPlatformId) {
+      message.warning(t("proxy.import_select_platform") || "请选择关联平台");
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await fetch("/api/admin/proxies/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: importText, platformId: importPlatformId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const { created, updated, parseErrors } = data.data || {};
+        const msg = `新增 ${created} 个，覆盖 ${updated} 个` + (parseErrors?.length ? `，${parseErrors.length} 行格式错误` : "");
+        message.success(msg);
+        setImportModalOpen(false);
+        setImportText("");
+        setImportPlatformId(undefined);
+        fetchProxies();
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const columns: TableColumnsType<ProxyItem> = [
     {
       title: t("proxy.address"),
@@ -246,6 +285,9 @@ export default function ProxiesPage() {
             <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchProxies()} disabled={loading}>
               {t("common.refresh")}
             </Button>
+            <Button variant="default" icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
+              {t("proxy.import") || "批量导入"}
+            </Button>
             <Button variant="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
               {t("proxy.create_proxy") || "添加代理"}
             </Button>
@@ -294,6 +336,48 @@ export default function ProxiesPage() {
             </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={t("proxy.import") || "批量导入代理"}
+        open={importModalOpen}
+        onCancel={() => { setImportModalOpen(false); setImportText(""); setImportPlatformId(undefined); }}
+        onOk={handleImport}
+        confirmLoading={importing}
+        centered
+        width={560}
+        style={{ maxWidth: "90vw" }}
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-zinc-500 dark:text-zinc-400">
+            每行一条，格式：<code className="bg-zinc-100 dark:bg-zinc-800 px-1 rounded">IP:端口:账号:密码</code>
+            <br />
+            同一 IP、端口、账号、密码的代理将被覆盖。
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("proxy.platform")}</label>
+            <Select
+              placeholder={t("proxy.select_platform") || "选择关联平台"}
+              className="w-full"
+              value={importPlatformId}
+              onChange={setImportPlatformId}
+            >
+              {platforms.map((p) => (
+                <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">代理列表</label>
+            <Input.TextArea
+              rows={10}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={"142.111.67.146:5611:user1:pass1\n10.0.0.1:1080:user2:pass2"}
+              className="font-mono text-xs"
+            />
+          </div>
+        </div>
       </Modal>
     </div>
   );

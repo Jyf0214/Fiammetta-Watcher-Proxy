@@ -158,6 +158,9 @@
     "reset": "Reset",
     "reset_success": "Reset successfully",
     "filter_platform": "Filter by platform",
+    "import": "Import",
+    "import_empty": "Import content cannot be empty",
+    "import_select_platform": "Please select a platform",
     "select_platform": "Select platform"
   },
   "api_key": {
