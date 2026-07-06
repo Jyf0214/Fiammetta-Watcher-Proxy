@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
 import { getNextKey } from "@/lib/platform-keys";
 import { platformFetch } from "@/lib/platform-fetch";
+import { extractForwardableHeaders } from "@/lib/forward-headers";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import { checkAndResetApiKey } from "@/lib/api-key-reset";
@@ -150,6 +151,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 从下游请求中提取白名单请求头，透传给上游
+  const forwardedHeaders = extractForwardableHeaders(request);
+
   let upstreamSucceeded = false;
   try {
     const upstreamResponse = await platformFetch(upstreamUrl, route.platform, {
@@ -157,6 +161,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${upstreamKey}`,
+        ...forwardedHeaders,
       },
       body: JSON.stringify({
         ...body,

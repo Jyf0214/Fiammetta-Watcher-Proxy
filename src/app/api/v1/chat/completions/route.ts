@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
 import { getNextKey } from "@/lib/platform-keys";
 import { platformFetch } from "@/lib/platform-fetch";
+import { extractForwardableHeaders } from "@/lib/forward-headers";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import { checkAndResetApiKey } from "@/lib/api-key-reset";
@@ -172,6 +173,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 从下游请求中提取白名单请求头，透传给上游
+  const forwardedHeaders = extractForwardableHeaders(request);
+
   // 请求时无法预知流式响应的 token 数，因此 tokenCount 保持默认值 0，
   // 这是流式响应的固有限制——token 用量只能在流结束后从 usage chunk 中提取。
   let upstreamSucceeded = false;
@@ -183,6 +187,7 @@ export async function POST(request: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${upstreamKey}`,
+          ...forwardedHeaders,
         },
         body: JSON.stringify({
           ...body,
