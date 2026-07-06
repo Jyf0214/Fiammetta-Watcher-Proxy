@@ -84,7 +84,9 @@ export function proxy(request: NextRequest) {
       }
 
       // Edge Runtime 无法使用 jsonwebtoken（依赖 Node.js API），
-      // 此处仅做轻量级 JWT 过期检查，完整签名验证在路由处理器的 getAdminFromRequest 中进行
+      // 此处仅做轻量级 JWT 过期检查，完整签名验证在路由处理器的 getAdminFromRequest 中进行。
+      // 【安全依赖】：每个 /api/admin/* 路由处理器必须调用 getAdminFromRequest() 进行完整签名验证，
+      // 此中间件仅作为第一道防线（快速拒绝明显过期的 token），不能替代签名验证。
       try {
         const payload = JSON.parse(base64UrlDecode(token.split(".")[1]));
         if (payload.exp && payload.exp * 1000 < Date.now()) {

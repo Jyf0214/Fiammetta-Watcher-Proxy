@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { routeRequest } from "@/lib/router";
 import { getNextKey } from "@/lib/platform-keys";
 import { platformFetch } from "@/lib/platform-fetch";
-import { checkPlatformRateLimit, recordPlatformTokens } from "@/lib/rate-limiter";
+import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import type { ChatCompletionRequest } from "@/types";
 
@@ -45,19 +45,43 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 检查调用次数限制（callLimit）
+  const effectiveCallLimit = apiKey.callLimit ?? apiKey.plan?.callLimit ?? null;
+  if (effectiveCallLimit !== null) {
+    const callCount = await prisma.requestLog.count({
+      where: { keyId: apiKey.id },
+    });
+    if (callCount >= effectiveCallLimit) {
+      return Response.json(
+        { error: { message: "API Key 调用次数已达上限", type: "invalid_request_error" } },
+        { status: 429 }
+      );
+    }
+  }
+
+  // 2. 解析请求体（先读取文本检查大小，再解析JSON）
+  let bodyText: string;
+  try {
+    bodyText = await request.text();
+  } catch {
+    return Response.json(
+      { error: { message: "读取请求体失败", type: "invalid_request_error" } },
+      { status: 400 }
+    );
+  }
+
   // 请求体大小限制（Route Handler 不受 serverActions.bodySizeLimit 影响，需手动检查）
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > 10 * 1024 * 1024) {
+  // 检查实际请求体大小，而不是依赖客户端提供的 Content-Length 头
+  if (bodyText.length > 10 * 1024 * 1024) {
     return Response.json(
       { error: { message: "请求体过大", type: "invalid_request_error" } },
       { status: 413 }
     );
   }
 
-  // 2. 解析请求体
   let body: ChatCompletionRequest;
   try {
-    body = await request.json();
+    body = JSON.parse(bodyText);
   } catch {
     return Response.json(
       { error: { message: "请求体格式错误", type: "invalid_request_error" } },
@@ -100,6 +124,30 @@ export async function POST(request: NextRequest) {
         status: 429,
         headers: {
           "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)),
+        },
+      }
+    );
+  }
+
+  // 4.1 API Key 级别速率限制检查
+  const apiKeyRateResult = checkKeyRateLimit(
+    apiKey.id,
+    apiKey.rpmLimit,
+    apiKey.tpmLimit
+  );
+
+  if (!apiKeyRateResult.allowed) {
+    return Response.json(
+      {
+        error: {
+          message: "API Key 请求速率超过限制，请稍后重试",
+          type: "rate_limit_error",
+        },
+      },
+      {
+        status: 429,
+        headers: {
+          "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)),
         },
       }
     );
@@ -150,7 +198,12 @@ export async function POST(request: NextRequest) {
 
     if (!upstreamResponse.ok) {
       const errorText = await upstreamResponse.text();
-      await recordFailure(route.platform.id);
+      try {
+        await recordFailure(route.platform.id);
+      } catch (recordError) {
+        // 仅输出错误信息，避免泄露完整堆栈
+        console.error("[chat/completions] 上游错误路径熔断器记录失败:", recordError instanceof Error ? recordError.message : String(recordError));
+      }
 
       // 记录错误日志
       const duration = Date.now() - startTime;
@@ -201,7 +254,12 @@ export async function POST(request: NextRequest) {
     if (isStream) {
       const stream = upstreamResponse.body;
       if (!stream) {
-        await recordFailure(route.platform.id);
+        try {
+          await recordFailure(route.platform.id);
+        } catch {
+          // 仅输出错误信息，避免泄露完整堆栈
+          console.error("[chat/completions] 流式响应缺失时熔断器记录失败");
+        }
         return Response.json(
           { error: { message: "上游未返回流式响应", type: "server_error" } },
           { status: 500 }
@@ -324,6 +382,19 @@ export async function POST(request: NextRequest) {
                   { totalTokens, tpmLimit: route.platform.tpmLimit }
                 );
               }
+
+              // API Key 级别 TPM 追溯性检查
+              const apiKeyTpmResult = recordApiKeyTokens(
+                apiKey.id,
+                apiKey.tpmLimit,
+                totalTokens
+              );
+              if (!apiKeyTpmResult.allowed) {
+                console.warn(
+                  `[chat/completions] 流式响应 API Key ${apiKey.id} TPM 已超限`,
+                  { totalTokens, tpmLimit: apiKey.tpmLimit }
+                );
+              }
             }
           } catch (dbError) {
             // 数据库操作失败时仅记录错误，不中断流的正常关闭
@@ -413,28 +484,51 @@ export async function POST(request: NextRequest) {
           { totalTokens, tpmLimit: route.platform.tpmLimit }
         );
       }
+
+      // API Key 级别 TPM 追溯性检查
+      const apiKeyTpmResult = recordApiKeyTokens(
+        apiKey.id,
+        apiKey.tpmLimit,
+        totalTokens
+      );
+      if (!apiKeyTpmResult.allowed) {
+        console.warn(
+          `[chat/completions] API Key ${apiKey.id} TPM 已超限`,
+          { totalTokens, tpmLimit: apiKey.tpmLimit }
+        );
+      }
     }
 
     return Response.json(responseData);
   } catch (error) {
     // 仅在上游请求本身失败时记录熔断失败，避免误触发熔断
     if (!upstreamSucceeded) {
-      await recordFailure(route.platform.id);
+      try {
+        await recordFailure(route.platform.id);
+      } catch {
+        // 仅输出错误信息，避免泄露完整堆栈
+        console.error("[chat/completions] 熔断器记录失败:", error instanceof Error ? error.message : String(error));
+      }
     }
 
-    const duration = Date.now() - startTime;
-    await prisma.requestLog.create({
-      data: {
-        keyId: apiKey.id,
-        platformId: route.platform.id,
-        model: body.model,
-        status: 500,
-        tokens: 0,
-        duration,
-        isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      },
-    });
+    try {
+      const duration = Date.now() - startTime;
+      await prisma.requestLog.create({
+        data: {
+          keyId: apiKey.id,
+          platformId: route.platform.id,
+          model: body.model,
+          status: 500,
+          tokens: 0,
+          duration,
+          isError: true,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+    } catch (logError) {
+      // 仅输出错误信息，避免泄露完整堆栈
+      console.error("[chat/completions] 错误日志写入失败:", logError instanceof Error ? logError.message : String(logError));
+    }
 
     return Response.json(
       { error: { message: "请求上游服务失败", type: "server_error" } },
