@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
           await prisma.config.delete({
             where: { key: "admin_reset_password" },
           });
-          console.log("[auth] 密码重置标志已处理，密码已更新");
+          if (isDebug) console.log("[auth] 密码重置标志已处理，密码已更新");
         } catch (e) {
           console.error("[auth] 密码重置处理失败:", e);
         }

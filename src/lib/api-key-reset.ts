@@ -71,15 +71,31 @@ export async function checkAndResetApiKey(apiKeyId: string): Promise<boolean> {
       return false;
     }
 
-    // 执行重置：归零 usedTokens，恢复 status 为 active
-    await prisma.apiKey.update({
-      where: { id: apiKeyId },
-      data: {
-        usedTokens: BigInt(0),
-        // 如果因超限被禁用，在新周期自动恢复
-        ...(apiKey.status === "disabled" ? { status: "active" } : {}),
-      },
-    });
+    // 计算当前周期的起始时间（用于清理过期请求日志，使 callLimit 同步重置）
+    const now = new Date();
+    let periodStart: Date;
+    if (apiKey.resetPeriod === "daily") {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else {
+      // monthly: 从当月1号开始
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    // 执行重置：归零 usedTokens、清理过期请求日志（callLimit 同步重置）、恢复 status
+    await prisma.$transaction([
+      prisma.apiKey.update({
+        where: { id: apiKeyId },
+        data: {
+          usedTokens: BigInt(0),
+          // 如果因超限被禁用，在新周期自动恢复
+          ...(apiKey.status === "disabled" ? { status: "active" } : {}),
+        },
+      }),
+      // 删除当前周期之前的请求日志，使 callLimit 计数归零
+      prisma.requestLog.deleteMany({
+        where: { keyId: apiKeyId, createdAt: { lt: periodStart } },
+      }),
+    ]);
 
     if (process.env.NODE_ENV !== "production") {
       console.log(
@@ -128,15 +144,29 @@ async function runReset() {
     for (const key of keysToCheck) {
       if (!needsReset(key)) continue;
 
-      // 执行重置：归零 usedTokens，恢复 status 为 active
-      await prisma.apiKey.update({
-        where: { id: key.id },
-        data: {
-          usedTokens: BigInt(0),
-          // 如果因超限被禁用，在新周期自动恢复
-          ...(key.status === "disabled" ? { status: "active" } : {}),
-        },
-      });
+      // 计算当前周期的起始时间（用于清理过期请求日志，使 callLimit 同步重置）
+      const now = new Date();
+      let periodStart: Date;
+      if (key.resetPeriod === "daily") {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      } else {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+
+      // 执行重置：归零 usedTokens、清理过期请求日志、恢复 status
+      await prisma.$transaction([
+        prisma.apiKey.update({
+          where: { id: key.id },
+          data: {
+            usedTokens: BigInt(0),
+            // 如果因超限被禁用，在新周期自动恢复
+            ...(key.status === "disabled" ? { status: "active" } : {}),
+          },
+        }),
+        prisma.requestLog.deleteMany({
+          where: { keyId: key.id, createdAt: { lt: periodStart } },
+        }),
+      ]);
 
       resetCount++;
 

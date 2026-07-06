@@ -28,27 +28,27 @@ model Admin {
 // ==================== 上游平台 ====================
 
 model Platform {
-  id           String   @id @default(cuid())
-  name         String
-  baseUrl      String
-  apiKey       String   // 主密钥
-  apiKeys      String   @default("[]") // 附加密钥（JSON 数组），与主密钥一起轮询
-  type         String   @default("openai") // openai | azure | custom
-  enabled      Boolean  @default(true)
-  priority     Int      @default(0) // 数值越大优先级越高
-  weight       Int      @default(1) // 负载均衡权重
-  rpmLimit     Int?     // 每分钟请求限制
-  tpmLimit     Int?     // 每分钟 token 限制
-  status       String   @default("healthy") // healthy | degraded | down
-  failCount    Int      @default(0) // 连续失败次数
-  lastFailAt   DateTime?
-  cooldownEnd  DateTime? // 熔断冷却结束时间
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String    @id @default(cuid())
+  name        String
+  baseUrl     String
+  apiKey      String // 主密钥
+  apiKeys     String    @default("[]") // 附加密钥（JSON 数组），与主密钥一起轮询
+  type        String    @default("openai") // openai | azure | custom
+  enabled     Boolean   @default(true)
+  priority    Int       @default(0) // 数值越大优先级越高
+  weight      Int       @default(1) // 负载均衡权重
+  rpmLimit    Int? // 每分钟请求限制
+  tpmLimit    Int? // 每分钟 token 限制
+  status      String    @default("healthy") // healthy | degraded | down
+  failCount   Int       @default(0) // 连续失败次数
+  lastFailAt  DateTime?
+  cooldownEnd DateTime? // 熔断冷却结束时间
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  modelMaps  ModelMap[]
+  modelMaps   ModelMap[]
   requestLogs RequestLog[]
-  proxies   Proxy[]
+  proxies     Proxy[]
 
   @@index([enabled, status])
   @@map("platforms")
@@ -57,16 +57,16 @@ model Platform {
 // ==================== 代理 ====================
 
 model Proxy {
-  id          String   @id @default(cuid())
-  address     String   // 格式：http://user:pass@host:port 或 socks5://host:port
-  platformId  String   // 绑定到特定平台
-  enabled     Boolean  @default(true)
-  status      String   @default("healthy") // healthy | degraded | down
-  failCount   Int      @default(0) // 连续失败次数
+  id          String    @id @default(cuid())
+  address     String // 格式：http://user:pass@host:port 或 socks5://host:port
+  platformId  String // 绑定到特定平台
+  enabled     Boolean   @default(true)
+  status      String    @default("healthy") // healthy | degraded | down
+  failCount   Int       @default(0) // 连续失败次数
   lastFailAt  DateTime?
   cooldownEnd DateTime? // 熔断冷却结束时间（封禁 30 分钟）
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   platform Platform @relation(fields: [platformId], references: [id])
 
@@ -77,23 +77,23 @@ model Proxy {
 // ==================== API Key ====================
 
 model ApiKey {
-  id         String    @id @default(cuid())
-  key        String    @unique
-  name       String
-  planId     String?   // 可选：关联套餐模板
-  quota      Decimal?  @default(0) // 自定义额度（null 表示使用 Plan 默认值）
-  usedTokens BigInt   @default(0) // 已使用 token 数
-  rpmLimit   Int?      // 每分钟请求限制（null 表示使用 Plan 默认值）
-  tpmLimit   Int?      // 每分钟 token 限制（null 表示使用 Plan 默认值）
-  callLimit  Int?      // 总调用次数限制（null 表示使用 Plan 默认值）
-  tokenLimit BigInt?   // 总 token 限制（null 表示使用 Plan 默认值）
-  resetPeriod String?  @default("monthly") // monthly | daily | never
-  status     String    @default("active") // active | disabled | expired
-  expiresAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  key         String    @unique
+  name        String
+  planId      String? // 可选：关联套餐模板
+  quota       Decimal?  @default(0) // 自定义额度（null 表示使用 Plan 默认值）
+  usedTokens  BigInt    @default(0) // 已使用 token 数
+  rpmLimit    Int? // 每分钟请求限制（null 表示使用 Plan 默认值）
+  tpmLimit    Int? // 每分钟 token 限制（null 表示使用 Plan 默认值）
+  callLimit   Int? // 总调用次数限制（null 表示使用 Plan 默认值）
+  tokenLimit  BigInt? // 总 token 限制（null 表示使用 Plan 默认值）
+  resetPeriod String?   @default("monthly") // monthly | daily | never
+  status      String    @default("active") // active | disabled | expired
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  plan       Plan?      @relation(fields: [planId], references: [id])
+  plan        Plan?        @relation(fields: [planId], references: [id])
   requestLogs RequestLog[]
 
   @@index([status, expiresAt])
@@ -105,10 +105,10 @@ model ApiKey {
 model Plan {
   id          String   @id @default(cuid())
   name        String   @unique
-  tokenQuota  BigInt   // 总 token 额度
-  callLimit   Int      // 总调用次数限制
-  rpmLimit    Int      // 每分钟请求限制
-  tpmLimit    Int      // 每分钟 token 限制
+  tokenQuota  BigInt // 总 token 额度
+  callLimit   Int // 总调用次数限制
+  rpmLimit    Int // 每分钟请求限制
+  tpmLimit    Int // 每分钟 token 限制
   resetPeriod String   @default("monthly") // monthly | daily | never
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -122,9 +122,9 @@ model Plan {
 
 model ModelMap {
   id          String   @id @default(cuid())
-  alias       String   // 客户端请求的模型名（别名）
-  targetModel String   // 实际转发到上游的模型名
-  platformId  String?  // 绑定到特定平台（null 表示使用路由引擎自动选择）
+  alias       String // 客户端请求的模型名（别名）
+  targetModel String // 实际转发到上游的模型名
+  platformId  String? // 绑定到特定平台（null 表示使用路由引擎自动选择）
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -141,7 +141,7 @@ model RequestLog {
   keyId            String?
   platformId       String?
   model            String
-  status           Int      // HTTP 状态码
+  status           Int // HTTP 状态码
   tokens           Int      @default(0) // token 总用量（prompt + completion）
   promptTokens     Int      @default(0) // 输入 token 数
   completionTokens Int      @default(0) // 输出 token 数
@@ -151,8 +151,8 @@ model RequestLog {
   errorMessage     String?
   createdAt        DateTime @default(now())
 
-  key      ApiKey?    @relation(fields: [keyId], references: [id])
-  platform Platform?  @relation(fields: [platformId], references: [id])
+  key      ApiKey?   @relation(fields: [keyId], references: [id])
+  platform Platform? @relation(fields: [platformId], references: [id])
 
   @@index([keyId])
   @@index([platformId])
@@ -167,8 +167,8 @@ model RequestLog {
 model AuditLog {
   id        String   @id @default(cuid())
   adminId   String?
-  action    String   // 操作类型（login, create_platform, update_key 等）
-  detail    String?  // 操作详情（JSON）
+  action    String // 操作类型（login, create_platform, update_key 等）
+  detail    String? // 操作详情（JSON）
   ip        String?
   createdAt DateTime @default(now())
 
@@ -183,9 +183,9 @@ model AuditLog {
 
 model SystemEvent {
   id        String   @id @default(cuid())
-  level     String   // info | warning | error | critical
+  level     String // info | warning | error | critical
   message   String
-  detail    String?  // 详细信息（JSON）
+  detail    String? // 详细信息（JSON）
   createdAt DateTime @default(now())
 
   @@index([level])

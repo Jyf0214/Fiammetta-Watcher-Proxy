@@ -133,11 +133,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 4.1 API Key 级别速率限制检查
+  // 4.1 API Key 级别速率限制检查（Key 级 → Plan 级回退）
+  const effectiveRpmLimit = apiKey.rpmLimit ?? apiKey.plan?.rpmLimit ?? null;
+  const effectiveTpmLimit = apiKey.tpmLimit ?? apiKey.plan?.tpmLimit ?? null;
   const apiKeyRateResult = checkKeyRateLimit(
     apiKey.id,
-    apiKey.rpmLimit,
-    apiKey.tpmLimit
+    effectiveRpmLimit,
+    effectiveTpmLimit
   );
 
   if (!apiKeyRateResult.allowed) {

@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (errors.length > 0) {
-      console.log("[POST /api/admin/platforms] 校验失败:", errors);
+      if (isDebug) console.log("[POST /api/admin/platforms] 校验失败:", errors);
       return NextResponse.json(
         { success: false, error: errors.join("; ") },
         { status: 400 }
@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     forceRefreshRouterCache();
 
-    console.log("[POST /api/admin/platforms] 创建成功:", { id: platform.id, name: platform.name });
+    if (isDebug) console.log("[POST /api/admin/platforms] 创建成功:", { id: platform.id, name: platform.name });
 
     // 排除 apiKey 明文，避免敏感信息泄露到前端
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
