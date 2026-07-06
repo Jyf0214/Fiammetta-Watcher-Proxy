@@ -35,7 +35,7 @@ async function fetchPlatformModels(platform: {
   apiKeys: string;
   name: string;
 }): Promise<UpstreamModel[]> {
-  const url = `${platform.baseUrl.replace(/\/+$/, "")}/v1/models`;
+  const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
   // 轮询选择密钥
   const extraKeys = parseApiKeys(platform.apiKeys);
