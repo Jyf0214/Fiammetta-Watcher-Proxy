@@ -17,6 +17,8 @@ export interface PlatformConfig {
   weight: number;
   rpmLimit: number | null;
   tpmLimit: number | null;
+  /** 透传给上游的下游请求头白名单（JSON 字符串数组） */
+  forwardHeaders: string;
   status: PlatformStatus;
   failCount: number;
   lastFailAt: Date | null;

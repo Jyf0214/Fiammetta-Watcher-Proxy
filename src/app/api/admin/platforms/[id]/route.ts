@@ -104,6 +104,25 @@ export async function PUT(
       ...(body.tpmLimit !== undefined && { tpmLimit: body.tpmLimit ?? null }),
     };
 
+    // forwardHeaders 校验并更新
+    if (body.forwardHeaders !== undefined) {
+      if (body.forwardHeaders === "" || body.forwardHeaders === null) {
+        updateData.forwardHeaders = "[]";
+      } else if (typeof body.forwardHeaders === "string") {
+        try {
+          const parsed = JSON.parse(body.forwardHeaders);
+          if (Array.isArray(parsed)) {
+            const validHeaders = parsed
+              .filter((h: unknown): h is string => typeof h === "string" && h.trim().length > 0)
+              .map((h: string) => h.trim());
+            updateData.forwardHeaders = JSON.stringify(validHeaders);
+          }
+        } catch {
+          // JSON 解析失败，保留原值
+        }
+      }
+    }
+
     // apiKey 在编辑时可选（不提供则保留原值）
     if (body.apiKey === undefined || body.apiKey === null || body.apiKey === "") {
       updateData.apiKey = existing.apiKey;

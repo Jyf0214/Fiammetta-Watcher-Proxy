@@ -151,8 +151,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 从下游请求中提取白名单请求头，透传给上游
-  const forwardedHeaders = extractForwardableHeaders(request);
+  // 从下游请求中提取平台配置的白名单请求头，透传给上游
+  const forwardedHeaders = extractForwardableHeaders(request, route.platform.forwardHeaders);
 
   let upstreamSucceeded = false;
   try {

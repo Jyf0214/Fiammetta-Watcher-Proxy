@@ -173,8 +173,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 从下游请求中提取白名单请求头，透传给上游
-  const forwardedHeaders = extractForwardableHeaders(request);
+  // 从下游请求中提取平台配置的白名单请求头，透传给上游
+  const forwardedHeaders = extractForwardableHeaders(request, route.platform.forwardHeaders);
 
   // 请求时无法预知流式响应的 token 数，因此 tokenCount 保持默认值 0，
   // 这是流式响应的固有限制——token 用量只能在流结束后从 usage chunk 中提取。

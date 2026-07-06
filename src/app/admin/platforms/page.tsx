@@ -33,6 +33,7 @@ interface Platform {
   weight: number;
   rpmLimit: number | null;
   tpmLimit: number | null;
+  forwardHeaders: string;
   status: string;
 }
 
@@ -91,6 +92,7 @@ export default function PlatformsPage() {
         // JSON 解析失败，忽略
       }
     }
+    // forwardHeaders 已经是 JSON 字符串，直接显示
     form.setFieldsValue({ ...platform, apiKeys: apiKeysText });
     setFormVisible(true);
   };
@@ -428,6 +430,12 @@ export default function PlatformsPage() {
                   min={0}
                   placeholder={t("common.unlimited")}
                   className="w-full"
+                />
+              </Form.Item>
+              <Form.Item name="forwardHeaders" label={t("platform.forward_headers")}>
+                <Input.TextArea
+                  rows={2}
+                  placeholder='["X-Thinking-Mode", "X-Reasoning-Effort"]'
                 />
               </Form.Item>
             </div>

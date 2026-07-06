@@ -124,6 +124,7 @@
     "weight": "Weight",
     "rpm_limit": "RPM Limit",
     "tpm_limit": "TPM Limit",
+    "forward_headers": "Forward Headers",
     "status_healthy": "Healthy",
     "status_degraded": "Degraded",
     "status_down": "Down",

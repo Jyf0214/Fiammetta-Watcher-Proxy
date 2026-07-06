@@ -57,6 +57,7 @@ async function doRefresh() {
     weight: p.weight,
     rpmLimit: p.rpmLimit,
     tpmLimit: p.tpmLimit,
+    forwardHeaders: p.forwardHeaders,
     status: p.status as PlatformConfig["status"],
     failCount: p.failCount,
     lastFailAt: p.lastFailAt,

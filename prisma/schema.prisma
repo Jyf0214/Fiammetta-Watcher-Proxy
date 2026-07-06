@@ -43,6 +43,7 @@ model Platform {
   failCount   Int       @default(0) // 连续失败次数
   lastFailAt  DateTime?
   cooldownEnd DateTime? // 熔断冷却结束时间
+  forwardHeaders String @default("[]") // 透传给上游的下游请求头白名单（JSON 数组）
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

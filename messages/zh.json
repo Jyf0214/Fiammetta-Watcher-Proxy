@@ -124,6 +124,7 @@
     "weight": "权重",
     "rpm_limit": "RPM 限制",
     "tpm_limit": "TPM 限制",
+    "forward_headers": "透传请求头",
     "status_healthy": "健康",
     "status_degraded": "降级",
     "status_down": "故障",

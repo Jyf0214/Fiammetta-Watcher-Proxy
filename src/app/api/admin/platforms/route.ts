@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     if (isDebug) console.log("[POST /api/admin/platforms] 请求体:", { ...body, apiKey: body.apiKey ? "***" : undefined });
-    const { name, baseUrl, apiKey, apiKeys, type, priority, weight, rpmLimit, tpmLimit } =
+    const { name, baseUrl, apiKey, apiKeys, type, priority, weight, rpmLimit, tpmLimit, forwardHeaders } =
       body;
 
     // 输入校验
@@ -173,6 +173,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // forwardHeaders 校验：JSON 字符串数组
+    let normalizedForwardHeaders = "[]";
+    if (forwardHeaders !== undefined && forwardHeaders !== null && forwardHeaders !== "") {
+      if (typeof forwardHeaders !== "string") {
+        errors.push("透传请求头必须为 JSON 字符串数组格式");
+      } else {
+        try {
+          const parsed = JSON.parse(forwardHeaders);
+          if (!Array.isArray(parsed)) {
+            errors.push("透传请求头必须为数组格式");
+          } else {
+            const validHeaders = parsed
+              .filter((h: unknown): h is string => typeof h === "string" && h.trim().length > 0)
+              .map((h: string) => h.trim());
+            normalizedForwardHeaders = JSON.stringify(validHeaders);
+          }
+        } catch {
+          errors.push("透传请求头 JSON 格式错误");
+        }
+      }
+    }
+
     if (errors.length > 0) {
       if (isDebug) console.log("[POST /api/admin/platforms] 校验失败:", errors);
       return NextResponse.json(
@@ -198,6 +220,7 @@ export async function POST(request: NextRequest) {
         weight: weight ?? 1,
         rpmLimit: rpmLimit ?? null,
         tpmLimit: tpmLimit ?? null,
+        forwardHeaders: normalizedForwardHeaders,
       },
     });
 
