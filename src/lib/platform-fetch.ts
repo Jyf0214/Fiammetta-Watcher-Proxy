@@ -7,6 +7,7 @@
 
 import { selectProxy } from "./proxy-router";
 import { proxyFetch, markProxyFailed, markProxySuccess } from "./proxy-fetch";
+import { isDebug } from "./auth-helpers";
 import type { PlatformConfig } from "@/types";
 
 export interface PlatformFetchOptions extends RequestInit {
@@ -31,9 +32,25 @@ export async function platformFetch(
 
   // 尝试通过代理
   const proxy = await selectProxy(platform.id);
+
+  if (isDebug) {
+    console.log(
+      `[proxy-debug] platformFetch url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy ? `${proxy.address} id=${proxy.id}` : "null(无可用代理)"}`
+    );
+  }
+
   if (proxy) {
     try {
+      if (isDebug) {
+        console.log(`[proxy-debug] 通过代理 ${proxy.id}(${proxy.address}) 发送请求 → ${url}`);
+      }
+
       const res = await proxyFetch(url, proxy, { ...fetchOptions, timeout });
+
+      if (isDebug) {
+        console.log(`[proxy-debug] 代理 ${proxy.id} 响应: status=${res.status} statusText=${res.statusText}`);
+      }
+
       // 2xx/3xx/4xx 都算代理连接成功（代理本身能通）
       if (res.status < 500) {
         await markProxySuccess(proxy.id);
@@ -43,17 +60,23 @@ export async function platformFetch(
       await markProxySuccess(proxy.id);
       return res;
     } catch (err) {
-      // 代理连接失败（超时、连接拒绝等）
+      const errMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       console.warn(
-        `[proxy] 代理 ${proxy.id} 请求失败，回退直连:`,
-        err instanceof Error ? err.message : String(err)
+        `[proxy] 代理 ${proxy.id} 请求失败，回退直连: ${errMsg}`
       );
+      if (isDebug) {
+        console.warn(`[proxy-debug] 代理 ${proxy.id} 失败详情:`, err);
+      }
       await markProxyFailed(proxy.id);
       // 回退到直连（继续执行下面的逻辑）
     }
   }
 
   // 直连
+  if (isDebug) {
+    console.log(`[proxy-debug] 直连发送请求 → ${url}`);
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
   try {
@@ -61,6 +84,11 @@ export async function platformFetch(
       ...fetchOptions,
       signal: controller.signal,
     });
+
+    if (isDebug) {
+      console.log(`[proxy-debug] 直连响应: status=${res.status} statusText=${res.statusText}`);
+    }
+
     return res;
   } finally {
     clearTimeout(timeoutId);

@@ -8,6 +8,7 @@
  */
 
 import { prisma } from "./prisma";
+import { isDebug } from "./auth-helpers";
 import type { Proxy } from "@prisma/client";
 
 /** 代理缓存 */
@@ -64,13 +65,24 @@ export async function selectProxy(platformId: string): Promise<Proxy | null> {
   const proxies = proxyCache.get(platformId) ?? [];
   const available = proxies.filter(isProxyAvailable);
 
+  if (isDebug) {
+    console.log(
+      `[proxy-debug] selectProxy platform=${platformId} total=${proxies.length} available=${available.length} disabled=${proxies.filter(p => !p.enabled).length} down=${proxies.filter(p => p.status === "down").length}`
+    );
+  }
+
   if (available.length === 0) return null;
 
   const counter = counters.get(platformId) ?? 0;
   const index = counter % available.length;
   counters.set(platformId, counter + 1);
 
-  return available[index];
+  const selected = available[index];
+  if (isDebug) {
+    console.log(`[proxy-debug] selectProxy 选中: id=${selected.id} address=${selected.address} status=${selected.status} failCount=${selected.failCount}`);
+  }
+
+  return selected;
 }
 
 /**

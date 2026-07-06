@@ -6,6 +6,7 @@
  */
 
 import type { Proxy } from "@prisma/client";
+import { isDebug } from "./auth-helpers";
 
 /** 解析后的代理信息 */
 interface ParsedProxy {
@@ -35,7 +36,12 @@ function parseProxy(address: string): ParsedProxy | null {
  */
 async function createAgent(proxyAddress: string) {
   const parsed = parseProxy(proxyAddress);
-  if (!parsed) return null;
+  if (!parsed) {
+    if (isDebug) console.log(`[proxy-debug] 代理地址解析失败: ${proxyAddress}`);
+    return null;
+  }
+
+  if (isDebug) console.log(`[proxy-debug] 创建 agent: protocol=${parsed.protocol} address=${parsed.url}`);
 
   if (parsed.protocol === "socks5") {
     const { SocksProxyAgent } = await import("socks-proxy-agent");
@@ -74,6 +80,10 @@ export async function proxyFetch(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
+  if (isDebug) {
+    console.log(`[proxy-debug] proxyFetch 发送请求: proxy=${proxy.id} → ${url} timeout=${timeout}ms`);
+  }
+
   try {
     const res = await fetch(url, {
       ...fetchOptions,
@@ -81,6 +91,11 @@ export async function proxyFetch(
       agent,
       signal: controller.signal,
     });
+
+    if (isDebug) {
+      console.log(`[proxy-debug] proxyFetch 收到响应: proxy=${proxy.id} status=${res.status} url=${url}`);
+    }
+
     return res;
   } finally {
     clearTimeout(timeoutId);
