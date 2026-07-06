@@ -72,10 +72,10 @@ export async function GET() {
  * POST /api/admin/platforms — 创建平台
  */
 export async function POST(request: NextRequest) {
-  console.log("[POST /api/admin/platforms] 收到创建请求");
+  if (isDebug) console.log("[POST /api/admin/platforms] 收到创建请求");
   const admin = await requireAdmin();
   if (!admin) {
-    console.log("[POST /api/admin/platforms] 未授权");
+    if (isDebug) console.log("[POST /api/admin/platforms] 未授权");
     return NextResponse.json(
       { success: false, error: "未授权" },
       { status: 401 }
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    console.log("[POST /api/admin/platforms] 请求体:", { ...body, apiKey: body.apiKey ? "***" : undefined });
+    if (isDebug) console.log("[POST /api/admin/platforms] 请求体:", { ...body, apiKey: body.apiKey ? "***" : undefined });
     const { name, baseUrl, apiKey, apiKeys, type, priority, weight, rpmLimit, tpmLimit } =
       body;
 

@@ -97,7 +97,7 @@ export default function KeysPage() {
         message.error(data.error);
       }
     } catch (err) {
-      if (!(err instanceof Error && err.message.includes("form"))) message.error(t("common.error"));
+      if (!('errorFields' in (err as Record<string, unknown>))) message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }

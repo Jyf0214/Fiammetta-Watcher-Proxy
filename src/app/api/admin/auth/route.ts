@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
           console.error("[auth] 密码重置处理失败:", e);
         }
       } else {
-        console.warn("[auth] 密码重置标志存在但环境变量不匹配或未配置，跳过重置");
+        console.warn("[auth] 密码重置标志存在但无法处理，已跳过");
         await prisma.config.delete({
           where: { key: "admin_reset_password" },
         });
