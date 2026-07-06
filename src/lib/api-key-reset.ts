@@ -49,6 +49,56 @@ function needsReset(apiKey: { resetPeriod: string | null; updatedAt: Date }): bo
 }
 
 /**
+ * 检查单个 API Key 是否需要重置，并在必要时执行重置
+ *
+ * 在请求处理中调用，确保每次请求前检查重置周期。
+ * 返回 true 表示已执行重置，false 表示无需重置。
+ */
+export async function checkAndResetApiKey(apiKeyId: string): Promise<boolean> {
+  try {
+    const apiKey = await prisma.apiKey.findUnique({
+      where: { id: apiKeyId },
+      select: {
+        id: true,
+        resetPeriod: true,
+        usedTokens: true,
+        status: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!apiKey || !needsReset(apiKey)) {
+      return false;
+    }
+
+    // 执行重置：归零 usedTokens，恢复 status 为 active
+    await prisma.apiKey.update({
+      where: { id: apiKeyId },
+      data: {
+        usedTokens: BigInt(0),
+        // 如果因超限被禁用，在新周期自动恢复
+        ...(apiKey.status === "disabled" ? { status: "active" } : {}),
+      },
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        `[api-key-reset] 请求时重置 Key ${apiKeyId.slice(0, 8)}... ` +
+        `resetPeriod=${apiKey.resetPeriod} usedTokens=${apiKey.usedTokens}→0`
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error(
+      `[api-key-reset] 检查重置失败 (keyId=${apiKeyId}):`,
+      error instanceof Error ? error.message : String(error)
+    );
+    return false;
+  }
+}
+
+/**
  * 执行一轮重置检查
  *
  * 查询所有 resetPeriod !== "never" 且 status 为 active 的 API Key，

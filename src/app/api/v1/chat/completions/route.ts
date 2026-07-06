@@ -5,6 +5,7 @@ import { getNextKey } from "@/lib/platform-keys";
 import { platformFetch } from "@/lib/platform-fetch";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
+import { checkAndResetApiKey } from "@/lib/api-key-reset";
 import type { ChatCompletionRequest } from "@/types";
 
 /**
@@ -44,6 +45,9 @@ export async function POST(request: NextRequest) {
       { status: 401 }
     );
   }
+
+  // 检查是否需要重置 API Key 用量（根据 resetPeriod）
+  await checkAndResetApiKey(apiKey.id);
 
   // 检查调用次数限制（callLimit）
   const effectiveCallLimit = apiKey.callLimit ?? apiKey.plan?.callLimit ?? null;
