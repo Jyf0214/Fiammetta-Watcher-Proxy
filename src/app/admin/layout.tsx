@@ -25,6 +25,7 @@ import {
   Shield,
   BarChart3,
   Network,
+  Zap,
 } from "lucide-react";
 import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
@@ -49,6 +50,7 @@ const menuItems: MenuItem[] = [
   { key: "admin.logs", icon: FileText, href: "/admin/logs", group: "monitor" },
   { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
   { key: "admin.events", icon: Bell, href: "/admin/events", group: "monitor" },
+  { key: "admin.auto_model", icon: Zap, href: "/admin/auto-model", group: "manage" },
   { key: "admin.system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
@@ -238,6 +240,7 @@ function TopHeader({
     "/admin/keys": "admin.keys",
     "/admin/models": "admin.models",
     "/admin/proxies": "admin.proxies",
+    "/admin/auto-model": "admin.auto_model",
     "/admin/usage": "admin.usage",
     "/admin/logs": "admin.logs",
     "/admin/audit": "admin.audit",
