@@ -6,6 +6,7 @@ import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 // 内存缓存，避免每次请求都查数据库
 let platformCache: PlatformConfig[] = [];
 let modelMapCache: ModelMapConfig[] = [];
+let platformModelCache: Map<string, Set<string>> = new Map(); // platformId → 模型 ID 集合
 let lastRefresh = 0;
 const CACHE_TTL = 30_000;
 const EMPTY_CACHE_RETRY = 5_000; // 空缓存时的重试间隔
@@ -37,12 +38,15 @@ async function refreshCache() {
  * 执行实际的缓存刷新（数据库查询 + 原子赋值）
  */
 async function doRefresh() {
-  const [platforms, modelMaps] = await Promise.all([
+  const [platforms, modelMaps, platformModels] = await Promise.all([
     prisma.platform.findMany({
       where: { enabled: true },
       orderBy: [{ priority: "desc" }, { weight: "desc" }],
     }),
     prisma.modelMap.findMany(),
+    prisma.platformModel.findMany({
+      select: { platformId: true, modelId: true },
+    }),
   ]);
 
   const newPlatforms = platforms.map((p) => ({
@@ -71,9 +75,21 @@ async function doRefresh() {
     platformId: m.platformId,
   }));
 
-  // 原子赋值：两个缓存同时切换，避免读取方看到不一致的状态
+  // 构建平台模型缓存：platformId → Set<modelId>
+  const newPlatformModelCache = new Map<string, Set<string>>();
+  for (const pm of platformModels) {
+    let set = newPlatformModelCache.get(pm.platformId);
+    if (!set) {
+      set = new Set();
+      newPlatformModelCache.set(pm.platformId, set);
+    }
+    set.add(pm.modelId);
+  }
+
+  // 原子赋值：所有缓存同时切换，避免读取方看到不一致的状态
   platformCache = newPlatforms;
   modelMapCache = newModelMaps;
+  platformModelCache = newPlatformModelCache;
   lastRefresh = Date.now();
 
   // 清理已删除平台的断路器条目
@@ -187,6 +203,29 @@ function isPlatformAvailable(platform: PlatformConfig): boolean {
 }
 
 /**
+ * 检查平台是否拥有指定模型
+ *
+ * 如果 platformModelCache 为空（未拉取过模型），视为兼容模式，不过滤。
+ */
+function hasPlatformModel(platformId: string, modelId: string): boolean {
+  // 兼容模式：无模型数据时不过滤
+  if (platformModelCache.size === 0) return true;
+
+  const models = platformModelCache.get(platformId);
+  if (!models) return false;
+
+  // 精确匹配
+  if (models.has(modelId)) return true;
+
+  // 通配符匹配：平台拥有 gpt-* 类模型时匹配 gpt-4o 等
+  for (const m of models) {
+    if (m.endsWith("*") && modelId.startsWith(m.slice(0, -1))) return true;
+  }
+
+  return false;
+}
+
+/**
  * 选择最佳平台处理请求
  */
 export async function routeRequest(
@@ -200,21 +239,40 @@ export async function routeRequest(
     specifiedPlatformId
   );
 
-  // 如果模型映射指定了平台
+  // 如果模型映射指定了平台（用户明确绑定，优先使用）
   if (targetPlatformId) {
     const platform = platformCache.find(
-      (p) => p.id === targetPlatformId && isPlatformAvailable(p)
+      (p) =>
+        p.id === targetPlatformId &&
+        isPlatformAvailable(p) &&
+        hasPlatformModel(p.id, targetModel)
     );
     if (platform) {
       return { platform, targetModel };
     }
-    // 指定平台不可用，尝试其他平台
+    // 指定平台不可用或无该模型，尝试其他平台
   }
 
-  // 按优先级和权重选择可用平台
-  const availablePlatforms = platformCache.filter(isPlatformAvailable);
+  // 按优先级和权重选择可用平台，且平台必须拥有目标模型
+  const availablePlatforms = platformCache.filter(
+    (p) => isPlatformAvailable(p) && hasPlatformModel(p.id, targetModel)
+  );
 
-  if (availablePlatforms.length === 0) return null;
+  if (availablePlatforms.length === 0) {
+    // fallback：无平台拥有该模型时，不过滤模型（兼容未拉取过模型的场景）
+    const fallbackPlatforms = platformCache.filter(isPlatformAvailable);
+    if (fallbackPlatforms.length === 0) return null;
+
+    const maxPriority = Math.max(...fallbackPlatforms.map((p) => p.priority));
+    const topPriorityPlatforms = fallbackPlatforms.filter(
+      (p) => p.priority === maxPriority
+    );
+
+    const selectedPlatform = selectPlatformByWeight(topPriorityPlatforms);
+    if (!selectedPlatform) return null;
+
+    return { platform: selectedPlatform, targetModel };
+  }
 
   // 按优先级分组
   const maxPriority = Math.max(...availablePlatforms.map((p) => p.priority));

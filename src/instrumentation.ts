@@ -31,5 +31,13 @@ export async function register() {
     } catch (error) {
       console.error("[instrumentation] API Key 重置调度器启动失败:", error);
     }
+
+    // 启动平台模型自动发现服务（定时从各平台 /v1/models 拉取可用模型）
+    try {
+      const { startModelFetcher } = await import("./lib/model-fetcher");
+      startModelFetcher();
+    } catch (error) {
+      console.error("[instrumentation] 模型拉取服务启动失败:", error);
+    }
   }
 }

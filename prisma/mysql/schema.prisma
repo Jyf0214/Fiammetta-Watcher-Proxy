@@ -50,6 +50,7 @@ model Platform {
   modelMaps  ModelMap[]
   requestLogs RequestLog[]
   proxies   Proxy[]
+  models    PlatformModel[]
 
   @@index([enabled, status])
   @@map("platforms")
@@ -133,6 +134,23 @@ model ModelMap {
 
   @@unique([alias, platformId])
   @@map("model_maps")
+}
+
+// ==================== 平台模型（自动发现） ====================
+
+model PlatformModel {
+  id         String   @id @default(cuid())
+  platformId String
+  modelId    String   @db.VarChar(200) // 模型 ID（如 gpt-4o, meta/llama-3.1-8b-instruct）
+  ownedBy    String?  @db.VarChar(200) // 模型归属（上游返回的 owned_by）
+  fetchedAt  DateTime @default(now()) // 最近一次发现时间
+
+  platform Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  @@unique([platformId, modelId])
+  @@index([platformId])
+  @@index([modelId])
+  @@map("platform_models")
 }
 
 // ==================== 请求日志 ====================
