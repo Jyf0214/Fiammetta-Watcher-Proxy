@@ -141,7 +141,12 @@
     "api_key_edit_hint": "留空则保持不变",
     "additional_keys": "API Key（一行一个）",
     "additional_keys_tip": "第一行为主密钥，后续行为附加密钥，用于轮询负载均衡",
-    "additional_keys_placeholder": "每行一个密钥（可选）"
+    "additional_keys_placeholder": "每行一个密钥（可选）",
+    "models": "模型管理",
+    "model_id": "模型 ID",
+    "model_source": "来源",
+    "model_placeholder": "输入模型 ID",
+    "refresh_models": "刷新"
   },
   "proxy": {
     "address": "代理地址",
@@ -288,7 +293,12 @@
     "db_status": "数据库状态",
     "db_connected": "已连接",
     "db_disconnected": "未连接",
-    "config_load_failed": "无法加载配置"
+    "config_load_failed": "无法加载配置",
+    "auto_model_title": "自动模型",
+    "auto_model_desc": "配置后，请求此模型 ID 时将自动轮询所有可用平台。",
+    "auto_model_regenerate": "重新生成",
+    "auto_model_regenerated": "自动模型 ID 已重新生成",
+    "auto_model_enable": "启用自动模型"
   },
   "api": {
     "missing_key": "缺少 API Key",

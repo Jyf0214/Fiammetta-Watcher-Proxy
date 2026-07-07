@@ -7,6 +7,7 @@ import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 let platformCache: PlatformConfig[] = [];
 let modelMapCache: ModelMapConfig[] = [];
 let platformModelCache: Map<string, Set<string>> = new Map(); // platformId → 模型 ID 集合
+let autoModelId: string | null = null; // 自动模型 ID（从 Config 表读取）
 let lastRefresh = 0;
 const CACHE_TTL = 30_000;
 const EMPTY_CACHE_RETRY = 5_000; // 空缓存时的重试间隔
@@ -38,7 +39,7 @@ async function refreshCache() {
  * 执行实际的缓存刷新（数据库查询 + 原子赋值）
  */
 async function doRefresh() {
-  const [platforms, modelMaps, platformModels] = await Promise.all([
+  const [platforms, modelMaps, platformModels, autoConfig] = await Promise.all([
     prisma.platform.findMany({
       where: { enabled: true },
       orderBy: [{ priority: "desc" }, { weight: "desc" }],
@@ -47,6 +48,7 @@ async function doRefresh() {
     prisma.platformModel.findMany({
       select: { platformId: true, modelId: true },
     }),
+    prisma.config.findUnique({ where: { key: "system:auto_model_id" } }),
   ]);
 
   const newPlatforms = platforms.map((p) => ({
@@ -90,6 +92,7 @@ async function doRefresh() {
   platformCache = newPlatforms;
   modelMapCache = newModelMaps;
   platformModelCache = newPlatformModelCache;
+  autoModelId = autoConfig?.value ?? null;
   lastRefresh = Date.now();
 
   // 清理已删除平台的断路器条目
@@ -233,6 +236,21 @@ export async function routeRequest(
   specifiedPlatformId?: string
 ): Promise<RouteDecision | null> {
   await refreshCache();
+
+  // 自动模型路由：请求模型 === 配置的自动模型 ID
+  if (autoModelId && requestedModel === autoModelId) {
+    const platformsWithModels = platformCache.filter(
+      (p) => isPlatformAvailable(p) && platformModelCache.has(p.id)
+    );
+    if (platformsWithModels.length === 0) return null;
+
+    const maxPriority = Math.max(...platformsWithModels.map((p) => p.priority));
+    const topPriority = platformsWithModels.filter((p) => p.priority === maxPriority);
+    const selected = selectPlatformByWeight(topPriority);
+    if (!selected) return null;
+
+    return { platform: selected, targetModel: requestedModel };
+  }
 
   const { targetModel, targetPlatformId } = resolveModelMapping(
     requestedModel,

@@ -10,13 +10,15 @@ import {
   Select,
   Switch,
   Card,
+  Drawer,
+  Table,
   message,
   Popconfirm,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined } from "@ant-design/icons";
+import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -46,6 +48,14 @@ export default function PlatformsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // 模型管理 Drawer 状态
+  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
+  const [modelPlatform, setModelPlatform] = useState<Platform | null>(null);
+  const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; fetchedAt: string }>>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [newModelId, setNewModelId] = useState("");
 
   const fetchPlatforms = async (signal?: AbortSignal) => {
     setLoading(true);
@@ -185,6 +195,87 @@ export default function PlatformsPage() {
     }
   };
 
+  // ==================== 模型管理 ====================
+
+  const openModelDrawer = (platform: Platform) => {
+    setModelPlatform(platform);
+    setModelDrawerOpen(true);
+    fetchModels(platform.id);
+  };
+
+  const fetchModels = async (platformId: string) => {
+    setModelsLoading(true);
+    try {
+      const res = await fetch(`/api/admin/platforms/${platformId}/models`);
+      const data = await res.json();
+      if (data.success) setModels(data.data || []);
+    } catch {
+      message.error(t("common.error"));
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  const handleRefreshModels = async () => {
+    if (!modelPlatform) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
+        method: "PUT",
+      });
+      const data = await res.json();
+      if (data.success) {
+        message.success(data.message);
+        fetchModels(modelPlatform.id);
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleAddModel = async () => {
+    if (!modelPlatform || !newModelId.trim()) return;
+    try {
+      const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: newModelId.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        message.success(data.message);
+        setNewModelId("");
+        fetchModels(modelPlatform.id);
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    }
+  };
+
+  const handleDeleteModel = async (modelId: string) => {
+    if (!modelPlatform) return;
+    try {
+      const res = await fetch(
+        `/api/admin/platforms/${modelPlatform.id}/models?modelId=${encodeURIComponent(modelId)}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json();
+      if (data.success) {
+        fetchModels(modelPlatform.id);
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    }
+  };
+
   const columns: TableColumnsType<Platform> = [
     {
       title: t("platform.name"),
@@ -261,10 +352,18 @@ export default function PlatformsPage() {
       title: t("common.actions"),
       key: "actions",
       fixed: "right",
-      width: 120,
+      width: 150,
       align: "center",
       render: (_: unknown, record: Platform) => (
         <Space size="small">
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            icon={<DatabaseOutlined />}
+            aria-label={t("platform.models") || "模型"}
+            onClick={() => openModelDrawer(record)}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -444,6 +543,80 @@ export default function PlatformsPage() {
           </Form>
         </Card>
       )}
+
+      {/* 模型管理 Drawer */}
+      <Drawer
+        title={
+          <span className="flex items-center gap-2">
+            <DatabaseOutlined />
+            {modelPlatform?.name} — {t("platform.models") || "模型管理"}
+          </span>
+        }
+        open={modelDrawerOpen}
+        onClose={() => setModelDrawerOpen(false)}
+        width={600}
+      >
+        <div className="mb-4 flex items-center gap-2">
+          <Input
+            placeholder={t("platform.model_placeholder") || "输入模型 ID"}
+            value={newModelId}
+            onChange={(e) => setNewModelId(e.target.value)}
+            onPressEnter={handleAddModel}
+            className="flex-1"
+          />
+          <Button variant="primary" size="sm" onClick={handleAddModel} disabled={!newModelId.trim()}>
+            {t("common.create")}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            icon={<ReloadOutlined />}
+            onClick={handleRefreshModels}
+            loading={refreshing}
+          >
+            {t("platform.refresh_models") || "刷新"}
+          </Button>
+        </div>
+        <Table
+          dataSource={models}
+          loading={modelsLoading}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          columns={[
+            {
+              title: t("platform.model_id") || "模型 ID",
+              dataIndex: "modelId",
+              key: "modelId",
+              ellipsis: true,
+            },
+            {
+              title: t("platform.model_source") || "来源",
+              dataIndex: "source",
+              key: "source",
+              width: 80,
+              render: (v: string) => (
+                <Tag color={v === "manual" ? "green" : "blue"}>
+                  {v === "manual" ? "手动" : "自动"}
+                </Tag>
+              ),
+            },
+            {
+              title: t("common.actions"),
+              key: "actions",
+              width: 60,
+              render: (_: unknown, record: { modelId: string }) => (
+                <Popconfirm
+                  title={t("common.confirm_delete")}
+                  onConfirm={() => handleDeleteModel(record.modelId)}
+                >
+                  <Button variant="dangerGhost" size="sm" iconOnly icon={<DeleteOutlined />} />
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
+      </Drawer>
     </div>
   );
 }

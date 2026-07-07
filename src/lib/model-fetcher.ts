@@ -33,7 +33,7 @@ function hashCode(str: string): number {
 /**
  * 从单个平台获取模型列表，失败返回 null（区分"无模型"和"拉取失败"）
  */
-async function fetchPlatformModels(platform: {
+export async function fetchPlatformModels(platform: {
   id: string;
   baseUrl: string;
   apiKey: string;

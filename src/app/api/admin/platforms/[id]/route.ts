@@ -235,8 +235,12 @@ export async function DELETE(
     if (logCount > 0) {
       await prisma.requestLog.deleteMany({ where: { platformId: id } });
     }
+    // 代理解绑而非删除（platformId 设为 null）
     if (proxyCount > 0) {
-      await prisma.proxy.deleteMany({ where: { platformId: id } });
+      await prisma.proxy.updateMany({
+        where: { platformId: id },
+        data: { platformId: null },
+      });
     }
     await prisma.platform.delete({ where: { id } });
 
@@ -256,9 +260,9 @@ export async function DELETE(
       message: (() => {
         const parts: string[] = [];
         if (logCount > 0) parts.push(`${logCount} 条请求日志`);
-        if (proxyCount > 0) parts.push(`${proxyCount} 个代理`);
+        if (proxyCount > 0) parts.push(`${proxyCount} 个代理已解绑`);
         return parts.length > 0
-          ? `平台删除成功（同时清理了${parts.join("、")}）`
+          ? `平台删除成功（${parts.join("、")}）`
           : "平台删除成功";
       })(),
     });

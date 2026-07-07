@@ -33,6 +33,8 @@ async function refreshProxyCache() {
 
   const grouped = new Map<string, Proxy[]>();
   for (const p of proxies) {
+    // 跳过未绑定平台的代理
+    if (!p.platformId) continue;
     const list = grouped.get(p.platformId) ?? [];
     list.push(p);
     grouped.set(p.platformId, list);

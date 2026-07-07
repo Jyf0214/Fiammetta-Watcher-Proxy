@@ -141,7 +141,12 @@
     "api_key_edit_hint": "Leave empty to keep current",
     "additional_keys": "API Key (one per line)",
     "additional_keys_tip": "First line is primary key, additional lines are secondary keys for round-robin load balancing",
-    "additional_keys_placeholder": "One key per line (optional)"
+    "additional_keys_placeholder": "One key per line (optional)",
+    "models": "Model Management",
+    "model_id": "Model ID",
+    "model_source": "Source",
+    "model_placeholder": "Enter model ID",
+    "refresh_models": "Refresh"
   },
   "proxy": {
     "address": "Proxy Address",
@@ -288,7 +293,12 @@
     "db_status": "Database Status",
     "db_connected": "Connected",
     "db_disconnected": "Disconnected",
-    "config_load_failed": "Failed to load configuration"
+    "config_load_failed": "Failed to load configuration",
+    "auto_model_title": "Auto Model",
+    "auto_model_desc": "When configured, requests to this model ID will automatically round-robin across all available platforms.",
+    "auto_model_regenerate": "Regenerate",
+    "auto_model_regenerated": "Auto model ID has been regenerated",
+    "auto_model_enable": "Enable Auto Model"
   },
   "api": {
     "missing_key": "Missing API Key",

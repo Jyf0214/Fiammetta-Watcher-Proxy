@@ -124,6 +124,9 @@ async function runCheck() {
       // 跳过仍在封禁冷却期内的代理
       if (proxy.cooldownEnd && proxy.cooldownEnd > now) continue;
 
+      // 跳过未绑定平台的代理
+      if (!proxy.platform) continue;
+
       const targetUrl = proxy.platform.baseUrl.replace(/\/+$/, "");
 
       const healthy = await testProxy(proxy.address, targetUrl);

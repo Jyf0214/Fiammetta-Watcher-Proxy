@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, Descriptions, Tag, Alert, Form, Input, message } from "antd";
+import { useState, useEffect, useCallback } from "react";
+import { Card, Descriptions, Tag, Alert, Form, Input, message, Tooltip } from "antd";
 import { Button } from "@/components/ui/Button";
-import { RefreshCw, Lock } from "lucide-react";
+import { RefreshCw, Lock, Zap, Copy, Check } from "lucide-react";
 import GlobalLoading from "@/components/Loading";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -22,6 +22,62 @@ export default function SystemPage() {
   const [loadError, setLoadError] = useState(false);
   const [passwordForm] = Form.useForm();
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+
+  // 自动模型 ID 状态
+  const [autoModelId, setAutoModelId] = useState<string | null>(null);
+  const [autoModelLoading, setAutoModelLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  /** 获取自动模型 ID 配置 */
+  const fetchAutoModelId = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/config");
+      const data = await res.json();
+      if (data.success && data.data) {
+        setAutoModelId(data.data["system:auto_model_id"] || null);
+      }
+    } catch {
+      // 静默失败
+    }
+  }, []);
+
+  /** 重新生成自动模型 ID */
+  const regenerateAutoModelId = async () => {
+    setAutoModelLoading(true);
+    try {
+      // 生成 fwp-auto-model- + 16 位随机 hex
+      const hex = Array.from({ length: 16 }, () =>
+        Math.floor(Math.random() * 16).toString(16)
+      ).join("");
+      const newId = `fwp-auto-model-${hex}`;
+
+      const res = await fetch("/api/admin/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "system:auto_model_id", value: newId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutoModelId(newId);
+        message.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    } finally {
+      setAutoModelLoading(false);
+    }
+  };
+
+  /** 复制自动模型 ID */
+  const copyAutoModelId = () => {
+    if (autoModelId) {
+      navigator.clipboard.writeText(autoModelId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   // 修复：将 fetchInfo 提取为独立函数，供 useEffect 和按钮 onClick 共用
   const fetchInfo = async (signal?: AbortSignal) => {
@@ -55,8 +111,9 @@ export default function SystemPage() {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchInfo(controller.signal);
+    fetchAutoModelId();
     return () => controller.abort();
-  }, []);
+  }, [fetchAutoModelId]);
 
   /** 修改密码提交处理 */
   const handleChangePassword = async (values: {
@@ -219,6 +276,54 @@ export default function SystemPage() {
             </Button>
           </Form.Item>
         </Form>
+      </Card>
+
+      {/* 自动模型 ID 配置卡片 */}
+      <Card
+        className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 mt-6"
+        title={
+          <span className="flex items-center gap-2">
+            <Zap size={18} />
+            {t("system.auto_model_title") || "自动模型"}
+          </span>
+        }
+      >
+        <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-4">
+          {t("system.auto_model_desc") || "配置后，请求此模型 ID 时将自动轮询所有可用平台。"}
+        </p>
+        {autoModelId ? (
+          <div className="flex items-center gap-3">
+            <code className="flex-1 bg-zinc-100 dark:bg-zinc-800 px-3 py-2 rounded text-sm font-mono break-all">
+              {autoModelId}
+            </code>
+            <Tooltip title={copied ? t("common.copied") : t("common.copy")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                icon={copied ? <Check size={14} /> : <Copy size={14} />}
+                onClick={copyAutoModelId}
+              />
+            </Tooltip>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={regenerateAutoModelId}
+              loading={autoModelLoading}
+            >
+              {t("system.auto_model_regenerate") || "重新生成"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={regenerateAutoModelId}
+            loading={autoModelLoading}
+          >
+            {t("system.auto_model_enable") || "启用自动模型"}
+          </Button>
+        )}
       </Card>
     </div>
   );

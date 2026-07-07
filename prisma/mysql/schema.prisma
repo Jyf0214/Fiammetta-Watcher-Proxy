@@ -61,7 +61,7 @@ model Platform {
 model Proxy {
   id          String   @id @default(cuid())
   address     String   // 格式：http://user:pass@host:port 或 socks5://host:port
-  platformId  String   // 绑定到特定平台
+  platformId  String?  // 绑定到特定平台（null = 未绑定）
   enabled     Boolean  @default(true)
   status      String   @default("healthy") // healthy | degraded | down
   failCount   Int      @default(0) // 连续失败次数
@@ -70,7 +70,7 @@ model Proxy {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  platform Platform @relation(fields: [platformId], references: [id])
+  platform Platform? @relation(fields: [platformId], references: [id], onDelete: SetNull)
 
   @@index([platformId, enabled, status])
   @@map("proxies")
@@ -143,6 +143,7 @@ model PlatformModel {
   platformId String
   modelId    String   @db.VarChar(200) // 模型 ID（如 gpt-4o, meta/llama-3.1-8b-instruct）
   ownedBy    String?  @db.VarChar(200) // 模型归属（上游返回的 owned_by）
+  source     String   @default("auto") @db.VarChar(20) // auto = 自动拉取, manual = 用户手动添加
   fetchedAt  DateTime @default(now()) // 最近一次发现时间
 
   platform Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
