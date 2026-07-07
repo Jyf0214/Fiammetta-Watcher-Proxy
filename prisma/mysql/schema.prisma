@@ -169,7 +169,7 @@ model AuditLog {
   id        String   @id @default(cuid())
   adminId   String?
   action    String   // 操作类型（login, create_platform, update_key 等）
-  detail    String?  // 操作详情（JSON）
+  detail    String?  @db.Text // 操作详情（JSON），可能包含大量变更记录
   ip        String?
   createdAt DateTime @default(now())
 
@@ -186,7 +186,7 @@ model SystemEvent {
   id        String   @id @default(cuid())
   level     String   // info | warning | error | critical
   message   String
-  detail    String?  // 详细信息（JSON）
+  detail    String?  @db.Text // 详细信息（JSON），可能包含大量错误堆栈
   createdAt DateTime @default(now())
 
   @@index([level])
@@ -199,7 +199,7 @@ model SystemEvent {
 model Config {
   id        String   @id @default(cuid())
   key       String   @unique
-  value     String
+  value     String   @db.Text
   updatedAt DateTime @updatedAt
 
   @@map("configs")
