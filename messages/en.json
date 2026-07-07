@@ -140,7 +140,7 @@
     "fetch_failed": "Failed to fetch platform list",
     "api_key_edit_hint": "Leave empty to keep current",
     "additional_keys": "API Key (one per line)",
-    "additional_keys_tip": "One key per line, used for round-robin load balancing",
+    "additional_keys_tip": "First line is primary key, additional lines are secondary keys for round-robin load balancing",
     "additional_keys_placeholder": "One key per line (optional)"
   },
   "proxy": {

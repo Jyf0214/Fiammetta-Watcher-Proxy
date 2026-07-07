@@ -80,20 +80,19 @@ export default function PlatformsPage() {
 
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
-    // 将 apiKeys JSON 数组转换为换行文本（供 Textarea 显示）
-    let apiKeysText = "";
+    // 将 apiKey + apiKeys 合并为换行文本（第一行=主密钥，其余行=附加密钥）
+    let allKeys = platform.apiKey || "";
     if (platform.apiKeys) {
       try {
         const parsed = JSON.parse(platform.apiKeys);
-        if (Array.isArray(parsed)) {
-          apiKeysText = parsed.join("\n");
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          allKeys = [allKeys, ...parsed].join("\n");
         }
       } catch {
         // JSON 解析失败，忽略
       }
     }
-    // forwardHeaders 已经是 JSON 字符串，直接显示
-    form.setFieldsValue({ ...platform, apiKeys: apiKeysText });
+    form.setFieldsValue({ ...platform, apiKey: allKeys });
     setFormVisible(true);
   };
 
@@ -108,13 +107,16 @@ export default function PlatformsPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
-      // 将附加密钥文本行转换为 JSON 数组
-      if (typeof values.apiKeys === "string") {
-        const lines = values.apiKeys
+      // 将 API Key 文本行拆分：第一行=主密钥，其余行=附加密钥
+      if (typeof values.apiKey === "string") {
+        const lines = values.apiKey
           .split("\n")
           .map((line: string) => line.trim())
           .filter((line: string) => line.length > 0);
-        values.apiKeys = JSON.stringify(lines);
+        if (lines.length > 0) {
+          values.apiKey = lines[0];
+          values.apiKeys = lines.length > 1 ? JSON.stringify(lines.slice(1)) : "[]";
+        }
       }
 
       const url = editing
@@ -376,20 +378,12 @@ export default function PlatformsPage() {
               <Form.Item
                 name="apiKey"
                 label={t("platform.api_key")}
+                tooltip={t("platform.additional_keys_tip") || "每行一个密钥，第一行为主密钥，后续行为附加密钥"}
                 rules={editing ? [] : [{ required: true }]}
-              >
-                <Input.Password
-                  placeholder={editing ? t("platform.api_key_edit_hint") : undefined}
-                />
-              </Form.Item>
-              <Form.Item
-                name="apiKeys"
-                label={t("platform.additional_keys") || "附加密钥"}
-                tooltip={t("platform.additional_keys_tip") || "每行一个密钥，用于轮询负载均衡"}
               >
                 <Input.TextArea
                   rows={3}
-                  placeholder={t("platform.additional_keys_placeholder") || "每行一个密钥（可选）"}
+                  placeholder={editing ? t("platform.api_key_edit_hint") : "每行一个密钥"}
                   className="font-mono text-xs"
                 />
               </Form.Item>

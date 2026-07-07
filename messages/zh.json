@@ -140,7 +140,7 @@
     "fetch_failed": "获取平台列表失败",
     "api_key_edit_hint": "留空则保持不变",
     "additional_keys": "API Key（一行一个）",
-    "additional_keys_tip": "每行一个密钥，用于轮询负载均衡",
+    "additional_keys_tip": "第一行为主密钥，后续行为附加密钥，用于轮询负载均衡",
     "additional_keys_placeholder": "每行一个密钥（可选）"
   },
   "proxy": {
