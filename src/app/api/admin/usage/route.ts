@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
+import { serializeBigInt } from "@/lib/serialize";
 
 /**
  * GET /api/admin/usage — 获取 API Key 用量统计
@@ -168,7 +169,7 @@ export async function GET(request: NextRequest) {
           ? k.key.substring(0, 8) + "..." + k.key.substring(k.key.length - 4)
           : "***";
 
-      return {
+      return serializeBigInt({
         id: k.id,
         name: k.name,
         key: maskedKey,
@@ -177,7 +178,7 @@ export async function GET(request: NextRequest) {
         usedTokens: k.usedTokens,
         createdAt: k.createdAt.toISOString(),
         stats: keyStats,
-      };
+      });
     });
 
     // 如果指定了 keyId，只返回该 Key 的数据
