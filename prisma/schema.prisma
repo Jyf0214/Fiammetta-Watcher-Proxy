@@ -168,7 +168,7 @@ model RequestLog {
   ttft             Int      @default(0) // 首个 token 时间（毫秒），仅流式响应有效
   duration         Int      @default(0) // 耗时（毫秒）
   isError          Boolean  @default(false)
-  errorMessage     String?
+  errorMessage     String?  @db.Text
   createdAt        DateTime @default(now())
 
   key      ApiKey?   @relation(fields: [keyId], references: [id])
@@ -188,7 +188,7 @@ model AuditLog {
   id        String   @id @default(cuid())
   adminId   String?
   action    String // 操作类型（login, create_platform, update_key 等）
-  detail    String? // 操作详情（JSON）
+  detail    String? @db.Text // 操作详情（JSON）
   ip        String?
   createdAt DateTime @default(now())
 
@@ -204,8 +204,8 @@ model AuditLog {
 model SystemEvent {
   id        String   @id @default(cuid())
   level     String // info | warning | error | critical
-  message   String
-  detail    String? // 详细信息（JSON）
+  message   String   @db.Text
+  detail    String?  @db.Text // 详细信息（JSON）
   createdAt DateTime @default(now())
 
   @@index([level])
@@ -218,7 +218,7 @@ model SystemEvent {
 model Config {
   id        String   @id @default(cuid())
   key       String   @unique
-  value     String
+  value     String   @db.Text
   updatedAt DateTime @updatedAt
 
   @@map("configs")
