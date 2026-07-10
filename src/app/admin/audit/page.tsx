@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Tag, message, type TableColumnsType } from "antd";
+import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { RefreshCw } from "lucide-react";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { RefreshCw, History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -27,7 +30,6 @@ export default function AuditPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  // 修复：将 fetchLogs 提取为独立函数，供 useEffect 和按钮 onClick 共用
   const fetchLogs = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -44,7 +46,6 @@ export default function AuditPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取审计日志失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -53,7 +54,6 @@ export default function AuditPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -117,22 +117,19 @@ export default function AuditPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          {t("admin.audit")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-          {t("admin.audit_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-end">
+    <PageContainer>
+      <PageHeader
+        icon={<History size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.audit")}
+        description={t("admin.audit_desc")}
+        extra={
           <Button variant="default" onClick={() => fetchLogs()} icon={<RefreshCw size={14} />} disabled={loading}>
             {t("common.refresh") || "刷新"}
           </Button>
-        </div>
+        }
+      />
+
+      <ProCard>
         <ResponsiveTable
           columns={columns}
           dataSource={logs}
@@ -145,9 +142,8 @@ export default function AuditPage() {
             onChange: setPage,
             showTotal: (count) => t("common.pagination_total", { count }),
           }}
-          aria-label={t("admin.audit")}
         />
-      </Card>
-    </div>
+      </ProCard>
+    </PageContainer>
   );
 }

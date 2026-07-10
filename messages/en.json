@@ -23,6 +23,7 @@
     "page": "Page",
     "per_page": "Per Page",
     "no_data": "No Data",
+    "items": "items",
     "confirm_delete": "Confirm Delete?",
     "confirm_delete_desc": "This action cannot be undone. Are you sure?",
     "back": "Back",
@@ -301,7 +302,11 @@
     "auto_model_desc": "When configured, requests to this model ID will automatically round-robin across all available platforms.",
     "auto_model_regenerate": "Regenerate",
     "auto_model_regenerated": "Auto model ID has been regenerated",
-    "auto_model_enable": "Enable Auto Model"
+    "auto_model_enable": "Enable Auto Model",
+    "auto_model_select_title": "Select Auto Routing Models",
+    "auto_model_select_desc": "Select models from discovered models to participate in auto routing. Supports search and multi-select.",
+    "auto_model_select_placeholder": "Search and select models...",
+    "auto_model_selected_saved": "Model selection saved"
   },
   "api": {
     "missing_key": "Missing API Key",

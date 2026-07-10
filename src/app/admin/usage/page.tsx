@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Card,
   Select,
   Tag,
   Tooltip,
@@ -10,7 +9,10 @@ import {
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { ReloadOutlined } from "@ant-design/icons";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { ReloadOutlined, BarChartOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -54,7 +56,6 @@ export default function UsagePage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取用量统计失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -209,45 +210,38 @@ export default function UsagePage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-          {t("admin.usage")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-          {t("admin.usage_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">
-              {t("common.total")}: {usageData.length}
-            </span>
-            <Select
-              value={period}
-              onChange={setPeriod}
-              className="w-32"
-              options={[
-                { value: "all", label: t("usage.period_all") },
-                { value: "today", label: t("usage.period_today") },
-                { value: "week", label: t("usage.period_week") },
-                { value: "month", label: t("usage.period_month") },
-              ]}
-            />
-          </div>
+    <PageContainer>
+      <PageHeader
+        icon={<BarChartOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.usage")}
+        description={t("admin.usage_desc")}
+        extra={
           <Button
             variant="default"
             icon={<ReloadOutlined />}
-            aria-label={t("common.refresh")}
             onClick={() => fetchUsage()}
             disabled={loading}
           >
             {t("common.refresh")}
           </Button>
-        </div>
+        }
+      />
 
+      <ProCard
+        extra={
+          <Select
+            value={period}
+            onChange={setPeriod}
+            className="w-32"
+            options={[
+              { value: "all", label: t("usage.period_all") },
+              { value: "today", label: t("usage.period_today") },
+              { value: "week", label: t("usage.period_week") },
+              { value: "month", label: t("usage.period_month") },
+            ]}
+          />
+        }
+      >
         <ResponsiveTable
           columns={columns}
           dataSource={usageData}
@@ -258,9 +252,8 @@ export default function UsagePage() {
             showTotal: (count) => t("common.pagination_total", { count }),
           }}
           scroll={{ x: 1400 }}
-          aria-label={t("admin.usage")}
         />
-      </Card>
-    </div>
+      </ProCard>
+    </PageContainer>
   );
 }

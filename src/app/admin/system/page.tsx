@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Descriptions, Tag, Alert, Form, Input, message } from "antd";
+import { Descriptions, Tag, Alert, Form, Input, message } from "antd";
 import { Button } from "@/components/ui/Button";
-import { RefreshCw, Lock } from "lucide-react";
+import { RefreshCw, Lock, Settings } from "lucide-react";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
 import GlobalLoading from "@/components/Loading";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -23,7 +26,6 @@ export default function SystemPage() {
   const [passwordForm] = Form.useForm();
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
-  // 修复：将 fetchInfo 提取为独立函数，供 useEffect 和按钮 onClick 共用
   const fetchInfo = async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/stats", { signal });
@@ -41,7 +43,6 @@ export default function SystemPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取系统信息失败:", err);
       setLoadError(true);
     } finally {
       if (!signal?.aborted) {
@@ -50,7 +51,6 @@ export default function SystemPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -58,7 +58,6 @@ export default function SystemPage() {
     return () => controller.abort();
   }, []);
 
-  /** 修改密码提交处理 */
   const handleChangePassword = async (values: {
     currentPassword: string;
     newPassword: string;
@@ -91,17 +90,13 @@ export default function SystemPage() {
 
   if (loadError) {
     return (
-      <div>
-        <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-1">
-            {t("admin.system")}
-          </h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-            {t("system.db_status")}
-          </p>
-        </div>
-
-        <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900" aria-label={t("admin.system")}>
+      <PageContainer>
+        <PageHeader
+          icon={<Settings size={20} className="text-zinc-500 dark:text-zinc-400" />}
+          title={t("admin.system")}
+          description={t("system.db_status")}
+        />
+        <ProCard>
           <Alert
             type="error"
             showIcon
@@ -117,23 +112,20 @@ export default function SystemPage() {
               </Button>
             }
           />
-        </Card>
-      </div>
+        </ProCard>
+      </PageContainer>
     );
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-1">
-          {t("admin.system")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-          {t("system.db_status")}
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        icon={<Settings size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.system")}
+        description={t("system.db_status")}
+      />
 
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900" aria-label={t("admin.system")}>
+      <ProCard className="mb-4">
         <Descriptions column={1} bordered>
           <Descriptions.Item label={t("system.admin_init")}>
             {info?.adminUsername || t("common.not_set")}
@@ -152,14 +144,12 @@ export default function SystemPage() {
             {info?.keyCount ?? 0}
           </Descriptions.Item>
         </Descriptions>
-      </Card>
+      </ProCard>
 
-      {/* 修改密码卡片 */}
-      <Card
-        className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 mt-6"
+      <ProCard
         title={
           <span className="flex items-center gap-2">
-            <Lock size={18} />
+            <Lock size={16} />
             {t("auth.change_password")}
           </span>
         }
@@ -219,7 +209,7 @@ export default function SystemPage() {
             </Button>
           </Form.Item>
         </Form>
-      </Card>
-    </div>
+      </ProCard>
+    </PageContainer>
   );
 }

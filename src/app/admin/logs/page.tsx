@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Card,
   Tag,
   Select,
   message,
@@ -11,7 +10,10 @@ import {
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { ReloadOutlined } from "@ant-design/icons";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { ReloadOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -42,7 +44,6 @@ export default function LogsPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
 
-  // 修复：将 fetchLogs 提取为独立函数，供 useEffect 和按钮 onClick 共用
   const fetchLogs = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -66,7 +67,6 @@ export default function LogsPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取日志失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -75,7 +75,6 @@ export default function LogsPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -187,49 +186,46 @@ export default function LogsPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          {t("admin.logs")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-          {t("admin.logs_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div className="flex flex-wrap gap-2">
-            <Select
-              placeholder={t("log.status_filter_placeholder")}
-              allowClear
-              className="w-36"
-              onChange={(v) => { setStatusFilter(v); setPage(1); }}
-            >
-              <Select.Option value="200">200</Select.Option>
-              <Select.Option value="400">400</Select.Option>
-              <Select.Option value="401">401</Select.Option>
-              <Select.Option value="429">429</Select.Option>
-              <Select.Option value="500">500</Select.Option>
-              <Select.Option value="503">503</Select.Option>
-            </Select>
-            <Select
-              placeholder={t("log.error_filter_placeholder")}
-              allowClear
-              className="w-36"
-              onChange={(v) => { setErrorFilter(v); setPage(1); }}
-            >
-              <Select.Option value="true">
-                {t("log.filter_error_only")}
-              </Select.Option>
-              <Select.Option value="false">
-                {t("log.filter_normal_only")}
-              </Select.Option>
-            </Select>
-          </div>
-          <Button variant="default" icon={<ReloadOutlined />} aria-label={t("common.refresh")} onClick={() => fetchLogs()} disabled={loading}>
+    <PageContainer>
+      <PageHeader
+        icon={<FileTextOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.logs")}
+        description={t("admin.logs_desc")}
+        extra={
+          <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchLogs()} disabled={loading}>
             {t("common.refresh")}
           </Button>
+        }
+      />
+
+      <ProCard>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Select
+            placeholder={t("log.status_filter_placeholder")}
+            allowClear
+            className="w-36"
+            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+          >
+            <Select.Option value="200">200</Select.Option>
+            <Select.Option value="400">400</Select.Option>
+            <Select.Option value="401">401</Select.Option>
+            <Select.Option value="429">429</Select.Option>
+            <Select.Option value="500">500</Select.Option>
+            <Select.Option value="503">503</Select.Option>
+          </Select>
+          <Select
+            placeholder={t("log.error_filter_placeholder")}
+            allowClear
+            className="w-36"
+            onChange={(v) => { setErrorFilter(v); setPage(1); }}
+          >
+            <Select.Option value="true">
+              {t("log.filter_error_only")}
+            </Select.Option>
+            <Select.Option value="false">
+              {t("log.filter_normal_only")}
+            </Select.Option>
+          </Select>
         </div>
 
         <ResponsiveTable
@@ -244,9 +240,8 @@ export default function LogsPage() {
             onChange: setPage,
             showTotal: (count) => t("common.pagination_total", { count }),
           }}
-          aria-label={t("admin.logs")}
         />
-      </Card>
-    </div>
+      </ProCard>
+    </PageContainer>
   );
 }

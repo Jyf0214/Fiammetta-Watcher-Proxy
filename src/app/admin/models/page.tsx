@@ -6,14 +6,16 @@ import {
   Form,
   Input,
   Select,
-  Card,
   message,
   Popconfirm,
   type TableColumnsType,
 } from "antd";
-import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, SwapOutlined } from "@ant-design/icons";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -40,7 +42,6 @@ export default function ModelsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  // 修复：将 fetchModels 提取为独立函数，供 useEffect 和操作回调共用
   const fetchModels = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -49,7 +50,6 @@ export default function ModelsPage() {
       if (data.success && Array.isArray(data.data)) setModels(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取模型列表失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -58,7 +58,6 @@ export default function ModelsPage() {
     }
   };
 
-  // 修复：将 fetchPlatforms 提取为独立函数
   const fetchPlatforms = async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/platforms", { signal });
@@ -66,12 +65,10 @@ export default function ModelsPage() {
       if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取平台列表失败:", err);
       message.error(t("common.error"));
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -101,7 +98,6 @@ export default function ModelsPage() {
         message.error(data.error);
       }
     } catch (err) {
-      // antd Form 校验失败抛出含 errorFields 的对象，无需显示错误提示
       if (err && typeof err === "object" && "errorFields" in err) return;
       message.error(t("common.error"));
     } finally {
@@ -166,22 +162,15 @@ export default function ModelsPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          {t("admin.models")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-          {t("admin.models_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-end">
+    <PageContainer>
+      <PageHeader
+        icon={<SwapOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.models")}
+        description={t("admin.models_desc")}
+        extra={
           <Button
             variant="primary"
             icon={<PlusOutlined />}
-            aria-label={t("model_map.create_mapping")}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);
@@ -189,17 +178,18 @@ export default function ModelsPage() {
           >
             {t("model_map.create_mapping")}
           </Button>
-        </div>
+        }
+      />
 
+      <ProCard>
         <ResponsiveTable
           columns={columns}
           dataSource={models}
           rowKey="id"
           loading={loading}
           pagination={{ pageSize: 20 }}
-          aria-label={t("admin.models")}
         />
-      </Card>
+      </ProCard>
 
       <Modal
         title={t("model_map.create_mapping")}
@@ -241,6 +231,6 @@ export default function ModelsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageContainer>
   );
 }

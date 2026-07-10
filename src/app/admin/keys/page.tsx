@@ -9,7 +9,6 @@ import {
   Input,
   InputNumber,
   Select,
-  Card,
   message,
   Popconfirm,
   Tooltip,
@@ -19,9 +18,13 @@ import {
   PlusOutlined,
   DeleteOutlined,
   CopyOutlined,
+  KeyOutlined,
 } from "@ant-design/icons";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -48,7 +51,6 @@ export default function KeysPage() {
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
 
-  // 修复：将 fetchKeys 提取为独立函数，供 useEffect 和操作回调共用
   const fetchKeys = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -57,7 +59,6 @@ export default function KeysPage() {
       if (data.success && Array.isArray(data.data)) setKeys(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取数据失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -66,7 +67,6 @@ export default function KeysPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -217,25 +217,15 @@ export default function KeysPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-          {t("admin.keys")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-          {t("admin.keys_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-between items-center">
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            {t("common.total")}: {keys.length}
-          </span>
+    <PageContainer>
+      <PageHeader
+        icon={<KeyOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.keys")}
+        description={t("admin.keys_desc")}
+        extra={
           <Button
             variant="primary"
             icon={<PlusOutlined />}
-            aria-label={t("api_key.create_key")}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);
@@ -243,21 +233,22 @@ export default function KeysPage() {
           >
             {t("api_key.create_key")}
           </Button>
-        </div>
+        }
+      />
 
+      <ProCard>
         <ResponsiveTable
           columns={columns}
           dataSource={keys}
           rowKey="id"
           loading={loading}
-          aria-label={t("admin.keys")}
           pagination={{
             pageSize: 20,
             showTotal: (total) => t("common.pagination_total", { count: total }),
           }}
           scroll={{ x: 700 }}
         />
-      </Card>
+      </ProCard>
 
       <Modal
         title={t("api_key.create_key")}
@@ -362,6 +353,6 @@ export default function KeysPage() {
           {t("api_key.copy_key")}
         </Button>
       </Modal>
-    </div>
+    </PageContainer>
   );
 }

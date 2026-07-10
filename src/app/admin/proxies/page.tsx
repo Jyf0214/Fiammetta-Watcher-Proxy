@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import {
-  Card,
   Tag,
   Modal,
   Form,
@@ -14,7 +13,10 @@ import {
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, GlobalOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -254,18 +256,28 @@ export default function ProxiesPage() {
   if (loading && proxies.length === 0) return <GlobalLoading size="large" />;
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-          {t("admin.proxies")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-          {t("admin.proxies_desc")}
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        icon={<GlobalOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.proxies")}
+        description={t("admin.proxies_desc")}
+        extra={
+          <div className="flex gap-2">
+            <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchProxies()} disabled={loading}>
+              {t("common.refresh")}
+            </Button>
+            <Button variant="default" icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
+              {t("proxy.import") || "批量导入"}
+            </Button>
+            <Button variant="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
+              {t("proxy.create_proxy") || "添加代理"}
+            </Button>
+          </div>
+        }
+      />
 
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <ProCard
+        extra={
           <div className="flex items-center gap-3">
             <span className="text-sm text-zinc-500 dark:text-zinc-400">
               {t("common.total")}: {proxies.length}
@@ -281,19 +293,8 @@ export default function ProxiesPage() {
               ))}
             </Select>
           </div>
-          <div className="flex gap-2">
-            <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchProxies()} disabled={loading}>
-              {t("common.refresh")}
-            </Button>
-            <Button variant="default" icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
-              {t("proxy.import") || "批量导入"}
-            </Button>
-            <Button variant="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
-              {t("proxy.create_proxy") || "添加代理"}
-            </Button>
-          </div>
-        </div>
-
+        }
+      >
         <ResponsiveTable
           columns={columns}
           dataSource={proxies}
@@ -301,9 +302,8 @@ export default function ProxiesPage() {
           loading={loading}
           pagination={{ pageSize: 20, showTotal: (total) => t("common.pagination_total", { count: total }) }}
           scroll={{ x: 700 }}
-          aria-label={t("admin.proxies")}
         />
-      </Card>
+      </ProCard>
 
       <Modal
         title={t("proxy.create_proxy") || "添加代理"}
@@ -379,6 +379,6 @@ export default function ProxiesPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </PageContainer>
   );
 }

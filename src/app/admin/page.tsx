@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Tag, message } from "antd";
+import { Tag, message } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
 import {
   CloudServerOutlined,
   KeyOutlined,
   ApiOutlined,
   AlertOutlined,
+  DashboardOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -34,7 +38,6 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
 
@@ -47,7 +50,6 @@ export default function DashboardPage() {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error("获取统计数据失败:", err);
         message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
@@ -124,19 +126,16 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div>
+    <PageContainer>
       {loading && !stats ? (
         <GlobalLoading size="large" />
       ) : (
         <>
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-1">
-              {t("dashboard.adminConsole")}
-            </h1>
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-              {t("dashboard.adminConsoleDesc")}
-            </p>
-          </div>
+          <PageHeader
+            icon={<DashboardOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+            title={t("dashboard.adminConsole")}
+            description={t("dashboard.adminConsoleDesc")}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {statCards.map((card) => (
@@ -144,7 +143,7 @@ export default function DashboardPage() {
                 key={card.key}
                 role="article"
                 aria-label={card.title}
-                className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5 hover:shadow-lg hover:shadow-zinc-100 dark:hover:shadow-zinc-800/50 transition-all duration-300 group"
+                className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 p-5 hover:shadow-lg hover:shadow-zinc-100 dark:hover:shadow-zinc-800/50 transition-all duration-300 group"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div
@@ -166,18 +165,12 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <Card
+          <ProCard
             title={
               <span className="font-semibold text-zinc-900 dark:text-zinc-100">
                 {t("dashboard.recent_events")}
               </span>
             }
-            className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900"
-            styles={{
-              header: {
-                borderBottom: "1px solid #f4f4f5",
-              },
-            }}
           >
             <ResponsiveTable
               columns={eventColumns}
@@ -185,11 +178,10 @@ export default function DashboardPage() {
               rowKey="id"
               pagination={false}
               size="small"
-              aria-label={t("dashboard.recent_events")}
             />
-          </Card>
+          </ProCard>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

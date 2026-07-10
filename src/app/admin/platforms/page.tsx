@@ -9,7 +9,6 @@ import {
   InputNumber,
   Select,
   Switch,
-  Card,
   Drawer,
   Table,
   message,
@@ -18,7 +17,10 @@ import {
 } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined, CloudServerOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -49,7 +51,6 @@ export default function PlatformsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  // 模型管理 Drawer 状态
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [modelPlatform, setModelPlatform] = useState<Platform | null>(null);
   const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; fetchedAt: string }>>([]);
@@ -65,7 +66,6 @@ export default function PlatformsPage() {
       if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取数据失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -90,7 +90,6 @@ export default function PlatformsPage() {
 
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
-    // 将 apiKey + apiKeys 合并为换行文本（第一行=主密钥，其余行=附加密钥）
     let allKeys = platform.apiKey || "";
     if (platform.apiKeys) {
       try {
@@ -117,7 +116,6 @@ export default function PlatformsPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
-      // 将 API Key 文本行拆分：第一行=主密钥，其余行=附加密钥
       if (typeof values.apiKey === "string") {
         const lines = values.apiKey
           .split("\n")
@@ -150,8 +148,6 @@ export default function PlatformsPage() {
         message.error(data.error || t("common.error"));
       }
     } catch (err) {
-      console.error("[PlatformsPage] 提交异常:", err);
-      // antd Form 校验失败不显示错误提示
       if (err && typeof err === "object" && "errorFields" in err) return;
       message.error(t("common.error"));
     } finally {
@@ -194,8 +190,6 @@ export default function PlatformsPage() {
       setTogglingId(null);
     }
   };
-
-  // ==================== 模型管理 ====================
 
   const openModelDrawer = (platform: Platform) => {
     setModelPlatform(platform);
@@ -361,7 +355,6 @@ export default function PlatformsPage() {
             size="sm"
             iconOnly
             icon={<DatabaseOutlined />}
-            aria-label={t("platform.models") || "模型"}
             onClick={() => openModelDrawer(record)}
           />
           <Button
@@ -369,7 +362,6 @@ export default function PlatformsPage() {
             size="sm"
             iconOnly
             icon={<EditOutlined />}
-            aria-label={t("common.edit")}
             onClick={() => openEditForm(record)}
           />
           <Popconfirm
@@ -381,7 +373,6 @@ export default function PlatformsPage() {
               size="sm"
               iconOnly
               icon={<DeleteOutlined />}
-              aria-label={t("common.delete")}
             />
           </Popconfirm>
         </Space>
@@ -394,49 +385,38 @@ export default function PlatformsPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-          {t("admin.platforms")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-          {t("admin.platforms_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-between items-center">
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            {t("common.total")}: {platforms.length}
-          </span>
+    <PageContainer>
+      <PageHeader
+        icon={<CloudServerOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.platforms")}
+        description={t("admin.platforms_desc")}
+        extra={
           <Button
             variant="primary"
             icon={<PlusOutlined />}
-            aria-label={t("platform.create_platform")}
             onClick={openCreateForm}
           >
             {t("platform.create_platform")}
           </Button>
-        </div>
+        }
+      />
 
+      <ProCard>
         <ResponsiveTable
           columns={columns}
           dataSource={platforms}
           rowKey="id"
           loading={loading}
-          aria-label={t("admin.platforms")}
           pagination={{
             pageSize: 20,
             showTotal: (total) => t("common.pagination_total", { count: total }),
           }}
           scroll={{ x: 900 }}
         />
-      </Card>
+      </ProCard>
 
-      {/* 内联创建/编辑表单 */}
       {formVisible && (
-        <Card
-          className="mt-6 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900"
+        <ProCard
           title={
             <div className="flex items-center justify-between">
               <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
@@ -448,13 +428,12 @@ export default function PlatformsPage() {
                 iconOnly
                 icon={<CloseOutlined />}
                 onClick={closeForm}
-                aria-label={t("common.close")}
               />
             </div>
           }
+          className="mt-4"
         >
           <Form form={form} layout="vertical" onFinish={handleSubmit} onFinishFailed={({ errorFields }) => {
-            // 表单校验失败时显示第一个错误
             if (errorFields && errorFields.length > 0) {
               message.error(errorFields[0].errors[0] || t("validation.field_required"));
             }
@@ -541,10 +520,9 @@ export default function PlatformsPage() {
               </Button>
             </div>
           </Form>
-        </Card>
+        </ProCard>
       )}
 
-      {/* 模型管理 Drawer */}
       <Drawer
         title={
           <span className="flex items-center gap-2">
@@ -617,6 +595,6 @@ export default function PlatformsPage() {
           ]}
         />
       </Drawer>
-    </div>
+    </PageContainer>
   );
 }

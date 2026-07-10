@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Tag, message, type TableColumnsType } from "antd";
+import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { RefreshCw } from "lucide-react";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ProCard } from "@/components/ui/ProCard";
+import { RefreshCw, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -26,7 +29,6 @@ export default function EventsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  // 修复：将 fetchEvents 提取为独立函数，供 useEffect 和按钮 onClick 共用
   const fetchEvents = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -46,7 +48,6 @@ export default function EventsPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("获取系统事件失败:", err);
       message.error(t("common.error"));
     } finally {
       if (!signal?.aborted) {
@@ -55,7 +56,6 @@ export default function EventsPage() {
     }
   };
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -117,22 +117,19 @@ export default function EventsPage() {
   }
 
   return (
-    <div>
-      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          {t("admin.events")}
-        </h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-          {t("admin.events_desc")}
-        </p>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-4 flex justify-end">
+    <PageContainer>
+      <PageHeader
+        icon={<AlertTriangle size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("admin.events")}
+        description={t("admin.events_desc")}
+        extra={
           <Button variant="default" onClick={() => fetchEvents()} icon={<RefreshCw size={14} />} disabled={loading}>
             {t("common.refresh") || "刷新"}
           </Button>
-        </div>
+        }
+      />
+
+      <ProCard>
         <ResponsiveTable
           columns={columns}
           dataSource={events}
@@ -145,9 +142,8 @@ export default function EventsPage() {
             onChange: setPage,
             showTotal: (count) => t("common.pagination_total", { count }),
           }}
-          aria-label={t("admin.events")}
         />
-      </Card>
-    </div>
+      </ProCard>
+    </PageContainer>
   );
 }

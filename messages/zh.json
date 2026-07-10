@@ -23,6 +23,7 @@
     "page": "页",
     "per_page": "每页",
     "no_data": "暂无数据",
+    "items": "项",
     "confirm_delete": "确认删除？",
     "confirm_delete_desc": "此操作不可撤销，确定要删除吗？",
     "back": "返回",
@@ -301,7 +302,11 @@
     "auto_model_desc": "配置后，请求此模型 ID 时将自动轮询所有可用平台。",
     "auto_model_regenerate": "重新生成",
     "auto_model_regenerated": "自动模型 ID 已重新生成",
-    "auto_model_enable": "启用自动模型"
+    "auto_model_enable": "启用自动模型",
+    "auto_model_select_title": "选择自动分流模型",
+    "auto_model_select_desc": "从已发现的模型中选择要参与自动分流的模型，支持搜索和多选。",
+    "auto_model_select_placeholder": "搜索并选择模型...",
+    "auto_model_selected_saved": "模型选择已保存"
   },
   "api": {
     "missing_key": "缺少 API Key",
