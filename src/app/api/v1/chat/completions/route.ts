@@ -212,6 +212,7 @@ export async function POST(request: NextRequest) {
           ...(isStream ? { stream_options: { include_usage: true } } : {}),
         }),
         timeout: 120_000,
+        keyId: apiKey.id,
       });
     } catch (fetchError) {
       if (fetchError instanceof DOMException && fetchError.name === "AbortError") {

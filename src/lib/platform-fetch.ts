@@ -1,11 +1,11 @@
 /**
  * 平台级代理感知请求封装
  *
- * 自动检测平台是否配置了代理，若有则通过代理转发请求。
+ * 自动检测全局代理池中是否有可用代理，若有则通过代理转发请求。
  * 代理失败时自动标记并回退到直连。
  */
 
-import { selectProxy } from "./proxy-router";
+import { selectProxy, releaseProxy } from "./proxy-router";
 import { proxyFetch, markProxyFailed, markProxySuccess } from "./proxy-fetch";
 import { isDebug } from "./auth-helpers";
 import type { PlatformConfig } from "@/types";
@@ -13,13 +13,15 @@ import type { PlatformConfig } from "@/types";
 export interface PlatformFetchOptions extends RequestInit {
   /** 超时时间（毫秒），默认 120 秒 */
   timeout?: number;
+  /** 当前请求的 API Key ID，用于代理并发占用追踪 */
+  keyId?: string;
 }
 
 /**
- * 通过平台的代理（或直连）发送请求
+ * 通过全局代理池（或直连）发送请求
  *
- * 1. 检查平台是否有可用代理
- * 2. 若有，选择一个代理通过它转发
+ * 1. 从全局代理池选择一个可用代理
+ * 2. 若有，通过它转发请求
  * 3. 若代理请求失败，标记代理失败并回退直连
  * 4. 若无代理，直接发送
  */
@@ -28,14 +30,15 @@ export async function platformFetch(
   platform: PlatformConfig,
   options: PlatformFetchOptions = {}
 ): Promise<Response> {
-  const { timeout = 120_000, ...fetchOptions } = options;
+  const { timeout = 120_000, keyId, ...fetchOptions } = options;
 
-  // 尝试通过代理
-  const proxy = await selectProxy(platform.id);
+  // 从全局代理池选择代理
+  const proxy = await selectProxy(platform.id, keyId);
+  let proxyReleased = false;
 
   if (isDebug) {
     console.log(
-      `[proxy-debug] platformFetch url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy ? `${proxy.address} id=${proxy.id}` : "null(无可用代理)"}`
+      `[proxy-debug] platformFetch url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy ? `${proxy.address} id=${proxy.id}` : "null(无可用代理)"} keyId=${keyId || "none"}`
     );
   }
 
@@ -54,10 +57,14 @@ export async function platformFetch(
       // 2xx/3xx/4xx 都算代理连接成功（代理本身能通）
       if (res.status < 500) {
         await markProxySuccess(proxy.id);
+        releaseProxy(platform.id, proxy.id, keyId || "");
+        proxyReleased = true;
         return res;
       }
       // 5xx 可能是上游问题，但代理本身是通的
       await markProxySuccess(proxy.id);
+      releaseProxy(platform.id, proxy.id, keyId || "");
+      proxyReleased = true;
       return res;
     } catch (err) {
       const errMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -92,5 +99,8 @@ export async function platformFetch(
     return res;
   } finally {
     clearTimeout(timeoutId);
+    if (proxy && !proxyReleased) {
+      releaseProxy(platform.id, proxy.id, keyId || "");
+    }
   }
 }

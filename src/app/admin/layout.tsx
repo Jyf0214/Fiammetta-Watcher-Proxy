@@ -25,6 +25,7 @@ import {
   Shield,
   BarChart3,
   Network,
+  Database,
   Zap,
 } from "lucide-react";
 import { message } from "antd";
@@ -46,6 +47,7 @@ const menuItems: MenuItem[] = [
   { key: "admin.keys", icon: Key, href: "/admin/keys", group: "manage" },
   { key: "admin.models", icon: ArrowLeftRight, href: "/admin/models", group: "manage" },
   { key: "admin.proxies", icon: Network, href: "/admin/proxies", group: "manage" },
+  { key: "admin.proxy_pools", icon: Database, href: "/admin/proxy-pools", group: "manage" },
   { key: "admin.usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
   { key: "admin.logs", icon: FileText, href: "/admin/logs", group: "monitor" },
   { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
@@ -240,6 +242,7 @@ function TopHeader({
     "/admin/keys": "admin.keys",
     "/admin/models": "admin.models",
     "/admin/proxies": "admin.proxies",
+    "/admin/proxy-pools": "admin.proxy_pools",
     "/admin/auto-model": "admin.auto_model",
     "/admin/usage": "admin.usage",
     "/admin/logs": "admin.logs",

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import Image from 'next/image';
 import { ImageOff } from 'lucide-react';
 
 interface LazyImageProps {
@@ -77,15 +78,13 @@ export function LazyImage({
 
       {/* 实际图片 */}
       {isInView && (
-        <img
+        <Image
           src={src}
           alt={alt}
+          fill
+          unoptimized
           className={`lazy-image ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} ${className ?? ''}`}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
+          style={{ objectFit: 'cover' }}
           onLoad={() => setStatus('loaded')}
           onError={() => setStatus('error')}
         />

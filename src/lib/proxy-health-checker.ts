@@ -6,6 +6,8 @@
  * - 连续失败 3 次后封禁 30 分钟
  * - 封禁到期后自动恢复为 half-open 状态重新测试
  * - 测试间隔 5 分钟
+ *
+ * 代理不再绑定平台，健康检查使用第一个启用的平台作为测试目标。
  */
 
 import { prisma } from "./prisma";
@@ -45,10 +47,6 @@ function parseProxyAddress(address: string): {
 
 /**
  * 通过代理发送轻量测试请求
- *
- * 对 HTTP/HTTPS 代理：发送 CONNECT 握手
- * 对 SOCKS5 代理：尝试建立连接
- * 对所有类型：尝试通过代理访问目标平台的 /health 或根路径
  */
 async function testProxy(
   proxyAddress: string,
@@ -59,7 +57,6 @@ async function testProxy(
 
   try {
     if (parsed.protocol === "socks5") {
-      // SOCKS5 代理：使用 socks-proxy-agent 建立连接测试
       const { SocksProxyAgent } = await import("socks-proxy-agent");
       const agent = new SocksProxyAgent(proxyAddress);
       const controller = new AbortController();
@@ -81,7 +78,6 @@ async function testProxy(
         agent.destroy?.();
       }
     } else {
-      // HTTP/HTTPS 代理：使用 https-proxy-agent
       const { HttpsProxyAgent } = await import("https-proxy-agent");
       const agent = new HttpsProxyAgent(proxyAddress);
       const controller = new AbortController();
@@ -115,19 +111,26 @@ async function runCheck() {
   try {
     const proxies = await prisma.proxy.findMany({
       where: { enabled: true },
-      include: { platform: { select: { baseUrl: true } } },
     });
 
     const now = new Date();
 
+    // 获取第一个启用的平台作为测试目标
+    const testPlatform = await prisma.platform.findFirst({
+      where: { enabled: true },
+      select: { baseUrl: true },
+    });
+    if (!testPlatform) {
+      if (proxies.length > 0) {
+        console.warn("[proxy-health] 无可用平台，跳过健康检查");
+      }
+      return;
+    }
+    const targetUrl = testPlatform.baseUrl.replace(/\/+$/, "") + "/";
+
     for (const proxy of proxies) {
       // 跳过仍在封禁冷却期内的代理
       if (proxy.cooldownEnd && proxy.cooldownEnd > now) continue;
-
-      // 跳过未绑定平台的代理
-      if (!proxy.platform) continue;
-
-      const targetUrl = proxy.platform.baseUrl.replace(/\/+$/, "") + "/";
 
       const healthy = await testProxy(proxy.address, targetUrl);
 

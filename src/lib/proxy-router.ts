@@ -1,23 +1,37 @@
 /**
  * 代理路由 — 为每个请求选择最佳代理
  *
+ * 全局代理池，所有平台共享，按请求轮转。
+ *
  * 策略：
  * - 只选择状态为 healthy 或 degraded（未封禁）的代理
- * - Round-robin 轮询，均匀分摊各代理负载
- * - 代理列表按平台缓存，30 秒刷新
+ * - 并发感知轮转：同一平台的不同 key 优先分配不同的代理
+ * - 若所有代理均被同一平台占用，回退到 round-robin 复用
+ * - 代理列表全局缓存，30 秒刷新
  */
 
 import { prisma } from "./prisma";
 import { isDebug } from "./auth-helpers";
 import type { Proxy } from "@prisma/client";
 
-/** 代理缓存 */
-let proxyCache: Map<string, Proxy[]> = new Map();
+/** 全局代理缓存 */
+let proxyCache: Proxy[] = [];
 let lastRefresh = 0;
 const CACHE_TTL = 30_000;
 
-/** 每个平台独立的轮询计数器 */
-const counters = new Map<string, number>();
+/** 全局 round-robin 计数器（回退用） */
+let globalCounter = 0;
+
+/**
+ * 平台级并发占用追踪
+ *
+ * 结构：Map<platformId, Map<proxyId, Set<keyId>>>
+ * 含义：某平台的某个代理当前正在服务哪些 key
+ *
+ * 请求开始时调用 acquireProxy() 写入，请求结束时调用 releaseProxy() 清除。
+ * 内存态，重启归零，多实例各自独立（尽力而为）。
+ */
+const activeAssignments = new Map<string, Map<string, Set<string>>>();
 
 /**
  * 刷新代理缓存
@@ -31,16 +45,7 @@ async function refreshProxyCache() {
     orderBy: { createdAt: "asc" },
   });
 
-  const grouped = new Map<string, Proxy[]>();
-  for (const p of proxies) {
-    // 跳过未绑定平台的代理
-    if (!p.platformId) continue;
-    const list = grouped.get(p.platformId) ?? [];
-    list.push(p);
-    grouped.set(p.platformId, list);
-  }
-
-  proxyCache = grouped;
+  proxyCache = proxies;
   lastRefresh = now;
 }
 
@@ -56,35 +61,103 @@ function isProxyAvailable(proxy: Proxy): boolean {
 }
 
 /**
- * 为指定平台选择下一个可用代理
+ * 为指定平台选择下一个可用代理（并发感知）
  *
- * @param platformId 平台 ID
+ * @param platformId 平台 ID（用于并发占用追踪）
+ * @param keyId 当前请求的 API Key ID（用于占用追踪）
  * @returns 可用的代理记录，无可用代理返回 null
  */
-export async function selectProxy(platformId: string): Promise<Proxy | null> {
+export async function selectProxy(platformId: string, keyId?: string): Promise<Proxy | null> {
   await refreshProxyCache();
 
-  const proxies = proxyCache.get(platformId) ?? [];
-  const available = proxies.filter(isProxyAvailable);
+  const available = proxyCache.filter(isProxyAvailable);
 
   if (isDebug) {
+    const total = proxyCache.length;
+    const down = proxyCache.filter(p => p.status === "down").length;
+    const disabled = proxyCache.filter(p => !p.enabled).length;
     console.log(
-      `[proxy-debug] selectProxy platform=${platformId} total=${proxies.length} available=${available.length} disabled=${proxies.filter(p => !p.enabled).length} down=${proxies.filter(p => p.status === "down").length}`
+      `[proxy-debug] selectProxy platform=${platformId} total=${total} available=${available.length} disabled=${disabled} down=${down}`
     );
   }
 
   if (available.length === 0) return null;
 
-  const counter = counters.get(platformId) ?? 0;
-  const index = counter % available.length;
-  counters.set(platformId, counter + 1);
+  // 1. 查找当前平台未被任何 key 占用的代理（优先选择）
+  const platformAssignments = activeAssignments.get(platformId);
+  const occupiedProxyIds = new Set<string>();
+  if (platformAssignments) {
+    for (const [proxyId, keySet] of platformAssignments) {
+      if (keySet.size > 0) {
+        occupiedProxyIds.add(proxyId);
+      }
+    }
+  }
 
-  const selected = available[index];
+  const unoccupied = available.filter(p => !occupiedProxyIds.has(p.id));
+
+  let selected: Proxy;
+
+  if (unoccupied.length > 0) {
+    // 有未占用的代理，round-robin 从中选择
+    const index = globalCounter % unoccupied.length;
+    selected = unoccupied[index];
+    globalCounter++;
+  } else {
+    // 所有代理均被占用，回退到全局 round-robin（复用）
+    const index = globalCounter % available.length;
+    selected = available[index];
+    globalCounter++;
+  }
+
+  // 2. 记录占用
+  if (keyId) {
+    acquireProxy(platformId, selected.id, keyId);
+  }
+
   if (isDebug) {
-    console.log(`[proxy-debug] selectProxy 选中: id=${selected.id} address=${selected.address} status=${selected.status} failCount=${selected.failCount}`);
+    const occupiedCount = occupiedProxyIds.size;
+    console.log(
+      `[proxy-debug] selectProxy 选中: id=${selected.id} address=${selected.address} status=${selected.status} failCount=${selected.failCount} occupied=${occupiedCount}/${available.length}`
+    );
   }
 
   return selected;
+}
+
+/**
+ * 标记代理被某个 key 占用
+ */
+function acquireProxy(platformId: string, proxyId: string, keyId: string): void {
+  let platformMap = activeAssignments.get(platformId);
+  if (!platformMap) {
+    platformMap = new Map();
+    activeAssignments.set(platformId, platformMap);
+  }
+  let keySet = platformMap.get(proxyId);
+  if (!keySet) {
+    keySet = new Set();
+    platformMap.set(proxyId, keySet);
+  }
+  keySet.add(keyId);
+}
+
+/**
+ * 释放代理占用（请求结束后调用）
+ */
+export function releaseProxy(platformId: string, proxyId: string, keyId: string): void {
+  const platformMap = activeAssignments.get(platformId);
+  if (!platformMap) return;
+  const keySet = platformMap.get(proxyId);
+  if (!keySet) return;
+  keySet.delete(keyId);
+  // 清理空条目
+  if (keySet.size === 0) {
+    platformMap.delete(proxyId);
+  }
+  if (platformMap.size === 0) {
+    activeAssignments.delete(platformId);
+  }
 }
 
 /**
@@ -96,18 +169,17 @@ export async function forceRefreshProxyCache() {
 }
 
 /**
- * 获取平台的代理统计信息
+ * 获取代理全局统计信息
  */
-export async function getProxyStats(platformId: string) {
+export async function getProxyStats() {
   await refreshProxyCache();
 
-  const proxies = proxyCache.get(platformId) ?? [];
   const now = new Date();
   let healthy = 0;
   let degraded = 0;
   let down = 0;
 
-  for (const p of proxies) {
+  for (const p of proxyCache) {
     if (!p.enabled) continue;
     if (p.status === "down" && p.cooldownEnd && p.cooldownEnd > now) {
       down++;
@@ -118,5 +190,5 @@ export async function getProxyStats(platformId: string) {
     }
   }
 
-  return { total: proxies.length, healthy, degraded, down };
+  return { total: proxyCache.length, healthy, degraded, down };
 }

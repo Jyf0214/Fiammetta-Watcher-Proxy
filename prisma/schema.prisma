@@ -49,11 +49,24 @@ model Platform {
 
   modelMaps   ModelMap[]
   requestLogs RequestLog[]
-  proxies     Proxy[]
   models      PlatformModel[]
 
   @@index([enabled, status])
   @@map("platforms")
+}
+
+// ==================== 代理池 ====================
+
+model ProxyPool {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  proxies Proxy[]
+
+  @@map("proxy_pools")
 }
 
 // ==================== 代理 ====================
@@ -61,7 +74,7 @@ model Platform {
 model Proxy {
   id          String    @id @default(cuid())
   address     String   @db.VarChar(1024) // 格式：http://user:pass@host:port 或 socks5://host:port
-  platformId  String? // 绑定到特定平台（null = 未绑定）
+  poolId      String? // 归属代理池（null = 未分组）
   enabled     Boolean   @default(true)
   status      String    @default("healthy") // healthy | degraded | down
   failCount   Int       @default(0) // 连续失败次数
@@ -70,9 +83,9 @@ model Proxy {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  platform Platform? @relation(fields: [platformId], references: [id], onDelete: SetNull)
+  pool ProxyPool? @relation(fields: [poolId], references: [id], onDelete: SetNull)
 
-  @@index([platformId, enabled, status])
+  @@index([poolId, enabled, status])
   @@map("proxies")
 }
 
@@ -161,6 +174,7 @@ model RequestLog {
   id               String   @id @default(cuid())
   keyId            String?
   platformId       String?
+  proxyId          String? // 使用的代理 ID（null = 直连）
   model            String
   status           Int // HTTP 状态码
   tokens           Int      @default(0) // token 总用量（prompt + completion）

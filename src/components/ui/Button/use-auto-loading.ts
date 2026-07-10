@@ -81,8 +81,9 @@ export function useAutoLoading(
 
   // 组件卸载时清理定时器
   useEffect(() => {
+    const timer = timerRef.current;
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

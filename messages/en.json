@@ -101,7 +101,9 @@
     "models": "Model Mapping",
     "models_desc": "Manage model alias to target model mappings",
     "proxies": "Proxies",
-    "proxies_desc": "Manage upstream proxy servers with HTTP/HTTPS/SOCKS5 support, auto health check and failover",
+    "proxies_desc": "Manage proxy servers in the global pool with HTTP/HTTPS/SOCKS5 support, auto health check and failover",
+    "proxy_pools": "Proxy Pools",
+    "proxy_pools_desc": "Manage proxy pool groups — proxies in pools are shared across all platforms",
     "usage": "Usage Stats",
     "usage_desc": "View detailed usage statistics and performance metrics for each API Key",
     "logs": "Request Logs",
@@ -154,7 +156,7 @@
   },
   "proxy": {
     "address": "Proxy Address",
-    "platform": "Platform",
+    "pool": "Pool",
     "status": "Status",
     "healthy": "Healthy",
     "degraded": "Degraded",
@@ -166,11 +168,22 @@
     "delete_success": "Proxy deleted successfully",
     "reset": "Reset",
     "reset_success": "Reset successfully",
-    "filter_platform": "Filter by platform",
+    "filter_pool": "Filter by pool",
     "import": "Import",
     "import_empty": "Import content cannot be empty",
-    "import_select_platform": "Please select a platform",
-    "select_platform": "Select platform"
+    "import_select_pool": "Please select a pool",
+    "select_pool": "Select pool",
+    "no_pool": "Ungrouped"
+  },
+  "proxy_pool": {
+    "name": "Pool Name",
+    "proxy_count": "Proxies",
+    "create_pool": "Add Pool",
+    "edit_pool": "Edit Pool",
+    "create_success": "Pool created successfully",
+    "edit_success": "Pool updated successfully",
+    "delete_success": "Pool deleted successfully",
+    "confirm_delete": "After deleting the pool, its proxies will become ungrouped. Continue?"
   },
   "api_key": {
     "key": "API Key",

@@ -8,7 +8,7 @@ import { forceRefreshProxyCache } from "@/lib/proxy-router";
  *
  * 请求体:
  *   - text: string  — 每行一条，格式 IP:端口:账号:密码
- *   - platformId: string — 绑定的目标平台 ID
+ *   - poolId?: string — 归属代理池 ID（可选）
  *
  * 去重规则：address 相同则覆盖（更新 enabled=true、status=healthy）。
  */
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { text, platformId } = body;
+    const { text, poolId } = body;
 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
       return NextResponse.json(
@@ -29,19 +29,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!platformId || typeof platformId !== "string") {
-      return NextResponse.json(
-        { success: false, error: "必须指定关联平台" },
-        { status: 400 }
-      );
-    }
-
-    const platform = await prisma.platform.findUnique({ where: { id: platformId } });
-    if (!platform) {
-      return NextResponse.json(
-        { success: false, error: "关联平台不存在" },
-        { status: 400 }
-      );
+    // 校验代理池（可选）
+    if (poolId && typeof poolId === "string") {
+      const pool = await prisma.proxyPool.findUnique({ where: { id: poolId } });
+      if (!pool) {
+        return NextResponse.json(
+          { success: false, error: "关联代理池不存在" },
+          { status: 400 }
+        );
+      }
     }
 
     // 解析每行：IP:端口:账号:密码 → http://账号:密码@IP:端口
@@ -95,9 +91,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 查询已有代理（按 address 去重）
+    // 查询已有代理（按 address 去重，全局范围）
     const existingProxies = await prisma.proxy.findMany({
-      where: { platformId },
       select: { id: true, address: true },
     });
     const existingMap = new Map(existingProxies.map((p) => [p.address, p.id]));
@@ -118,7 +113,10 @@ export async function POST(request: NextRequest) {
           updated++;
         } else {
           await tx.proxy.create({
-            data: { address: item.address, platformId },
+            data: {
+              address: item.address,
+              poolId: poolId && typeof poolId === "string" ? poolId : null,
+            },
           });
           created++;
         }
@@ -131,7 +129,7 @@ export async function POST(request: NextRequest) {
       data: {
         adminId: admin.adminId,
         action: "import_proxies",
-        detail: JSON.stringify({ platformId, created, updated, parseErrors: parseErrors.length }),
+        detail: JSON.stringify({ poolId: poolId || null, created, updated, parseErrors: parseErrors.length }),
         ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });

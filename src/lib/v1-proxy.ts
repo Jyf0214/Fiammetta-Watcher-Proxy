@@ -171,6 +171,7 @@ export async function proxyV1Request(
           },
           body: request.body,
           timeout: 120_000,
+          keyId: apiKey.id,
         });
       } else {
         // JSON 转发
@@ -193,6 +194,7 @@ export async function proxyV1Request(
           },
           body: JSON.stringify(upstreamBody),
           timeout: 120_000,
+          keyId: apiKey.id,
         });
       }
     } catch (fetchError) {

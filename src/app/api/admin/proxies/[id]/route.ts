@@ -53,10 +53,21 @@ export async function PUT(
       }
     }
 
+    if (body.poolId !== undefined) {
+      if (body.poolId === null || body.poolId === "") {
+        updateData.poolId = null;
+      } else if (typeof body.poolId === "string") {
+        const pool = await prisma.proxyPool.findUnique({ where: { id: body.poolId } });
+        if (!pool) {
+          return NextResponse.json({ success: false, error: "关联代理池不存在" }, { status: 400 });
+        }
+        updateData.poolId = body.poolId;
+      }
+    }
+
     const proxy = await prisma.proxy.update({ where: { id }, data: updateData });
     await forceRefreshProxyCache();
 
-    // 记录审计日志（与 DELETE 路由保持一致）
     await prisma.auditLog.create({
       data: {
         adminId: admin.adminId,

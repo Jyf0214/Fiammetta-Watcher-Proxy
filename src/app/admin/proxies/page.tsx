@@ -24,18 +24,18 @@ import GlobalLoading from "@/components/Loading";
 interface ProxyItem {
   id: string;
   address: string;
-  platformId: string;
+  poolId: string | null;
   enabled: boolean;
   status: string;
   failCount: number;
   lastFailAt: string | null;
   cooldownEnd: string | null;
   isBanned: boolean;
-  platform: { id: string; name: string };
+  pool: { id: string; name: string } | null;
   createdAt: string;
 }
 
-interface PlatformOption {
+interface PoolOption {
   id: string;
   name: string;
 }
@@ -43,15 +43,15 @@ interface PlatformOption {
 export default function ProxiesPage() {
   const { t } = useTranslation();
   const [proxies, setProxies] = useState<ProxyItem[]>([]);
-  const [platforms, setPlatforms] = useState<PlatformOption[]>([]);
+  const [pools, setPools] = useState<PoolOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [filterPlatform, setFilterPlatform] = useState<string | undefined>();
+  const [filterPool, setFilterPool] = useState<string | undefined>();
   const [refreshKey, setRefreshKey] = useState(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importPlatformId, setImportPlatformId] = useState<string | undefined>();
+  const [importPoolId, setImportPoolId] = useState<string | undefined>();
   const [importing, setImporting] = useState(false);
   const [form] = Form.useForm();
 
@@ -61,7 +61,7 @@ export default function ProxiesPage() {
     const fetchProxies = async () => {
       setLoading(true);
       try {
-        const params = filterPlatform ? `?platformId=${filterPlatform}` : "";
+        const params = filterPool ? `?poolId=${filterPool}` : "";
         const res = await fetch(`/api/admin/proxies${params}`, { signal: controller.signal });
         if (res.status === 401) return;
         const data = await res.json();
@@ -74,20 +74,20 @@ export default function ProxiesPage() {
       }
     };
 
-    const fetchPlatforms = async () => {
+    const fetchPools = async () => {
       try {
-        const res = await fetch("/api/admin/platforms", { signal: controller.signal });
+        const res = await fetch("/api/admin/pools", { signal: controller.signal });
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) {
-          setPlatforms(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
+          setPools(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
         }
       } catch { /* ignore */ }
     };
 
     fetchProxies();
-    fetchPlatforms();
+    fetchPools();
     return () => controller.abort();
-  }, [filterPlatform, t, refreshKey]);
+  }, [filterPool, t, refreshKey]);
 
   const handleRefresh = useCallback(() => {
     setRefreshKey(k => k + 1);
@@ -171,16 +171,12 @@ export default function ProxiesPage() {
       message.warning(t("proxy.import_empty") || "导入内容不能为空");
       return;
     }
-    if (!importPlatformId) {
-      message.warning(t("proxy.import_select_platform") || "请选择关联平台");
-      return;
-    }
     setImporting(true);
     try {
       const res = await fetch("/api/admin/proxies/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: importText, platformId: importPlatformId }),
+        body: JSON.stringify({ text: importText, poolId: importPoolId || null }),
       });
       const data = await res.json();
       if (data.success) {
@@ -189,7 +185,7 @@ export default function ProxiesPage() {
         message.success(msg);
         setImportModalOpen(false);
         setImportText("");
-        setImportPlatformId(undefined);
+        setImportPoolId(undefined);
         handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
@@ -210,10 +206,10 @@ export default function ProxiesPage() {
       render: (v: string) => <span className="font-mono text-xs">{v.replace(/\/\/.*@/, "//***@")}</span>,
     },
     {
-      title: t("proxy.platform"),
-      key: "platformName",
+      title: t("proxy.pool"),
+      key: "poolName",
       width: 140,
-      render: (_: unknown, r: ProxyItem) => r.platform?.name || "-",
+      render: (_: unknown, r: ProxyItem) => r.pool?.name || <span className="text-zinc-400">{t("proxy.no_pool") || "未分组"}</span>,
     },
     {
       title: t("common.status"),
@@ -288,12 +284,12 @@ export default function ProxiesPage() {
               {t("common.total")}: {proxies.length}
             </span>
             <Select
-              placeholder={t("proxy.filter_platform") || "按平台筛选"}
+              placeholder={t("proxy.filter_pool") || "按代理池筛选"}
               allowClear
               className="w-40"
-              onChange={(v) => setFilterPlatform(v)}
+              onChange={(v) => setFilterPool(v)}
             >
-              {platforms.map((p) => (
+              {pools.map((p) => (
                 <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
               ))}
             </Select>
@@ -330,12 +326,11 @@ export default function ProxiesPage() {
             <Input placeholder="http://127.0.0.1:7890" className="font-mono text-xs" />
           </Form.Item>
           <Form.Item
-            name="platformId"
-            label={t("proxy.platform")}
-            rules={[{ required: true }]}
+            name="poolId"
+            label={t("proxy.pool")}
           >
-            <Select placeholder={t("proxy.select_platform") || "选择关联平台"}>
-              {platforms.map((p) => (
+            <Select placeholder={t("proxy.select_pool") || "选择代理池"} allowClear>
+              {pools.map((p) => (
                 <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
               ))}
             </Select>
@@ -346,7 +341,7 @@ export default function ProxiesPage() {
       <Modal
         title={t("proxy.import") || "批量导入代理"}
         open={importModalOpen}
-        onCancel={() => { setImportModalOpen(false); setImportText(""); setImportPlatformId(undefined); }}
+        onCancel={() => { setImportModalOpen(false); setImportText(""); setImportPoolId(undefined); }}
         onOk={handleImport}
         confirmLoading={importing}
         centered
@@ -360,14 +355,15 @@ export default function ProxiesPage() {
             同一 IP、端口、账号、密码的代理将被覆盖。
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">{t("proxy.platform")}</label>
+            <label className="block text-sm font-medium mb-1">{t("proxy.pool")}</label>
             <Select
-              placeholder={t("proxy.select_platform") || "选择关联平台"}
+              placeholder={t("proxy.select_pool") || "选择代理池"}
               className="w-full"
-              value={importPlatformId}
-              onChange={setImportPlatformId}
+              value={importPoolId}
+              onChange={setImportPoolId}
+              allowClear
             >
-              {platforms.map((p) => (
+              {pools.map((p) => (
                 <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
               ))}
             </Select>

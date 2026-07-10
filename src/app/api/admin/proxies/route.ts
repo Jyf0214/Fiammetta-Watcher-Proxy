@@ -21,13 +21,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const platformId = searchParams.get("platformId");
+    const poolId = searchParams.get("poolId");
 
-    const where = platformId ? { platformId } : {};
+    const where = poolId ? { poolId } : {};
 
     const proxies = await prisma.proxy.findMany({
       where,
-      include: { platform: { select: { id: true, name: true } } },
+      include: { pool: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
     });
 
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { address, platformId } = body;
+    const { address, poolId } = body;
 
     const errors: string[] = [];
 
@@ -72,11 +72,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!platformId || typeof platformId !== "string") {
-      errors.push("必须指定关联平台");
-    } else {
-      const platform = await prisma.platform.findUnique({ where: { id: platformId } });
-      if (!platform) errors.push("关联平台不存在");
+    // 校验代理池（可选）
+    if (poolId && typeof poolId === "string") {
+      const pool = await prisma.proxyPool.findUnique({ where: { id: poolId } });
+      if (!pool) errors.push("关联代理池不存在");
     }
 
     if (errors.length > 0) {
@@ -84,7 +83,10 @@ export async function POST(request: NextRequest) {
     }
 
     const proxy = await prisma.proxy.create({
-      data: { address: address.trim(), platformId },
+      data: {
+        address: address.trim(),
+        poolId: poolId && typeof poolId === "string" ? poolId : null,
+      },
     });
 
     await forceRefreshProxyCache();
@@ -93,12 +95,12 @@ export async function POST(request: NextRequest) {
       data: {
         adminId: admin.adminId,
         action: "create_proxy",
-        detail: JSON.stringify({ proxyId: proxy.id, address: "***", platformId }),
+        detail: JSON.stringify({ proxyId: proxy.id, address: "***", poolId: poolId || null }),
         ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
       },
     });
 
-    if (isDebug) console.log("[DEBUG] 创建代理:", { id: proxy.id, platformId });
+    if (isDebug) console.log("[DEBUG] 创建代理:", { id: proxy.id, poolId });
 
     return NextResponse.json({ success: true, data: proxy, message: "代理创建成功" });
   } catch (err) {
