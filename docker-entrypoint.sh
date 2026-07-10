@@ -4,13 +4,13 @@ set -e
 echo "[启动] 运行数据库迁移..."
 
 # 根据 DATABASE_URL 协议动态切换 Prisma schema 中的 provider（单一 schema 文件，不拷贝）
-if echo "$DATABASE_URL" | grep -qE '^mysql://'; then
-  echo "[启动] 检测到 MySQL 数据库，动态切换 provider"
-  sed -i 's/provider = "postgresql"/provider = "mysql"/' prisma/schema.prisma
-elif echo "$DATABASE_URL" | grep -qE '^postgres(ql)?://'; then
-  echo "[启动] 检测到 PostgreSQL 数据库，保持默认 provider"
+if echo "$DATABASE_URL" | grep -qE '^postgres(ql)?://'; then
+  echo "[启动] 检测到 PostgreSQL 数据库，动态切换 provider"
+  sed -i 's/provider = "mysql"/provider = "postgresql"/' prisma/schema.prisma
+elif echo "$DATABASE_URL" | grep -qE '^mysql://'; then
+  echo "[启动] 检测到 MySQL 数据库，保持默认 provider"
 else
-  echo "[启动] 警告：DATABASE_URL 协议无法识别，默认使用 PostgreSQL"
+  echo "[启动] 警告：DATABASE_URL 协议无法识别，默认使用 MySQL"
 fi
 
 if ! node ./node_modules/prisma/build/index.js db push; then
