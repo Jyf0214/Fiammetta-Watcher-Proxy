@@ -7,6 +7,7 @@ import { extractForwardableHeaders } from "@/lib/forward-headers";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
 import { checkAndResetApiKey } from "@/lib/api-key-reset";
+import { sanitizeUpstreamError } from "@/lib/proxy-handler";
 import type { CompletionRequest } from "@/types";
 
 /**
@@ -215,22 +216,8 @@ export async function POST(request: NextRequest) {
         console.error("[completions] 记录上游错误日志失败:", logError instanceof Error ? logError.message : String(logError));
       }
 
-      // 尝试解析上游返回的错误为 JSON，解析失败则包装为标准错误格式
-      let errorBody: string;
-      try {
-        JSON.parse(errorText);
-        // 上游返回的是合法 JSON，直接透传
-        errorBody = errorText;
-      } catch {
-        // 上游返回的不是 JSON（如纯文本、HTML 错误页），包装为标准错误响应
-        errorBody = JSON.stringify({
-          error: {
-            message: errorText.substring(0, 500) || "上游返回了非 JSON 格式的错误响应",
-            type: "upstream_error",
-            upstream_status: upstreamResponse.status,
-          },
-        });
-      }
+      // 脱敏处理：仅提取错误消息，不透传完整上游响应（防止泄露 API Key、内部路径等）
+      const errorBody = sanitizeUpstreamError(errorText, upstreamResponse.status);
 
       return new Response(errorBody, {
         status: upstreamResponse.status,

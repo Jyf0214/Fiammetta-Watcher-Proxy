@@ -240,7 +240,10 @@ export async function DELETE(request: NextRequest) {
   } catch (err) {
     console.error("[DELETE /api/admin/auth] 登出异常:", err);
     await clearAuthCookie();
-    return NextResponse.json({ success: true, message: "已退出登录" });
+    return NextResponse.json(
+      { success: false, error: "登出过程中发生错误，但登录状态已清除" },
+      { status: 500 }
+    );
   }
 }
 

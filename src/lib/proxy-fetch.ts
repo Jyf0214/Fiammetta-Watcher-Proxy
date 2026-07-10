@@ -104,38 +104,49 @@ export async function proxyFetch(
 }
 
 /**
- * 标记代理失败（更新数据库状态）
+ * 标记代理失败（事务内原子读写，防止并发覆盖 failCount）
  */
 export async function markProxyFailed(proxyId: string): Promise<void> {
   const { prisma } = await import("./prisma");
   const now = new Date();
 
-  const proxy = await prisma.proxy.findUnique({ where: { id: proxyId } });
-  if (!proxy) return;
-
-  const newFailCount = proxy.failCount + 1;
   const FAILURE_THRESHOLD = 3;
   const BAN_DURATION_MS = 30 * 60 * 1000;
 
-  const newStatus = newFailCount >= FAILURE_THRESHOLD ? "down" : "degraded";
-  const cooldownEnd =
-    newFailCount >= FAILURE_THRESHOLD
-      ? new Date(now.getTime() + BAN_DURATION_MS)
-      : null;
+  // 事务内读取当前 failCount 再递增，确保并发请求不会覆盖彼此的计数
+  const newFailCount = await prisma.$transaction(async (tx) => {
+    const proxy = await tx.proxy.findUnique({
+      where: { id: proxyId },
+      select: { failCount: true },
+    });
+    if (!proxy) return -1; // 代理不存在，跳过
 
-  await prisma.proxy.update({
-    where: { id: proxyId },
-    data: {
-      failCount: newFailCount,
-      status: newStatus,
-      lastFailAt: now,
-      ...(cooldownEnd ? { cooldownEnd } : {}),
-    },
+    const count = proxy.failCount + 1;
+    const newStatus = count >= FAILURE_THRESHOLD ? "down" : "degraded";
+    const cooldownEnd =
+      count >= FAILURE_THRESHOLD
+        ? new Date(now.getTime() + BAN_DURATION_MS)
+        : undefined;
+
+    await tx.proxy.update({
+      where: { id: proxyId },
+      data: {
+        failCount: count,
+        status: newStatus,
+        lastFailAt: now,
+        ...(cooldownEnd ? { cooldownEnd } : {}),
+      },
+    });
+
+    return count;
   });
 
+  if (newFailCount < 0) return;
+
   if (newFailCount >= FAILURE_THRESHOLD) {
+    const cooldownEnd = new Date(now.getTime() + BAN_DURATION_MS);
     console.warn(
-      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，封禁至 ${cooldownEnd?.toISOString()}`
+      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，封禁至 ${cooldownEnd.toISOString()}`
     );
   }
 }

@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    forceRefreshRouterCache();
+    await forceRefreshRouterCache();
 
     if (isDebug) console.log("[POST /api/admin/platforms] 创建成功:", { id: platform.id, name: platform.name });
 

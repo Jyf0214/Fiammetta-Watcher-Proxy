@@ -30,7 +30,7 @@ model Admin {
 model Platform {
   id          String    @id @default(cuid())
   name        String
-  baseUrl     String
+  baseUrl     String   @db.Text
   apiKey      String // 主密钥
   apiKeys     String    @default("[]") @db.Text // 附加密钥（JSON 数组），与主密钥一起轮询
   type        String    @default("openai") // openai | azure | custom
@@ -60,7 +60,7 @@ model Platform {
 
 model Proxy {
   id          String    @id @default(cuid())
-  address     String // 格式：http://user:pass@host:port 或 socks5://host:port
+  address     String   @db.Text // 格式：http://user:pass@host:port 或 socks5://host:port
   platformId  String? // 绑定到特定平台（null = 未绑定）
   enabled     Boolean   @default(true)
   status      String    @default("healthy") // healthy | degraded | down

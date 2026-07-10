@@ -7,12 +7,51 @@
  * - 平台级 + Key 级速率限制
  * - 流式响应 TransformStream（usage 提取）
  * - Token 扣减与日志记录
+ * - 上游错误脱敏
  */
 
 import { prisma } from "./prisma";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "./rate-limiter";
 import { checkAndResetApiKey } from "./api-key-reset";
 import type { ApiKey, Plan } from "@prisma/client";
+
+// ==================== 上游错误脱敏 ====================
+
+/**
+ * 脱敏上游错误响应，仅提取错误消息，不透传完整响应体
+ *
+ * 防止上游 API 的内部信息（API Key、内部路径、堆栈等）泄露给客户端。
+ */
+export function sanitizeUpstreamError(
+  errorText: string,
+  upstreamStatus: number
+): string {
+  try {
+    const parsed = JSON.parse(errorText);
+    // 提取 OpenAI 兼容格式的 error.message
+    const message =
+      parsed?.error?.message ||
+      parsed?.message ||
+      parsed?.detail ||
+      "";
+    return JSON.stringify({
+      error: {
+        message: String(message).substring(0, 500) || "上游服务返回错误",
+        type: "upstream_error",
+        upstream_status: upstreamStatus,
+      },
+    });
+  } catch {
+    // 非 JSON 响应，返回通用错误
+    return JSON.stringify({
+      error: {
+        message: "上游服务返回未知错误",
+        type: "upstream_error",
+        upstream_status: upstreamStatus,
+      },
+    });
+  }
+}
 
 // ==================== API Key 校验 ====================
 

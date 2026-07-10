@@ -97,7 +97,7 @@ export async function notifyPlatformDown(
     });
     if (platform) platformName = platform.name;
   } catch {
-    // 忽略查询失败
+    console.warn(`[notifier] 查询平台 ${platformId} 名称失败，使用 ID 作为名称`);
   }
 
   await sendNotification(
@@ -121,7 +121,7 @@ export async function notifyPlatformRecovered(
     });
     if (platform) platformName = platform.name;
   } catch {
-    // 忽略查询失败
+    console.warn(`[notifier] 查询平台 ${platformId} 名称失败，使用 ID 作为名称`);
   }
 
   await sendNotification(
