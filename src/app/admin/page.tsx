@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Tag, message } from "antd";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Tag, message, Tooltip } from "antd";
+import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -12,10 +13,15 @@ import {
   ApiOutlined,
   AlertOutlined,
   DashboardOutlined,
+  ReloadOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
+
+// ==================== 类型定义 ====================
 
 interface Stats {
   totalPlatforms: number;
@@ -33,34 +39,85 @@ interface Stats {
   }>;
 }
 
+// ==================== 常量 ====================
+
+const AUTO_REFRESH_INTERVAL = 30_000; // 30 秒自动刷新
+
+// ==================== 页面组件 ====================
+
 export default function DashboardPage() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchStats = async () => {
+  // 获取统计数据（供手动刷新和定时器调用）
+  const fetchStats = useCallback(
+    async (isManual = false) => {
+      if (isManual) setRefreshing(true);
       try {
-        const res = await fetch("/api/admin/stats", { signal: controller.signal });
+        const res = await fetch("/api/admin/stats");
         const data = await res.json();
         if (data.success && data.data) {
           setStats(data.data);
+          setLastRefreshed(new Date());
         }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+      } catch {
+        if (isManual) {
+          message.error(t("common.error"));
+        }
       } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [t]
+  );
+
+  // 自动刷新定时器（同时负责首次加载）
+  useEffect(() => {
+    // 首次立即加载
+    const controller = new AbortController();
+    fetch("/api/admin/stats", { signal: controller.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          setStats(data.data);
+          setLastRefreshed(new Date());
         }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    // 设置定时刷新
+    if (autoRefresh) {
+      timerRef.current = setInterval(() => {
+        fetchStats(false);
+      }, AUTO_REFRESH_INTERVAL);
+    }
+
+    return () => {
+      controller.abort();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
     };
+  }, [autoRefresh, fetchStats]);
 
-    fetchStats();
-    return () => controller.abort();
-  }, [t]);
+  // 手动刷新
+  const handleRefresh = useCallback(() => {
+    fetchStats(true);
+  }, [fetchStats]);
+
+  // 切换自动刷新
+  const toggleAutoRefresh = useCallback(() => {
+    setAutoRefresh((prev) => !prev);
+  }, []);
+
+  // ==================== 表格列 ====================
 
   const eventColumns = [
     {
@@ -85,6 +142,8 @@ export default function DashboardPage() {
       render: (v: string) => new Date(v).toLocaleString(),
     },
   ];
+
+  // ==================== 统计卡片 ====================
 
   const statCards = [
     {
@@ -121,53 +180,87 @@ export default function DashboardPage() {
     },
   ];
 
+  // ==================== 渲染 ====================
+
+  if (loading && !stats) {
+    return <GlobalLoading size="large" />;
+  }
+
   return (
     <PageContainer>
-      {loading && !stats ? (
-        <GlobalLoading size="large" />
-      ) : (
-        <>
-          <PageHeader
-            icon={<DashboardOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
-            title={t("dashboard.adminConsole")}
-            description={t("dashboard.adminConsoleDesc")}
-          />
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-            {statCards.map((card) => (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center`}>
-                    <span className={`${card.iconColor}`}>{card.icon}</span>
-                  </div>
-                  <div>
-                    <p className="text-zinc-500 text-xs">{card.title}</p>
-                    <p className="text-xl font-bold text-zinc-900">
-                      {card.value.toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              </ProCard>
-            ))}
+      <PageHeader
+        icon={<DashboardOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        title={t("dashboard.adminConsole")}
+        description={
+          lastRefreshed
+            ? `${t("dashboard.adminConsoleDesc")} · ${t("dashboard.last_refreshed") || "上次刷新"}: ${lastRefreshed.toLocaleTimeString()}`
+            : t("dashboard.adminConsoleDesc")
+        }
+        extra={
+          <div className="flex items-center gap-2">
+            <Tooltip
+              title={
+                autoRefresh
+                  ? t("dashboard.pause_auto_refresh") || "暂停自动刷新"
+                  : t("dashboard.resume_auto_refresh") || "开启自动刷新"
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                icon={autoRefresh ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                onClick={toggleAutoRefresh}
+                className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
+              />
+            </Tooltip>
+            <Button
+              variant="default"
+              icon={<ReloadOutlined className={refreshing ? "animate-spin" : ""} />}
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              {t("common.refresh")}
+            </Button>
           </div>
+        }
+      />
 
-          <ProCard
-            title={
-              <span className="font-semibold text-zinc-900">
-                {t("dashboard.recent_events")}
-              </span>
-            }
-          >
-            <ResponsiveTable
-              columns={eventColumns}
-              dataSource={stats?.recentEvents || []}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        {statCards.map((card) => (
+          <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
+            <div className="flex items-center gap-3">
+              <div className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center`}>
+                <span className={`${card.iconColor}`}>{card.icon}</span>
+              </div>
+              <div>
+                <p className="text-zinc-500 text-xs">{card.title}</p>
+                <p className="text-xl font-bold text-zinc-900">
+                  {card.value.toLocaleString()}
+                </p>
+              </div>
+            </div>
           </ProCard>
-        </>
-      )}
+        ))}
+      </div>
+
+      {/* 最近事件 */}
+      <ProCard
+        title={
+          <span className="font-semibold text-zinc-900">
+            {t("dashboard.recent_events")}
+          </span>
+        }
+      >
+        <ResponsiveTable
+          columns={eventColumns}
+          dataSource={stats?.recentEvents || []}
+          rowKey="id"
+          pagination={false}
+          size="small"
+        />
+      </ProCard>
     </PageContainer>
   );
 }

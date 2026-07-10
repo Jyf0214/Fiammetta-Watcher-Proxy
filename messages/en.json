@@ -298,6 +298,9 @@
     "recent_events": "Recent Events",
     "adminConsole": "Dashboard",
     "adminConsoleDesc": "System management and monitoring panel",
+    "last_refreshed": "Last refreshed",
+    "pause_auto_refresh": "Pause auto refresh",
+    "resume_auto_refresh": "Resume auto refresh",
     "fetch_failed": "Failed to fetch statistics"
   },
   "event": {

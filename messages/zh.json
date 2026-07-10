@@ -298,6 +298,9 @@
     "recent_events": "最近事件",
     "adminConsole": "控制台",
     "adminConsoleDesc": "系统管理与监控面板",
+    "last_refreshed": "上次刷新",
+    "pause_auto_refresh": "暂停自动刷新",
+    "resume_auto_refresh": "开启自动刷新",
     "fetch_failed": "获取统计数据失败"
   },
   "event": {

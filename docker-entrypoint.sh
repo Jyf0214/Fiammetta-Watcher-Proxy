@@ -13,6 +13,11 @@ else
   echo "[启动] 警告：DATABASE_URL 协议无法识别，默认使用 MySQL"
 fi
 
+# 一次性数据迁移：代理平台绑定 → 代理池（在 schema 变更前执行）
+if [ -f scripts/migrate-proxy-pool.sh ]; then
+  sh scripts/migrate-proxy-pool.sh || echo "[警告] 代理池数据迁移跳过或失败"
+fi
+
 if ! node ./node_modules/prisma/build/index.js db push; then
   echo "[错误] 数据库迁移失败，请检查 DATABASE_URL 配置和数据库连接状态"
   exit 1
