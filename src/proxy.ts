@@ -46,8 +46,32 @@ function base64UrlDecode(str: string): string {
   return atob(base64);
 }
 
+// ==================== 语言检测 ====================
+const SUPPORTED_LOCALES = ["zh", "en"];
+const DEFAULT_LOCALE = "zh";
+
+function detectLocale(request: NextRequest): string {
+  const cookieLocale = request.cookies.get("NEXT_LOCALE")?.value;
+  if (cookieLocale && SUPPORTED_LOCALES.includes(cookieLocale)) {
+    return cookieLocale;
+  }
+  const acceptLanguage = request.headers.get("accept-language");
+  if (acceptLanguage) {
+    const preferred = acceptLanguage
+      .split(",")
+      .map((lang) => lang.split(";")[0].trim().toLowerCase())
+      .find((lang) => SUPPORTED_LOCALES.includes(lang.split("-")[0]));
+    if (preferred) {
+      return preferred.split("-")[0];
+    }
+  }
+  return DEFAULT_LOCALE;
+}
+
 /**
  * Proxy 安全中间件 — Next.js 16 proxy.ts 规范
+ * - / 根路径语言检测 + 重定向
+ * - /admin 页面 Token 验证（轻量级过期检查）
  * - /api/admin/* 路由统一鉴权兜底（排除登录接口）
  * - /api/admin/* 路由 IP 级速率限制
  * - /api/v1/* 路由 CORS 处理
@@ -55,6 +79,56 @@ function base64UrlDecode(str: string): string {
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // ==================== 根路径 → 语言检测 + 重定向 ====================
+  if (pathname === "/") {
+    const locale = detectLocale(request);
+    const url = request.nextUrl.clone();
+    url.pathname = `/${locale}`;
+    return NextResponse.redirect(url);
+  }
+
+  // ==================== /admin 页面 Token 验证 ====================
+  if (pathname.startsWith("/admin") && !pathname.startsWith("/api")) {
+    // 登录页：已登录则跳转 admin
+    if (pathname === "/admin/login") {
+      const token = request.cookies.get("admin_token")?.value;
+      if (token) {
+        try {
+          const payload = JSON.parse(base64UrlDecode(token.split(".")[1]));
+          if (!payload.exp || payload.exp * 1000 >= Date.now()) {
+            const url = request.nextUrl.clone();
+            url.pathname = "/admin";
+            return NextResponse.redirect(url);
+          }
+        } catch {
+          // token 无效，允许停留在登录页
+        }
+      }
+      return NextResponse.next();
+    }
+
+    // 其他 admin 页面：无有效 token 则跳转登录
+    const token = request.cookies.get("admin_token")?.value;
+    if (!token) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/admin/login";
+      return NextResponse.redirect(url);
+    }
+    try {
+      const payload = JSON.parse(base64UrlDecode(token.split(".")[1]));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/admin/login";
+        return NextResponse.redirect(url);
+      }
+    } catch {
+      const url = request.nextUrl.clone();
+      url.pathname = "/admin/login";
+      return NextResponse.redirect(url);
+    }
+  }
+
   const response = NextResponse.next();
 
   // ==================== 安全响应头 ====================
@@ -142,5 +216,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
