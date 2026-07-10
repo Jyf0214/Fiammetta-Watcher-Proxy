@@ -1,6 +1,6 @@
 // Fiammetta Watcher Proxy — Prisma Schema
 // 数据库仅用于授权验证、管理员身份校验、必要的草稿存储与最小化运行支撑
-// 默认使用 PostgreSQL，MySQL 用户请通过 prisma.config.ts 切换 provider
+// provider 由 docker-entrypoint.sh 根据 DATABASE_URL 协议自动切换，不要手动修改
 
 generator client {
   provider = "prisma-client-js"
