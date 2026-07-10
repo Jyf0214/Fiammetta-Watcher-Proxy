@@ -310,21 +310,28 @@ export default function AdminPageLayout({
   const open = useCallback(() => setSidebarOpen(true), []);
   const close = useCallback(() => setSidebarOpen(false), []);
 
-  // Token 验证已由 middleware 处理，此处仅获取用户名用于侧边栏显示
+  // 修复：添加 AbortController 防止组件卸载后的竞态请求
   useEffect(() => {
     if (isLoginPage) return;
 
     const controller = new AbortController();
-    const fetchUsername = async () => {
+    const checkAuth = async () => {
       try {
         const res = await fetch("/api/admin/auth", { signal: controller.signal });
-        if (!res.ok) return;
+        if (!res.ok) {
+          router.push("/admin/login");
+          return;
+        }
         const data = await res.json();
         if (data.success && data.data?.username) {
           setUsername(data.data.username);
+        } else {
+          router.push("/admin/login");
         }
       } catch (err) {
+        // 忽略 AbortError，其他错误才跳转
         if (err instanceof DOMException && err.name === "AbortError") return;
+        router.push("/admin/login");
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -332,9 +339,9 @@ export default function AdminPageLayout({
       }
     };
 
-    fetchUsername();
+    checkAuth();
     return () => controller.abort();
-  }, [isLoginPage]);
+  }, [isLoginPage, router]);
 
   const handleLogout = async () => {
     if (logoutLoading) return;
