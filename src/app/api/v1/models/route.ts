@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { parseApiKeys } from "@/lib/platform-keys";
+import { getNextKey, parseApiKeys } from "@/lib/platform-keys";
+import type { PlatformConfig } from "@/types";
 
 /**
  * GET /api/v1/models — 模型列表聚合端点
@@ -18,15 +19,6 @@ interface UpstreamModel {
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-/** 简单字符串哈希（用于确定性选择密钥） */
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) | 0;
-  }
-  return hash;
-}
-
 /** 从单个平台获取模型列表，失败返回空数组 */
 async function fetchPlatformModels(platform: {
   id: string;
@@ -37,14 +29,17 @@ async function fetchPlatformModels(platform: {
 }): Promise<UpstreamModel[]> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
-  // 轮询选择密钥
+  // 轮询选择密钥，均匀分摊各密钥调用量
   const extraKeys = parseApiKeys(platform.apiKeys);
   const keys = [platform.apiKey, ...extraKeys].filter((k) => k?.trim());
   if (keys.length === 0) return [];
 
-  // 简单轮询：用 platform.id 哈希选择，避免每次都用同一个
-  const index = Math.abs(hashCode(platform.id)) % keys.length;
-  const apiKey = keys[index];
+  const apiKey = getNextKey({
+    id: platform.id,
+    apiKey: platform.apiKey,
+    apiKeys: extraKeys,
+  } as PlatformConfig);
+  if (!apiKey) return [];
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

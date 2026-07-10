@@ -11,7 +11,8 @@
  */
 
 import { prisma } from "./prisma";
-import { parseApiKeys } from "./platform-keys";
+import { getNextKey, parseApiKeys } from "./platform-keys";
+import type { PlatformConfig } from "@/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 分钟
@@ -19,15 +20,6 @@ const REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 分钟
 interface UpstreamModel {
   id: string;
   owned_by?: string;
-}
-
-/** 简单字符串哈希（用于确定性选择密钥） */
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) | 0;
-  }
-  return hash;
 }
 
 /**
@@ -43,11 +35,13 @@ export async function fetchPlatformModels(platform: {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
   const extraKeys = parseApiKeys(platform.apiKeys);
-  const keys = [platform.apiKey, ...extraKeys].filter((k) => k?.trim());
-  if (keys.length === 0) return null;
 
-  const index = Math.abs(hashCode(platform.id)) % keys.length;
-  const apiKey = keys[index];
+  const apiKey = getNextKey({
+    id: platform.id,
+    apiKey: platform.apiKey,
+    apiKeys: extraKeys,
+  } as PlatformConfig);
+  if (!apiKey) return null;
 
   try {
     const controller = new AbortController();

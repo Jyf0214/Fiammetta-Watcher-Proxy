@@ -245,6 +245,3 @@ export function stopRateLimitCleanup() {
     cleanupIntervalId = null;
   }
 }
-
-// 模块自初始化：首次导入时自动启动清理定时器，防止 Map 无限增长
-startRateLimitCleanup();

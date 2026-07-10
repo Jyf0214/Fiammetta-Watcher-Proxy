@@ -50,11 +50,26 @@ export async function POST(request: NextRequest) {
   // 检查是否需要重置 API Key 用量（根据 resetPeriod）
   await checkAndResetApiKey(apiKey.id);
 
-  // 检查调用次数限制（callLimit）
+  // 检查调用次数限制（callLimit），仅统计当前重置周期内的调用次数
   const effectiveCallLimit = apiKey.callLimit ?? apiKey.plan?.callLimit ?? null;
   if (effectiveCallLimit !== null) {
+    // 根据 resetPeriod 计算当前周期起始时间
+    const now = new Date();
+    let periodStart: Date;
+    const resetPeriod = apiKey.resetPeriod ?? apiKey.plan?.resetPeriod ?? "never";
+    if (resetPeriod === "daily") {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else if (resetPeriod === "monthly") {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      periodStart = new Date(0); // never：不限制，统计全部
+    }
+
     const callCount = await prisma.requestLog.count({
-      where: { keyId: apiKey.id },
+      where: {
+        keyId: apiKey.id,
+        createdAt: { gte: periodStart },
+      },
     });
     if (callCount >= effectiveCallLimit) {
       return Response.json(
@@ -76,8 +91,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 请求体大小限制（Route Handler 不受 serverActions.bodySizeLimit 影响，需手动检查）
-  // 检查实际请求体大小，而不是依赖客户端提供的 Content-Length 头
-  if (bodyText.length > 10 * 1024 * 1024) {
+  // 使用 Buffer.byteLength 检查实际字节数，而非 string.length（后者仅统计 UTF-16 code unit，多字节字符会被低估）
+  if (Buffer.byteLength(bodyText, "utf8") > 10 * 1024 * 1024) {
     return Response.json(
       { error: { message: "请求体过大", type: "invalid_request_error" } },
       { status: 413 }
@@ -277,12 +292,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // 上游已返回 200，标记成功，避免外层 catch 误调 recordFailure
-      upstreamSucceeded = true;
-
-      // 记录成功
-      await recordSuccess(route.platform.id);
-
       // 通过 TransformStream 拦截 SSE 流，在透传数据的同时提取 usage 信息
       let capturedUsage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
       let firstTokenTime: number | null = null;
@@ -415,7 +424,14 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      return new Response(stream.pipeThrough(usageTransformer), {
+      const pipedStream = stream.pipeThrough(usageTransformer);
+
+      // 标记成功：仅在流成功创建后设置，避免外层 catch 误调 recordFailure
+      // 注意：流式消费由 HTTP 服务器异步执行，route handler 无法捕获消费过程中的错误
+      upstreamSucceeded = true;
+      await recordSuccess(route.platform.id);
+
+      return new Response(pipedStream, {
         status: 200,
         headers: {
           "Content-Type": "text/event-stream",

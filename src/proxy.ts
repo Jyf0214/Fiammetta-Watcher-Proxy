@@ -57,14 +57,8 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const response = NextResponse.next();
 
-  // ==================== 安全响应头 ====================
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set(
-    "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=()"
-  );
+  // 安全响应头统一由 next.config.ts 的 headers() 管理，proxy 中间件不再重复设置
+  // 避免两处维护不一致
 
   // ==================== /api/admin/* 鉴权兜底 ====================
   if (pathname.startsWith("/api/admin/")) {

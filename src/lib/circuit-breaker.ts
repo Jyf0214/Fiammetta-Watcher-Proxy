@@ -22,12 +22,82 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
 };
 
 /**
- * 检查并更新平台熔断器状态
+ * 启动时从数据库同步熔断器状态到内存
+ *
+ * 解决服务重启后内存 Map 清空但 DB 仍有旧状态的问题：
+ * - DB 中 status="down" + cooldownEnd 未过期 → 内存中恢复为 open
+ * - DB 中 status="down" + cooldownEnd 已过期 → 内存中恢复为 half-open（允许探测）
+ * - 其他 → 内存中为 closed
+ */
+export async function syncCircuitBreakersFromDatabase(): Promise<void> {
+  try {
+    const platforms = await prisma.platform.findMany({
+      select: { id: true, status: true, failCount: true, cooldownEnd: true },
+    });
+
+    const now = Date.now();
+    let syncedCount = 0;
+
+    for (const p of platforms) {
+      if (p.status === "down") {
+        const cooldownMs = p.cooldownEnd ? p.cooldownEnd.getTime() : 0;
+        const isExpired = cooldownMs <= now;
+
+        breakers.set(p.id, {
+          state: isExpired ? "half-open" : "open",
+          failureCount: p.failCount,
+          lastFailureAt: 0,
+          cooldownEnd: cooldownMs,
+          halfOpenAttempts: 0,
+          halfOpenPending: 0,
+        });
+        syncedCount++;
+      } else if (p.status === "degraded") {
+        breakers.set(p.id, {
+          state: "closed",
+          failureCount: p.failCount,
+          lastFailureAt: 0,
+          cooldownEnd: 0,
+          halfOpenAttempts: 0,
+          halfOpenPending: 0,
+        });
+        syncedCount++;
+      }
+      // healthy 状态不需要在内存中创建条目（默认 closed）
+    }
+
+    if (syncedCount > 0) {
+      console.log(`[circuit-breaker] 从数据库同步了 ${syncedCount} 个平台的熔断器状态`);
+    }
+  } catch (err) {
+    console.error(
+      "[circuit-breaker] 从数据库同步状态失败:",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+/**
+ * 纯查询：获取平台熔断器状态（不修改任何状态）
+ *
+ * 用于展示、统计等不需要触发状态转换的场景。
+ * 与 checkAndUpdateCircuitBreakerState 的区别：不执行 open → half-open 转换。
+ */
+export function getCircuitBreakerState(platformId: string): CircuitBreakerState {
+  const entry = breakers.get(platformId);
+  if (!entry) return "closed";
+  return entry.state;
+}
+
+/**
+ * 检查并更新平台熔断器状态（具有副作用）
  *
  * 注意：此函数具有副作用——当熔断器处于 open 状态且冷却期已过时，
  * 会将状态转换为 half-open 并重置 halfOpenAttempts。
  * 这是有意设计：调用者在查询状态的同时触发状态机的自然流转，
  * 避免在多处重复写转换逻辑。
+ *
+ * 仅在实际路由决策路径中使用；展示/统计场景请用 getCircuitBreakerState。
  */
 export function checkAndUpdateCircuitBreakerState(
   platformId: string

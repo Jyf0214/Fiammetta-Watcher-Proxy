@@ -127,7 +127,7 @@ async function runCheck() {
       // 跳过未绑定平台的代理
       if (!proxy.platform) continue;
 
-      const targetUrl = proxy.platform.baseUrl.replace(/\/+$/, "");
+      const targetUrl = proxy.platform.baseUrl.replace(/\/+$/, "") + "/";
 
       const healthy = await testProxy(proxy.address, targetUrl);
 

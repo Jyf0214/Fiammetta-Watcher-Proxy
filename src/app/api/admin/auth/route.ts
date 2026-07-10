@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth";
 import { isDebug } from "@/lib/auth-helpers";
 
-// ---------- 登录速率限制（内存实现） ----------
+// ---------- 登录速率限制（原子化检查+递增，防竞态） ----------
 
 interface LoginAttemptEntry {
   count: number;
@@ -48,17 +48,27 @@ function getClientIp(request: NextRequest): string {
   );
 }
 
-/** 检查该 IP 是否被限流，返回 null 表示允许，否则返回 429 响应 */
-function checkLoginRateLimit(ip: string): NextResponse | null {
+/**
+ * 原子化检查并递增登录失败计数
+ *
+ * 将「检查是否超限」和「递增计数」合为一步操作，
+ * 避免两个并发请求同时通过检查后都执行登录的竞态条件。
+ * 返回 null 表示允许，否则返回 429 响应。
+ */
+function checkAndRecordLoginAttempt(ip: string): NextResponse | null {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  let entry = loginAttempts.get(ip);
 
+  // 窗口过期，重置
   if (!entry || now - entry.windowStart >= LOGIN_WINDOW_MS) {
-    loginAttempts.set(ip, { count: 0, windowStart: now });
-    return null;
+    entry = { count: 0, windowStart: now };
+    loginAttempts.set(ip, entry);
   }
 
-  if (entry.count >= LOGIN_MAX_ATTEMPTS) {
+  // 先递增再检查：确保并发请求不会同时通过
+  entry.count += 1;
+
+  if (entry.count > LOGIN_MAX_ATTEMPTS) {
     const resetAt = new Date(entry.windowStart + LOGIN_WINDOW_MS).toISOString();
     return NextResponse.json(
       {
@@ -73,18 +83,6 @@ function checkLoginRateLimit(ip: string): NextResponse | null {
   return null;
 }
 
-/** 记录一次登录失败 */
-function recordLoginFailure(ip: string): void {
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
-
-  if (!entry || now - entry.windowStart >= LOGIN_WINDOW_MS) {
-    loginAttempts.set(ip, { count: 1, windowStart: now });
-  } else {
-    entry.count += 1;
-  }
-}
-
 /** 登录成功，清除该 IP 的失败计数 */
 function clearLoginFailures(ip: string): void {
   loginAttempts.delete(ip);
@@ -97,7 +95,8 @@ export async function POST(request: NextRequest) {
   try {
     const clientIp = getClientIp(request);
 
-    const rateLimitResponse = checkLoginRateLimit(clientIp);
+    // 原子化限流检查+递增，避免并发绕过限制
+    const rateLimitResponse = checkAndRecordLoginAttempt(clientIp);
     if (rateLimitResponse) {
       return rateLimitResponse;
     }
@@ -118,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     if (!admin) {
       await hashPassword("dummy");
-      recordLoginFailure(clientIp);
+      // 计数已在 checkAndRecordLoginAttempt 中原子递增，无需再次记录
       return NextResponse.json(
         { success: false, error: "用户名或密码错误" },
         { status: 401 }
@@ -133,7 +132,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!valid) {
-      recordLoginFailure(clientIp);
+      // 计数已在 checkAndRecordLoginAttempt 中原子递增，无需再次记录
       await prisma.auditLog.create({
         data: {
           adminId: admin.id,

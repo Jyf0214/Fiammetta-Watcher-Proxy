@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { checkAndUpdateCircuitBreakerState, incrementHalfOpenPending, cleanupStaleBreakers } from "./circuit-breaker";
+import { checkAndUpdateCircuitBreakerState, getCircuitBreakerState, incrementHalfOpenPending, cleanupStaleBreakers } from "./circuit-breaker";
 import { parseApiKeys } from "./platform-keys";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/types";
 
@@ -175,34 +175,36 @@ function selectPlatformByWeight(
 }
 
 /**
- * 检查平台是否可用（未处于熔断冷却期）
+ * 检查平台是否可用（纯查询，无副作用）
  *
- * 通过调用 checkAndUpdateCircuitBreakerState 触发 open → half-open 的自动转换，
- * 使得冷却期过后的熔断器能进入探测阶段。
+ * 仅读取熔断器状态，不触发状态转换，不递增半开探测计数。
+ * 展示、统计等场景可安全调用。
  */
 function isPlatformAvailable(platform: PlatformConfig): boolean {
   if (!platform.enabled) return false;
 
-  // 检查内存中的熔断器状态，触发 open → half-open 的自动转换
-  const breakerState = checkAndUpdateCircuitBreakerState(platform.id);
+  // 读取熔断器状态（纯查询，不触发 open → half-open 转换）
+  const breakerState = getCircuitBreakerState(platform.id);
 
-  // 熔断器处于 open 状态且冷却期未过，平台不可用
+  // 熔断器处于 open 状态，平台不可用
   if (breakerState === "open") return false;
 
-  // 熔断器处于 half-open 状态，允许探测请求通过
-  if (breakerState === "half-open") {
-    incrementHalfOpenPending(platform.id);
-    return true;
-  }
+  // 熔断器处于 half-open 或 closed 状态，检查冷却期
+  if (platform.cooldownEnd && platform.cooldownEnd > new Date()) return false;
+  return true;
+}
 
-  if (breakerState === "closed") {
-    // 断路器认为已恢复，以内存状态为准
-    // 不再检查缓存中的 status（可能因 DB 更新失败而过时）
-    if (platform.cooldownEnd && platform.cooldownEnd > new Date()) return false;
-    return true;
+/**
+ * 刷新所有平台的熔断器状态（触发 open → half-open 自然转换）
+ *
+ * 在路由决策前调用一次，将冷却期已过的 open 状态平台转为 half-open。
+ * 与 isPlatformAvailable 分离，避免每次查询都触发副作用。
+ */
+function refreshCircuitBreakerStates(platforms: PlatformConfig[]): void {
+  for (const p of platforms) {
+    if (!p.enabled) continue;
+    checkAndUpdateCircuitBreakerState(p.id);
   }
-
-  return false;
 }
 
 /**
@@ -237,6 +239,9 @@ export async function routeRequest(
 ): Promise<RouteDecision | null> {
   await refreshCache();
 
+  // 统一触发熔断器 open → half-open 转换（仅执行一次，不重复）
+  refreshCircuitBreakerStates(platformCache);
+
   // 自动模型路由：请求模型 === 配置的自动模型 ID
   if (autoModelId && requestedModel === autoModelId) {
     const platformsWithModels = platformCache.filter(
@@ -249,6 +254,11 @@ export async function routeRequest(
     const selected = selectPlatformByWeight(topPriority);
     if (!selected) return null;
 
+    // 仅对选中的平台递增半开探测计数
+    const breakerState = getCircuitBreakerState(selected.id);
+    if (breakerState === "half-open") {
+      incrementHalfOpenPending(selected.id);
+    }
     return { platform: selected, targetModel: requestedModel };
   }
 
@@ -266,6 +276,10 @@ export async function routeRequest(
         hasPlatformModel(p.id, targetModel)
     );
     if (platform) {
+      const breakerState = getCircuitBreakerState(platform.id);
+      if (breakerState === "half-open") {
+        incrementHalfOpenPending(platform.id);
+      }
       return { platform, targetModel };
     }
     // 指定平台不可用或无该模型，尝试其他平台
@@ -289,6 +303,10 @@ export async function routeRequest(
     const selectedPlatform = selectPlatformByWeight(topPriorityPlatforms);
     if (!selectedPlatform) return null;
 
+    const breakerState = getCircuitBreakerState(selectedPlatform.id);
+    if (breakerState === "half-open") {
+      incrementHalfOpenPending(selectedPlatform.id);
+    }
     return { platform: selectedPlatform, targetModel };
   }
 
@@ -300,6 +318,11 @@ export async function routeRequest(
 
   const selectedPlatform = selectPlatformByWeight(topPriorityPlatforms);
   if (!selectedPlatform) return null;
+
+  const breakerState = getCircuitBreakerState(selectedPlatform.id);
+  if (breakerState === "half-open") {
+    incrementHalfOpenPending(selectedPlatform.id);
+  }
 
   return {
     platform: selectedPlatform,
@@ -314,9 +337,19 @@ export async function routeToPlatform(
   platformId: string
 ): Promise<PlatformConfig | null> {
   await refreshCache();
+
+  // 触发该平台的熔断器状态转换
+  checkAndUpdateCircuitBreakerState(platformId);
+
   const platform = platformCache.find(
     (p) => p.id === platformId && isPlatformAvailable(p)
   );
+  if (platform) {
+    const breakerState = getCircuitBreakerState(platform.id);
+    if (breakerState === "half-open") {
+      incrementHalfOpenPending(platform.id);
+    }
+  }
   return platform ?? null;
 }
 

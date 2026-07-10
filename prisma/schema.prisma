@@ -32,7 +32,7 @@ model Platform {
   name        String
   baseUrl     String
   apiKey      String // 主密钥
-  apiKeys     String    @default("[]") // 附加密钥（JSON 数组），与主密钥一起轮询
+  apiKeys     String    @default("[]") @db.Text // 附加密钥（JSON 数组），与主密钥一起轮询
   type        String    @default("openai") // openai | azure | custom
   enabled     Boolean   @default(true)
   priority    Int       @default(0) // 数值越大优先级越高
@@ -43,7 +43,7 @@ model Platform {
   failCount   Int       @default(0) // 连续失败次数
   lastFailAt  DateTime?
   cooldownEnd DateTime? // 熔断冷却结束时间
-  forwardHeaders String @default("[]") // 透传给上游的下游请求头白名单（JSON 数组）
+  forwardHeaders String @default("[]") @db.Text // 透传给上游的下游请求头白名单（JSON 数组）
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

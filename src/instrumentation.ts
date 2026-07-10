@@ -12,6 +12,16 @@ export async function register() {
       console.error("[instrumentation] 管理员初始化失败:", error);
     }
 
+    // 从数据库同步熔断器状态到内存（解决重启后状态丢失问题）
+    try {
+      const { syncCircuitBreakersFromDatabase } = await import(
+        "./lib/circuit-breaker"
+      );
+      await syncCircuitBreakersFromDatabase();
+    } catch (error) {
+      console.error("[instrumentation] 熔断器状态同步失败:", error);
+    }
+
     // 启动代理健康检查后台服务（定期检测代理可用性，连续失败 3 次自动封禁）
     try {
       const { startProxyHealthChecker } = await import(
@@ -38,6 +48,14 @@ export async function register() {
       startModelFetcher();
     } catch (error) {
       console.error("[instrumentation] 模型拉取服务启动失败:", error);
+    }
+
+    // 启动速率限制器过期窗口清理定时器（防止内存无限增长）
+    try {
+      const { startRateLimitCleanup } = await import("./lib/rate-limiter");
+      startRateLimitCleanup();
+    } catch (error) {
+      console.error("[instrumentation] 速率限制器清理服务启动失败:", error);
     }
   }
 }
