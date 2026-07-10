@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Space,
   Tag,
@@ -51,7 +51,7 @@ export default function KeysPage() {
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
 
-  const fetchKeys = async (signal?: AbortSignal) => {
+  const fetchKeys = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/keys", { signal });
@@ -65,14 +65,14 @@ export default function KeysPage() {
         setLoading(false);
       }
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchKeys(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [fetchKeys]);
 
   const handleSubmit = async () => {
     try {

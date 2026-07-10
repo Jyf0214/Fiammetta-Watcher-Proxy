@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Tag,
   Modal,
@@ -54,7 +54,7 @@ export default function ProxiesPage() {
   const [importing, setImporting] = useState(false);
   const [form] = Form.useForm();
 
-  const fetchProxies = async (signal?: AbortSignal) => {
+  const fetchProxies = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const params = filterPlatform ? `?platformId=${filterPlatform}` : "";
@@ -68,9 +68,9 @@ export default function ProxiesPage() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  };
+  }, [filterPlatform, t]);
 
-  const fetchPlatforms = async (signal?: AbortSignal) => {
+  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/platforms", { signal });
       const data = await res.json();
@@ -78,7 +78,7 @@ export default function ProxiesPage() {
         setPlatforms(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
       }
     } catch { /* ignore */ }
-  };
+  }, []);
 
   useEffect(() => {
     const c = new AbortController();
@@ -86,7 +86,7 @@ export default function ProxiesPage() {
     fetchProxies(c.signal);
     fetchPlatforms(c.signal);
     return () => c.abort();
-  }, [filterPlatform]);
+  }, [fetchProxies, fetchPlatforms]);
 
   const handleCreate = async () => {
     try {

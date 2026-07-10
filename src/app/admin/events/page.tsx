@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -29,7 +29,7 @@ export default function EventsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  const fetchEvents = async (signal?: AbortSignal) => {
+  const fetchEvents = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch(
@@ -54,14 +54,14 @@ export default function EventsPage() {
         setLoading(false);
       }
     }
-  };
+  }, [page, router, t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchEvents(controller.signal);
     return () => controller.abort();
-  }, [page]);
+  }, [fetchEvents]);
 
   const levelColorMap: Record<string, string> = {
     info: "blue",

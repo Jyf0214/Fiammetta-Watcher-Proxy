@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Space,
   Tag,
@@ -58,7 +58,7 @@ export default function PlatformsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
 
-  const fetchPlatforms = async (signal?: AbortSignal) => {
+  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/platforms", { signal });
@@ -72,14 +72,14 @@ export default function PlatformsPage() {
         setLoading(false);
       }
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPlatforms(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [fetchPlatforms]);
 
   const openCreateForm = () => {
     setEditing(null);

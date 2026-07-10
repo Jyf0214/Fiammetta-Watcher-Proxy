@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -30,7 +30,7 @@ export default function AuditPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  const fetchLogs = async (signal?: AbortSignal) => {
+  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal });
@@ -52,14 +52,14 @@ export default function AuditPage() {
         setLoading(false);
       }
     }
-  };
+  }, [page, router, t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLogs(controller.signal);
     return () => controller.abort();
-  }, [page]);
+  }, [fetchLogs]);
 
   const actionColorMap: Record<string, string> = {
     login: "blue",

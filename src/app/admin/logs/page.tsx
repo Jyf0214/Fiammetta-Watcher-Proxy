@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Tag,
@@ -44,7 +44,7 @@ export default function LogsPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
 
-  const fetchLogs = async (signal?: AbortSignal) => {
+  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -73,14 +73,14 @@ export default function LogsPage() {
         setLoading(false);
       }
     }
-  };
+  }, [page, statusFilter, errorFilter, router, t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLogs(controller.signal);
     return () => controller.abort();
-  }, [page, statusFilter, errorFilter]);
+  }, [fetchLogs]);
 
   const columns: TableColumnsType<LogEntry> = [
     {

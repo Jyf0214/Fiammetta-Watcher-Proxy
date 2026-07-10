@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Modal,
   Form,
@@ -42,7 +42,7 @@ export default function ModelsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchModels = async (signal?: AbortSignal) => {
+  const fetchModels = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/models", { signal });
@@ -56,9 +56,9 @@ export default function ModelsPage() {
         setLoading(false);
       }
     }
-  };
+  }, [t]);
 
-  const fetchPlatforms = async (signal?: AbortSignal) => {
+  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/platforms", { signal });
       const data = await res.json();
@@ -67,7 +67,7 @@ export default function ModelsPage() {
       if (err instanceof DOMException && err.name === "AbortError") return;
       message.error(t("common.error"));
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,7 +75,7 @@ export default function ModelsPage() {
     fetchModels(controller.signal);
     fetchPlatforms(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [fetchModels, fetchPlatforms]);
 
   const handleSubmit = async () => {
     try {

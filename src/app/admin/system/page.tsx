@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Descriptions, Tag, Alert, Form, Input, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw, Lock, Settings } from "lucide-react";
@@ -26,7 +26,7 @@ export default function SystemPage() {
   const [passwordForm] = Form.useForm();
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
-  const fetchInfo = async (signal?: AbortSignal) => {
+  const fetchInfo = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/stats", { signal });
       const data = await res.json();
@@ -49,14 +49,14 @@ export default function SystemPage() {
         setLoading(false);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchInfo(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [fetchInfo]);
 
   const handleChangePassword = async (values: {
     currentPassword: string;

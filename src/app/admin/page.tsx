@@ -60,7 +60,7 @@ export default function DashboardPage() {
 
     fetchStats();
     return () => controller.abort();
-  }, []);
+  }, [t]);
 
   const eventColumns = [
     {

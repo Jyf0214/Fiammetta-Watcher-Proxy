@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Select,
   Tag,
   Tooltip,
+  message,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -16,7 +17,6 @@ import { ReloadOutlined, BarChartOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
-import { message } from "antd";
 
 interface KeyUsage {
   id: string;
@@ -45,7 +45,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string>("all");
 
-  const fetchUsage = async (signal?: AbortSignal) => {
+  const fetchUsage = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ period });
@@ -62,14 +62,14 @@ export default function UsagePage() {
         setLoading(false);
       }
     }
-  };
+  }, [period, t]);
 
   useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchUsage(controller.signal);
     return () => controller.abort();
-  }, [period]);
+  }, [fetchUsage]);
 
   const columns: TableColumnsType<KeyUsage> = [
     {
