@@ -12,6 +12,7 @@
 
 import { prisma } from "./prisma";
 import { getNextKey, parseApiKeys } from "./platform-keys";
+import { detectModelType } from "./model-type";
 import type { PlatformConfig } from "@/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -116,6 +117,7 @@ async function fetchAllPlatformModels(): Promise<void> {
               platformId: platform.id,
               modelId: m.id,
               ownedBy: m.owned_by ?? platform.name,
+              type: detectModelType(m.id),
               fetchedAt: now,
             })),
           });
