@@ -261,6 +261,7 @@
     "status": "状态",
     "total_requests": "总请求数",
     "total_tokens": "总 Token",
+    "active_keys": "活跃 Key 数",
     "prompt_tokens": "输入 Token",
     "prompt_tokens_desc": "所有请求的输入 token 总量",
     "completion_tokens": "输出 Token",
@@ -276,7 +277,10 @@
     "period_all": "全部时间",
     "period_today": "今天",
     "period_week": "最近 7 天",
-    "period_month": "最近 30 天"
+    "period_month": "最近 30 天",
+    "trend_title": "请求与 Token 趋势",
+    "detail_title": "Key 用量明细",
+    "requests": "请求数"
   },
   "dashboard": {
     "total_requests": "总请求数",

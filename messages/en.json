@@ -261,6 +261,7 @@
     "status": "Status",
     "total_requests": "Total Requests",
     "total_tokens": "Total Tokens",
+    "active_keys": "Active Keys",
     "prompt_tokens": "Input Tokens",
     "prompt_tokens_desc": "Total input tokens across all requests",
     "completion_tokens": "Output Tokens",
@@ -276,7 +277,10 @@
     "period_all": "All Time",
     "period_today": "Today",
     "period_week": "Last 7 Days",
-    "period_month": "Last 30 Days"
+    "period_month": "Last 30 Days",
+    "trend_title": "Requests & Token Trend",
+    "detail_title": "Key Usage Details",
+    "requests": "Requests"
   },
   "dashboard": {
     "total_requests": "Total Requests",
