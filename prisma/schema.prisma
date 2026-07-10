@@ -30,9 +30,9 @@ model Admin {
 model Platform {
   id          String    @id @default(cuid())
   name        String
-  baseUrl     String   @db.Text
-  apiKey      String // 主密钥
-  apiKeys     String    @default("[]") @db.Text // 附加密钥（JSON 数组），与主密钥一起轮询
+  baseUrl     String   @db.VarChar(2048)
+  apiKey      String   @db.VarChar(512) // 主密钥（显式长度，防止 Azure JWT 等超长密钥截断）
+  apiKeys     String    @db.Text // 附加密钥（JSON 数组），与主密钥一起轮询（MySQL TEXT 列不允许 DEFAULT，应用层保证默认值 "[]"）
   type        String    @default("openai") // openai | azure | custom
   enabled     Boolean   @default(true)
   priority    Int       @default(0) // 数值越大优先级越高
@@ -43,7 +43,7 @@ model Platform {
   failCount   Int       @default(0) // 连续失败次数
   lastFailAt  DateTime?
   cooldownEnd DateTime? // 熔断冷却结束时间
-  forwardHeaders String @default("[]") @db.Text // 透传给上游的下游请求头白名单（JSON 数组）
+  forwardHeaders String @db.Text // 透传给上游的下游请求头白名单（JSON 数组）（MySQL TEXT 列不允许 DEFAULT，应用层保证默认值 "[]"）
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -60,7 +60,7 @@ model Platform {
 
 model Proxy {
   id          String    @id @default(cuid())
-  address     String   @db.Text // 格式：http://user:pass@host:port 或 socks5://host:port
+  address     String   @db.VarChar(1024) // 格式：http://user:pass@host:port 或 socks5://host:port
   platformId  String? // 绑定到特定平台（null = 未绑定）
   enabled     Boolean   @default(true)
   status      String    @default("healthy") // healthy | degraded | down
@@ -83,7 +83,7 @@ model ApiKey {
   key         String    @unique
   name        String
   planId      String? // 可选：关联套餐模板
-  quota       Decimal?  @default(0) // 自定义额度（null 表示使用 Plan 默认值）
+  quota       Decimal?  @default(0) @db.Decimal(18, 4) // 自定义额度（null 表示使用 Plan 默认值）
   usedTokens  BigInt    @default(0) // 已使用 token 数
   rpmLimit    Int? // 每分钟请求限制（null 表示使用 Plan 默认值）
   tpmLimit    Int? // 每分钟 token 限制（null 表示使用 Plan 默认值）
