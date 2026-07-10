@@ -141,8 +141,8 @@ model ModelMap {
 model PlatformModel {
   id         String   @id @default(cuid())
   platformId String
-  modelId    String   // 模型 ID（如 gpt-4o, meta/llama-3.1-8b-instruct）
-  ownedBy    String?  // 模型归属（上游返回的 owned_by）
+  modelId    String   @db.VarChar(255) // 模型 ID（如 gpt-4o, meta/llama-3.1-8b-instruct）
+  ownedBy    String?  @db.VarChar(255) // 模型归属（上游返回的 owned_by）
   source     String   @default("auto") // auto = 自动拉取, manual = 用户手动添加
   fetchedAt  DateTime @default(now()) // 最近一次发现时间
 
