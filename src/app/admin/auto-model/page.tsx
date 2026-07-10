@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { message, Select, Empty } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -36,77 +36,59 @@ export default function AutoModelPage() {
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedModelsLoading, setSelectedModelsLoading] = useState(false);
 
-  /** 获取自动模型 ID 配置 */
-  const fetchAutoModelId = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/config");
-      const data = await res.json();
-      if (data.success && data.data) {
-        setAutoModelId(data.data["system:auto_model_id"] || null);
-      }
-    } catch {
-      // 静默失败
-    }
-  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
 
-  /** 获取已保存的模型选择 */
-  const fetchSelectedModels = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/config");
-      const data = await res.json();
-      if (data.success && data.data) {
-        const savedModels = data.data["system:auto_model_selected"];
-        if (savedModels) {
-          try {
-            setSelectedModels(JSON.parse(savedModels));
-          } catch {
-            setSelectedModels([]);
-          }
-        }
-      }
-    } catch {
-      // 静默失败
-    }
-  }, []);
-
-  /** 获取所有平台已发现的模型列表 */
-  const fetchAllModels = useCallback(async () => {
-    setModelsLoading(true);
-    try {
-      const res = await fetch("/api/admin/platforms");
-      const data = await res.json();
-      if (!data.success || !Array.isArray(data.data)) return;
-
-      const allModels: PlatformModel[] = [];
-      for (const platform of data.data) {
-        try {
-          const mRes = await fetch(`/api/admin/platforms/${platform.id}/models`);
-          const mData = await mRes.json();
-          if (mData.success && Array.isArray(mData.data)) {
-            for (const m of mData.data) {
-              allModels.push({ ...m, platform: { name: platform.name } });
+    const fetchAllData = async () => {
+      setModelsLoading(true);
+      try {
+        const res = await fetch("/api/admin/config", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setAutoModelId(data.data["system:auto_model_id"] || null);
+          const savedModels = data.data["system:auto_model_selected"];
+          if (savedModels) {
+            try {
+              setSelectedModels(JSON.parse(savedModels));
+            } catch {
+              setSelectedModels([]);
             }
           }
-        } catch {
-          // 单个平台失败不影响其他
         }
+      } catch {
+        // 静默失败
       }
-      setModels(allModels);
-    } catch {
-      message.error(t("common.error"));
-    } finally {
-      setModelsLoading(false);
-    }
-  }, [t]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchAutoModelId();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchAllModels();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchSelectedModels();
-  }, [fetchAutoModelId, fetchAllModels, fetchSelectedModels]);
+      try {
+        const pRes = await fetch("/api/admin/platforms", { signal: controller.signal });
+        const pData = await pRes.json();
+        if (pData.success && Array.isArray(pData.data)) {
+          const allModels: PlatformModel[] = [];
+          for (const platform of pData.data) {
+            try {
+              const mRes = await fetch(`/api/admin/platforms/${platform.id}/models`, { signal: controller.signal });
+              const mData = await mRes.json();
+              if (mData.success && Array.isArray(mData.data)) {
+                for (const m of mData.data) {
+                  allModels.push({ ...m, platform: { name: platform.name } });
+                }
+              }
+            } catch {
+              // 单个平台失败不影响其他
+            }
+          }
+          setModels(allModels);
+        }
+      } catch {
+        message.error(t("common.error"));
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+
+    fetchAllData();
+    return () => controller.abort();
+  }, [t]);
 
   /** 重新生成自动模型 ID */
   const regenerateAutoModelId = async () => {
