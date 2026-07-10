@@ -29,37 +29,42 @@ export default function AuditPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-
-  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal });
-      if (res.status === 401) {
-        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
-        router.push("/admin/login");
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        if (data.data?.items) setLogs(data.data.items);
-        if (data.data) setTotal(data.data.total);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [page, router, t]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchLogs(controller.signal);
+
+    const fetchLogs = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal: controller.signal });
+        if (res.status === 401) {
+          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          router.push("/admin/login");
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          if (data.data?.items) setLogs(data.data.items);
+          if (data.data) setTotal(data.data.total);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchLogs();
     return () => controller.abort();
-  }, [fetchLogs]);
+  }, [page, router, t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const actionColorMap: Record<string, string> = {
     login: "blue",
@@ -123,7 +128,7 @@ export default function AuditPage() {
         title={t("admin.audit")}
         description={t("admin.audit_desc")}
         extra={
-          <Button variant="default" onClick={() => fetchLogs()} icon={<RefreshCw size={14} />} disabled={loading}>
+          <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={loading}>
             {t("common.refresh") || "刷新"}
           </Button>
         }

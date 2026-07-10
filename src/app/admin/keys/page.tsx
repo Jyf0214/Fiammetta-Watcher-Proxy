@@ -50,29 +50,34 @@ export default function KeysPage() {
   const [submitting, setSubmitting] = useState(false);
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
-
-  const fetchKeys = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/keys", { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) setKeys(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [t]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchKeys(controller.signal);
+
+    const fetchKeys = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/admin/keys", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) setKeys(data.data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchKeys();
     return () => controller.abort();
-  }, [fetchKeys]);
+  }, [t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const handleSubmit = async () => {
     try {
@@ -92,7 +97,7 @@ export default function KeysPage() {
         form.resetFields();
         setNewKeyValue(data.data.key);
         setNewKeyVisible(true);
-        fetchKeys();
+        handleRefresh();
       } else {
         message.error(data.error);
       }
@@ -109,7 +114,7 @@ export default function KeysPage() {
       const data = await res.json();
       if (data.success) {
         message.success(t("api_key.delete_success") || "删除成功");
-        fetchKeys();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }

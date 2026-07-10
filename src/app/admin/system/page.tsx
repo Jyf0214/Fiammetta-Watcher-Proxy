@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Descriptions, Tag, Alert, Form, Input, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw, Lock, Settings } from "lucide-react";
@@ -25,38 +25,39 @@ export default function SystemPage() {
   const [loadError, setLoadError] = useState(false);
   const [passwordForm] = Form.useForm();
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
-
-  const fetchInfo = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch("/api/admin/stats", { signal });
-      const data = await res.json();
-      if (data.success && data.data) {
-        setInfo({
-          adminUsername: data.data.adminUsername || "",
-          dbConnected: data.data.dbConnected ?? false,
-          platformCount: data.data.activePlatforms || 0,
-          keyCount: data.data.activeKeys || 0,
-        });
-        setLoadError(false);
-      } else {
-        setLoadError(true);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setLoadError(true);
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchInfo(controller.signal);
+
+    const fetchInfo = async () => {
+      try {
+        const res = await fetch("/api/admin/stats", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setInfo({
+            adminUsername: data.data.adminUsername || "",
+            dbConnected: data.data.dbConnected ?? false,
+            platformCount: data.data.activePlatforms || 0,
+            keyCount: data.data.activeKeys || 0,
+          });
+          setLoadError(false);
+        } else {
+          setLoadError(true);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setLoadError(true);
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchInfo();
     return () => controller.abort();
-  }, [fetchInfo]);
+  }, [refreshKey]);
 
   const handleChangePassword = async (values: {
     currentPassword: string;
@@ -104,7 +105,7 @@ export default function SystemPage() {
             description={
               <Button
                 variant="default"
-                onClick={() => { setLoadError(false); fetchInfo(); }}
+                onClick={() => { setLoadError(false); setLoading(true); setRefreshKey((k) => k + 1); }}
                 icon={<RefreshCw size={14} />}
                 size="sm"
               >

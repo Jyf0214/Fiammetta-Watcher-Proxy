@@ -48,45 +48,50 @@ export default function ProxiesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState<string | undefined>();
+  const [refreshKey, setRefreshKey] = useState(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importPlatformId, setImportPlatformId] = useState<string | undefined>();
   const [importing, setImporting] = useState(false);
   const [form] = Form.useForm();
 
-  const fetchProxies = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const params = filterPlatform ? `?platformId=${filterPlatform}` : "";
-      const res = await fetch(`/api/admin/proxies${params}`, { signal });
-      if (res.status === 401) return;
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) setProxies(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, [filterPlatform, t]);
-
-  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch("/api/admin/platforms", { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setPlatforms(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
-      }
-    } catch { /* ignore */ }
-  }, []);
-
   useEffect(() => {
-    const c = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchProxies(c.signal);
-    fetchPlatforms(c.signal);
-    return () => c.abort();
-  }, [fetchProxies, fetchPlatforms]);
+    const controller = new AbortController();
+
+    const fetchProxies = async () => {
+      setLoading(true);
+      try {
+        const params = filterPlatform ? `?platformId=${filterPlatform}` : "";
+        const res = await fetch(`/api/admin/proxies${params}`, { signal: controller.signal });
+        if (res.status === 401) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) setProxies(data.data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+
+    const fetchPlatforms = async () => {
+      try {
+        const res = await fetch("/api/admin/platforms", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          setPlatforms(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
+        }
+      } catch { /* ignore */ }
+    };
+
+    fetchProxies();
+    fetchPlatforms();
+    return () => controller.abort();
+  }, [filterPlatform, t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const handleCreate = async () => {
     try {
@@ -102,7 +107,7 @@ export default function ProxiesPage() {
         message.success(t("proxy.create_success") || "创建成功");
         setModalOpen(false);
         form.resetFields();
-        fetchProxies();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }
@@ -120,7 +125,7 @@ export default function ProxiesPage() {
       const data = await res.json();
       if (data.success) {
         message.success(t("proxy.delete_success") || "删除成功");
-        fetchProxies();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }
@@ -137,7 +142,7 @@ export default function ProxiesPage() {
         body: JSON.stringify({ enabled: !proxy.enabled }),
       });
       const data = await res.json();
-      if (data.success) fetchProxies();
+      if (data.success) handleRefresh();
       else message.error(data.error || t("common.error"));
     } catch {
       message.error(t("common.error"));
@@ -154,7 +159,7 @@ export default function ProxiesPage() {
       const data = await res.json();
       if (data.success) {
         message.success(t("proxy.reset_success") || "已重置");
-        fetchProxies();
+        handleRefresh();
       }
     } catch {
       message.error(t("common.error"));
@@ -185,7 +190,7 @@ export default function ProxiesPage() {
         setImportModalOpen(false);
         setImportText("");
         setImportPlatformId(undefined);
-        fetchProxies();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }
@@ -263,7 +268,7 @@ export default function ProxiesPage() {
         description={t("admin.proxies_desc")}
         extra={
           <div className="flex gap-2">
-            <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchProxies()} disabled={loading}>
+            <Button variant="default" icon={<ReloadOutlined />} onClick={handleRefresh} disabled={loading}>
               {t("common.refresh")}
             </Button>
             <Button variant="default" icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>

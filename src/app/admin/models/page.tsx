@@ -38,44 +38,49 @@ export default function ModelsPage() {
   const [models, setModels] = useState<ModelMap[]>([]);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchModels = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/models", { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) setModels(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [t]);
-
-  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch("/api/admin/platforms", { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    }
-  }, [t]);
-
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchModels(controller.signal);
-    fetchPlatforms(controller.signal);
+
+    const fetchModels = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/admin/models", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) setModels(data.data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    const fetchPlatforms = async () => {
+      try {
+        const res = await fetch("/api/admin/platforms", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      }
+    };
+
+    fetchModels();
+    fetchPlatforms();
     return () => controller.abort();
-  }, [fetchModels, fetchPlatforms]);
+  }, [t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   const handleSubmit = async () => {
     try {
@@ -93,7 +98,7 @@ export default function ModelsPage() {
         message.success(data.message);
         setModalOpen(false);
         form.resetFields();
-        fetchModels();
+        handleRefresh();
       } else {
         message.error(data.error);
       }
@@ -111,7 +116,7 @@ export default function ModelsPage() {
       const data = await res.json();
       if (data.success) {
         message.success(data.message || t("model_map.delete_success") || "删除成功");
-        fetchModels();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }

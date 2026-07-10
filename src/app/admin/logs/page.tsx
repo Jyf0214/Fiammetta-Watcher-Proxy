@@ -43,44 +43,49 @@ export default function LogsPage() {
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
-
-  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: "20",
-      });
-      if (statusFilter) params.set("status", statusFilter);
-      if (errorFilter) params.set("isError", errorFilter);
-
-      const res = await fetch(`/api/admin/logs?${params}`, { signal });
-      if (res.status === 401) {
-        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
-        router.push("/admin/login");
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        if (data.data?.items) setLogs(data.data.items);
-        if (data.data) setTotal(data.data.total);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [page, statusFilter, errorFilter, router, t]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchLogs(controller.signal);
+
+    const fetchLogs = async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: "20",
+        });
+        if (statusFilter) params.set("status", statusFilter);
+        if (errorFilter) params.set("isError", errorFilter);
+
+        const res = await fetch(`/api/admin/logs?${params}`, { signal: controller.signal });
+        if (res.status === 401) {
+          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          router.push("/admin/login");
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          if (data.data?.items) setLogs(data.data.items);
+          if (data.data) setTotal(data.data.total);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchLogs();
     return () => controller.abort();
-  }, [fetchLogs]);
+  }, [page, statusFilter, errorFilter, router, t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const columns: TableColumnsType<LogEntry> = [
     {
@@ -192,7 +197,7 @@ export default function LogsPage() {
         title={t("admin.logs")}
         description={t("admin.logs_desc")}
         extra={
-          <Button variant="default" icon={<ReloadOutlined />} onClick={() => fetchLogs()} disabled={loading}>
+          <Button variant="default" icon={<ReloadOutlined />} onClick={handleRefresh} disabled={loading}>
             {t("common.refresh")}
           </Button>
         }

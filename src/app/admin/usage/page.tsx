@@ -44,32 +44,37 @@ export default function UsagePage() {
   const [usageData, setUsageData] = useState<KeyUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string>("all");
-
-  const fetchUsage = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ period });
-      const res = await fetch(`/api/admin/usage?${params}`, { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setUsageData(data.data);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [period, t]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchUsage(controller.signal);
+
+    const fetchUsage = async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ period });
+        const res = await fetch(`/api/admin/usage?${params}`, { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          setUsageData(data.data);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchUsage();
     return () => controller.abort();
-  }, [fetchUsage]);
+  }, [period, t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const columns: TableColumnsType<KeyUsage> = [
     {
@@ -219,7 +224,7 @@ export default function UsagePage() {
           <Button
             variant="default"
             icon={<ReloadOutlined />}
-            onClick={() => fetchUsage()}
+            onClick={handleRefresh}
             disabled={loading}
           >
             {t("common.refresh")}

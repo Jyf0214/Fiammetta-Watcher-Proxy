@@ -45,6 +45,7 @@ export default function PlatformsPage() {
   const { t } = useTranslation();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<Platform | null>(null);
   const [form] = Form.useForm();
@@ -58,28 +59,32 @@ export default function PlatformsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
 
-  const fetchPlatforms = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/platforms", { signal });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [t]);
-
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchPlatforms(controller.signal);
+
+    const fetchPlatforms = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/admin/platforms", { signal: controller.signal });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchPlatforms();
     return () => controller.abort();
-  }, [fetchPlatforms]);
+  }, [t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   const openCreateForm = () => {
     setEditing(null);
@@ -143,7 +148,7 @@ export default function PlatformsPage() {
       if (data.success) {
         message.success(data.message);
         closeForm();
-        fetchPlatforms();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }
@@ -161,7 +166,7 @@ export default function PlatformsPage() {
       const data = await res.json();
       if (data.success) {
         message.success(t("platform.delete_success") || "删除成功");
-        fetchPlatforms();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }
@@ -180,7 +185,7 @@ export default function PlatformsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchPlatforms();
+        handleRefresh();
       } else {
         message.error(data.error || t("common.error"));
       }

@@ -28,40 +28,45 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-
-  const fetchEvents = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/admin/logs?type=events&page=${page}&pageSize=20`,
-        { signal }
-      );
-      if (res.status === 401) {
-        message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
-        router.push("/admin/login");
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        if (data.data?.items) setEvents(data.data.items);
-        if (data.data) setTotal(data.data.total);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [page, router, t]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchEvents(controller.signal);
+
+    const fetchEvents = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/admin/logs?type=events&page=${page}&pageSize=20`,
+          { signal: controller.signal }
+        );
+        if (res.status === 401) {
+          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          router.push("/admin/login");
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          if (data.data?.items) setEvents(data.data.items);
+          if (data.data) setTotal(data.data.total);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        message.error(t("common.error"));
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchEvents();
     return () => controller.abort();
-  }, [fetchEvents]);
+  }, [page, router, t, refreshKey]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey(k => k + 1);
+  }, []);
 
   const levelColorMap: Record<string, string> = {
     info: "blue",
@@ -123,7 +128,7 @@ export default function EventsPage() {
         title={t("admin.events")}
         description={t("admin.events_desc")}
         extra={
-          <Button variant="default" onClick={() => fetchEvents()} icon={<RefreshCw size={14} />} disabled={loading}>
+          <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={loading}>
             {t("common.refresh") || "刷新"}
           </Button>
         }
