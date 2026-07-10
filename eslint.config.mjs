@@ -18,6 +18,6 @@ export default [
     },
   },
   {
-    ignores: ["node_modules/", ".next/", "out/"],
+    ignores: ["node_modules/", ".next/", "out/", "scripts/"],
   },
 ];
