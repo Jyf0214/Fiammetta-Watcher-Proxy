@@ -280,7 +280,9 @@
     "period_month": "最近 30 天",
     "trend_title": "请求与 Token 趋势",
     "detail_title": "Key 用量明细",
-    "requests": "请求数"
+    "requests": "请求数",
+    "tab_key": "Key 用量",
+    "tab_platform": "平台用量"
   },
   "dashboard": {
     "total_requests": "总请求数",

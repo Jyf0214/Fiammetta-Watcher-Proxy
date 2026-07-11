@@ -280,7 +280,9 @@
     "period_month": "Last 30 Days",
     "trend_title": "Requests & Token Trend",
     "detail_title": "Key Usage Details",
-    "requests": "Requests"
+    "requests": "Requests",
+    "tab_key": "Key Usage",
+    "tab_platform": "Platform Usage"
   },
   "dashboard": {
     "total_requests": "Total Requests",
