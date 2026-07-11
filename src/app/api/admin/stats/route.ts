@@ -22,6 +22,7 @@ export async function GET() {
       activeKeys,
       requestAgg,
       errorCount,
+      perfStats,
       recentEvents,
     ] = await Promise.all([
       prisma.platform.count(),
@@ -33,11 +34,19 @@ export async function GET() {
         _count: true,
       }),
       prisma.requestLog.count({ where: { isError: true } }),
+      prisma.requestLog.aggregate({
+        _avg: { ttft: true, duration: true },
+        where: { isError: false, ttft: { gt: 0 } },
+      }),
       prisma.systemEvent.findMany({
         orderBy: { createdAt: "desc" },
         take: 10,
       }),
     ]);
+
+    // 计算全局平均 TTFT 和平均耗时
+    const avgTtft = Math.round(perfStats._avg.ttft || 0);
+    const avgDuration = Math.round(perfStats._avg.duration || 0);
 
     return NextResponse.json({
       success: true,
@@ -51,6 +60,8 @@ export async function GET() {
         totalRequests: requestAgg._count,
         errorRequests: errorCount,
         totalTokens: requestAgg._sum.tokens || 0,
+        avgTtft,
+        avgDuration,
         recentEvents: recentEvents.map((e) => ({
           id: e.id,
           level: e.level,

@@ -16,6 +16,8 @@ import {
   ReloadOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
+  FieldTimeOutlined,
+  ClockCircleOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -31,6 +33,8 @@ interface Stats {
   totalRequests: number;
   errorRequests: number;
   totalTokens: number;
+  avgTtft: number;
+  avgDuration: number;
   recentEvents: Array<{
     id: string;
     level: string;
@@ -178,6 +182,24 @@ export default function DashboardPage() {
       color: "bg-purple-50",
       iconColor: "text-purple-500",
     },
+    {
+      key: "avgTtft",
+      title: t("usage.avg_ttft"),
+      value: stats?.avgTtft ?? 0,
+      suffix: "ms",
+      icon: <FieldTimeOutlined />,
+      color: "bg-orange-50",
+      iconColor: "text-orange-500",
+    },
+    {
+      key: "avgDuration",
+      title: t("usage.avg_duration"),
+      value: stats?.avgDuration ?? 0,
+      suffix: "ms",
+      icon: <ClockCircleOutlined />,
+      color: "bg-cyan-50",
+      iconColor: "text-cyan-500",
+    },
   ];
 
   // ==================== 渲染 ====================
@@ -238,6 +260,11 @@ export default function DashboardPage() {
                 <p className="text-zinc-500 text-xs">{card.title}</p>
                 <p className="text-xl font-bold text-zinc-900">
                   {card.value.toLocaleString()}
+                  {card.suffix && (
+                    <span className="text-sm font-normal text-zinc-400 ml-1">
+                      {card.suffix}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
