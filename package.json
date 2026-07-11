@@ -16,7 +16,6 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@ant-design/charts": "^2.6.7",
     "@ant-design/icons": "^6.3.1",
     "@prisma/client": "^6.19.3",
     "@tailwindcss/postcss": "^4.3.1",
@@ -32,6 +31,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-i18next": "^17.0.8",
+    "recharts": "^3.9.2",
     "socks-proxy-agent": "^10.1.0",
     "tailwind-merge": "^3.6.0"
   },

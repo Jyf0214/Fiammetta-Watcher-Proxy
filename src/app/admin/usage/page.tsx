@@ -1,28 +1,30 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  Select,
-  Tag,
-  Tooltip,
-  Statistic,
-  message,
-  type TableColumnsType,
-} from "antd";
+import { Select, Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { ReloadOutlined, BarChartOutlined, ThunderboltOutlined, FieldTimeOutlined, CloudServerOutlined, RiseOutlined } from "@ant-design/icons";
+import {
+  ReloadOutlined,
+  BarChartOutlined,
+  ThunderboltOutlined,
+  FieldTimeOutlined,
+  CloudServerOutlined,
+  RiseOutlined,
+} from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 
-const Line = dynamic(() => import("@ant-design/charts").then((mod) => mod.Line), {
+const UsageChart = dynamic(() => import("./UsageChart"), {
   ssr: false,
-  loading: () => <div className="h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />,
+  loading: () => (
+    <div className="h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />
+  ),
 });
 
 // ==================== 类型定义 ====================
@@ -75,7 +77,9 @@ export default function UsagePage() {
       setLoading(true);
       try {
         const params = new URLSearchParams({ period });
-        const res = await fetch(`/api/admin/usage?${params}`, { signal: controller.signal });
+        const res = await fetch(`/api/admin/usage?${params}`, {
+          signal: controller.signal,
+        });
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) {
           setUsageData(data.data);
@@ -100,7 +104,9 @@ export default function UsagePage() {
       setTrendLoading(true);
       try {
         const params = new URLSearchParams({ period });
-        const res = await fetch(`/api/admin/usage/trend?${params}`, { signal: controller.signal });
+        const res = await fetch(`/api/admin/usage/trend?${params}`, {
+          signal: controller.signal,
+        });
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) {
           setTrendData(data.data);
@@ -122,50 +128,63 @@ export default function UsagePage() {
 
   // 汇总统计
   const summary = useMemo(() => {
-    const totalRequests = usageData.reduce((s, k) => s + k.stats.totalRequests, 0);
-    const totalTokens = usageData.reduce((s, k) => s + k.stats.totalTokens, 0);
+    const totalRequests = usageData.reduce(
+      (s, k) => s + k.stats.totalRequests,
+      0
+    );
+    const totalTokens = usageData.reduce(
+      (s, k) => s + k.stats.totalTokens,
+      0
+    );
     const activeKeys = usageData.filter((k) => k.status === "active").length;
-    const avgTtft = usageData.length > 0
-      ? Math.round(usageData.reduce((s, k) => s + k.stats.avgTtft, 0) / usageData.length)
-      : 0;
+    const avgTtft =
+      usageData.length > 0
+        ? Math.round(
+            usageData.reduce((s, k) => s + k.stats.avgTtft, 0) /
+              usageData.length
+          )
+        : 0;
     return { totalRequests, totalTokens, activeKeys, avgTtft };
   }, [usageData]);
 
-  // 折线图配置
-  const chartData = useMemo(() => {
-    const points: Array<{ date: string; type: string; value: number }> = [];
-    for (const d of trendData) {
-      points.push({ date: d.date, type: t("usage.requests") || "请求数", value: d.requests });
-      points.push({ date: d.date, type: t("usage.total_tokens") || "Token", value: d.tokens });
-    }
-    return points;
-  }, [trendData, t]);
+  // ==================== 统计卡片 ====================
 
-  const chartConfig = useMemo(() => ({
-    data: chartData,
-    xField: "date",
-    yField: "value",
-    colorField: "type",
-    height: 320,
-    axis: {
-      x: { labelAutoRotate: true },
-      y: { title: "" },
+  const statCards = [
+    {
+      key: "requests",
+      title: t("usage.total_requests"),
+      value: summary.totalRequests,
+      icon: <ThunderboltOutlined />,
+      color: "bg-blue-50",
+      iconColor: "text-blue-500",
     },
-    legend: { position: "top" as const },
-    interaction: { tooltip: { render: (_e: unknown, { title, items }: { title: string; items: Array<{ name: string; value: number; color: string }> }) => {
-      if (!items || items.length === 0) return "";
-      let html = `<div style="font-weight:500;margin-bottom:4px">${title}</div>`;
-      for (const item of items) {
-        html += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
-          <span style="width:8px;height:8px;border-radius:50%;background:${item.color};display:inline-block"></span>
-          <span>${item.name}:</span>
-          <span style="font-weight:500">${item.value.toLocaleString()}</span>
-        </div>`;
-      }
-      return html;
-    }} },
-    style: { lineWidth: 2 },
-  }), [chartData]);
+    {
+      key: "tokens",
+      title: t("usage.total_tokens"),
+      value: summary.totalTokens,
+      icon: <RiseOutlined />,
+      color: "bg-emerald-50",
+      iconColor: "text-emerald-500",
+    },
+    {
+      key: "activeKeys",
+      title: t("usage.active_keys"),
+      value: summary.activeKeys,
+      suffix: `/ ${usageData.length}`,
+      icon: <CloudServerOutlined />,
+      color: "bg-purple-50",
+      iconColor: "text-purple-500",
+    },
+    {
+      key: "ttft",
+      title: t("usage.avg_ttft"),
+      value: summary.avgTtft,
+      suffix: "ms",
+      icon: <FieldTimeOutlined />,
+      color: "bg-amber-50",
+      iconColor: "text-amber-500",
+    },
+  ];
 
   // ==================== 表格列 ====================
 
@@ -289,7 +308,9 @@ export default function UsagePage() {
       width: 100,
       align: "right",
       render: (_: unknown, record: KeyUsage) =>
-        record.stats.avgDuration > 0 ? `${record.stats.avgDuration}ms` : "-",
+        record.stats.avgDuration > 0
+          ? `${record.stats.avgDuration}ms`
+          : "-",
       responsive: ["xl"],
     },
     {
@@ -312,7 +333,12 @@ export default function UsagePage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<BarChartOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={
+          <BarChartOutlined
+            size={20}
+            className="text-zinc-500 dark:text-zinc-400"
+          />
+        }
         title={t("admin.usage")}
         description={t("admin.usage_desc")}
         extra={
@@ -340,48 +366,43 @@ export default function UsagePage() {
         }
       />
 
-      {/* 汇总统计卡片 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <ProCard>
-          <Statistic
-            title={t("usage.total_requests")}
-            value={summary.totalRequests}
-            prefix={<ThunderboltOutlined className="text-blue-500" />}
-            loading={loading}
-          />
-        </ProCard>
-        <ProCard>
-          <Statistic
-            title={t("usage.total_tokens")}
-            value={summary.totalTokens}
-            prefix={<RiseOutlined className="text-green-500" />}
-            groupSeparator=","
-            loading={loading}
-          />
-        </ProCard>
-        <ProCard>
-          <Statistic
-            title={t("usage.active_keys")}
-            value={summary.activeKeys}
-            suffix={`/ ${usageData.length}`}
-            prefix={<CloudServerOutlined className="text-purple-500" />}
-            loading={loading}
-          />
-        </ProCard>
-        <ProCard>
-          <Statistic
-            title={t("usage.avg_ttft")}
-            value={summary.avgTtft}
-            suffix="ms"
-            prefix={<FieldTimeOutlined className="text-orange-500" />}
-            loading={loading}
-          />
-        </ProCard>
+      {/* 统计卡片 — 与仪表盘风格一致 */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        {statCards.map((card) => (
+          <ProCard
+            key={card.key}
+            className="bg-white border-zinc-200"
+            padding="p-4"
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center`}
+              >
+                <span className={card.iconColor}>{card.icon}</span>
+              </div>
+              <div>
+                <p className="text-zinc-500 text-xs">{card.title}</p>
+                <p className="text-xl font-bold text-zinc-900">
+                  {card.value.toLocaleString()}
+                  {card.suffix && (
+                    <span className="text-sm font-normal text-zinc-400 ml-1">
+                      {card.suffix}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </ProCard>
+        ))}
       </div>
 
       {/* 趋势折线图 */}
       <ProCard
-        title={t("usage.trend_title") || "请求与 Token 趋势"}
+        title={
+          <span className="font-semibold text-zinc-900">
+            {t("usage.trend_title")}
+          </span>
+        }
         className="mb-4"
       >
         {trendLoading ? (
@@ -390,16 +411,20 @@ export default function UsagePage() {
           </div>
         ) : trendData.length === 0 ? (
           <div className="h-[320px] flex items-center justify-center text-zinc-400">
-            {t("common.no_data") || "暂无数据"}
+            {t("common.no_data")}
           </div>
         ) : (
-          <Line {...chartConfig} />
+          <UsageChart data={trendData} />
         )}
       </ProCard>
 
       {/* 详细用量表格 */}
       <ProCard
-        title={t("usage.detail_title") || "Key 用量明细"}
+        title={
+          <span className="font-semibold text-zinc-900">
+            {t("usage.detail_title")}
+          </span>
+        }
         extra={
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
             {t("common.total")}: {usageData.length}
@@ -413,7 +438,8 @@ export default function UsagePage() {
           loading={loading}
           pagination={{
             pageSize: 20,
-            showTotal: (count) => t("common.pagination_total", { count }),
+            showTotal: (count) =>
+              t("common.pagination_total", { count }),
           }}
           scroll={{ x: 1400 }}
         />
