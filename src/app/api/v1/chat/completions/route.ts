@@ -6,6 +6,7 @@ import { platformFetch } from "@/lib/platform-fetch";
 import { extractForwardableHeaders } from "@/lib/forward-headers";
 import { checkPlatformRateLimit, recordPlatformTokens, checkKeyRateLimit, recordApiKeyTokens } from "@/lib/rate-limiter";
 import { recordSuccess, recordFailure } from "@/lib/circuit-breaker";
+import { freezeAutoModel, isAutoModelRequest } from "@/lib/router";
 import { checkAndResetApiKey } from "@/lib/api-key-reset";
 import { sanitizeUpstreamError } from "@/lib/proxy-handler";
 import type { ChatCompletionRequest } from "@/types";
@@ -231,6 +232,11 @@ export async function POST(request: NextRequest) {
       } catch (recordError) {
         // 仅输出错误信息，避免泄露完整堆栈
         console.error("[chat/completions] 上游错误路径熔断器记录失败:", recordError instanceof Error ? recordError.message : String(recordError));
+      }
+
+      // 自动模型请求失败时，临时冻结该模型（避免反复请求到异常模型）
+      if (isAutoModelRequest(body.model)) {
+        freezeAutoModel(route.targetModel);
       }
 
       // 记录错误日志
@@ -521,6 +527,11 @@ export async function POST(request: NextRequest) {
       } catch {
         // 仅输出错误信息，避免泄露完整堆栈
         console.error("[chat/completions] 熔断器记录失败:", error instanceof Error ? error.message : String(error));
+      }
+
+      // 自动模型请求失败时，临时冻结该模型
+      if (isAutoModelRequest(body.model)) {
+        freezeAutoModel(route.targetModel);
       }
     }
 

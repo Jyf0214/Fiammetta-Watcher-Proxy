@@ -12,6 +12,55 @@ let lastRefresh = 0;
 const CACHE_TTL = 30_000;
 const EMPTY_CACHE_RETRY = 5_000; // 空缓存时的重试间隔
 
+// ==================== 自动模型冻结机制 ====================
+// 当自动模型请求某模型失败（429/错误）时，临时冻结该模型，
+// 冻结期间自动模型不会再次选择该模型，到期后自动解冻。
+// 同一平台的其他模型不受影响。
+
+const frozenModels = new Map<string, number>(); // modelName → 解冻时间戳
+const AUTO_MODEL_FREEZE_MS = 3 * 60 * 1000; // 默认冻结 3 分钟
+
+/**
+ * 冻结模型（自动模型专用）
+ *
+ * 冻结期间，自动模型路由不会选择该模型。
+ * 冻结到期后自动解冻，无需手动干预。
+ */
+export function freezeAutoModel(
+  modelName: string,
+  durationMs: number = AUTO_MODEL_FREEZE_MS
+): void {
+  const unfreezeAt = Date.now() + durationMs;
+  frozenModels.set(modelName, unfreezeAt);
+  console.log(
+    `[auto-model] 模型 ${modelName} 已冻结 ${(durationMs / 1000).toFixed(0)} 秒，解冻时间: ${new Date(unfreezeAt).toISOString()}`
+  );
+}
+
+/**
+ * 检查模型是否处于冻结状态（自动模型专用）
+ */
+function isAutoModelFrozen(modelName: string): boolean {
+  const unfreezeAt = frozenModels.get(modelName);
+  if (!unfreezeAt) return false;
+
+  if (Date.now() >= unfreezeAt) {
+    // 已到期，自动解冻
+    frozenModels.delete(modelName);
+    console.log(`[auto-model] 模型 ${modelName} 已自动解冻`);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * 判断请求的模型是否为自动模型
+ */
+export function isAutoModelRequest(model: string): boolean {
+  return autoModelId !== null && model === autoModelId;
+}
+
 let refreshPromise: Promise<void> | null = null;
 
 /**
@@ -175,6 +224,26 @@ function selectPlatformByWeight(
 }
 
 /**
+ * 按平台权重选择候选模型（加权随机，权重来自所属平台）
+ */
+function selectCandidateByWeight(
+  candidates: { platform: PlatformConfig; model: string }[]
+): { platform: PlatformConfig; model: string } | null {
+  if (candidates.length === 0) return null;
+
+  const totalWeight = candidates.reduce((sum, c) => sum + c.platform.weight, 0);
+  if (totalWeight === 0) return candidates[0];
+
+  let random = Math.random() * totalWeight;
+  for (const candidate of candidates) {
+    random -= candidate.platform.weight;
+    if (random <= 0) return candidate;
+  }
+
+  return candidates[candidates.length - 1];
+}
+
+/**
  * 检查平台是否可用（纯查询，无副作用）
  *
  * 仅读取熔断器状态，不触发状态转换，不递增半开探测计数。
@@ -244,22 +313,39 @@ export async function routeRequest(
 
   // 自动模型路由：请求模型 === 配置的自动模型 ID
   if (autoModelId && requestedModel === autoModelId) {
-    const platformsWithModels = platformCache.filter(
-      (p) => isPlatformAvailable(p) && platformModelCache.has(p.id)
-    );
-    if (platformsWithModels.length === 0) return null;
+    // 收集所有可用平台上未冻结的模型，构建 (平台, 模型) 候选列表
+    const candidates: { platform: PlatformConfig; model: string }[] = [];
 
-    const maxPriority = Math.max(...platformsWithModels.map((p) => p.priority));
-    const topPriority = platformsWithModels.filter((p) => p.priority === maxPriority);
-    const selected = selectPlatformByWeight(topPriority);
+    for (const p of platformCache) {
+      if (!isPlatformAvailable(p)) continue;
+      const models = platformModelCache.get(p.id);
+      if (!models || models.size === 0) continue;
+
+      for (const modelName of models) {
+        // 跳过冻结中的模型
+        if (isAutoModelFrozen(modelName)) continue;
+        // 跳过通配符规则（如 gpt-*），只选择具体模型
+        if (modelName.includes("*")) continue;
+        candidates.push({ platform: p, model: modelName });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // 按平台优先级分组，选择最高优先级组
+    const maxPriority = Math.max(...candidates.map((c) => c.platform.priority));
+    const topPriority = candidates.filter((c) => c.platform.priority === maxPriority);
+
+    // 在最高优先级组中，按平台权重加权随机选择一个 (平台, 模型) 对
+    const selected = selectCandidateByWeight(topPriority);
     if (!selected) return null;
 
     // 仅对选中的平台递增半开探测计数
-    const breakerState = getCircuitBreakerState(selected.id);
+    const breakerState = getCircuitBreakerState(selected.platform.id);
     if (breakerState === "half-open") {
-      incrementHalfOpenPending(selected.id);
+      incrementHalfOpenPending(selected.platform.id);
     }
-    return { platform: selected, targetModel: requestedModel };
+    return { platform: selected.platform, targetModel: selected.model };
   }
 
   const { targetModel, targetPlatformId } = resolveModelMapping(
