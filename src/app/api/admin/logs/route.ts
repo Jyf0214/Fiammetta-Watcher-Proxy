@@ -4,6 +4,16 @@ import { getAdminFromRequest } from "@/lib/auth";
 
 /**
  * GET /api/admin/logs — 获取请求日志列表
+ *
+ * 查询参数：
+ * - page: 页码，默认 1
+ * - pageSize: 每页条数，默认 20，最大 100
+ * - status: HTTP 状态码筛选
+ * - isError: 是否错误（true/false）
+ * - type: events — 查询系统事件
+ * - keyId: 按 API Key 筛选
+ * - startDate: 起始日期（ISO 格式或 YYYY-MM-DD）
+ * - endDate: 结束日期（ISO 格式或 YYYY-MM-DD，含当天全部）
  */
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest();
@@ -23,18 +33,20 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status");
   const isError = searchParams.get("isError");
   const type = searchParams.get("type");
+  const keyId = searchParams.get("keyId");
+  const startDateStr = searchParams.get("startDate");
+  const endDateStr = searchParams.get("endDate");
 
   try {
     // 系统事件类型查询
     if (type === "events") {
-      const where = {};
       const [items, total] = await Promise.all([
         prisma.systemEvent.findMany({
           orderBy: { createdAt: "desc" },
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
-        prisma.systemEvent.count({ where }),
+        prisma.systemEvent.count(),
       ]);
 
       return NextResponse.json({
@@ -55,14 +67,38 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 请求日志查询
+    // 请求日志查询 — 构建 where 条件（所有条件 AND 组合）
     const where: Record<string, unknown> = {};
+
+    // 状态码筛选
     if (status) {
       const n = parseInt(status, 10);
       if (!isNaN(n)) where.status = n;
     }
-    if (isError !== null && isError !== undefined) {
+
+    // 错误筛选
+    if (isError !== null && isError !== undefined && isError !== "") {
       where.isError = isError === "true";
+    }
+
+    // API Key 筛选
+    if (keyId) {
+      where.keyId = keyId;
+    }
+
+    // 日期范围筛选
+    if (startDateStr || endDateStr) {
+      const createdAtFilter: Record<string, Date> = {};
+      if (startDateStr) {
+        createdAtFilter.gte = new Date(startDateStr);
+      }
+      if (endDateStr) {
+        // 结束日期含当天全部：取当天 23:59:59.999
+        const end = new Date(endDateStr);
+        end.setHours(23, 59, 59, 999);
+        createdAtFilter.lte = end;
+      }
+      where.createdAt = createdAtFilter;
     }
 
     const [items, total] = await Promise.all([
@@ -95,10 +131,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error("[GET /api/admin/logs] 获取日志失败:", err);
     return NextResponse.json(
-      {
-        success: false,
-        error: "获取日志失败",
-      },
+      { success: false, error: "获取日志失败" },
       { status: 500 }
     );
   }

@@ -30,6 +30,7 @@
     "next": "Next",
     "refresh": "Refresh",
     "retry": "Retry",
+    "reset": "Reset",
     "close": "Close",
     "copy": "Copy",
     "copied": "Copied to clipboard",
@@ -254,6 +255,9 @@
     "error_filter_placeholder": "Filter by error",
     "filter_error_only": "Errors only",
     "filter_normal_only": "Normal only",
+    "filter_by_key": "Filter by Key",
+    "start_date": "Start Date",
+    "end_date": "End Date",
     "fetch_failed": "Failed to fetch logs"
   },
   "usage": {
