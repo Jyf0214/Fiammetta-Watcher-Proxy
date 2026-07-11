@@ -2,7 +2,7 @@
  * 平台级代理感知请求封装
  *
  * 自动检测全局代理池中是否有可用代理，若有则通过代理转发请求。
- * 代理失败时自动标记并回退到直连。
+ * 代理失败时自动选择下一个可用代理重试，全部失败后回退到直连。
  */
 
 import { selectProxy, releaseProxy } from "./proxy-router";
@@ -15,6 +15,8 @@ export interface PlatformFetchOptions extends RequestInit {
   timeout?: number;
   /** 当前请求的 API Key ID，用于代理并发占用追踪 */
   keyId?: string;
+  /** 代理失败后最大重试次数（尝试不同代理），默认 2 */
+  maxRetries?: number;
 }
 
 /**
@@ -22,64 +24,52 @@ export interface PlatformFetchOptions extends RequestInit {
  *
  * 1. 从全局代理池选择一个可用代理
  * 2. 若有，通过它转发请求
- * 3. 若代理请求失败，标记代理失败并回退直连
- * 4. 若无代理，直接发送
+ * 3. 若代理失败，标记失败并选择下一个可用代理重试
+ * 4. 所有代理均失败后，回退到直连
+ * 5. 若无代理，直接发送
  */
 export async function platformFetch(
   url: string,
   platform: PlatformConfig,
   options: PlatformFetchOptions = {}
 ): Promise<Response> {
-  const { timeout = 120_000, keyId, ...fetchOptions } = options;
+  const { timeout = 120_000, keyId, maxRetries = 2, ...fetchOptions } = options;
 
-  // 从全局代理池选择代理
-  const proxy = await selectProxy(platform.id, keyId);
-  let proxyReleased = false;
+  // 尝试多个代理
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const proxy = await selectProxy(platform.id, keyId);
 
-  if (isDebug) {
-    console.log(
-      `[proxy-debug] platformFetch url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy ? `${proxy.address} id=${proxy.id}` : "null(无可用代理)"} keyId=${keyId || "none"}`
-    );
-  }
+    if (!proxy) break; // 无可用代理，跳出循环走直连
 
-  if (proxy) {
+    if (isDebug) {
+      console.log(
+        `[proxy-debug] platformFetch attempt=${attempt + 1}/${maxRetries + 1} url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy.address} id=${proxy.id} keyId=${keyId || "none"}`
+      );
+    }
+
     try {
-      if (isDebug) {
-        console.log(`[proxy-debug] 通过代理 ${proxy.id}(${proxy.address}) 发送请求 → ${url}`);
-      }
-
       const res = await proxyFetch(url, proxy, { ...fetchOptions, timeout });
 
       if (isDebug) {
-        console.log(`[proxy-debug] 代理 ${proxy.id} 响应: status=${res.status} statusText=${res.statusText}`);
+        console.log(`[proxy-debug] 代理 ${proxy.id} 响应: status=${res.status}`);
       }
 
-      // 2xx/3xx/4xx 都算代理连接成功（代理本身能通）
-      if (res.status < 500) {
-        await markProxySuccess(proxy.id);
-        releaseProxy(platform.id, proxy.id, keyId || "");
-        proxyReleased = true;
-        return res;
-      }
-      // 5xx 可能是上游问题，但代理本身是通的
+      // 任何 HTTP 响应都算代理连接成功
       await markProxySuccess(proxy.id);
       releaseProxy(platform.id, proxy.id, keyId || "");
-      proxyReleased = true;
       return res;
     } catch (err) {
       const errMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       console.warn(
-        `[proxy] 代理 ${proxy.id} 请求失败，回退直连: ${errMsg}`
+        `[proxy] 代理 ${proxy.id} 请求失败 (attempt ${attempt + 1}/${maxRetries + 1})，${attempt < maxRetries ? "尝试下一个代理" : "回退直连"}: ${errMsg}`
       );
-      if (isDebug) {
-        console.warn(`[proxy-debug] 代理 ${proxy.id} 失败详情:`, err);
-      }
       await markProxyFailed(proxy.id);
-      // 回退到直连（继续执行下面的逻辑）
+      releaseProxy(platform.id, proxy.id, keyId || "");
+      // 继续循环，selectProxy 会选下一个可用代理
     }
   }
 
-  // 直连
+  // 直连（所有代理均失败或无代理时）
   if (isDebug) {
     console.log(`[proxy-debug] 直连发送请求 → ${url}`);
   }
@@ -93,14 +83,11 @@ export async function platformFetch(
     });
 
     if (isDebug) {
-      console.log(`[proxy-debug] 直连响应: status=${res.status} statusText=${res.statusText}`);
+      console.log(`[proxy-debug] 直连响应: status=${res.status}`);
     }
 
     return res;
   } finally {
     clearTimeout(timeoutId);
-    if (proxy && !proxyReleased) {
-      releaseProxy(platform.id, proxy.id, keyId || "");
-    }
   }
 }
