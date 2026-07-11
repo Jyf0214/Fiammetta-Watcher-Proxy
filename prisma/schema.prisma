@@ -238,3 +238,30 @@ model Config {
 
   @@map("configs")
 }
+
+// ==================== 日志聚合统计（30 天前自动归档） ====================
+
+model DailyStats {
+  id                    String   @id @default(cuid())
+  date                  DateTime @db.Date // 聚合日期（仅日期部分）
+  keyId                 String? // API Key ID（null = 无 Key 请求）
+  keyName               String? // 冗余 Key 名称（Key 可能被删除）
+  platformId            String? // 平台 ID
+  platformName          String? // 冗余平台名称
+  model                 String   // 模型名称
+  totalRequests         Int      @default(0) // 总请求数
+  errorRequests         Int      @default(0) // 错误请求数
+  totalTokens           Int      @default(0) // 总 token（prompt + completion）
+  totalPromptTokens     Int      @default(0) // 总输入 token
+  totalCompletionTokens Int      @default(0) // 总输出 token
+  avgTtft               Float    @default(0) // 平均首 token 延迟（毫秒）
+  avgDuration           Float    @default(0) // 平均耗时（毫秒）
+  maxTtft               Int      @default(0) // 最大首 token 延迟
+  maxDuration           Int      @default(0) // 最大耗时
+
+  @@unique([date, keyId, model])
+  @@index([date])
+  @@index([keyId, date])
+  @@index([platformId, date])
+  @@map("daily_stats")
+}

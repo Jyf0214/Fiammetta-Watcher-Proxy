@@ -258,7 +258,16 @@
     "filter_by_key": "Filter by Key",
     "start_date": "Start Date",
     "end_date": "End Date",
-    "fetch_failed": "Failed to fetch logs"
+    "fetch_failed": "Failed to fetch logs",
+    "tab_detailed": "Detailed Logs",
+    "tab_archived": "Archived Stats",
+    "archive_date": "Archive Date",
+    "total_requests": "Total Requests",
+    "error_requests": "Errors",
+    "avg_ttft": "Avg TTFT",
+    "avg_duration": "Avg Duration",
+    "manual_archive": "Archive Now",
+    "archiving": "Archiving..."
   },
   "usage": {
     "key_name": "Key Name",

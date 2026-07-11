@@ -57,5 +57,13 @@ export async function register() {
     } catch (error) {
       console.error("[instrumentation] 速率限制器清理服务启动失败:", error);
     }
+
+    // 启动日志归档调度器（每天凌晨将 30 天前的详细日志聚合为统计数据）
+    try {
+      const { startLogArchiver } = await import("./lib/log-archiver");
+      startLogArchiver();
+    } catch (error) {
+      console.error("[instrumentation] 日志归档服务启动失败:", error);
+    }
   }
 }

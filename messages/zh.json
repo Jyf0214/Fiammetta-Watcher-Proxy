@@ -258,7 +258,16 @@
     "filter_by_key": "按 Key 筛选",
     "start_date": "开始日期",
     "end_date": "结束日期",
-    "fetch_failed": "获取日志失败"
+    "fetch_failed": "获取日志失败",
+    "tab_detailed": "详细日志",
+    "tab_archived": "归档统计",
+    "archive_date": "归档日期",
+    "total_requests": "总请求数",
+    "error_requests": "错误数",
+    "avg_ttft": "平均首 Token",
+    "avg_duration": "平均耗时",
+    "manual_archive": "立即归档",
+    "archiving": "归档中..."
   },
   "usage": {
     "key_name": "Key 名称",
