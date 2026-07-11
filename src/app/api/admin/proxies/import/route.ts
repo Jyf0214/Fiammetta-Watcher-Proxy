@@ -65,8 +65,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
-        parseErrors.push(`第 ${i + 1} 行 IP 格式无效: ${ip}`);
+      // 支持 IP 和域名格式
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(ip)) {
+        parseErrors.push(`第 ${i + 1} 行 IP/域名格式无效: ${ip}`);
         continue;
       }
 
