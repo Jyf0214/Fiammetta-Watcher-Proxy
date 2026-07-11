@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
+import { ThunderboltOutlined, RiseOutlined, GlobalOutlined, WarningOutlined } from "@ant-design/icons";
 import "@/lib/i18n";
 
 interface PlatformUsage {
@@ -83,7 +84,7 @@ export default function PlatformUsageTab({
       key: "requests",
       title: t("usage.total_requests"),
       value: summary.totalRequests,
-      icon: "⚡",
+      icon: <ThunderboltOutlined />,
       bgColor: "bg-blue-50",
       iconColor: "text-blue-500",
     },
@@ -91,7 +92,7 @@ export default function PlatformUsageTab({
       key: "tokens",
       title: t("usage.total_tokens"),
       value: summary.totalTokens,
-      icon: "📈",
+      icon: <RiseOutlined />,
       bgColor: "bg-emerald-50",
       iconColor: "text-emerald-500",
     },
@@ -100,7 +101,7 @@ export default function PlatformUsageTab({
       title: t("dashboard.active_platforms"),
       value: summary.activePlatforms,
       suffix: `/ ${data.length}`,
-      icon: "🌐",
+      icon: <GlobalOutlined />,
       bgColor: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -108,7 +109,7 @@ export default function PlatformUsageTab({
       key: "errors",
       title: t("common.error") || "错误",
       value: summary.errorRequests,
-      icon: "⚠️",
+      icon: <WarningOutlined />,
       bgColor: "bg-red-50",
       iconColor: "text-red-500",
     },
@@ -273,9 +274,9 @@ export default function PlatformUsageTab({
           >
             <div className="flex items-center gap-3">
               <div
-                className={`h-9 w-9 ${card.bgColor} rounded-lg flex items-center justify-center text-base`}
+                className={`h-9 w-9 ${card.bgColor} rounded-lg flex items-center justify-center`}
               >
-                {card.icon}
+                <span className={card.iconColor}>{card.icon}</span>
               </div>
               <div>
                 <p className="text-zinc-500 text-xs">{card.title}</p>

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
+import { ThunderboltOutlined, RiseOutlined, CloudServerOutlined, FieldTimeOutlined } from "@ant-design/icons";
 import "@/lib/i18n";
 
 interface KeyUsage {
@@ -84,7 +85,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "requests",
       title: t("usage.total_requests"),
       value: summary.totalRequests,
-      icon: "⚡",
+      icon: <ThunderboltOutlined />,
       bgColor: "bg-blue-50",
       iconColor: "text-blue-500",
     },
@@ -92,7 +93,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "tokens",
       title: t("usage.total_tokens"),
       value: summary.totalTokens,
-      icon: "📈",
+      icon: <RiseOutlined />,
       bgColor: "bg-emerald-50",
       iconColor: "text-emerald-500",
     },
@@ -101,7 +102,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       title: t("usage.active_keys"),
       value: summary.activeKeys,
       suffix: `/ ${data.length}`,
-      icon: "🔑",
+      icon: <CloudServerOutlined />,
       bgColor: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -110,7 +111,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       title: t("usage.avg_ttft"),
       value: summary.avgTtft,
       suffix: "ms",
-      icon: "⏱",
+      icon: <FieldTimeOutlined />,
       bgColor: "bg-amber-50",
       iconColor: "text-amber-500",
     },
@@ -265,9 +266,9 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
           >
             <div className="flex items-center gap-3">
               <div
-                className={`h-9 w-9 ${card.bgColor} rounded-lg flex items-center justify-center text-base`}
+                className={`h-9 w-9 ${card.bgColor} rounded-lg flex items-center justify-center`}
               >
-                {card.icon}
+                <span className={card.iconColor}>{card.icon}</span>
               </div>
               <div>
                 <p className="text-zinc-500 text-xs">{card.title}</p>
