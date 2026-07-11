@@ -13,6 +13,7 @@
 import { prisma } from "./prisma";
 import { getNextKey, parseApiKeys } from "./platform-keys";
 import { detectModelType } from "./model-type";
+import { isResolvedAddressSafe } from "./url-validation";
 import type { PlatformConfig } from "@/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -34,6 +35,20 @@ export async function fetchPlatformModels(platform: {
   name: string;
 }): Promise<UpstreamModel[] | null> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
+
+  // 请求时 DNS 解析校验（防御 DNS 重绑定 SSRF）
+  try {
+    const targetUrl = new URL(url);
+    const safe = await isResolvedAddressSafe(targetUrl.hostname);
+    if (!safe) {
+      console.warn(
+        `[model-fetcher] 平台 ${platform.name} DNS 解析校验失败: ${targetUrl.hostname} → 目标 IP 属于内网/保留地址，跳过`
+      );
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
   const extraKeys = parseApiKeys(platform.apiKeys);
 

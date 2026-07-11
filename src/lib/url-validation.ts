@@ -95,7 +95,7 @@ function isIpAddressInternal(hostname: string): boolean {
 /**
  * 检查主机名是否属于危险的内网目标
  */
-function isDangerousHostname(hostname: string): boolean {
+export function isDangerousHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
 
   // 拦截十进制整数 IP 表示法（如 2130706433 = 127.0.0.1）
@@ -173,4 +173,47 @@ export function validateUrlSafe(url: string): UrlValidationResult {
   }
 
   return { valid: true };
+}
+
+/**
+ * DNS 解析后校验目标 IP 是否属于内网/保留地址
+ *
+ * 防御 DNS 重绑定攻击：域名在创建时解析为公网 IP，
+ * 之后被切换为内网 IP。在实际请求前做 DNS 解析后校验。
+ *
+ * @returns 安全返回 true，危险返回 false
+ */
+export async function isResolvedAddressSafe(hostname: string): Promise<boolean> {
+  // 先做静态检查（十进制/十六进制 IP、localhost 变体等）
+  if (isDangerousHostname(hostname)) return false;
+
+  // 跳过纯 IP 地址（已在 isDangerousHostname 中检查过）
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    return !isPrivateOrReservedIPv4(hostname);
+  }
+
+  try {
+    const dnsPromises = await import("node:dns/promises");
+    const results = await dnsPromises.resolve4(hostname, { ttl: true });
+    for (const r of results) {
+      if (isPrivateOrReservedIPv4(r.address)) {
+        return false;
+      }
+    }
+    // 也检查 AAAA 记录
+    try {
+      const aaaResults = await dnsPromises.resolve6(hostname, { ttl: true });
+      for (const r of aaaResults) {
+        if (isPrivateOrReservedIPv6(r.address)) {
+          return false;
+        }
+      }
+    } catch {
+      // 无 AAAA 记录，忽略
+    }
+    return true;
+  } catch {
+    // DNS 解析失败，保守拒绝
+    return false;
+  }
 }

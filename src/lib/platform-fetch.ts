@@ -8,6 +8,7 @@
 import { selectProxy, releaseProxy } from "./proxy-router";
 import { proxyFetch, markProxyFailed, markProxySuccess } from "./proxy-fetch";
 import { isDebug } from "./auth-helpers";
+import { isResolvedAddressSafe } from "./url-validation";
 import type { PlatformConfig } from "@/types";
 
 export interface PlatformFetchOptions extends RequestInit {
@@ -35,6 +36,23 @@ export async function platformFetch(
 ): Promise<Response> {
   const { timeout = 120_000, keyId, maxRetries = 2, ...fetchOptions } = options;
 
+  // 请求时 DNS 解析校验（防御 DNS 重绑定 SSRF）
+  try {
+    const targetUrl = new URL(url);
+    const safe = await isResolvedAddressSafe(targetUrl.hostname);
+    if (!safe) {
+      console.warn(
+        `[security] 请求时 DNS 解析校验失败: ${url} → 目标 IP 属于内网/保留地址，拒绝请求`
+      );
+      return new Response(
+        JSON.stringify({ error: "目标地址解析为内网地址，出于安全考虑不被允许" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  } catch {
+    // URL 解析失败，让后续请求自然失败
+  }
+
   // 尝试多个代理
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const proxy = await selectProxy(platform.id, keyId);
@@ -43,7 +61,7 @@ export async function platformFetch(
 
     if (isDebug) {
       console.log(
-        `[proxy-debug] platformFetch attempt=${attempt + 1}/${maxRetries + 1} url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy.address} id=${proxy.id} keyId=${keyId || "none"}`
+        `[proxy-debug] platformFetch attempt=${attempt + 1}/${maxRetries + 1} url=${url} platform=${platform.name}(${platform.id}) proxy=${proxy.address.replace(/(:\/\/[^:]+:)([^@]+)(@)/, "$1***$3")} id=${proxy.id} keyId=${keyId || "none"}`
       );
     }
 

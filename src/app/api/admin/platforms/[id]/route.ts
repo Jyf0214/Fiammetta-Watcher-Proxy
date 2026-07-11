@@ -227,12 +227,10 @@ export async function DELETE(
     }
 
     // 统计并清理关联数据，避免外键约束导致删除失败
-    const logCount = await prisma.requestLog.count({ where: { platformId: id } });
-
-    if (logCount > 0) {
-      await prisma.requestLog.deleteMany({ where: { platformId: id } });
-    }
-    await prisma.platform.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.requestLog.deleteMany({ where: { platformId: id } });
+      await tx.platform.delete({ where: { id } });
+    });
 
     await forceRefreshRouterCache();
 
@@ -247,13 +245,7 @@ export async function DELETE(
 
     return NextResponse.json({
       success: true,
-      message: (() => {
-        const parts: string[] = [];
-        if (logCount > 0) parts.push(`${logCount} 条请求日志`);
-        return parts.length > 0
-          ? `平台删除成功（${parts.join("、")}）`
-          : "平台删除成功";
-      })(),
+      message: "平台删除成功",
     });
   } catch (err) {
     console.error("[DELETE /api/admin/platforms/[id]] 删除平台失败:", err);

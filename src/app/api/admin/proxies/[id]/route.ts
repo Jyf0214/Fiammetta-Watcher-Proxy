@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshProxyCache } from "@/lib/proxy-router";
+import { isDangerousHostname } from "@/lib/url-validation";
 
 /**
  * PUT /api/admin/proxies/[id] — 更新代理
@@ -34,6 +35,9 @@ export async function PUT(
         const url = new URL(body.address);
         if (!["http:", "https:", "socks5:"].includes(url.protocol)) {
           return NextResponse.json({ success: false, error: "代理地址协议必须为 http、https 或 socks5" }, { status: 400 });
+        }
+        if (isDangerousHostname(url.hostname)) {
+          return NextResponse.json({ success: false, error: "代理地址指向内网/保留地址，出于安全考虑不被允许" }, { status: 400 });
         }
       } catch {
         return NextResponse.json({ success: false, error: "代理地址格式无效" }, { status: 400 });

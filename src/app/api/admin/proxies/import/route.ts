@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshProxyCache } from "@/lib/proxy-router";
+import { isDangerousHostname } from "@/lib/url-validation";
 
 /**
  * POST /api/admin/proxies/import — 批量导入代理
@@ -71,6 +72,12 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // 内网/保留地址检查
+      if (isDangerousHostname(ip)) {
+        parseErrors.push(`第 ${i + 1} 行地址指向内网/保留地址: ${ip}`);
+        continue;
+      }
+
       const portNum = parseInt(port, 10);
       if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
         parseErrors.push(`第 ${i + 1} 行端口无效: ${port}`);
@@ -87,6 +94,18 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "没有可导入的代理",
           details: parseErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 批量导入数量上限
+    const MAX_IMPORT = 1000;
+    if (parsed.length > MAX_IMPORT) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `单次最多导入 ${MAX_IMPORT} 个代理，当前有 ${parsed.length} 个，请分批导入`,
         },
         { status: 400 }
       );

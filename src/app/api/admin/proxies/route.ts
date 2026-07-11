@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshProxyCache } from "@/lib/proxy-router";
+import { isDangerousHostname } from "@/lib/url-validation";
 import { isDebug } from "@/lib/auth-helpers";
 
 async function requireAdmin() {
@@ -66,6 +67,9 @@ export async function POST(request: NextRequest) {
         const url = new URL(address);
         if (!["http:", "https:", "socks5:"].includes(url.protocol)) {
           errors.push("代理地址协议必须为 http、https 或 socks5");
+        }
+        if (isDangerousHostname(url.hostname)) {
+          errors.push("代理地址指向内网/保留地址，出于安全考虑不被允许");
         }
       } catch {
         errors.push("代理地址格式无效");

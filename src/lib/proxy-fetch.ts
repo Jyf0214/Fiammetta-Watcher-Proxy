@@ -15,6 +15,14 @@ interface ParsedProxy {
 }
 
 /**
+ * 脱敏代理地址（隐藏密码部分）
+ * http://user:pass@host:port → http://user:***@host:port
+ */
+function maskProxyAddress(address: string): string {
+  return address.replace(/(:\/\/[^:]+:)([^@]+)(@)/, "$1***$3");
+}
+
+/**
  * 解析代理地址
  */
 function parseProxy(address: string): ParsedProxy | null {
@@ -37,11 +45,11 @@ function parseProxy(address: string): ParsedProxy | null {
 async function createAgent(proxyAddress: string) {
   const parsed = parseProxy(proxyAddress);
   if (!parsed) {
-    if (isDebug) console.log(`[proxy-debug] 代理地址解析失败: ${proxyAddress}`);
+    if (isDebug) console.log(`[proxy-debug] 代理地址解析失败: ${maskProxyAddress(proxyAddress)}`);
     return null;
   }
 
-  if (isDebug) console.log(`[proxy-debug] 创建 agent: protocol=${parsed.protocol} address=${parsed.url}`);
+  if (isDebug) console.log(`[proxy-debug] 创建 agent: protocol=${parsed.protocol} address=${maskProxyAddress(parsed.url)}`);
 
   if (parsed.protocol === "socks5") {
     const { SocksProxyAgent } = await import("socks-proxy-agent");
