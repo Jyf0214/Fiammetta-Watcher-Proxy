@@ -1,15 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// ==================== Claude Bot 拦截 ====================
-// 检测 Claude 相关爬虫/Agent 的 User-Agent，直接返回 403 拒绝访问
-const CLAUDE_BOT_PATTERN = /claudebot|claude[-_]?web|anthropic[-_]?ai|claude.*bot|claude.*crawler|claude.*spider|claude.*agent/i;
-
-function isClaudeBot(userAgent: string | null): boolean {
-  if (!userAgent) return false;
-  return CLAUDE_BOT_PATTERN.test(userAgent);
-}
-
 // ==================== Admin API 速率限制 (60次/分钟/IP) ====================
 // Edge Runtime 中使用全局变量 Map 实现，不依赖 Node.js API
 const adminRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -64,17 +55,6 @@ function base64UrlDecode(str: string): string {
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // ==================== Claude Bot 拦截 ====================
-  // 检测 Claude 相关爬虫/Agent，直接返回 403 拒绝所有请求
-  const userAgent = request.headers.get("user-agent");
-  if (isClaudeBot(userAgent)) {
-    return NextResponse.json(
-      { error: { message: "Access denied", type: "forbidden" } },
-      { status: 403 }
-    );
-  }
-
   const response = NextResponse.next();
 
   // 安全响应头统一由 next.config.ts 的 headers() 管理，proxy 中间件不再重复设置
@@ -156,5 +136,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/api/:path*"],
 };
