@@ -1,0 +1,25 @@
+# 禁止所有爬虫访问和索引
+User-agent: *
+Disallow: /
+
+# 禁止所有搜索引擎索引
+User-agent: Googlebot
+Disallow: /
+
+User-agent: Bingbot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: Yandex
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+User-agent: Sogou
+Disallow: /
+
+User-agent: ia_archiver
+Disallow: /

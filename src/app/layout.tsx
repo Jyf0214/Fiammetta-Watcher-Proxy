@@ -9,6 +9,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Fiammetta Watcher Proxy",
   description: "OpenAI API 中转站路由代理",
+  robots: {
+    index: false,
+    follow: false,
+    nosnippet: true,
+    noimageindex: true,
+  },
 };
 
 export default function RootLayout({
