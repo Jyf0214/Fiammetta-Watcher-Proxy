@@ -48,20 +48,38 @@ export async function GET(request: NextRequest) {
 
     // 使用 Prisma $queryRaw 按天聚合（MySQL DATE 函数）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = await prisma.$queryRaw`
-      SELECT
-        DATE(createdAt) as date,
-        COUNT(*) as requests,
-        COALESCE(SUM(tokens), 0) as tokens,
-        COALESCE(SUM(promptTokens), 0) as promptTokens,
-        COALESCE(SUM(completionTokens), 0) as completionTokens
-      FROM request_logs
-      WHERE createdAt >= ${startDate}
-        AND isError = false
-        ${keyId ? prisma.$queryRaw`AND keyId = ${keyId}` : prisma.$queryRaw``}
-      GROUP BY DATE(createdAt)
-      ORDER BY date ASC
-    `;
+    let rows: any[];
+
+    if (keyId) {
+      rows = await prisma.$queryRaw`
+        SELECT
+          DATE(createdAt) as date,
+          COUNT(*) as requests,
+          COALESCE(SUM(tokens), 0) as tokens,
+          COALESCE(SUM(promptTokens), 0) as promptTokens,
+          COALESCE(SUM(completionTokens), 0) as completionTokens
+        FROM request_logs
+        WHERE createdAt >= ${startDate}
+          AND isError = false
+          AND keyId = ${keyId}
+        GROUP BY DATE(createdAt)
+        ORDER BY date ASC
+      `;
+    } else {
+      rows = await prisma.$queryRaw`
+        SELECT
+          DATE(createdAt) as date,
+          COUNT(*) as requests,
+          COALESCE(SUM(tokens), 0) as tokens,
+          COALESCE(SUM(promptTokens), 0) as promptTokens,
+          COALESCE(SUM(completionTokens), 0) as completionTokens
+        FROM request_logs
+        WHERE createdAt >= ${startDate}
+          AND isError = false
+        GROUP BY DATE(createdAt)
+        ORDER BY date ASC
+      `;
+    }
 
     const trend = rows.map((row) => ({
       date: row.date instanceof Date

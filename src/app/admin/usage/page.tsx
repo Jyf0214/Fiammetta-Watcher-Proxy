@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Select, Tabs } from "antd";
+import { Select, Tabs, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { ReloadOutlined, BarChartOutlined } from "@ant-design/icons";
+import {
+  ReloadOutlined,
+  BarChartOutlined,
+  WarningOutlined,
+} from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -37,6 +41,7 @@ export default function UsagePage() {
   const { t } = useTranslation();
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [trendLoading, setTrendLoading] = useState(true);
+  const [trendError, setTrendError] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>("month");
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<string>("key");
@@ -47,17 +52,28 @@ export default function UsagePage() {
 
     const fetchTrend = async () => {
       setTrendLoading(true);
+      setTrendError(null);
       try {
         const params = new URLSearchParams({ period });
         const res = await fetch(`/api/admin/usage/trend?${params}`, {
           signal: controller.signal,
         });
         const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
+        if (!res.ok || !data.success) {
+          const errMsg = data.error || `HTTP ${res.status}`;
+          console.error("[用量趋势] 加载失败:", errMsg, data);
+          setTrendError(errMsg);
+          return;
+        }
+        if (Array.isArray(data.data)) {
           setTrendData(data.data);
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[用量趋势] 请求异常:", errMsg, err);
+        setTrendError(errMsg);
+        message.error(t("dashboard.fetch_failed"));
       } finally {
         if (!controller.signal.aborted) setTrendLoading(false);
       }
@@ -142,9 +158,34 @@ export default function UsagePage() {
           <div className="h-[320px] flex items-center justify-center">
             <GlobalLoading size="small" />
           </div>
+        ) : trendError ? (
+          <div className="h-[320px] flex flex-col items-center justify-center gap-2">
+            <WarningOutlined className="text-2xl text-red-400" />
+            <p className="text-sm text-red-500 font-medium">
+              {t("dashboard.fetch_failed")}
+            </p>
+            <p className="text-xs text-zinc-400 max-w-md text-center">
+              {trendError}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ReloadOutlined />}
+              onClick={handleRefresh}
+              className="mt-1"
+            >
+              {t("common.retry") || "重试"}
+            </Button>
+          </div>
         ) : trendData.length === 0 ? (
-          <div className="h-[320px] flex items-center justify-center text-zinc-400">
-            {t("common.no_data")}
+          <div className="h-[320px] flex flex-col items-center justify-center gap-2">
+            <BarChartOutlined className="text-3xl text-zinc-300" />
+            <p className="text-sm text-zinc-400">
+              {t("common.no_data")}
+            </p>
+            <p className="text-xs text-zinc-300">
+              {t("usage.trend_empty_hint") || "发送 API 请求后数据将在此显示"}
+            </p>
           </div>
         ) : (
           <UsageChart data={trendData} />

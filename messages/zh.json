@@ -29,6 +29,7 @@
     "back": "返回",
     "next": "下一步",
     "refresh": "刷新",
+    "retry": "重试",
     "close": "关闭",
     "copy": "复制",
     "copied": "已复制到剪贴板",
@@ -282,7 +283,8 @@
     "detail_title": "Key 用量明细",
     "requests": "请求数",
     "tab_key": "Key 用量",
-    "tab_platform": "平台用量"
+    "tab_platform": "平台用量",
+    "trend_empty_hint": "发送 API 请求后数据将在此显示"
   },
   "dashboard": {
     "total_requests": "总请求数",

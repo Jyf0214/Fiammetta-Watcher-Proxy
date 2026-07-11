@@ -29,6 +29,7 @@
     "back": "Back",
     "next": "Next",
     "refresh": "Refresh",
+    "retry": "Retry",
     "close": "Close",
     "copy": "Copy",
     "copied": "Copied to clipboard",
@@ -282,7 +283,8 @@
     "detail_title": "Key Usage Details",
     "requests": "Requests",
     "tab_key": "Key Usage",
-    "tab_platform": "Platform Usage"
+    "tab_platform": "Platform Usage",
+    "trend_empty_hint": "Data will appear here after sending API requests"
   },
   "dashboard": {
     "total_requests": "Total Requests",
