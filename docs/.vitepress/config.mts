@@ -2,7 +2,6 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Fiammetta Watcher Proxy',
-  base: '/Fiammetta-Watcher-Proxy/',
   description: '多平台 AI API 代理网关 — 统一接入、智能分流、用量监控',
   lastUpdated: true,
   ignoreDeadLinks: true,
