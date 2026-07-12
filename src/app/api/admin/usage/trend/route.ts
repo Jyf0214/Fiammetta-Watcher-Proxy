@@ -3,11 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 
 /**
- * GET /api/admin/usage/trend — 获取请求量和 Token 使用趋势（按天聚合）
+ * GET /api/admin/usage/trend — 获取请求量和 Token 使用趋势
  *
  * 查询参数：
  * - period: 时间范围（today/week/month/all），默认 month
  * - keyId: 可选，指定单个 Key ID
+ *
+ * 聚合粒度：
+ * - today: 按小时聚合（显示 24 小时趋势）
+ * - week/month/all: 按天聚合
  */
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest();
@@ -46,39 +50,76 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 使用 Prisma $queryRaw 按天聚合（MySQL DATE 函数）
+    // 根据 period 决定聚合粒度：today 按小时，其他按天
+    const isHourly = period === "today";
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let rows: any[];
 
-    if (keyId) {
-      rows = await prisma.$queryRaw`
-        SELECT
-          DATE(createdAt) as date,
-          COUNT(*) as requests,
-          COALESCE(SUM(tokens), 0) as tokens,
-          COALESCE(SUM(promptTokens), 0) as promptTokens,
-          COALESCE(SUM(completionTokens), 0) as completionTokens
-        FROM request_logs
-        WHERE createdAt >= ${startDate}
-          AND isError = false
-          AND keyId = ${keyId}
-        GROUP BY DATE(createdAt)
-        ORDER BY date ASC
-      `;
+    if (isHourly) {
+      // 按小时聚合
+      if (keyId) {
+        rows = await prisma.$queryRaw`
+          SELECT
+            DATE_FORMAT(createdAt, '%Y-%m-%d %H:00:00') as date,
+            COUNT(*) as requests,
+            COALESCE(SUM(tokens), 0) as tokens,
+            COALESCE(SUM(promptTokens), 0) as promptTokens,
+            COALESCE(SUM(completionTokens), 0) as completionTokens
+          FROM request_logs
+          WHERE createdAt >= ${startDate}
+            AND isError = false
+            AND keyId = ${keyId}
+          GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d %H:00:00')
+          ORDER BY date ASC
+        `;
+      } else {
+        rows = await prisma.$queryRaw`
+          SELECT
+            DATE_FORMAT(createdAt, '%Y-%m-%d %H:00:00') as date,
+            COUNT(*) as requests,
+            COALESCE(SUM(tokens), 0) as tokens,
+            COALESCE(SUM(promptTokens), 0) as promptTokens,
+            COALESCE(SUM(completionTokens), 0) as completionTokens
+          FROM request_logs
+          WHERE createdAt >= ${startDate}
+            AND isError = false
+          GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d %H:00:00')
+          ORDER BY date ASC
+        `;
+      }
     } else {
-      rows = await prisma.$queryRaw`
-        SELECT
-          DATE(createdAt) as date,
-          COUNT(*) as requests,
-          COALESCE(SUM(tokens), 0) as tokens,
-          COALESCE(SUM(promptTokens), 0) as promptTokens,
-          COALESCE(SUM(completionTokens), 0) as completionTokens
-        FROM request_logs
-        WHERE createdAt >= ${startDate}
-          AND isError = false
-        GROUP BY DATE(createdAt)
-        ORDER BY date ASC
-      `;
+      // 按天聚合
+      if (keyId) {
+        rows = await prisma.$queryRaw`
+          SELECT
+            DATE(createdAt) as date,
+            COUNT(*) as requests,
+            COALESCE(SUM(tokens), 0) as tokens,
+            COALESCE(SUM(promptTokens), 0) as promptTokens,
+            COALESCE(SUM(completionTokens), 0) as completionTokens
+          FROM request_logs
+          WHERE createdAt >= ${startDate}
+            AND isError = false
+            AND keyId = ${keyId}
+          GROUP BY DATE(createdAt)
+          ORDER BY date ASC
+        `;
+      } else {
+        rows = await prisma.$queryRaw`
+          SELECT
+            DATE(createdAt) as date,
+            COUNT(*) as requests,
+            COALESCE(SUM(tokens), 0) as tokens,
+            COALESCE(SUM(promptTokens), 0) as promptTokens,
+            COALESCE(SUM(completionTokens), 0) as completionTokens
+          FROM request_logs
+          WHERE createdAt >= ${startDate}
+            AND isError = false
+          GROUP BY DATE(createdAt)
+          ORDER BY date ASC
+        `;
+      }
     }
 
     const trend = rows.map((row) => ({

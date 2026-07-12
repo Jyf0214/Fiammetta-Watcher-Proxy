@@ -27,6 +27,7 @@ import {
   Network,
   Database,
   Zap,
+  Download,
 } from "lucide-react";
 import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
@@ -48,11 +49,12 @@ const menuItems: MenuItem[] = [
   { key: "admin.models", icon: ArrowLeftRight, href: "/admin/models", group: "manage" },
   { key: "admin.proxies", icon: Network, href: "/admin/proxies", group: "manage" },
   { key: "admin.proxy_pools", icon: Database, href: "/admin/proxy-pools", group: "manage" },
+  { key: "admin.auto_model", icon: Zap, href: "/admin/auto-model", group: "manage" },
   { key: "admin.usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
   { key: "admin.logs", icon: FileText, href: "/admin/logs", group: "monitor" },
   { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
   { key: "admin.events", icon: Bell, href: "/admin/events", group: "monitor" },
-  { key: "admin.auto_model", icon: Zap, href: "/admin/auto-model", group: "manage" },
+  { key: "admin.data_manager", icon: Download, href: "/admin/data-manager", group: "system" },
   { key: "admin.system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
@@ -249,6 +251,7 @@ function TopHeader({
     "/admin/audit": "admin.audit",
     "/admin/system": "admin.system",
     "/admin/events": "admin.events",
+    "/admin/data-manager": "admin.data_manager",
   };
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";

@@ -408,14 +408,16 @@ async function recordNonStreamUsage(
   const promptTokens = opts.usage?.prompt_tokens || 0;
   const completionTokens = opts.usage?.completion_tokens || 0;
   const totalTokens = promptTokens + completionTokens;
+  const duration = Date.now() - opts.startTime;
 
   try {
     const { recordPlatformTokens, recordApiKeyTokens } = await import("./rate-limiter");
 
-    const effectiveTokenLimit =
-      apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
-    if (effectiveTokenLimit !== null) {
-      await prisma.$transaction(async (tx) => {
+    // Token 扣减、日志记录在同一事务中执行，确保数据一致性
+    await prisma.$transaction(async (tx) => {
+      const effectiveTokenLimit =
+        apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
+      if (effectiveTokenLimit !== null) {
         const updated = await tx.apiKey.update({
           where: { id: apiKey.id },
           data: { usedTokens: { increment: totalTokens } },
@@ -427,29 +429,31 @@ async function recordNonStreamUsage(
             data: { status: "disabled" },
           });
         }
-      });
-    } else {
-      await prisma.apiKey.update({
-        where: { id: apiKey.id },
-        data: { usedTokens: { increment: totalTokens } },
-      });
-    }
+      } else {
+        await tx.apiKey.update({
+          where: { id: apiKey.id },
+          data: { usedTokens: { increment: totalTokens } },
+        });
+      }
 
-    await prisma.requestLog.create({
-      data: {
-        keyId: apiKey.id,
-        platformId: platform.id,
-        model: opts.model,
-        status: 200,
-        tokens: totalTokens,
-        promptTokens,
-        completionTokens,
-        ttft: 0,
-        duration: Date.now() - opts.startTime,
-        isError: false,
-      },
+      // 记录日志（同一事务中）
+      await tx.requestLog.create({
+        data: {
+          keyId: apiKey.id,
+          platformId: platform.id,
+          model: opts.model,
+          status: 200,
+          tokens: totalTokens,
+          promptTokens,
+          completionTokens,
+          ttft: 0,
+          duration,
+          isError: false,
+        },
+      });
     });
 
+    // 追溯性 TPM 检查（事务外，仅记录警告）
     if (totalTokens > 0) {
       const tpmResult = recordPlatformTokens(
         platform.id,

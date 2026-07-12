@@ -13,7 +13,7 @@
 import { prisma } from "./prisma";
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 分钟
-const FAILURE_THRESHOLD = 3; // 连续失败次数触发封禁
+const FAILURE_THRESHOLD = 2; // 连续失败 2 次触发降级，3 次触发封禁
 const BAN_DURATION_MS = 30 * 60 * 1000; // 封禁 30 分钟
 const TEST_TIMEOUT_MS = 10_000; // 单次测试超时 10 秒
 
@@ -70,7 +70,7 @@ async function testProxy(
           method: "HEAD",
         });
         clearTimeout(timeoutId);
-        return res.ok || res.status === 404 || res.status === 405;
+        return res.ok;
       } catch {
         clearTimeout(timeoutId);
         return false;
@@ -91,7 +91,7 @@ async function testProxy(
           method: "HEAD",
         });
         clearTimeout(timeoutId);
-        return res.ok || res.status === 404 || res.status === 405;
+        return res.ok;
       } catch {
         clearTimeout(timeoutId);
         return false;
@@ -115,18 +115,19 @@ async function runCheck() {
 
     const now = new Date();
 
-    // 获取第一个启用的平台作为测试目标
-    const testPlatform = await prisma.platform.findFirst({
+    // 随机选择一个启用的平台作为测试目标（避免单一目标导致误判）
+    const testPlatforms = await prisma.platform.findMany({
       where: { enabled: true },
       select: { baseUrl: true },
     });
-    if (!testPlatform) {
+    if (testPlatforms.length === 0) {
       if (proxies.length > 0) {
         console.warn("[proxy-health] 无可用平台，跳过健康检查");
       }
       return;
     }
-    const targetUrl = testPlatform.baseUrl.replace(/\/+$/, "") + "/";
+    const targetPlatform = testPlatforms[Math.floor(Math.random() * testPlatforms.length)];
+    const targetUrl = targetPlatform.baseUrl.replace(/\/+$/, "") + "/";
 
     for (const proxy of proxies) {
       // 跳过仍在封禁冷却期内的代理
@@ -134,39 +135,77 @@ async function runCheck() {
 
       const healthy = await testProxy(proxy.address, targetUrl);
 
-      if (healthy) {
-        // 恢复健康状态
-        if (proxy.failCount > 0 || proxy.status !== "healthy") {
-          await prisma.proxy.update({
-            where: { id: proxy.id },
-            data: { failCount: 0, status: "healthy", cooldownEnd: null },
-          });
-        }
-      } else {
-        const newFailCount = proxy.failCount + 1;
-        const newStatus =
-          newFailCount >= FAILURE_THRESHOLD ? "down" : "degraded";
-        const cooldownEnd =
-          newFailCount >= FAILURE_THRESHOLD
-            ? new Date(now.getTime() + BAN_DURATION_MS)
-            : null;
-
-        await prisma.proxy.update({
+      // 使用事务原子性更新 failCount，防止与请求失败的竞争条件
+      await prisma.$transaction(async (tx) => {
+        // 重新读取最新状态
+        const currentProxy = await tx.proxy.findUnique({
           where: { id: proxy.id },
-          data: {
-            failCount: newFailCount,
-            status: newStatus,
-            lastFailAt: now,
-            cooldownEnd,
-          },
+          select: { failCount: true, status: true },
         });
+        if (!currentProxy) return;
 
-        if (newFailCount >= FAILURE_THRESHOLD) {
-          console.warn(
-            `[proxy-health] 代理 ${proxy.id} 连续失败 ${newFailCount} 次，封禁至 ${cooldownEnd?.toISOString()}`
-          );
+        if (healthy) {
+          // 渐进式恢复：从 down 恢复时先进入 degraded，而不是直接恢复为 healthy
+          if (currentProxy.failCount > 0 || currentProxy.status !== "healthy") {
+            const oldStatus = currentProxy.status;
+            let newStatus: string;
+            let newFailCount: number;
+
+            if (oldStatus === "down") {
+              // 从 down 恢复：进入 degraded 状态，failCount 设为 1
+              newStatus = "degraded";
+              newFailCount = 1;
+              console.log(
+                `[proxy-health] 代理 ${proxy.id} 从 down 渐进恢复: ${oldStatus} → degraded, failCount: ${newFailCount}`
+              );
+            } else {
+              // 从 degraded 恢复：直接恢复为 healthy
+              newStatus = "healthy";
+              newFailCount = 0;
+              console.log(
+                `[proxy-health] 代理 ${proxy.id} 状态恢复: ${oldStatus} → healthy`
+              );
+            }
+
+            await tx.proxy.update({
+              where: { id: proxy.id },
+              data: { failCount: newFailCount, status: newStatus, cooldownEnd: null },
+            });
+          }
+        } else {
+          const newFailCount = currentProxy.failCount + 1;
+          const newStatus =
+            newFailCount >= FAILURE_THRESHOLD ? "down" : "degraded";
+          const cooldownEnd =
+            newFailCount >= FAILURE_THRESHOLD
+              ? new Date(now.getTime() + BAN_DURATION_MS)
+              : null;
+
+          const oldStatus = currentProxy.status;
+          await tx.proxy.update({
+            where: { id: proxy.id },
+            data: {
+              failCount: newFailCount,
+              status: newStatus,
+              lastFailAt: now,
+              cooldownEnd,
+            },
+          });
+
+          // 状态变更时记录日志
+          if (oldStatus !== newStatus) {
+            console.warn(
+              `[proxy-health] 代理 ${proxy.id} 状态变更: ${oldStatus} → ${newStatus}, failCount: ${newFailCount}`
+            );
+          }
+
+          if (newFailCount >= FAILURE_THRESHOLD) {
+            console.warn(
+              `[proxy-health] 代理 ${proxy.id} 连续失败 ${newFailCount} 次，封禁至 ${cooldownEnd?.toISOString()}`
+            );
+          }
         }
-      }
+      });
     }
   } catch (err) {
     console.error(

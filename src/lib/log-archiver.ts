@@ -186,17 +186,18 @@ async function archiveSingleDay(
 
     if (existing) {
       // 合并：累加计数，重新计算平均值
+      // 注意：DailyStats 表没有记录有 TTFT/Duration 数据的请求数
+      // 使用加权平均公式：新平均值 = (旧平均值 × 旧请求数 + 新总和) / (旧请求数 + 新请求数)
+      // 这里假设所有请求都有 duration 数据，但只有流式请求有 ttft 数据
       const newTotalRequests = existing.totalRequests + group.totalRequests;
       const newTtftSum =
         existing.avgTtft * existing.totalRequests + group.ttftSum;
       const newDurationSum =
         existing.avgDuration * existing.totalRequests + group.durationSum;
-      // 有 TTFT 数据的请求数 = 原来估算的 + 新增的
-      const existingTtftCount = Math.round(
-        existing.avgTtft > 0
-          ? (existing.avgTtft * existing.totalRequests) / existing.avgTtft
-          : 0
-      );
+      // 估算原有有 TTFT 数据的请求数：avgTtft > 0 说明有数据，按比例估算
+      const existingTtftCount = existing.avgTtft > 0
+        ? Math.round((existing.avgTtft * existing.totalRequests) / existing.avgTtft)
+        : 0;
 
       await prisma.dailyStats.update({
         where: { id: existing.id },
@@ -212,8 +213,8 @@ async function archiveSingleDay(
               ? newTtftSum / (existingTtftCount + group.ttftCount)
               : 0,
           avgDuration:
-            existingTtftCount + group.durationCount > 0
-              ? newDurationSum / (existingTtftCount + group.durationCount)
+            newTotalRequests > 0
+              ? newDurationSum / newTotalRequests
               : 0,
           maxTtft: Math.max(existing.maxTtft, group.maxTtft),
           maxDuration: Math.max(existing.maxDuration, group.maxDuration),

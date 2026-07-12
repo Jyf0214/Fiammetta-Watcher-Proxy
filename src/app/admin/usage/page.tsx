@@ -188,7 +188,10 @@ export default function UsagePage() {
             </p>
           </div>
         ) : (
-          <UsageChart data={trendData} />
+          <UsageChart
+            data={trendData}
+            granularity={period === "today" ? "hourly" : "daily"}
+          />
         )}
         {trendData.length > 0 && (
           <div className="flex items-center justify-center gap-8 pt-3 border-t border-zinc-50">

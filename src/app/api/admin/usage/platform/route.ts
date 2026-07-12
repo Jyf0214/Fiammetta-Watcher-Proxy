@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    // 获取每个平台的请求统计
+    // 获取每个平台的请求统计（包含 platformId 为 null 的请求）
     const stats = await prisma.requestLog.groupBy({
       by: ["platformId"],
       where: whereClause,
@@ -105,11 +105,14 @@ export async function GET(request: NextRequest) {
     });
     const errorCountMap = new Map<string, number>();
     for (const e of errorStats) {
-      if (e.platformId) errorCountMap.set(e.platformId, e._count);
+      // 使用 "unknown" 作为 platformId 为 null 的键
+      const key = e.platformId || "unknown";
+      errorCountMap.set(key, e._count);
     }
 
     for (const s of stats) {
-      if (s.platformId === null) continue;
+      // 使用 "unknown" 作为 platformId 为 null 的键
+      const statKey = s.platformId || "unknown";
 
       const totalTokens = s._sum.tokens || 0;
       const promptTokens = s._sum.promptTokens || 0;
@@ -144,7 +147,7 @@ export async function GET(request: NextRequest) {
           ? Math.round((totalRequests / timeSpanSeconds) * 60 * 100) / 100
           : 0;
 
-      statsMap.set(s.platformId, {
+      statsMap.set(statKey, {
         totalRequests,
         totalTokens,
         promptTokens,
@@ -153,7 +156,7 @@ export async function GET(request: NextRequest) {
         avgDuration,
         avgTokensPerSecond,
         avgRequestsPerMinute,
-        errorRequests: errorCountMap.get(s.platformId) || 0,
+        errorRequests: errorCountMap.get(statKey) || 0,
         firstRequestAt: firstRequestAt?.toISOString() || null,
       });
     }
@@ -184,6 +187,23 @@ export async function GET(request: NextRequest) {
         stats: pStats,
       });
     });
+
+    // 添加 "未知平台" 条目（platformId 为 null 的请求）
+    const unknownStats = statsMap.get("unknown");
+    if (unknownStats && unknownStats.totalRequests > 0) {
+      result.push(
+        serializeBigInt({
+          id: "unknown",
+          name: "未知平台",
+          type: "unknown",
+          enabled: false,
+          status: "unknown",
+          baseUrl: "",
+          createdAt: new Date().toISOString(),
+          stats: unknownStats,
+        })
+      );
+    }
 
     return NextResponse.json({
       success: true,

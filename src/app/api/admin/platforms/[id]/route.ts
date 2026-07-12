@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { forceRefreshRouterCache } from "@/lib/router";
 import { validateUrlSafe } from "@/lib/url-validation";
-import { serializeApiKeys } from "@/lib/platform-keys";
+import { serializeApiKeys, serializeNamedApiKeys, type NamedApiKey } from "@/lib/platform-keys";
 import { isDebug } from "@/lib/auth-helpers";
 
 /**
@@ -131,6 +131,7 @@ export async function PUT(
     }
 
     // apiKeys 在编辑时可选（不提供则保留原值）
+    // 支持两种格式：字符串数组 ["key1", "key2"] 或对象数组 [{name, key}]
     if (body.apiKeys !== undefined && body.apiKeys !== null) {
       if (body.apiKeys === "") {
         updateData.apiKeys = "[]";
@@ -138,10 +139,22 @@ export async function PUT(
         try {
           const parsed = JSON.parse(body.apiKeys);
           if (Array.isArray(parsed)) {
-            const validKeys = parsed.filter((k: unknown): k is string =>
-              typeof k === "string" && k.trim().length > 0 && k.length <= 500
-            );
-            updateData.apiKeys = serializeApiKeys(validKeys);
+            // 检查是否为对象数组格式 [{name, key}]
+            if (parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null && "key" in parsed[0]) {
+              const validKeys = parsed.filter((k: unknown): k is NamedApiKey =>
+                typeof k === "object" && k !== null &&
+                typeof (k as NamedApiKey).key === "string" &&
+                (k as NamedApiKey).key.trim().length > 0 &&
+                (k as NamedApiKey).key.length <= 500
+              );
+              updateData.apiKeys = serializeNamedApiKeys(validKeys);
+            } else {
+              // 旧格式：字符串数组
+              const validKeys = parsed.filter((k: unknown): k is string =>
+                typeof k === "string" && k.trim().length > 0 && k.length <= 500
+              );
+              updateData.apiKeys = serializeApiKeys(validKeys);
+            }
           }
         } catch {
           // JSON 解析失败，保留原值

@@ -24,18 +24,35 @@ interface TrendPoint {
 
 interface UsageChartProps {
   data: TrendPoint[];
+  /** 聚合粒度：hourly = 按小时，daily = 按天 */
+  granularity?: "hourly" | "daily";
 }
 
-export default function UsageChart({ data }: UsageChartProps) {
+/**
+ * 格式化日期标签
+ * - 按小时：YYYY-MM-DD HH:00 → HH:00
+ * - 按天：YYYY-MM-DD → MM-DD
+ */
+function formatDateLabel(date: string, granularity: "hourly" | "daily"): string {
+  if (granularity === "hourly") {
+    // 格式：2024-01-15 14:00:00 → 14:00
+    const timePart = date.slice(11, 16); // HH:MM
+    return timePart || date.slice(11);
+  }
+  // 格式：2024-01-15 → 01-15
+  return date.slice(5);
+}
+
+export default function UsageChart({ data, granularity = "daily" }: UsageChartProps) {
   const { t } = useTranslation();
 
   const chartData = useMemo(
     () =>
       data.map((d) => ({
         ...d,
-        dateLabel: d.date.slice(5), // MM-DD
+        dateLabel: formatDateLabel(d.date, granularity),
       })),
-    [data]
+    [data, granularity]
   );
 
   return (

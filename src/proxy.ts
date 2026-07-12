@@ -48,6 +48,7 @@ function base64UrlDecode(str: string): string {
 
 /**
  * Proxy 安全中间件 — Next.js 16 proxy.ts 规范
+ * - /admin/* 页面路由认证保护（排除登录页）
  * - /api/admin/* 路由统一鉴权兜底（排除登录接口）
  * - /api/admin/* 路由 IP 级速率限制
  * - /api/v1/* 路由 CORS 处理
@@ -56,6 +57,39 @@ function base64UrlDecode(str: string): string {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const response = NextResponse.next();
+
+  // ==================== /admin/* 页面路由认证保护 ====================
+  // 保护所有 admin 页面，排除登录页和静态资源
+  if (pathname.startsWith("/admin") && !pathname.startsWith("/admin/login")) {
+    // 检查是否为静态资源（CSS、JS、图片等）
+    const isStaticResource = /\.(css|js|ico|png|jpg|jpeg|gif|svg|woff|woff2|ttf|eot)$/i.test(pathname);
+
+    if (!isStaticResource) {
+      const token = request.cookies.get("admin_token")?.value;
+      if (!token) {
+        // 未登录，重定向到登录页
+        const loginUrl = new URL("/admin/login", request.url);
+        loginUrl.searchParams.set("from", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+
+      // 轻量级 JWT 过期检查
+      try {
+        const payload = JSON.parse(base64UrlDecode(token.split(".")[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          const loginUrl = new URL("/admin/login", request.url);
+          loginUrl.searchParams.set("from", pathname);
+          loginUrl.searchParams.set("expired", "1");
+          return NextResponse.redirect(loginUrl);
+        }
+      } catch {
+        // token 格式无效，重定向到登录页
+        const loginUrl = new URL("/admin/login", request.url);
+        loginUrl.searchParams.set("from", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    }
+  }
 
   // 安全响应头统一由 next.config.ts 的 headers() 管理，proxy 中间件不再重复设置
   // 避免两处维护不一致
@@ -136,5 +170,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: [
+    "/api/:path*",
+    // Admin 页面路由保护（排除登录页和静态资源）
+    "/admin/:path*",
+  ],
 };

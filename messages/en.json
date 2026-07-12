@@ -118,6 +118,8 @@
     "auto_model": "Auto Routing",
     "auto_model_desc": "Configure auto model ID and view platform model discovery status",
     "auto_model_discovered": "Discovered Models",
+    "data_manager": "Data Manager",
+    "data_manager_desc": "Export and import system data for backup and migration",
     "group_overview": "Overview",
     "group_manage": "Manage",
     "group_monitor": "Monitor",

@@ -51,12 +51,29 @@ async function refreshProxyCache() {
 
 /**
  * 判断代理是否可用（未处于封禁冷却期）
+ *
+ * 代理优先级：
+ * - healthy: 完全可用，优先选择
+ * - degraded: 降级可用，仅在 healthy 代理不足时使用，且随机 50% 概率跳过
+ * - down: 封禁中，不可用（除非封禁已过期，此时为 half-open 状态）
  */
 function isProxyAvailable(proxy: Proxy): boolean {
   if (!proxy.enabled) return false;
-  if (proxy.status === "down" && proxy.cooldownEnd && proxy.cooldownEnd > new Date()) {
-    return false;
+
+  if (proxy.status === "down") {
+    // 封禁中，检查是否已过期（half-open 状态）
+    if (proxy.cooldownEnd && proxy.cooldownEnd > new Date()) {
+      return false;
+    }
+    // 封禁已过期，允许探测（half-open）
+    return true;
   }
+
+  if (proxy.status === "degraded") {
+    // degraded 状态：50% 概率跳过，降低被选中的概率
+    return Math.random() > 0.5;
+  }
+
   return true;
 }
 

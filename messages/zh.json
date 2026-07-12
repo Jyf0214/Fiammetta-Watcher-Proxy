@@ -118,6 +118,8 @@
     "auto_model": "自动分流",
     "auto_model_desc": "配置自动模型 ID 和查看平台模型发现状态",
     "auto_model_discovered": "已发现的模型",
+    "data_manager": "数据管理",
+    "data_manager_desc": "导出和导入系统数据，支持备份和迁移",
     "group_overview": "概览",
     "group_manage": "管理",
     "group_monitor": "监控",

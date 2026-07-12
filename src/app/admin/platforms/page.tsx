@@ -20,7 +20,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined, CloudServerOutlined } from "@ant-design/icons";
+import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined, CloudServerOutlined, CopyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -41,6 +41,12 @@ interface Platform {
   status: string;
 }
 
+/** 命名密钥格式 */
+interface NamedApiKey {
+  name: string;
+  key: string;
+}
+
 export default function PlatformsPage() {
   const { t } = useTranslation();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -51,6 +57,9 @@ export default function PlatformsPage() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // 命名密钥状态
+  const [namedKeys, setNamedKeys] = useState<NamedApiKey[]>([{ name: "密钥1", key: "" }]);
 
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [modelPlatform, setModelPlatform] = useState<Platform | null>(null);
@@ -90,23 +99,95 @@ export default function PlatformsPage() {
     setEditing(null);
     form.resetFields();
     form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
+    setNamedKeys([{ name: "密钥1", key: "" }]);
     setFormVisible(true);
+  };
+
+  // 添加新密钥
+  const addNamedKey = () => {
+    const existingNames = namedKeys.map((k) => k.name);
+    let newIndex = 1;
+    while (existingNames.includes(`密钥${newIndex}`)) {
+      newIndex++;
+    }
+    setNamedKeys([...namedKeys, { name: `密钥${newIndex}`, key: "" }]);
+  };
+
+  // 删除密钥
+  const removeNamedKey = (index: number) => {
+    if (namedKeys.length <= 1) {
+      message.warning("至少保留一个密钥");
+      return;
+    }
+    const newKeys = namedKeys.filter((_, i) => i !== index);
+    setNamedKeys(newKeys);
+  };
+
+  // 更新密钥名称
+  const updateKeyName = (index: number, name: string) => {
+    const newKeys = [...namedKeys];
+    newKeys[index] = { ...newKeys[index], name };
+    setNamedKeys(newKeys);
+  };
+
+  // 更新密钥值
+  const updateKeyValue = (index: number, key: string) => {
+    const newKeys = [...namedKeys];
+    newKeys[index] = { ...newKeys[index], key };
+    setNamedKeys(newKeys);
+  };
+
+  // 复制密钥值
+  const copyKeyValue = (key: string) => {
+    navigator.clipboard.writeText(key);
+    message.success("已复制到剪贴板");
   };
 
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
-    let allKeys = platform.apiKey || "";
+
+    // 解析命名密钥
+    const namedKeys: NamedApiKey[] = [];
+
+    // 主密钥
+    if (platform.apiKey && platform.apiKey.trim()) {
+      namedKeys.push({ name: "主密钥", key: platform.apiKey });
+    }
+
+    // 附加密钥
     if (platform.apiKeys) {
       try {
         const parsed = JSON.parse(platform.apiKeys);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          allKeys = [allKeys, ...parsed].join("\n");
+        if (Array.isArray(parsed)) {
+          // 检查是否为对象数组格式 [{name, key}]
+          if (parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null && "key" in parsed[0]) {
+            // 新格式
+            parsed.forEach((item: NamedApiKey) => {
+              if (item && typeof item.key === "string" && item.key.trim()) {
+                namedKeys.push({ name: item.name || `密钥${namedKeys.length + 1}`, key: item.key });
+              }
+            });
+          } else {
+            // 旧格式：字符串数组，自动命名
+            parsed.forEach((key: string, index: number) => {
+              if (typeof key === "string" && key.trim()) {
+                namedKeys.push({ name: `密钥${index + 1}`, key });
+              }
+            });
+          }
         }
       } catch {
         // JSON 解析失败，忽略
       }
     }
-    form.setFieldsValue({ ...platform, apiKey: allKeys });
+
+    // 如果没有密钥，添加一个空行
+    if (namedKeys.length === 0) {
+      namedKeys.push({ name: "密钥1", key: "" });
+    }
+
+    setNamedKeys(namedKeys);
+    form.setFieldsValue(platform);
     setFormVisible(true);
   };
 
@@ -121,15 +202,11 @@ export default function PlatformsPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
-      if (typeof values.apiKey === "string") {
-        const lines = values.apiKey
-          .split("\n")
-          .map((line: string) => line.trim())
-          .filter((line: string) => line.length > 0);
-        if (lines.length > 0) {
-          values.apiKey = lines[0];
-          values.apiKeys = lines.length > 1 ? JSON.stringify(lines.slice(1)) : "[]";
-        }
+      // 处理命名密钥
+      const validKeys = namedKeys.filter((k) => k.key && k.key.trim());
+      if (validKeys.length > 0) {
+        values.apiKey = validKeys[0].key;
+        values.apiKeys = validKeys.length > 1 ? JSON.stringify(validKeys.slice(1)) : "[]";
       }
 
       const url = editing
@@ -459,16 +536,58 @@ export default function PlatformsPage() {
                 <Input placeholder="https://api.openai.com/v1" />
               </Form.Item>
               <Form.Item
-                name="apiKey"
-                label={t("platform.api_key")}
-                tooltip={t("platform.additional_keys_tip") || "每行一个密钥，第一行为主密钥，后续行为附加密钥"}
+                label={t("platform.api_key") || "API 密钥"}
+                tooltip={t("platform.additional_keys_tip") || "支持多个密钥，自动轮询分摊调用量"}
                 rules={editing ? [] : [{ required: true }]}
+                className="sm:col-span-2 lg:col-span-3"
               >
-                <Input.TextArea
-                  rows={3}
-                  placeholder={editing ? t("platform.api_key_edit_hint") : "每行一个密钥"}
-                  className="font-mono text-xs"
-                />
+                <div className="space-y-3">
+                  {namedKeys.map((namedKey, index) => (
+                    <div key={index} className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                      <Input
+                        value={namedKey.name}
+                        onChange={(e) => updateKeyName(index, e.target.value)}
+                        placeholder="密钥名称"
+                        className="w-24 flex-shrink-0"
+                        size="small"
+                      />
+                      <Input.Password
+                        value={namedKey.key}
+                        onChange={(e) => updateKeyValue(index, e.target.value)}
+                        placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"}
+                        className="flex-1 font-mono text-xs"
+                        size="small"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        iconOnly
+                        icon={<CopyOutlined />}
+                        onClick={() => copyKeyValue(namedKey.key)}
+                        disabled={!namedKey.key}
+                        title="复制密钥"
+                      />
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        iconOnly
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeNamedKey(index)}
+                        disabled={namedKeys.length <= 1}
+                        title="删除密钥"
+                      />
+                    </div>
+                  ))}
+                  <Button
+                    variant="default"
+                    onClick={addNamedKey}
+                    icon={<PlusOutlined />}
+                    block
+                    size="sm"
+                  >
+                    添加密钥
+                  </Button>
+                </div>
               </Form.Item>
               <Form.Item
                 name="type"

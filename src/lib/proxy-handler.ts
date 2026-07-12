@@ -262,6 +262,7 @@ export function createUsageTransformer(ctx: StreamTransformContext) {
   let capturedUsage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
   let firstTokenTime: number | null = null;
   let lastChunkTime = Date.now();
+  let chunkCount = 0;
   const CHUNK_TIMEOUT_MS = 60_000;
 
   const transformer = new TransformStream({
@@ -272,6 +273,7 @@ export function createUsageTransformer(ctx: StreamTransformContext) {
         return;
       }
       lastChunkTime = now;
+      chunkCount++;
 
       if (firstTokenTime === null) {
         firstTokenTime = now;
@@ -299,6 +301,12 @@ export function createUsageTransformer(ctx: StreamTransformContext) {
       }
     },
     async flush() {
+      // usage 提取失败时记录警告，便于排查问题
+      if (!capturedUsage && chunkCount > 0) {
+        console.warn(
+          `[proxy-handler] 流式响应未提取到 usage 信息，chunks: ${chunkCount}，platform: ${ctx.platformId}，model: ${ctx.model}`
+        );
+      }
       await flushTokenUsage(ctx, capturedUsage, firstTokenTime);
     },
   });
@@ -309,6 +317,7 @@ export function createUsageTransformer(ctx: StreamTransformContext) {
 /**
  * 流结束时的 Token 扣减与日志记录
  *
+ * token 扣减和日志记录在同一事务中执行，确保数据一致性。
  * 数据库操作失败时仅记录错误，不中断流的正常关闭。
  */
 async function flushTokenUsage(
@@ -320,13 +329,15 @@ async function flushTokenUsage(
   const completionTokens = capturedUsage?.completion_tokens || 0;
   const totalTokens = promptTokens + completionTokens;
   const ttft = firstTokenTime !== null ? firstTokenTime - ctx.startTime : 0;
+  const duration = Date.now() - ctx.startTime;
 
   try {
-    // Token 扣减与额度检查
-    const effectiveTokenLimit =
-      ctx.apiKey.tokenLimit ?? ctx.apiKey.plan?.tokenQuota ?? null;
-    if (effectiveTokenLimit !== null) {
-      await prisma.$transaction(async (tx) => {
+    // Token 扣减、日志记录在同一事务中执行，确保数据一致性
+    await prisma.$transaction(async (tx) => {
+      // Token 扣减与额度检查
+      const effectiveTokenLimit =
+        ctx.apiKey.tokenLimit ?? ctx.apiKey.plan?.tokenQuota ?? null;
+      if (effectiveTokenLimit !== null) {
         const updated = await tx.apiKey.update({
           where: { id: ctx.apiKeyId },
           data: { usedTokens: { increment: totalTokens } },
@@ -338,32 +349,31 @@ async function flushTokenUsage(
             data: { status: "disabled" },
           });
         }
-      });
-    } else {
-      await prisma.apiKey.update({
-        where: { id: ctx.apiKeyId },
-        data: { usedTokens: { increment: totalTokens } },
-      });
-    }
+      } else {
+        await tx.apiKey.update({
+          where: { id: ctx.apiKeyId },
+          data: { usedTokens: { increment: totalTokens } },
+        });
+      }
 
-    // 记录日志
-    const duration = Date.now() - ctx.startTime;
-    await prisma.requestLog.create({
-      data: {
-        keyId: ctx.apiKeyId,
-        platformId: ctx.platformId,
-        model: ctx.model,
-        status: 200,
-        tokens: totalTokens,
-        promptTokens,
-        completionTokens,
-        ttft,
-        duration,
-        isError: false,
-      },
+      // 记录日志（同一事务中）
+      await tx.requestLog.create({
+        data: {
+          keyId: ctx.apiKeyId,
+          platformId: ctx.platformId,
+          model: ctx.model,
+          status: 200,
+          tokens: totalTokens,
+          promptTokens,
+          completionTokens,
+          ttft,
+          duration,
+          isError: false,
+        },
+      });
     });
 
-    // 追溯性 TPM 检查
+    // 追溯性 TPM 检查（事务外，仅记录警告）
     if (totalTokens > 0) {
       const tpmResult = recordPlatformTokens(
         ctx.platformId,

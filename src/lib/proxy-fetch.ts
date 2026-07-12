@@ -118,7 +118,7 @@ export async function markProxyFailed(proxyId: string): Promise<void> {
   const { prisma } = await import("./prisma");
   const now = new Date();
 
-  const FAILURE_THRESHOLD = 3;
+  const FAILURE_THRESHOLD = 2; // 连续失败 2 次触发降级，3 次触发封禁
   const BAN_DURATION_MS = 30 * 60 * 1000;
 
   // 事务内读取当前 failCount 再递增，确保并发请求不会覆盖彼此的计数
@@ -151,10 +151,17 @@ export async function markProxyFailed(proxyId: string): Promise<void> {
 
   if (newFailCount < 0) return;
 
-  if (newFailCount >= FAILURE_THRESHOLD) {
+  // 记录状态变更日志
+  if (newFailCount === 1) {
+    console.warn(`[proxy] 代理 ${proxyId} 首次失败，failCount: ${newFailCount}`);
+  } else if (newFailCount >= FAILURE_THRESHOLD) {
     const cooldownEnd = new Date(now.getTime() + BAN_DURATION_MS);
     console.warn(
-      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，封禁至 ${cooldownEnd.toISOString()}`
+      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，状态变更为 down，封禁至 ${cooldownEnd.toISOString()}`
+    );
+  } else {
+    console.warn(
+      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，状态变更为 degraded`
     );
   }
 }
@@ -164,6 +171,18 @@ export async function markProxyFailed(proxyId: string): Promise<void> {
  */
 export async function markProxySuccess(proxyId: string): Promise<void> {
   const { prisma } = await import("./prisma");
+
+  // 读取当前状态，仅在状态需要变更时记录日志
+  const proxy = await prisma.proxy.findUnique({
+    where: { id: proxyId },
+    select: { failCount: true, status: true },
+  });
+
+  if (proxy && (proxy.failCount > 0 || proxy.status !== "healthy")) {
+    console.log(
+      `[proxy] 代理 ${proxyId} 状态恢复: ${proxy.status} → healthy, failCount: ${proxy.failCount} → 0`
+    );
+  }
 
   await prisma.proxy.update({
     where: { id: proxyId },
