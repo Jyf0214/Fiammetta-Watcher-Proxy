@@ -19,7 +19,7 @@ type ExportType = "system" | "data" | "all";
  *
  * 导出内容：
  * - system: 平台、API Keys、模型映射、代理、代理池、配置、套餐
- * - data: 请求日志、每日统计、审计日志、系统事件
+ * - data: API Keys、请求日志、每日统计、审计日志、系统事件
  * - all: 以上全部
  */
 export async function GET(request: NextRequest) {
@@ -63,14 +63,7 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      // 脱敏处理
-      const sanitizedPlatforms = platforms.map((p) => ({
-        ...p,
-        apiKey: maskKey(p.apiKey),
-        apiKeys: maskApiKeys(p.apiKeys),
-      }));
-
-      exportData.platforms = sanitizedPlatforms;
+      exportData.platforms = platforms;
 
       // 模型映射
       exportData.modelMaps = await prisma.modelMap.findMany({
@@ -92,13 +85,7 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      // 脱敏处理
-      const sanitizedProxies = proxies.map((p) => ({
-        ...p,
-        address: maskProxyAddress(p.address),
-      }));
-
-      exportData.proxies = sanitizedProxies;
+      exportData.proxies = proxies;
 
       // 代理池
       exportData.proxyPools = await prisma.proxyPool.findMany({
@@ -121,13 +108,8 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      // 系统配置（排除敏感配置）
+      // 系统配置（全部导出）
       const configs = await prisma.config.findMany({
-        where: {
-          key: {
-            notIn: ["admin_reset_password"],
-          },
-        },
         select: {
           key: true,
           value: true,
@@ -159,13 +141,7 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      // 脱敏处理
-      const sanitizedApiKeys = apiKeys.map((k) => ({
-        ...k,
-        key: maskKey(k.key),
-      }));
-
-      exportData.apiKeys = sanitizedApiKeys;
+      exportData.apiKeys = apiKeys;
 
       // 请求日志（最近 30 天）
       const thirtyDaysAgo = new Date();
@@ -275,34 +251,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-/**
- * 脱敏 API Key
- */
-function maskKey(key: string): string {
-  if (!key || key.length <= 8) return "***";
-  return key.substring(0, 6) + "***" + key.substring(key.length - 4);
-}
-
-/**
- * 脱敏 API Keys JSON
- */
-function maskApiKeys(apiKeys: string): string {
-  try {
-    const parsed = JSON.parse(apiKeys);
-    if (Array.isArray(parsed)) {
-      return JSON.stringify(parsed.map((k: string) => maskKey(k)));
-    }
-  } catch {
-    // 忽略解析错误
-  }
-  return "[]";
-}
-
-/**
- * 脱敏代理地址
- */
-function maskProxyAddress(address: string): string {
-  return address.replace(/(:\/\/[^:]+:)([^@]+)(@)/, "$1***$3");
 }
