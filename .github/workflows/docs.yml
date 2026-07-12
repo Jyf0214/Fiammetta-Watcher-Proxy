@@ -3,7 +3,13 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches:
+      - main
       - docs
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
