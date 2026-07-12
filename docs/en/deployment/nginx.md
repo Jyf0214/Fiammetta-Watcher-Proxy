@@ -98,5 +98,3 @@ sudo systemctl reload nginx
 
 ## Next Steps
 
-- [Docker](/en/deployment/docker) — Container deployment
-- [Environment](/en/deployment/env) — Configuration options

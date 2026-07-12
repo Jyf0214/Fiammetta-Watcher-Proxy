@@ -27,5 +27,3 @@
 
 ## 下一步
 
-- [功能特性](/guide/features) — 了解 FWP 的完整功能
-- [快速开始](/guide/quickstart) — 5 分钟部署 FWP

@@ -15,8 +15,6 @@ cd Fiammetta-Watcher-Proxy
 cp .env.example .env
 ```
 
-Edit `.env` with required configuration (see [Environment](/en/deployment/env)).
-
 ### 3. Start services
 
 ```bash
@@ -82,5 +80,3 @@ docker run -d \
 
 ## Next Steps
 
-- [Environment](/en/deployment/env) — All configuration options
-- [Nginx](/en/deployment/nginx) — Reverse proxy setup

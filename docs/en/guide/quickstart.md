@@ -67,5 +67,3 @@ npm run dev
 
 ## Next Steps
 
-- [Platform Config](/en/guide/platform) — Add your first AI platform
-- [Environment](/en/deployment/env) — All configuration options

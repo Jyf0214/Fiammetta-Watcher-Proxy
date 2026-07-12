@@ -4,7 +4,7 @@ FWP provides OpenAI-compatible API endpoints.
 
 ## Base Information
 
-- **Base URL**: `https://your-domain.com/v1`
+- **Base URL**: `https://fwp.example.com/v1`
 - **Auth**: Bearer Token (API Key)
 
 ## Authentication
@@ -22,8 +22,15 @@ Authorization: Bearer fwp-your-api-key
 | `/v1/chat/completions` | POST | Chat completions |
 | `/v1/completions` | POST | Text completions |
 | `/v1/embeddings` | POST | Text embeddings |
-| `/v1/images/generations` | POST | Image generation |
+| `/v1/responses` | POST | OpenAI Responses API |
 | `/v1/models` | GET | List available models |
+| `/v1/models/{model}` | GET | Get single model info |
+| `/v1/images/generations` | POST | Image generation |
+| `/v1/images/edits` | POST | Image editing (multipart) |
+| `/v1/images/variations` | POST | Image variations (multipart) |
+| `/v1/audio/speech` | POST | Text-to-speech (TTS) |
+| `/v1/audio/transcriptions` | POST | Speech-to-text (Whisper) |
+| `/v1/audio/translations` | POST | Audio translation |
 
 ## Response Format
 
@@ -73,5 +80,3 @@ curl -X POST https://your-domain.com/v1/chat/completions \
 
 ## Next Steps
 
-- [Chat Completions](/en/api/chat-completions) — Chat API details
-- [Environment](/en/deployment/env) — Service configuration

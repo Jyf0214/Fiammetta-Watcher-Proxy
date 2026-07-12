@@ -27,5 +27,3 @@ Client → FWP → OpenAI / Anthropic / Google / ...
 
 ## Next Steps
 
-- [Features](/en/guide/features) — Learn about FWP's capabilities
-- [Quick Start](/en/guide/quickstart) — Deploy FWP in 5 minutes

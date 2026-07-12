@@ -15,7 +15,6 @@ cd Fiammetta-Watcher-Proxy
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，填写必要配置（参见[环境变量](/deployment/env)）。
 
 ### 3. 启动服务
 
@@ -82,5 +81,3 @@ docker run -d \
 
 ## 下一步
 
-- [环境变量](/deployment/env) — 所有配置项说明
-- [Nginx 配置](/deployment/nginx) — 反向代理配置

@@ -67,5 +67,3 @@ npm run dev
 
 ## 下一步
 
-- [平台配置](/guide/platform) — 添加你的第一个 AI 平台
-- [环境变量](/deployment/env) — 了解所有配置项

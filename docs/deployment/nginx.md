@@ -98,5 +98,3 @@ sudo systemctl reload nginx
 
 ## 下一步
 
-- [Docker 部署](/deployment/docker) — 容器化部署
-- [环境变量](/deployment/env) — 所有配置项说明

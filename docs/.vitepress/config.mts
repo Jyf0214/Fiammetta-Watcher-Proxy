@@ -4,7 +4,7 @@ export default defineConfig({
   title: 'Fiammetta Watcher Proxy',
   description: '多平台 AI API 代理网关 — 统一接入、智能分流、用量监控',
   lastUpdated: true,
-  cleanUrls: true,
+  ignoreDeadLinks: true,
 
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],

@@ -39,6 +39,3 @@ connection_limit=5&pool_timeout=10
 
 ## Next Steps
 
-- [Docker Deployment](/en/deployment/docker) — Detailed Docker setup
-- [Environment](/en/deployment/env) — All configuration options
-- [Nginx](/en/deployment/nginx) — Reverse proxy and HTTPS setup

@@ -4,7 +4,7 @@ FWP 提供 OpenAI 兼容的 API 接口。
 
 ## 基础信息
 
-- **Base URL**: `https://your-domain.com/v1`
+- **Base URL**: `https://fwp.example.com/v1`
 - **认证方式**: Bearer Token（API Key）
 
 ## 请求格式
@@ -22,8 +22,15 @@ Authorization: Bearer fwp-your-api-key
 | `/v1/chat/completions` | POST | 聊天补全 |
 | `/v1/completions` | POST | 文本补全 |
 | `/v1/embeddings` | POST | 文本嵌入 |
-| `/v1/images/generations` | POST | 图像生成 |
+| `/v1/responses` | POST | OpenAI Responses API |
 | `/v1/models` | GET | 获取模型列表 |
+| `/v1/models/{model}` | GET | 获取单个模型信息 |
+| `/v1/images/generations` | POST | 图像生成 |
+| `/v1/images/edits` | POST | 图像编辑（multipart） |
+| `/v1/images/variations` | POST | 图像变体（multipart） |
+| `/v1/audio/speech` | POST | 文字转语音（TTS） |
+| `/v1/audio/transcriptions` | POST | 语音转文字（Whisper） |
+| `/v1/audio/translations` | POST | 语音翻译 |
 
 ## 响应格式
 
@@ -73,5 +80,3 @@ curl -X POST https://your-domain.com/v1/chat/completions \
 
 ## 下一步
 
-- [Chat Completions](/api/chat-completions) — 聊天补全 API 详情
-- [环境变量](/deployment/env) — 服务配置

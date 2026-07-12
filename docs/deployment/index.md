@@ -39,6 +39,3 @@ connection_limit=5&pool_timeout=10
 
 ## 下一步
 
-- [Docker 部署](/deployment/docker) — 详细的 Docker 部署步骤
-- [环境变量](/deployment/env) — 所有配置项说明
-- [Nginx 配置](/deployment/nginx) — 反向代理和 HTTPS 配置
