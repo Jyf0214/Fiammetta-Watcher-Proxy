@@ -410,7 +410,7 @@ export default function DataManagerPage() {
             <p className="font-medium text-zinc-700 dark:text-zinc-300">导入注意事项</p>
             <p>• 仅导入新数据，不会覆盖或删除现有数据</p>
             <p>• 已存在的数据（按名称或地址匹配）会被跳过</p>
-            <p>• 导入后建议检查平台配置</p>
+            <p>• 导入后建议检查平台状态是否正常</p>
           </div>
         </div>
       </ProCard>
