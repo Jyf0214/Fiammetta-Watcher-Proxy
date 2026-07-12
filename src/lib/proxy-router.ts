@@ -8,6 +8,7 @@
  * - 并发感知轮转：同一平台的不同 key 优先分配不同的代理
  * - 若所有代理均被同一平台占用，回退到 round-robin 复用
  * - 代理列表全局缓存，30 秒刷新
+ * - 缓存大小限制，防止内存溢出
  */
 
 import { prisma } from "./prisma";
@@ -18,6 +19,7 @@ import type { Proxy } from "@prisma/client";
 let proxyCache: Proxy[] = [];
 let lastRefresh = 0;
 const CACHE_TTL = 30_000;
+const MAX_PROXY_CACHE_SIZE = 500; // 代理缓存上限，防止内存溢出
 
 /** 全局 round-robin 计数器（回退用） */
 let globalCounter = 0;
@@ -43,6 +45,7 @@ async function refreshProxyCache() {
   const proxies = await prisma.proxy.findMany({
     where: { enabled: true },
     orderBy: { createdAt: "asc" },
+    take: MAX_PROXY_CACHE_SIZE, // 限制查询数量，防止内存溢出
   });
 
   proxyCache = proxies;
@@ -161,6 +164,11 @@ function acquireProxy(platformId: string, proxyId: string, keyId: string): void 
 
 /**
  * 释放代理占用（请求结束后调用）
+ *
+ * 包含内存清理逻辑：
+ * - 清理空的 keySet
+ * - 清理空的 platformMap
+ * - 当 activeAssignments 过大时清理最旧的平台（防止内存泄漏）
  */
 export function releaseProxy(platformId: string, proxyId: string, keyId: string): void {
   const platformMap = activeAssignments.get(platformId);
@@ -174,6 +182,12 @@ export function releaseProxy(platformId: string, proxyId: string, keyId: string)
   }
   if (platformMap.size === 0) {
     activeAssignments.delete(platformId);
+  }
+
+  // 防止内存泄漏：当平台数量过多时清理
+  if (activeAssignments.size > 100) {
+    const firstKey = activeAssignments.keys().next().value;
+    if (firstKey) activeAssignments.delete(firstKey);
   }
 }
 

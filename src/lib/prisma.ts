@@ -5,11 +5,27 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient() {
+  const baseLog: ("query" | "error" | "warn")[] =
+    process.env.NODE_ENV === "development"
+      ? ["query", "error", "warn"]
+      : ["error"];
+
+  // 连接池优化：限制连接数减少内存占用，适合小内存环境
+  const databaseUrl = process.env.DATABASE_URL;
+  const separator = databaseUrl?.includes("?") ? "&" : "?";
+  const optimizedUrl = databaseUrl
+    ? `${databaseUrl}${separator}connection_limit=5&pool_timeout=10`
+    : undefined;
+
   return new PrismaClient({
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
+    log: baseLog,
+    ...(optimizedUrl && {
+      datasources: {
+        db: {
+          url: optimizedUrl,
+        },
+      },
+    }),
   });
 }
 

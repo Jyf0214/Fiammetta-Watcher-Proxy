@@ -11,6 +11,7 @@ interface WindowEntry {
 const platformWindows = new Map<string, WindowEntry>();
 const apiKeyWindows = new Map<string, WindowEntry>();
 const CLEANUP_INTERVAL = 60_000; // 每分钟清理过期窗口
+const MAX_WINDOWS_SIZE = 200; // 最大窗口数量，防止内存溢出
 
 /**
  * 检查平台速率限制（RPM + TPM）
@@ -232,6 +233,17 @@ export function startRateLimitCleanup() {
         // 2 分钟未活动
         apiKeyWindows.delete(apiKeyId);
       }
+    }
+    // 防止内存溢出：超出上限时按时间戳排序淘汰最旧的
+    if (platformWindows.size > MAX_WINDOWS_SIZE) {
+      const sorted = [...platformWindows.entries()].sort((a, b) => a[1].windowStart - b[1].windowStart);
+      const excess = sorted.slice(0, platformWindows.size - MAX_WINDOWS_SIZE);
+      for (const [key] of excess) platformWindows.delete(key);
+    }
+    if (apiKeyWindows.size > MAX_WINDOWS_SIZE) {
+      const sorted = [...apiKeyWindows.entries()].sort((a, b) => a[1].windowStart - b[1].windowStart);
+      const excess = sorted.slice(0, apiKeyWindows.size - MAX_WINDOWS_SIZE);
+      for (const [key] of excess) apiKeyWindows.delete(key);
     }
   }, CLEANUP_INTERVAL);
 }
