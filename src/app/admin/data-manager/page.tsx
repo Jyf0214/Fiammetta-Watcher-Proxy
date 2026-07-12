@@ -18,6 +18,8 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import { cn } from "@/lib/ui";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n";
 
 type ExportType = "system" | "data" | "all";
 
@@ -27,64 +29,65 @@ interface ImportResult {
   details?: Record<string, { imported: number; skipped: number }>;
 }
 
-/** 导出类型配置 */
-const EXPORT_OPTIONS: {
-  value: ExportType;
-  label: string;
-  desc: string;
-  icon: React.ReactNode;
-  tag?: string;
-  tagColor?: string;
-}[] = [
-  {
-    value: "system",
-    label: "系统配置",
-    desc: "平台、模型映射、代理、套餐等配置数据",
-    icon: <CloudServerOutlined />,
-    tag: "推荐",
-    tagColor: "bg-blue-50 text-blue-600 border-blue-200",
-  },
-  {
-    value: "data",
-    label: "业务数据",
-    desc: "API Keys、请求日志、统计、审计日志等",
-    icon: <FileTextOutlined />,
-  },
-  {
-    value: "all",
-    label: "全部导出",
-    desc: "包含以上所有数据",
-    icon: <DatabaseOutlined />,
-    tag: "完整备份",
-    tagColor: "bg-amber-50 text-amber-600 border-amber-200",
-  },
-];
-
 /** 格式化导入字段名 */
 function formatImportKey(key: string): string {
   const map: Record<string, string> = {
-    platforms: "平台",
-    modelMaps: "模型映射",
-    proxies: "代理",
-    proxyPools: "代理池",
-    plans: "套餐模板",
-    apiKeys: "API Keys",
-    configs: "系统配置",
-    requestLogs: "请求日志",
-    dailyStats: "每日统计",
-    auditLogs: "审计日志",
-    systemEvents: "系统事件",
+    platforms: "platforms",
+    modelMaps: "modelMaps",
+    proxies: "proxies",
+    proxyPools: "proxyPools",
+    plans: "plans",
+    apiKeys: "apiKeys",
+    configs: "configs",
+    requestLogs: "requestLogs",
+    dailyStats: "dailyStats",
+    auditLogs: "auditLogs",
+    systemEvents: "systemEvents",
   };
   return map[key] || key;
 }
 
 export default function DataManagerPage() {
+  const { t } = useTranslation();
   const [exportType, setExportType] = useState<ExportType>("all");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** 导出类型配置 */
+  const exportOptions: {
+    value: ExportType;
+    label: string;
+    desc: string;
+    icon: React.ReactNode;
+    tag?: string;
+    tagColor?: string;
+  }[] = [
+    {
+      value: "system",
+      label: t("admin.dm_system_config"),
+      desc: t("admin.dm_system_config_desc"),
+      icon: <CloudServerOutlined />,
+      tag: t("admin.dm_system_config_tag"),
+      tagColor: "bg-blue-50 text-blue-600 border-blue-200",
+    },
+    {
+      value: "data",
+      label: t("admin.dm_business_data"),
+      desc: t("admin.dm_business_data_desc"),
+      icon: <FileTextOutlined />,
+    },
+    {
+      value: "all",
+      label: t("admin.dm_all_export"),
+      desc: t("admin.dm_all_export_desc"),
+      icon: <DatabaseOutlined />,
+      tag: t("admin.dm_all_export_tag"),
+      tagColor: "bg-amber-50 text-amber-600 border-amber-200",
+    },
+  ];
 
   const handleExport = async () => {
     setExporting(true);
@@ -94,7 +97,7 @@ export default function DataManagerPage() {
 
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.error || "导出失败");
+        throw new Error(error.error || t("admin.dm_err_export"));
       }
 
       const blob = await res.blob();
@@ -107,50 +110,53 @@ export default function DataManagerPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      message.success("导出成功");
+      message.success(t("admin.dm_export_success"));
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "导出失败");
+      message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
     } finally {
       setExporting(false);
     }
   };
 
-  const processImportFile = useCallback(async (file: File) => {
-    setImporting(true);
-    setImportResult(null);
+  const processImportFile = useCallback(
+    async (file: File) => {
+      setImporting(true);
+      setImportResult(null);
 
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
 
-      if (!data.version || !data.exportedAt) {
-        throw new Error("无效的导入文件格式");
+        if (!data.version || !data.exportedAt) {
+          throw new Error(t("admin.dm_err_invalid_format"));
+        }
+
+        const res = await fetch("/api/admin/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+
+        const result = await res.json();
+        setImportResult(result);
+
+        if (result.success) {
+          message.success(result.message);
+        } else {
+          message.error(result.error || t("admin.dm_err_export"));
+        }
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+        setImportResult({
+          success: false,
+          message: err instanceof Error ? err.message : t("admin.dm_err_export"),
+        });
+      } finally {
+        setImporting(false);
       }
-
-      const res = await fetch("/api/admin/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      const result = await res.json();
-      setImportResult(result);
-
-      if (result.success) {
-        message.success(result.message);
-      } else {
-        message.error(result.error || "导入失败");
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "导入失败");
-      setImportResult({
-        success: false,
-        message: err instanceof Error ? err.message : "导入失败",
-      });
-    } finally {
-      setImporting(false);
-    }
-  }, []);
+    },
+    [t]
+  );
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -159,18 +165,18 @@ export default function DataManagerPage() {
 
       const isJson = file.type === "application/json" || file.name.endsWith(".json");
       if (!isJson) {
-        message.error("只能导入 JSON 文件");
+        message.error(t("admin.dm_err_json_only"));
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
-        message.error("文件大小不能超过 10MB");
+        message.error(t("admin.dm_err_file_too_large"));
         return;
       }
 
       processImportFile(file);
       e.target.value = "";
     },
-    [processImportFile]
+    [processImportFile, t]
   );
 
   const handleDrop = useCallback(
@@ -181,33 +187,33 @@ export default function DataManagerPage() {
       if (!file) return;
 
       if (!file.name.endsWith(".json")) {
-        message.error("只能导入 JSON 文件");
+        message.error(t("admin.dm_err_json_only"));
         return;
       }
       processImportFile(file);
     },
-    [processImportFile]
+    [processImportFile, t]
   );
 
   return (
     <PageContainer>
       <PageHeader
         icon={<DatabaseOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
-        title="数据管理"
-        description="导出和导入系统数据，支持备份和迁移"
+        title={t("admin.data_manager")}
+        description={t("admin.data_manager_desc")}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ========== 导出区域 ========== */}
-        <ProCard title="数据导出">
+        <ProCard title={t("admin.dm_export")}>
           <div className="space-y-4">
             {/* 导出类型选择 */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                选择导出类型
+                {t("admin.dm_select_type")}
               </label>
               <div className="space-y-2">
-                {EXPORT_OPTIONS.map((opt) => (
+                {exportOptions.map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setExportType(opt.value)}
@@ -275,13 +281,13 @@ export default function DataManagerPage() {
               loading={exporting}
               block
             >
-              导出数据
+              {t("admin.dm_export_btn")}
             </Button>
           </div>
         </ProCard>
 
         {/* ========== 导入区域 ========== */}
-        <ProCard title="数据导入">
+        <ProCard title={t("admin.dm_import")}>
           <div className="space-y-4">
             {/* 上传区域 */}
             <div
@@ -325,10 +331,10 @@ export default function DataManagerPage() {
 
               <div className="text-center">
                 <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  {importing ? "正在导入..." : "点击或拖拽文件到此处"}
+                  {importing ? t("admin.dm_importing") : t("admin.dm_drop_hint")}
                 </p>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                  支持 .json 格式，最大 10MB
+                  {t("admin.dm_file_hint")}
                 </p>
               </div>
             </div>
@@ -379,7 +385,7 @@ export default function DataManagerPage() {
                           )}
                           {value.skipped > 0 && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                              跳过 {value.skipped}
+                              {t("admin.dm_skip")} {value.skipped}
                             </span>
                           )}
                         </div>
@@ -397,20 +403,26 @@ export default function DataManagerPage() {
       <ProCard className="mt-6" bodyClassName="p-4">
         <div className="flex items-start gap-2 mb-3">
           <InfoCircleOutlined className="text-zinc-400 mt-0.5 flex-shrink-0" />
-          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">使用提示</span>
+          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            {t("admin.dm_tips")}
+          </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-zinc-600 dark:text-zinc-400">
           <div className="space-y-1.5">
-            <p className="font-medium text-zinc-700 dark:text-zinc-300">导出场景</p>
-            <p>• 迁移到新服务器时，先导出再导入</p>
-            <p>• 定期备份系统配置</p>
-            <p>• 复制配置到其他环境</p>
+            <p className="font-medium text-zinc-700 dark:text-zinc-300">
+              {t("admin.dm_export_scenarios")}
+            </p>
+            <p>{t("admin.dm_tip_migrate")}</p>
+            <p>{t("admin.dm_tip_backup")}</p>
+            <p>{t("admin.dm_tip_copy")}</p>
           </div>
           <div className="space-y-1.5">
-            <p className="font-medium text-zinc-700 dark:text-zinc-300">导入注意事项</p>
-            <p>• 仅导入新数据，不会覆盖或删除现有数据</p>
-            <p>• 已存在的数据（按名称或地址匹配）会被跳过</p>
-            <p>• 导入后建议检查平台状态是否正常</p>
+            <p className="font-medium text-zinc-700 dark:text-zinc-300">
+              {t("admin.dm_import_notes")}
+            </p>
+            <p>{t("admin.dm_tip_no_overwrite")}</p>
+            <p>{t("admin.dm_tip_skip_existing")}</p>
+            <p>{t("admin.dm_tip_check_status")}</p>
           </div>
         </div>
       </ProCard>
