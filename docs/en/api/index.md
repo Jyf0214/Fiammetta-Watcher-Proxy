@@ -4,7 +4,7 @@ FWP provides OpenAI-compatible API endpoints.
 
 ## Base Information
 
-- **Base URL**: `https://fwp.example.com/v1`
+- **Base URL**: `https://example.com/v1`
 - **Auth**: Bearer Token (API Key)
 
 ## Authentication

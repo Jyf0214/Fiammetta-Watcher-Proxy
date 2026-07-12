@@ -9,7 +9,7 @@ GET /v1/models
 ## Request
 
 ```bash
-curl https://fwp.example.com/v1/models \
+curl https://example.com/v1/models \
   -H "Authorization: Bearer fwp-your-api-key"
 ```
 
@@ -42,7 +42,7 @@ GET /v1/models/{model}
 ```
 
 ```bash
-curl https://fwp.example.com/v1/models/gpt-4o \
+curl https://example.com/v1/models/gpt-4o \
   -H "Authorization: Bearer fwp-your-api-key"
 ```
 

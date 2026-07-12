@@ -19,7 +19,7 @@ POST /v1/completions
 ## 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/completions \
+curl -X POST https://example.com/v1/completions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

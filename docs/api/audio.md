@@ -23,7 +23,7 @@ POST /v1/audio/speech
 ### 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/audio/speech \
+curl -X POST https://example.com/v1/audio/speech \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -57,7 +57,7 @@ POST /v1/audio/transcriptions
 ### 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/audio/transcriptions \
+curl -X POST https://example.com/v1/audio/transcriptions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -F "file=@audio.mp3" \
   -F "model=whisper-1"
@@ -85,7 +85,7 @@ POST /v1/audio/translations
 ### 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/audio/translations \
+curl -X POST https://example.com/v1/audio/translations \
   -H "Authorization: Bearer fwp-your-api-key" \
   -F "file=@audio.mp3" \
   -F "model=whisper-1"

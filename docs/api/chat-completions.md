@@ -33,7 +33,7 @@ POST /v1/chat/completions
 ## 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/chat/completions \
+curl -X POST https://example.com/v1/chat/completions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -48,7 +48,7 @@ curl -X POST https://fwp.example.com/v1/chat/completions \
 ## 流式响应
 
 ```bash
-curl -X POST https://fwp.example.com/v1/chat/completions \
+curl -X POST https://example.com/v1/chat/completions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

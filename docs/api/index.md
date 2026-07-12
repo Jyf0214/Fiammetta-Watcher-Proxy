@@ -4,7 +4,7 @@ FWP 提供 OpenAI 兼容的 API 接口。
 
 ## 基础信息
 
-- **Base URL**: `https://fwp.example.com/v1`
+- **Base URL**: `https://example.com/v1`
 - **认证方式**: Bearer Token（API Key）
 
 ## 请求格式

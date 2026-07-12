@@ -22,7 +22,7 @@ OpenAI Responses API 代理，支持流式和非流式响应。该 API 提供比
 ## 请求示例
 
 ```bash
-curl -X POST https://fwp.example.com/v1/responses \
+curl -X POST https://example.com/v1/responses \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -35,7 +35,7 @@ curl -X POST https://fwp.example.com/v1/responses \
 ## 流式响应
 
 ```bash
-curl -X POST https://fwp.example.com/v1/responses \
+curl -X POST https://example.com/v1/responses \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

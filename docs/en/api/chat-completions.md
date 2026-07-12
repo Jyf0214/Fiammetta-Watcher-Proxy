@@ -33,7 +33,7 @@ Roles:
 ## Request Example
 
 ```bash
-curl -X POST https://fwp.example.com/v1/chat/completions \
+curl -X POST https://example.com/v1/chat/completions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -48,7 +48,7 @@ curl -X POST https://fwp.example.com/v1/chat/completions \
 ## Streaming
 
 ```bash
-curl -X POST https://fwp.example.com/v1/chat/completions \
+curl -X POST https://example.com/v1/chat/completions \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

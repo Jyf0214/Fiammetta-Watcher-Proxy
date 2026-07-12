@@ -16,7 +16,7 @@ POST /v1/embeddings
 ## Request Example
 
 ```bash
-curl -X POST https://fwp.example.com/v1/embeddings \
+curl -X POST https://example.com/v1/embeddings \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

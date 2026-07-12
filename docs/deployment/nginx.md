@@ -5,7 +5,7 @@
 ```nginx
 server {
     listen 80;
-    server_name fwp.example.com;
+    server_name example.com;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -30,7 +30,7 @@ server {
 sudo apt install certbot python3-certbot-nginx
 
 # 获取证书
-sudo certbot --nginx -d fwp.example.com
+sudo certbot --nginx -d example.com
 ```
 
 ### 手动配置 HTTPS
@@ -38,16 +38,16 @@ sudo certbot --nginx -d fwp.example.com
 ```nginx
 server {
     listen 80;
-    server_name fwp.example.com;
+    server_name example.com;
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name fwp.example.com;
+    server_name example.com;
 
-    ssl_certificate /etc/letsencrypt/live/fwp.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/fwp.example.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

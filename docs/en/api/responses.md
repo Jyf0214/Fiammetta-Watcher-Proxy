@@ -22,7 +22,7 @@ OpenAI Responses API proxy, supports both streaming and non-streaming responses.
 ## Request Example
 
 ```bash
-curl -X POST https://fwp.example.com/v1/responses \
+curl -X POST https://example.com/v1/responses \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -35,7 +35,7 @@ curl -X POST https://fwp.example.com/v1/responses \
 ## Streaming
 
 ```bash
-curl -X POST https://fwp.example.com/v1/responses \
+curl -X POST https://example.com/v1/responses \
   -H "Authorization: Bearer fwp-your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
