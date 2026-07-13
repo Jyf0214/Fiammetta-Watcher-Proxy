@@ -226,6 +226,33 @@ export default function SetupPage() {
     );
   }
 
+  // 如果已配置，直接显示完成状态
+  if (setupStatus?.configured) {
+    return (
+      <PageContainer>
+        <PageHeader
+          icon={<Database size={20} className="text-green-500" />}
+          title="系统已配置"
+          description="数据库环境变量已配置完成"
+        />
+        <ProCard>
+          <Alert
+            message="配置完成"
+            description="数据库环境变量已配置完成，系统运行正常。如需更改配置，请手动编辑 .env 文件。"
+            type="success"
+            showIcon
+            icon={<CheckCircle />}
+          />
+          <div className="mt-4">
+            <Button type="primary" href="/">
+              进入系统
+            </Button>
+          </div>
+        </ProCard>
+      </PageContainer>
+    );
+  }
+
   return (
     <PageContainer>
       <PageHeader

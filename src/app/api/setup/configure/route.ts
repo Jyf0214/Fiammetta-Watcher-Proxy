@@ -36,11 +36,33 @@ export async function POST(request: Request) {
       );
     }
 
+    // 检查是否已有数据库配置（禁止重复设置）
+    const envPath = join(process.cwd(), ".env");
+    if (existsSync(envPath)) {
+      const existingContent = await readFile(envPath, "utf-8");
+      // 检查 .env 文件中是否已配置 DATABASE_URL
+      const hasDatabaseUrlInEnv = existingContent.includes("DATABASE_URL=") &&
+        !existingContent.includes('DATABASE_URL=""');
+      if (hasDatabaseUrlInEnv) {
+        return NextResponse.json(
+          { success: false, error: "数据库已配置，不允许通过 API 修改。如需更改配置，请手动编辑 .env 文件" },
+          { status: 403 }
+        );
+      }
+    }
+
+    // 检查环境变量是否已配置
+    if (process.env.DATABASE_URL) {
+      return NextResponse.json(
+        { success: false, error: "数据库已配置，不允许通过 API 修改。如需更改配置，请手动编辑 .env 文件" },
+        { status: 403 }
+      );
+    }
+
     // 生成 JWT_SECRET（如果未提供）
     const jwtSecret = config.JWT_SECRET || generateRandomSecret();
 
     // 读取现有的 .env 文件
-    const envPath = join(process.cwd(), ".env");
     let existingContent = "";
     if (existsSync(envPath)) {
       existingContent = await readFile(envPath, "utf-8");
