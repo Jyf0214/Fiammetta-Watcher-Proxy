@@ -52,7 +52,8 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf "https://oauth2:$HF_TOKEN@huggingface.co/spaces/$HF_REPO"
-          GIT_TRACE=1 git fetch hf main --depth=1 2>&1 || true
+          # 显式将远程 main 分支拉取并映射到本地的 refs/remotes/hf/main
+          git fetch hf main:refs/remotes/hf/main --depth=1 --force 2>&1 || true
           echo "---"
           echo "remote URL host:"
           git remote get-url hf | sed 's|https://[^@]*@|https://***@|'
@@ -62,7 +63,8 @@ jobs:
         id: diff
         run: |
           LOCAL=$(git rev-parse HEAD)
-          HF=$(git rev-parse hf/main 2>/dev/null || echo "none")
+          # 使用 --verify 和 -q 确保只验证 commit 引用，失败时不输出多余的路径字符串
+          HF=$(git rev-parse --verify -q refs/remotes/hf/main || echo "none")
           
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
           echo "hf=$HF" >> "$GITHUB_OUTPUT"
