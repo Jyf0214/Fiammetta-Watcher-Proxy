@@ -52,7 +52,10 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf "https://oauth2:$HF_TOKEN@huggingface.co/spaces/$HF_REPO"
-          git fetch hf main --depth=1
+          GIT_TRACE=1 GIT_CURL_VERBOSE=1 git fetch hf main --depth=1 2>&1 || true
+          echo "---"
+          echo "实际 remote URL:"
+          git remote get-url hf
 
       - name: 检查差异
         if: steps.check.outputs.skip != 'true'
