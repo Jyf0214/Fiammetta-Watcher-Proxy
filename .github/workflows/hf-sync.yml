@@ -45,24 +45,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 验证 HF Token
-        if: steps.check.outputs.skip != 'true'
-        env:
-          HF_REPO: ${{ secrets.HF_REPO }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          echo "🔍 验证 HF Token 有效性..."
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $HF_TOKEN" \
-            "https://huggingface.co/api/v1/repos/spaces/$HF_REPO")
-          echo "  API 响应: HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ HF Token 验证失败 (HTTP $HTTP_CODE)"
-            echo "  请检查 HF_TOKEN 是否过期或 HF_REPO 是否正确"
-            exit 1
-          fi
-          echo "✅ HF Token 有效"
-
       - name: 添加 HF 远程仓库
         if: steps.check.outputs.skip != 'true'
         env:
@@ -78,10 +60,10 @@ jobs:
         run: |
           LOCAL=$(git rev-parse HEAD)
           HF=$(git rev-parse hf/main 2>/dev/null || echo "none")
-
+          
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
           echo "hf=$HF" >> "$GITHUB_OUTPUT"
-
+          
           if [ "$LOCAL" = "$HF" ]; then
             echo "synced=true" >> "$GITHUB_OUTPUT"
             echo "✅ HF Space 已是最新，无需同步"
