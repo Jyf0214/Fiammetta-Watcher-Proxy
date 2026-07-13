@@ -9,7 +9,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint src/",
-    "test": "vitest run",
+    "test": "vitest run --exclude='tmp/**' --exclude='.next/**'",
     "prepare": "git config core.hooksPath .githooks",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",

@@ -1,11 +1,16 @@
 /**
  * Setup 状态检查 API — 检查数据库环境变量是否已配置
  * 用于前端判断是否需要引导用户到 /setup 页面
+ *
+ * 支持两种配置方式：
+ * 1. 环境变量 (DATABASE_URL)
+ * 2. 配置文件 (data/db-config.json)
  */
 import { NextResponse } from "next/server";
+import { isDatabaseConfigured } from "@/lib/config";
 
 export async function GET() {
-  const hasDatabaseUrl = !!process.env.DATABASE_URL;
+  const hasDatabaseUrl = isDatabaseConfigured();
   const hasAdminUsername = !!process.env.ADMIN_USERNAME;
   const hasAdminPassword = !!process.env.ADMIN_PASSWORD;
   const hasJwtSecret = !!process.env.JWT_SECRET || !!process.env.JWKS_KEY;

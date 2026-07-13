@@ -4,10 +4,20 @@
  *
  * 当未配置 DATABASE_URL 时，跳过所有数据库相关初始化，
  * 引导用户通过 /setup 页面进行配置
+ *
+ * 支持从配置文件 (data/db-config.json) 读取数据库配置
  */
 export async function register() {
   // 仅在 Node.js 运行时执行（非 Edge）
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // 从配置文件加载数据库配置（优先级：环境变量 > 配置文件）
+    try {
+      const { loadConfigFromEnv } = await import("./lib/config");
+      loadConfigFromEnv();
+    } catch (error) {
+      console.error("[instrumentation] 配置文件加载失败:", error);
+    }
+
     // 如果未配置 DATABASE_URL，跳过所有数据库相关初始化
     if (!process.env.DATABASE_URL) {
       console.log(

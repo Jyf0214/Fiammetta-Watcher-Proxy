@@ -64,7 +64,7 @@ export default function SetupPage() {
 
       const data = await res.json();
       if (data.success) {
-        message.success("配置成功！系统将自动重新初始化");
+        message.success("配置成功！已保存到 db-config.json");
         setSuccess(true);
         setCurrentStep(2);
 
