@@ -53,6 +53,7 @@ export default function SetupPage() {
     ADMIN_USERNAME: string;
     ADMIN_PASSWORD: string;
     JWT_SECRET?: string;
+    JWKS_KEY?: string;
   }) => {
     setLoading(true);
     try {
@@ -130,9 +131,21 @@ export default function SetupPage() {
             <Form.Item
               name="JWT_SECRET"
               label="JWT 密钥（可选）"
-              extra="留空将自动生成安全密钥"
+              extra="留空将自动生成安全密钥。与 JWKS_KEY 二选一"
             >
               <Input.Password placeholder="留空自动生成" size="large" />
+            </Form.Item>
+
+            <Form.Item
+              name="JWKS_KEY"
+              label="JWKS_KEY（可选）"
+              extra="用于 RS256 非对称加密的 JWKS 密钥。与 JWT_SECRET 二选一"
+            >
+              <Input.TextArea
+                placeholder='{"keys":[{"kty":"RSA","d":"...",...}]}'
+                rows={4}
+                size="large"
+              />
             </Form.Item>
 
             <Form.Item>

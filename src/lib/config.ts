@@ -14,6 +14,7 @@ interface DbConfig {
   username: string;
   password: string;
   ssl?: boolean;
+  jwksKey?: string; // JWKS_KEY 配置（用于 RS256 非对称加密）
 }
 
 const CONFIG_DIR = "data";
@@ -138,5 +139,12 @@ export function loadConfigFromEnv(): void {
   if (dbUrl && !process.env.DATABASE_URL) {
     process.env.DATABASE_URL = dbUrl;
     console.log("[配置] 已从配置文件加载 DATABASE_URL");
+  }
+
+  // 加载 JWKS_KEY
+  const config = readDbConfig();
+  if (config?.jwksKey && !process.env.JWKS_KEY) {
+    process.env.JWKS_KEY = config.jwksKey;
+    console.log("[配置] 已从配置文件加载 JWKS_KEY");
   }
 }

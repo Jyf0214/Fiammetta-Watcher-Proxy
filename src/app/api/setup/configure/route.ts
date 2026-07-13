@@ -69,6 +69,7 @@ export async function POST(request: Request) {
         username: url.username,
         password: url.password,
         ssl: url.searchParams.get("ssl") === "true",
+        jwksKey: config.JWKS_KEY || undefined, // 保存 JWKS_KEY 到配置文件
       };
       const saved = saveDbConfig(dbConfig);
       if (!saved) {
