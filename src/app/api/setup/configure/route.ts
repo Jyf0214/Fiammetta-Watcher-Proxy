@@ -15,8 +15,21 @@ interface SetupConfig {
   JWKS_KEY?: string;
 }
 
+// 并发保护标记：防止多个请求同时配置
+let isConfiguring = false;
+
 export async function POST(request: Request) {
   try {
+    // 并发保护：防止多个请求同时配置
+    if (isConfiguring) {
+      return NextResponse.json(
+        { success: false, error: "配置正在进行中，请稍后重试" },
+        { status: 429 }
+      );
+    }
+
+    isConfiguring = true;
+
     const config: SetupConfig = await request.json();
 
     // 验证必需字段
@@ -136,7 +149,6 @@ export async function POST(request: Request) {
       success: true,
       message: "配置已成功写入 .env 文件",
       data: {
-        databaseUrl: config.DATABASE_URL,
         adminUsername: config.ADMIN_USERNAME,
         jwtSecretGenerated: !config.JWT_SECRET,
       },
@@ -147,6 +159,9 @@ export async function POST(request: Request) {
       { success: false, error: "配置写入失败，请检查权限" },
       { status: 500 }
     );
+  } finally {
+    // 无论成功或失败，都重置并发保护标记
+    isConfiguring = false;
   }
 }
 

@@ -61,22 +61,16 @@ export function proxy(request: NextRequest) {
 
   // ==================== 数据库配置检查 ====================
   // 如果没有数据库环境变量，且访问的不是 /setup 路由，则重定向到 /setup
-  // 优先级：远程环境变量 > 本地 .env 文件配置
+  // 注意：环境变量必须在启动时通过 .env 文件或系统环境变量设置
+  // 不允许通过请求头动态设置，防止安全漏洞
   if (!pathname.startsWith("/setup")) {
-    // 检查远程环境变量（优先级更高）
-    const hasRemoteDatabaseUrl = !!request.headers.get("x-database-url");
     const hasLocalDatabaseUrl = !!process.env.DATABASE_URL;
 
-    // 如果远程和本地都没有数据库 URL，则重定向到 /setup
-    if (!hasRemoteDatabaseUrl && !hasLocalDatabaseUrl) {
+    // 如果没有数据库 URL，则重定向到 /setup
+    if (!hasLocalDatabaseUrl) {
       const setupUrl = new URL("/setup", request.url);
       setupUrl.searchParams.set("from", pathname);
       return NextResponse.redirect(setupUrl);
-    }
-
-    // 如果有远程环境变量，优先使用远程配置
-    if (hasRemoteDatabaseUrl) {
-      process.env.DATABASE_URL = request.headers.get("x-database-url")!;
     }
   }
 
@@ -164,6 +158,21 @@ export function proxy(request: NextRequest) {
           { status: 429 }
         );
       }
+    }
+  }
+
+  // ==================== /api/setup/* 速率限制 ====================
+  // 防止暴力尝试配置端点
+  if (pathname.startsWith("/api/setup/")) {
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    if (!checkAdminRateLimit(clientIp)) {
+      return NextResponse.json(
+        { success: false, error: "请求过于频繁，请稍后再试" },
+        { status: 429 }
+      );
     }
   }
 

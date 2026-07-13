@@ -12,15 +12,26 @@ export async function GET() {
 
   const isConfigured = hasDatabaseUrl && hasAdminUsername && hasAdminPassword && hasJwtSecret;
 
+  // 如果已配置，只返回统一的"已配置"响应，不暴露具体缺少哪些字段
+  if (isConfigured) {
+    return NextResponse.json({
+      success: true,
+      data: {
+        configured: true,
+      },
+    });
+  }
+
+  // 未配置时，返回缺少的字段信息（用于 setup 页面引导）
   return NextResponse.json({
     success: true,
     data: {
-      configured: isConfigured,
+      configured: false,
       missing: {
         DATABASE_URL: !hasDatabaseUrl,
         ADMIN_USERNAME: !hasAdminUsername,
         ADMIN_PASSWORD: !hasAdminPassword,
-        JWT_SECRET: !hasJwtSecret && !hasAdminPassword,
+        JWT_SECRET: !hasJwtSecret,
       },
     },
   });
