@@ -52,18 +52,29 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf "https://oauth2:$HF_TOKEN@huggingface.co/spaces/$HF_REPO.git"
-          git fetch hf main --depth=1
+          git fetch hf main --depth=1 || {
+            echo "⚠️ fetch 失败，可能是全新仓库，跳过差异比较"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          }
 
       - name: 检查差异
         if: steps.check.outputs.skip != 'true'
         id: diff
         run: |
+          # 全新仓库，直接标记为需要同步
+          if [ "${{ steps.check.outputs.fresh }}" = "true" ]; then
+            echo "synced=false" >> "$GITHUB_OUTPUT"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            echo "⚡ 全新 HF Space，需要首次同步"
+            exit 0
+          fi
+
           LOCAL=$(git rev-parse HEAD)
           HF=$(git rev-parse hf/main 2>/dev/null || echo "none")
-          
+
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
           echo "hf=$HF" >> "$GITHUB_OUTPUT"
-          
+
           if [ "$LOCAL" = "$HF" ]; then
             echo "synced=true" >> "$GITHUB_OUTPUT"
             echo "✅ HF Space 已是最新，无需同步"
