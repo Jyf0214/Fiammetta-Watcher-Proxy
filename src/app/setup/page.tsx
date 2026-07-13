@@ -163,13 +163,13 @@ export default function SetupPage() {
                   配置完成后，系统将自动：
                 </Paragraph>
                 <ul className="list-disc pl-5 space-y-2">
-                  <li>写入 .env 配置文件</li>
+                  <li>写入数据库配置文件 (data/db-config.json)</li>
                   <li>更新运行时环境变量</li>
                   <li>重新初始化数据库连接</li>
                   <li>创建管理员账户</li>
                 </ul>
                 <Paragraph type="secondary" className="mt-4">
-                  注意：此操作会覆盖现有的数据库配置。如果已有数据，请确保已备份。
+                  注意：系统已配置时不允许通过此页面修改。如需更改配置，请手动编辑 data/db-config.json 文件。
                 </Paragraph>
               </div>
             }
@@ -238,7 +238,7 @@ export default function SetupPage() {
         <ProCard>
           <Alert
             message="配置完成"
-            description="数据库环境变量已配置完成，系统运行正常。如需更改配置，请手动编辑 .env 文件。"
+            description="数据库环境变量已配置完成，系统运行正常。如需更改配置，请手动编辑 data/db-config.json 文件。"
             type="success"
             showIcon
             icon={<CheckCircle />}

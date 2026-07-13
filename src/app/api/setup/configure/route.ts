@@ -59,19 +59,30 @@ export async function POST(request: Request) {
     }
 
     // 从 DATABASE_URL 解析配置并保存到 db-config.json
-    const urlMatch = config.DATABASE_URL.match(/^(postgresql|mysql):\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)$/);
-    if (urlMatch) {
-      const [, protocol, username, password, hostname, port, dbName] = urlMatch;
+    try {
+      const url = new URL(config.DATABASE_URL);
       const dbConfig = {
-        type: protocol === "postgresql" ? "postgresql" as const : "mysql" as const,
-        hostname,
-        port: parseInt(port),
-        dbName,
-        username,
-        password,
-        ssl: config.DATABASE_URL.includes("ssl=true"),
+        type: url.protocol === "postgresql:" ? "postgresql" as const : "mysql" as const,
+        hostname: url.hostname,
+        port: url.port ? parseInt(url.port) : (url.protocol === "postgresql:" ? 5432 : 3306),
+        dbName: url.pathname.slice(1), // 去掉开头的 /
+        username: url.username,
+        password: url.password,
+        ssl: url.searchParams.get("ssl") === "true",
       };
-      saveDbConfig(dbConfig);
+      const saved = saveDbConfig(dbConfig);
+      if (!saved) {
+        return NextResponse.json(
+          { success: false, error: "配置文件写入失败，请检查目录权限" },
+          { status: 500 }
+        );
+      }
+    } catch (error) {
+      console.error("[Setup API] DATABASE_URL 解析失败:", error);
+      return NextResponse.json(
+        { success: false, error: "数据库 URL 格式无效" },
+        { status: 400 }
+      );
     }
 
     // 更新进程环境变量（立即生效）
