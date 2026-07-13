@@ -53,10 +53,32 @@ function base64UrlDecode(str: string): string {
  * - /api/admin/* 路由 IP 级速率限制
  * - /api/v1/* 路由 CORS 处理
  * - 安全响应头注入
+ * - 数据库配置检查：未配置时引导到 /setup 页面
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const response = NextResponse.next();
+
+  // ==================== 数据库配置检查 ====================
+  // 如果没有数据库环境变量，且访问的不是 /setup 路由，则重定向到 /setup
+  // 优先级：远程环境变量 > 本地 .env 文件配置
+  if (!pathname.startsWith("/setup")) {
+    // 检查远程环境变量（优先级更高）
+    const hasRemoteDatabaseUrl = !!request.headers.get("x-database-url");
+    const hasLocalDatabaseUrl = !!process.env.DATABASE_URL;
+
+    // 如果远程和本地都没有数据库 URL，则重定向到 /setup
+    if (!hasRemoteDatabaseUrl && !hasLocalDatabaseUrl) {
+      const setupUrl = new URL("/setup", request.url);
+      setupUrl.searchParams.set("from", pathname);
+      return NextResponse.redirect(setupUrl);
+    }
+
+    // 如果有远程环境变量，优先使用远程配置
+    if (hasRemoteDatabaseUrl) {
+      process.env.DATABASE_URL = request.headers.get("x-database-url")!;
+    }
+  }
 
   // ==================== /admin/* 页面路由认证保护 ====================
   // 保护所有 admin 页面，排除登录页和静态资源

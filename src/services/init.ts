@@ -4,7 +4,8 @@ import { hashPassword } from "@/lib/auth";
 const RESET_FLAG_KEY = "admin_reset_password";
 
 /**
- * 环境变量校验 — 缺少必需变量时直接崩溃，阻止启动
+ * 环境变量校验 — 缺少必需变量时记录警告但不阻止启动
+ * 当缺少 DATABASE_URL 时，系统会引导用户到 /setup 页面进行配置
  */
 function validateRequiredEnvVars(): void {
   const required = ["ADMIN_USERNAME", "ADMIN_PASSWORD", "DATABASE_URL"];
@@ -16,6 +17,21 @@ function validateRequiredEnvVars(): void {
   }
 
   if (missing.length > 0) {
+    // 如果缺少 DATABASE_URL，记录警告但不阻止启动（引导到 /setup 页面）
+    if (missing.includes("DATABASE_URL")) {
+      console.warn(
+        `[警告] 未配置 DATABASE_URL 环境变量，系统将引导到 /setup 页面进行数据库配置`
+      );
+      // 只有当缺少其他必需变量时才阻止启动
+      const otherMissing = missing.filter((key) => key !== "DATABASE_URL");
+      if (otherMissing.length > 0) {
+        const msg = `[致命错误] 缺少必需环境变量: ${otherMissing.join(", ")}。系统无法启动，请配置后重试`;
+        console.error(msg);
+        throw new Error(msg);
+      }
+      return; // 仅缺少 DATABASE_URL，允许启动
+    }
+
     const msg = `[致命错误] 缺少必需环境变量: ${missing.join(", ")}。系统无法启动，请配置后重试`;
     console.error(msg);
     throw new Error(msg);
@@ -30,10 +46,17 @@ function validateRequiredEnvVars(): void {
  * 1. 若数据库无管理员 → 从环境变量创建
  * 2. 若数据库已有管理员且存在重置标志 → 用环境变量密码强制更新
  * 3. 重置时检测 ADMIN_USERNAME 与现有管理员是否匹配，不匹配则报错退出
+ * 4. 若缺少 DATABASE_URL → 跳过初始化，引导到 /setup 页面
  */
 export async function initializeAdmin(): Promise<void> {
   // 校验必需环境变量
   validateRequiredEnvVars();
+
+  // 如果缺少 DATABASE_URL，跳过管理员初始化（由 /setup 页面处理）
+  if (!process.env.DATABASE_URL) {
+    console.log("[初始化] 未配置 DATABASE_URL，跳过管理员初始化，等待用户通过 /setup 页面配置");
+    return;
+  }
 
   const username = process.env.ADMIN_USERNAME!;
   const password = process.env.ADMIN_PASSWORD!;
