@@ -52,7 +52,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf "https://oauth2:$HF_TOKEN@huggingface.co/spaces/$HF_REPO"
-          # 显式将远程 main 分支拉取并映射到本地的 refs/remotes/hf/main
+          # 明确指定拉取远程的 main 分支并映射为本地 refs/remotes/hf/main
           git fetch hf main:refs/remotes/hf/main --depth=1 --force 2>&1 || true
           echo "---"
           echo "remote URL host:"
@@ -63,7 +63,7 @@ jobs:
         id: diff
         run: |
           LOCAL=$(git rev-parse HEAD)
-          # 使用 --verify 和 -q 确保只验证 commit 引用，失败时不输出多余的路径字符串
+          # 使用 --verify -q 安全地检查引用。如果引用不存在，保持静默并返回非零，直接触发后面的 echo "none"
           HF=$(git rev-parse --verify -q refs/remotes/hf/main || echo "none")
           
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
@@ -85,7 +85,8 @@ jobs:
           HF_REPO: ${{ secrets.HF_REPO }}
         run: |
           echo "🚀 正在推送至 HF Space ($HF_REPO)..."
-          git push hf main:main --force-with-lease
+          # 使用 --force 代替 --force-with-lease 避免由于 CI 追踪配置冲突导致的推送拒绝问题
+          git push hf main:main --force
           echo "✅ 同步完成"
 
       - name: 同步结果
