@@ -112,58 +112,62 @@ export async function proxyFetch(
 }
 
 /**
- * 标记代理失败（事务内原子读写，防止并发覆盖 failCount）
+ * 根据封禁次数计算封禁时长
+ *
+ * 第 1 次封禁：15 分钟
+ * 第 2 次封禁：5 小时
+ * 第 3 次及以后：24 小时
+ */
+function getBanDurationMs(banCount: number): number {
+  if (banCount <= 1) return 15 * 60 * 1000; // 15 分钟
+  if (banCount === 2) return 5 * 60 * 60 * 1000; // 5 小时
+  return 24 * 60 * 60 * 1000; // 24 小时
+}
+
+/**
+ * 标记代理失败（一次失败即封禁，事务内原子读写）
  */
 export async function markProxyFailed(proxyId: string): Promise<void> {
   const { prisma } = await import("./prisma");
   const now = new Date();
 
-  const FAILURE_THRESHOLD = 2; // 连续失败 2 次触发降级，3 次触发封禁
-  const BAN_DURATION_MS = 30 * 60 * 1000;
-
-  // 事务内读取当前 failCount 再递增，确保并发请求不会覆盖彼此的计数
-  const newFailCount = await prisma.$transaction(async (tx) => {
+  // 事务内读取当前 banCount 再递增，确保并发请求不会覆盖
+  const result = await prisma.$transaction(async (tx) => {
     const proxy = await tx.proxy.findUnique({
       where: { id: proxyId },
-      select: { failCount: true },
+      select: { banCount: true },
     });
-    if (!proxy) return -1; // 代理不存在，跳过
+    if (!proxy) return null;
 
-    const count = proxy.failCount + 1;
-    const newStatus = count >= FAILURE_THRESHOLD ? "down" : "degraded";
-    const cooldownEnd =
-      count >= FAILURE_THRESHOLD
-        ? new Date(now.getTime() + BAN_DURATION_MS)
-        : undefined;
+    const newBanCount = proxy.banCount + 1;
+    const banDuration = getBanDurationMs(newBanCount);
+    const cooldownEnd = new Date(now.getTime() + banDuration);
 
     await tx.proxy.update({
       where: { id: proxyId },
       data: {
-        failCount: count,
-        status: newStatus,
+        status: "down",
+        failCount: 0,
+        banCount: newBanCount,
         lastFailAt: now,
-        ...(cooldownEnd ? { cooldownEnd } : {}),
+        cooldownEnd,
       },
     });
 
-    return count;
+    return { newBanCount, banDuration, cooldownEnd };
   });
 
-  if (newFailCount < 0) return;
+  if (!result) return;
 
-  // 记录状态变更日志
-  if (newFailCount === 1) {
-    console.warn(`[proxy] 代理 ${proxyId} 首次失败，failCount: ${newFailCount}`);
-  } else if (newFailCount >= FAILURE_THRESHOLD) {
-    const cooldownEnd = new Date(now.getTime() + BAN_DURATION_MS);
-    console.warn(
-      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，状态变更为 down，封禁至 ${cooldownEnd.toISOString()}`
-    );
-  } else {
-    console.warn(
-      `[proxy] 代理 ${proxyId} 连续失败 ${newFailCount} 次，状态变更为 degraded`
-    );
-  }
+  const durationLabel =
+    result.banDuration <= 15 * 60 * 1000
+      ? "15 分钟"
+      : result.banDuration <= 5 * 60 * 60 * 1000
+        ? "5 小时"
+        : "24 小时";
+  console.warn(
+    `[proxy] 代理 ${proxyId} 请求失败，封禁 ${durationLabel}（第 ${result.newBanCount} 次封禁，至 ${result.cooldownEnd.toISOString()}）`
+  );
 }
 
 /**

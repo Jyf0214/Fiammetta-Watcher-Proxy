@@ -28,6 +28,7 @@ interface ProxyItem {
   enabled: boolean;
   status: string;
   failCount: number;
+  banCount: number;
   lastFailAt: string | null;
   cooldownEnd: string | null;
   isBanned: boolean;
@@ -224,9 +225,9 @@ export default function ProxiesPage() {
       },
     },
     {
-      title: t("proxy.fail_count"),
-      dataIndex: "failCount",
-      key: "failCount",
+      title: t("proxy.ban_count"),
+      dataIndex: "banCount",
+      key: "banCount",
       width: 80,
       align: "center",
     },

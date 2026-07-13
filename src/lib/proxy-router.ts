@@ -53,27 +53,26 @@ async function refreshProxyCache() {
 }
 
 /**
- * 判断代理是否可用（未处于封禁冷却期）
+ * 判断代理是否可用
  *
- * 代理优先级：
+ * 代理状态：
  * - healthy: 完全可用，优先选择
- * - degraded: 降级可用，仅在 healthy 代理不足时使用，且随机 50% 概率跳过
- * - down: 封禁中，不可用（除非封禁已过期，此时为 half-open 状态）
+ * - degraded: 恢复中（自动测试通过后渐进恢复），可用但降低选中概率
+ * - down + cooldownEnd > now（封禁）: 不可用
+ * - down + cooldownEnd <= now（未使用）: 封禁已到期但未测试恢复，不可用
  */
 function isProxyAvailable(proxy: Proxy): boolean {
   if (!proxy.enabled) return false;
 
   if (proxy.status === "down") {
-    // 封禁中，检查是否已过期（half-open 状态）
-    if (proxy.cooldownEnd && proxy.cooldownEnd > new Date()) {
-      return false;
-    }
-    // 封禁已过期，允许探测（half-open）
-    return true;
+    // 无论封禁是否到期，down 状态一律不可用
+    // 封禁中：等待封禁到期
+    // 未使用：封禁已到期，等待自动测试恢复
+    return false;
   }
 
   if (proxy.status === "degraded") {
-    // degraded 状态：50% 概率跳过，降低被选中的概率
+    // 恢复中：可用但降低选中概率
     return Math.random() > 0.5;
   }
 
@@ -208,12 +207,17 @@ export async function getProxyStats() {
   const now = new Date();
   let healthy = 0;
   let degraded = 0;
-  let down = 0;
+  let banned = 0; // 封禁中（cooldownEnd > now）
+  let unused = 0; // 未使用（cooldownEnd <= now，等待自动测试恢复）
 
   for (const p of proxyCache) {
     if (!p.enabled) continue;
-    if (p.status === "down" && p.cooldownEnd && p.cooldownEnd > now) {
-      down++;
+    if (p.status === "down") {
+      if (p.cooldownEnd && p.cooldownEnd > now) {
+        banned++;
+      } else {
+        unused++;
+      }
     } else if (p.status === "healthy") {
       healthy++;
     } else {
@@ -221,5 +225,5 @@ export async function getProxyStats() {
     }
   }
 
-  return { total: proxyCache.length, healthy, degraded, down };
+  return { total: proxyCache.length, healthy, degraded, banned, unused };
 }

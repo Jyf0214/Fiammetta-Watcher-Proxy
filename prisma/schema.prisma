@@ -77,9 +77,10 @@ model Proxy {
   poolId      String? // 归属代理池（null = 未分组）
   enabled     Boolean   @default(true)
   status      String    @default("healthy") // healthy | degraded | down
-  failCount   Int       @default(0) // 连续失败次数
+  failCount   Int       @default(0) // 恢复计数（degraded 状态下用于渐进恢复）
+  banCount    Int       @default(0) // 累计封禁次数（决定递增封禁时长：0→15分钟，1→5小时，≥2→24小时）
   lastFailAt  DateTime?
-  cooldownEnd DateTime? // 熔断冷却结束时间（封禁 30 分钟）
+  cooldownEnd DateTime? // 封禁截止时间；过期后进入"未使用"状态，需自动测试通过才恢复正常
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

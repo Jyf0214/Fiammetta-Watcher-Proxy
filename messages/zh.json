@@ -197,6 +197,7 @@
     "down": "故障",
     "banned": "封禁中",
     "fail_count": "失败次数",
+    "ban_count": "封禁次数",
     "create_proxy": "添加代理",
     "create_success": "代理创建成功",
     "delete_success": "代理删除成功",

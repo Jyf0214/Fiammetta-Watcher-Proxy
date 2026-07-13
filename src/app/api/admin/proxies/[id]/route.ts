@@ -53,6 +53,7 @@ export async function PUT(
       updateData.status = body.status;
       if (body.status === "healthy") {
         updateData.failCount = 0;
+        updateData.banCount = 0;
         updateData.cooldownEnd = null;
       }
     }

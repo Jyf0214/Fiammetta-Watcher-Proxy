@@ -197,6 +197,7 @@
     "down": "Down",
     "banned": "Banned",
     "fail_count": "Fail Count",
+    "ban_count": "Ban Count",
     "create_proxy": "Add Proxy",
     "create_success": "Proxy created successfully",
     "delete_success": "Proxy deleted successfully",
