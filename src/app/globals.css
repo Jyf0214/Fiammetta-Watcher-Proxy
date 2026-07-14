@@ -371,23 +371,6 @@ article header h1 {
   background: #450a0a;
 }
 
-/* Switch 开关 */
-.dark .ant-switch {
-  background: #3f3f46;
-}
-.dark .ant-switch-checked {
-  background: #3b82f6;
-}
-.dark .ant-switch-handle::before {
-  background: #fff;
-}
-.dark .ant-switch:hover:not(.ant-switch-disabled) {
-  background: #52525b;
-}
-.dark .ant-switch-checked:hover:not(.ant-switch-disabled) {
-  background: #2563eb;
-}
-
 /* Tag 标签 */
 .dark .ant-tag-default {
   background: #27272a;

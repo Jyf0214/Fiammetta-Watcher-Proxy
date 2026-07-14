@@ -6,12 +6,12 @@ import {
   Modal,
   Form,
   Input,
-  Switch,
   message,
   Popconfirm,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
+import Switch from "@/components/ui/Switch";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
