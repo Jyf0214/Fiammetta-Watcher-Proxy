@@ -42,6 +42,7 @@
     "@types/node": "^26.0.1",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.25.1",
     "eslint-config-next": "^16.2.9",
     "postcss": "^8.5.10",
