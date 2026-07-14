@@ -201,27 +201,6 @@ function SidebarUserMenu({
   );
 }
 
-// ---------- MobileToggle ----------
-function MobileToggle({
-  isOpen,
-  onClick,
-}: {
-  isOpen: boolean;
-  onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <button
-      onClick={onClick}
-      aria-label={isOpen ? t("common.close_sidebar") : t("common.open_sidebar")}
-      aria-expanded={isOpen}
-      className={`md:hidden ${isOpen ? "hidden" : ""} fixed top-6 left-6 z-[9999] rounded-2xl p-3.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-2xl shadow-zinc-900/20 hover:scale-110 active:scale-95 transition-transform`}
-    >
-      <Menu size={22} />
-    </button>
-  );
-}
-
 // ---------- TopHeader ----------
 function TopHeader({
   pathname,
@@ -230,6 +209,7 @@ function TopHeader({
   cycle,
   mode,
   toggleLanguage,
+  onToggleSidebar,
 }: {
   pathname: string;
   t: (key: string) => string;
@@ -237,6 +217,7 @@ function TopHeader({
   cycle: () => void;
   mode: string;
   toggleLanguage: () => void;
+  onToggleSidebar: () => void;
 }) {
   const breadcrumbMap: Record<string, string> = {
     "/admin": "admin.dashboard",
@@ -261,6 +242,13 @@ function TopHeader({
 
   return (
     <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
+      <button
+        onClick={onToggleSidebar}
+        className="md:hidden p-2 -ml-2 mr-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        aria-label={t("common.open_sidebar")}
+      >
+        <Menu size={20} />
+      </button>
       <nav className="flex items-center gap-1.5 text-sm text-zinc-400">
         <span className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
           {t("admin.system")}
@@ -450,9 +438,6 @@ export default function AdminPageLayout({
 
   return (
     <div className={`flex min-h-screen overflow-x-hidden ${isDark ? "dark" : ""}`}>
-      {/* 移动端汉堡按钮 */}
-      <MobileToggle isOpen={sidebarOpen} onClick={sidebarOpen ? close : open} />
-
       {/* 桌面端侧边栏 */}
       <div className="hidden md:flex w-[280px] min-h-screen z-[100] bg-white dark:bg-zinc-900 flex-col shrink-0">
         {sidebarContent}
@@ -487,6 +472,7 @@ export default function AdminPageLayout({
           cycle={cycle}
           mode={mode}
           toggleLanguage={toggleLanguage}
+          onToggleSidebar={open}
         />
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden">{children}</main>
       </div>
