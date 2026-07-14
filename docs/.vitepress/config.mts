@@ -41,6 +41,12 @@ export default defineConfig({
                 { text: '自动分流', link: '/guide/auto-model' },
               ]
             },
+            {
+              text: '管理后台',
+              items: [
+                { text: '使用说明', link: '/guide/usage' },
+              ]
+            },
           ],
           '/api/': [
             {
@@ -61,6 +67,7 @@ export default defineConfig({
               items: [
                 { text: '部署指南', link: '/deployment/' },
                 { text: 'Docker 部署', link: '/deployment/docker' },
+                { text: 'Node.js 直接部署', link: '/deployment/standalone' },
                 { text: '环境变量', link: '/deployment/env' },
                 { text: 'Nginx 配置', link: '/deployment/nginx' },
               ]
@@ -103,6 +110,12 @@ export default defineConfig({
                 { text: 'Auto Routing', link: '/en/guide/auto-model' },
               ]
             },
+            {
+              text: 'Admin Panel',
+              items: [
+                { text: 'Usage Guide', link: '/en/guide/usage' },
+              ]
+            },
           ],
           '/en/api/': [
             {
@@ -123,6 +136,7 @@ export default defineConfig({
               items: [
                 { text: 'Overview', link: '/en/deployment/' },
                 { text: 'Docker', link: '/en/deployment/docker' },
+                { text: 'Node.js Standalone', link: '/en/deployment/standalone' },
                 { text: 'Environment', link: '/en/deployment/env' },
                 { text: 'Nginx', link: '/en/deployment/nginx' },
               ]

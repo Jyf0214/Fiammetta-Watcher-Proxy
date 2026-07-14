@@ -6,9 +6,9 @@ FWP supports multiple deployment methods. Docker is recommended.
 
 | Method | Use Case | Difficulty |
 |--------|----------|------------|
-| Docker Compose | Recommended for production | ⭐ |
-| Docker standalone | Lightweight deployment | ⭐ |
-| Node.js direct | Development/debugging | ⭐⭐ |
+| [Docker Compose](/en/deployment/docker) | Recommended for production | ⭐ |
+| [Docker standalone](/en/deployment/docker#standalone-docker) | Lightweight deployment | ⭐ |
+| [Node.js Standalone](/en/deployment/standalone) | No Docker environment, development/debugging | ⭐⭐ |
 
 ## Resource Requirements
 
@@ -28,6 +28,7 @@ FWP uses Prisma ORM and supports:
 
 - **PostgreSQL** (recommended) — Full feature support
 - **MySQL** — Full feature support
+- **TiDB Cloud** — MySQL-compatible protocol
 
 ### Connection Pool Optimization
 
@@ -39,3 +40,7 @@ connection_limit=5&pool_timeout=10
 
 ## Next Steps
 
+- [Docker Deployment](/en/deployment/docker) — Quick deployment with Docker Compose
+- [Node.js Standalone](/en/deployment/standalone) — Complete guide without Docker
+- [Environment Variables](/en/deployment/env) — All environment variable reference
+- [Nginx Configuration](/en/deployment/nginx) — Reverse proxy and HTTPS setup
