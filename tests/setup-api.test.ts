@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "../src/app/api/setup/configure/route";
 import { existsSync, readFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
+import { generateKeyPairSync } from "crypto";
 
 // Mock execSync 阻止实际的 prisma db push 执行
 vi.mock("child_process", () => ({
@@ -220,7 +221,8 @@ describe("Setup API - POST /api/setup/configure", () => {
 
   describe("JWKS_KEY 支持", () => {
     it("JWKS_KEY 应该保存到配置文件", async () => {
-      const jwksKey = '{"keys":[{"kty":"RSA","d":"test"}]}';
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const jwksKey = JSON.stringify({ keys: [privateKey.export({ format: "jwk" })] });
       const request = createMockRequest({
         DATABASE_URL: "postgresql://user:pass@localhost/db",
         ADMIN_USERNAME: "admin",
@@ -260,6 +262,21 @@ describe("Setup API - POST /api/setup/configure", () => {
       const content = readFileSync(configPath, "utf-8");
       const config = JSON.parse(content);
       expect(config.jwksKey).toBeUndefined();
+    });
+
+    it("不完整的 JWKS_KEY 应被拒绝（缺少 dp/dq/qi）", async () => {
+      const request = createMockRequest({
+        DATABASE_URL: "postgresql://user:pass@localhost/db",
+        ADMIN_USERNAME: "admin",
+        ADMIN_PASSWORD: "password123",
+        JWKS_KEY: '{"keys":[{"kty":"RSA","d":"test","n":"test","e":"AQAB"}]}',
+      });
+      const response = await POST(request);
+      const data = await parseResponse(response);
+
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error).toContain("JWKS_KEY 无效");
     });
   });
 

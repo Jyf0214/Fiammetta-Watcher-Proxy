@@ -17,6 +17,8 @@ interface DbConfig {
   sslAccept?: string; // TiDB Cloud 特有参数：sslaccept=strict
   jwksKey?: string; // JWKS_KEY 配置（用于 RS256 非对称加密）
   rawUrl?: string; // 原始 DATABASE_URL，保留所有特殊参数
+  adminUsername?: string; // 管理员用户名
+  adminPassword?: string; // 管理员密码
 }
 
 const CONFIG_DIR = "data";
@@ -157,5 +159,15 @@ export function loadConfigFromEnv(): void {
   if (config?.jwksKey && !process.env.JWKS_KEY) {
     process.env.JWKS_KEY = config.jwksKey;
     console.log("[配置] 已从配置文件加载 JWKS_KEY");
+  }
+
+  // 加载管理员凭据
+  if (config?.adminUsername && !process.env.ADMIN_USERNAME) {
+    process.env.ADMIN_USERNAME = config.adminUsername;
+    console.log("[配置] 已从配置文件加载 ADMIN_USERNAME");
+  }
+  if (config?.adminPassword && !process.env.ADMIN_PASSWORD) {
+    process.env.ADMIN_PASSWORD = config.adminPassword;
+    console.log("[配置] 已从配置文件加载 ADMIN_PASSWORD");
   }
 }

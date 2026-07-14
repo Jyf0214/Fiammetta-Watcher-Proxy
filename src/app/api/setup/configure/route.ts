@@ -12,6 +12,52 @@
 import { NextResponse } from "next/server";
 import { saveDbConfig } from "@/lib/config";
 import { execSync } from "child_process";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { createPrivateKey } from "crypto";
+
+/**
+ * 校验 JWKS_KEY 是否包含完整的 RSA 私钥字段
+ * 返回 null 表示有效，否则返回错误描述
+ */
+function validateJwksKey(raw: string): string | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "JSON 格式无效";
+  }
+
+  // 支持 JWKS 格式 { keys: [...] } 或单个 JWK 格式 { kty: "RSA", d: "..." }
+  const jwk = Array.isArray(parsed.keys) ? parsed.keys[0] as Record<string, unknown> : parsed;
+
+  if (!jwk || typeof jwk !== "object") {
+    return "未找到有效的密钥对象";
+  }
+
+  if (jwk.kty !== "RSA") {
+    return "密钥类型必须为 RSA";
+  }
+
+  if (typeof jwk.d !== "string") {
+    return "缺少私钥参数 d";
+  }
+
+  // RSA 私钥必须包含 CRT 参数
+  const requiredFields = ["n", "e", "p", "q", "dp", "dq", "qi"] as const;
+  const missing = requiredFields.filter((f) => typeof jwk[f] !== "string");
+  if (missing.length > 0) {
+    return `缺少 RSA 私钥参数: ${missing.join(", ")}`;
+  }
+
+  // 尝试用 Node.js crypto 解析，确保密钥本身有效
+  try {
+    createPrivateKey({ key: jwk as never, format: "jwk" });
+  } catch (e) {
+    return `密钥解析失败: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  return null;
+}
 
 interface SetupConfig {
   DATABASE_URL: string;
@@ -55,6 +101,17 @@ export async function POST(request: Request) {
       );
     }
 
+    // 验证 JWKS_KEY 完整性（如果提供了的话）
+    if (config.JWKS_KEY) {
+      const jwksError = validateJwksKey(config.JWKS_KEY);
+      if (jwksError) {
+        return NextResponse.json(
+          { success: false, error: `JWKS_KEY 无效: ${jwksError}` },
+          { status: 400 }
+        );
+      }
+    }
+
     // 检查是否已有数据库配置（禁止重复设置）
     if (process.env.DATABASE_URL) {
       return NextResponse.json(
@@ -65,6 +122,7 @@ export async function POST(request: Request) {
 
     // 保存数据库配置到 db-config.json
     // 直接保存原始 DATABASE_URL，避免解析/重新生成导致参数丢失
+    // 同时保存管理员凭据，确保重启后能自动加载
     try {
       const url = new URL(config.DATABASE_URL);
       const dbConfig = {
@@ -79,6 +137,9 @@ export async function POST(request: Request) {
         jwksKey: config.JWKS_KEY || undefined,
         // 保存原始 URL，确保特殊参数不丢失
         rawUrl: config.DATABASE_URL,
+        // 保存管理员凭据，确保重启后能自动加载
+        adminUsername: config.ADMIN_USERNAME,
+        adminPassword: config.ADMIN_PASSWORD,
       };
       const saved = saveDbConfig(dbConfig);
       if (!saved) {
@@ -108,14 +169,31 @@ export async function POST(request: Request) {
 
     // ==================== 数据库迁移 ====================
     // 执行 prisma db push 创建数据库表
-    // 注意：不在运行时修改 prisma/schema.prisma 源文件
-    // Docker 入口脚本或构建阶段已处理 provider 切换
+    // 创建临时 schema 文件，根据数据库类型动态设置 provider
     console.log("[Setup API] 开始执行数据库迁移...");
+    let tempSchemaPath = "";
     try {
-      // 获取详细输出以便调试
-      const output = execSync("npx prisma db push --accept-data-loss", {
+      // 确定数据库类型
+      const dbType = config.DATABASE_URL.startsWith("mysql") ? "mysql" : "postgresql";
+
+      // 读取原始 schema 并修改 provider
+      const originalSchema = readFileSync("prisma/schema.prisma", "utf-8");
+      let tempSchema = originalSchema;
+
+      if (dbType === "mysql" && originalSchema.includes('provider = "postgresql"')) {
+        tempSchema = originalSchema.replace('provider = "postgresql"', 'provider = "mysql"');
+      } else if (dbType === "postgresql" && originalSchema.includes('provider = "mysql"')) {
+        tempSchema = originalSchema.replace('provider = "mysql"', 'provider = "postgresql"');
+      }
+
+      // 创建临时 schema 文件（在项目目录内，确保 Prisma 能找到 package.json）
+      tempSchemaPath = `prisma/schema.setup.${Date.now()}.prisma`;
+      writeFileSync(tempSchemaPath, tempSchema, "utf-8");
+
+      // 使用临时 schema 执行 db push
+      const output = execSync(`npx prisma db push --schema=${tempSchemaPath} --accept-data-loss`, {
         stdio: "pipe",
-        timeout: 60000, // 60秒超时
+        timeout: 60000,
         encoding: "utf-8",
       });
       console.log("[Setup API] 数据库迁移完成");
@@ -143,12 +221,23 @@ export async function POST(request: Request) {
         userMessage = "数据库连接超时，请检查网络连接和防火墙设置";
       } else if (errorMsg.includes("P1001")) {
         userMessage = "无法连接到数据库服务器，请检查网络连接";
+      } else if (errorMsg.includes("P1012")) {
+        userMessage = "Prisma schema 配置错误";
       }
 
       return NextResponse.json(
         { success: false, error: `${userMessage}\n\n详细信息: ${errorMsg.slice(0, 500)}` },
         { status: 500 }
       );
+    } finally {
+      // 清理临时 schema 文件
+      if (tempSchemaPath && existsSync(tempSchemaPath)) {
+        try {
+          unlinkSync(tempSchemaPath);
+        } catch {
+          // 忽略清理错误
+        }
+      }
     }
 
     // ==================== 管理员初始化 ====================

@@ -63,7 +63,7 @@ export function proxy(request: NextRequest) {
   // 如果没有数据库环境变量，且访问的不是 /setup 路由，则重定向到 /setup
   // 注意：环境变量必须在启动时通过 .env 文件或系统环境变量设置
   // 不允许通过请求头动态设置，防止安全漏洞
-  if (!pathname.startsWith("/setup")) {
+  if (!pathname.startsWith("/setup") && !pathname.startsWith("/api/setup")) {
     const hasLocalDatabaseUrl = !!process.env.DATABASE_URL;
 
     // 如果没有数据库 URL，则重定向到 /setup
@@ -112,7 +112,7 @@ export function proxy(request: NextRequest) {
 
   // ==================== /api/admin/* 鉴权兜底 ====================
   if (pathname.startsWith("/api/admin/")) {
-    const publicPaths = ["/api/admin/auth"];
+    const publicPaths = ["/api/admin/auth", "/api/admin/login"];
     const isPublic = publicPaths.some(
       (p) => pathname === p || pathname.startsWith(p + "/")
     );
