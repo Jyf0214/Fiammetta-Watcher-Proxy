@@ -1,7 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "../src/app/api/setup/configure/route";
 import { existsSync, readFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
+
+// Mock execSync 阻止实际的 prisma db push 执行
+vi.mock("child_process", () => ({
+  execSync: vi.fn(() => Buffer.from("")),
+}));
+
+// Mock initializeAdmin 阻止实际的管理员初始化
+vi.mock("@/services/init", () => ({
+  initializeAdmin: vi.fn(() => Promise.resolve()),
+}));
 
 // 测试用临时目录
 const TEST_DATA_DIR = "tmp/test-api-config";
