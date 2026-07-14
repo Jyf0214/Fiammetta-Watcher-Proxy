@@ -63,13 +63,18 @@ export function readDbConfig(): DbConfig | null {
 
 /**
  * 将配置转换为 DATABASE_URL
+ * 对用户名和密码进行 URI 编码，防止特殊字符导致 URL 解析失败
  */
 export function configToDatabaseUrl(config: DbConfig): string {
   const protocol = config.type === "postgresql" ? "postgresql" : "mysql";
   const port = config.port || (config.type === "postgresql" ? 5432 : 3306);
   const ssl = config.ssl ? "?ssl=true" : "";
 
-  return `${protocol}://${config.username}:${config.password}@${config.hostname}:${port}/${config.dbName}${ssl}`;
+  // 对用户名和密码进行 URI 编码，处理 @、:、/ 等特殊字符
+  const encodedUsername = encodeURIComponent(config.username);
+  const encodedPassword = encodeURIComponent(config.password);
+
+  return `${protocol}://${encodedUsername}:${encodedPassword}@${config.hostname}:${port}/${config.dbName}${ssl}`;
 }
 
 /**

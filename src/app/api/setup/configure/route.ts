@@ -12,7 +12,6 @@
 import { NextResponse } from "next/server";
 import { saveDbConfig } from "@/lib/config";
 import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
 
 interface SetupConfig {
   DATABASE_URL: string;
@@ -71,10 +70,10 @@ export async function POST(request: Request) {
         type: url.protocol === "postgresql:" ? "postgresql" as const : "mysql" as const,
         hostname: url.hostname,
         port: url.port ? parseInt(url.port) : (url.protocol === "postgresql:" ? 5432 : 3306),
-        dbName: url.pathname.slice(1), // 去掉开头的 /
-        username: url.username,
-        password: url.password,
-        ssl: url.searchParams.get("ssl") === "true",
+        dbName: decodeURIComponent(url.pathname.slice(1)), // 去掉开头的 / 并解码
+        username: decodeURIComponent(url.username),
+        password: decodeURIComponent(url.password),
+        ssl: url.searchParams.get("ssl") === "true" || url.searchParams.get("sslmode") !== null,
         jwksKey: config.JWKS_KEY || undefined, // 保存 JWKS_KEY 到配置文件
       };
       const saved = saveDbConfig(dbConfig);
@@ -105,22 +104,10 @@ export async function POST(request: Request) {
 
     // ==================== 数据库迁移 ====================
     // 执行 prisma db push 创建数据库表
+    // 注意：不在运行时修改 prisma/schema.prisma 源文件
+    // Docker 入口脚本或构建阶段已处理 provider 切换
     console.log("[Setup API] 开始执行数据库迁移...");
     try {
-      // 根据数据库类型动态切换 Prisma schema provider
-      const dbType = config.DATABASE_URL.startsWith("mysql") ? "mysql" : "postgresql";
-      const schemaPath = "prisma/schema.prisma";
-      let schemaContent = readFileSync(schemaPath, "utf-8");
-
-      if (dbType === "postgresql" && schemaContent.includes('provider = "mysql"')) {
-        schemaContent = schemaContent.replace('provider = "mysql"', 'provider = "postgresql"');
-        writeFileSync(schemaPath, schemaContent, "utf-8");
-      } else if (dbType === "mysql" && schemaContent.includes('provider = "postgresql"')) {
-        schemaContent = schemaContent.replace('provider = "postgresql"', 'provider = "mysql"');
-        writeFileSync(schemaPath, schemaContent, "utf-8");
-      }
-
-      // 执行 prisma db push
       execSync("npx prisma db push --accept-data-loss", {
         stdio: "pipe",
         timeout: 60000, // 60秒超时
@@ -149,7 +136,6 @@ export async function POST(request: Request) {
       success: true,
       message: "配置已成功写入 db-config.json，数据库迁移完成",
       data: {
-        adminUsername: config.ADMIN_USERNAME,
         savedToConfigFile: true,
         databaseMigrated: true,
       },

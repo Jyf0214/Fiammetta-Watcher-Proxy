@@ -195,8 +195,9 @@ describe("config 模块", () => {
       const configPath = join(process.cwd(), TEST_DATA_DIR, "db-config.json");
       writeFileSync(configPath, JSON.stringify(validConfig), "utf-8");
       const url = getDatabaseUrl();
+      // 密码 p@ssw0rd!# 中的 @ 和 # 会被编码为 %40 和 %23
       expect(url).toBe(
-        "postgresql://testuser:p@ssw0rd!#@db.example.com:5432/testdb?ssl=true"
+        "postgresql://testuser:p%40ssw0rd!%23@db.example.com:5432/testdb?ssl=true"
       );
     });
 
@@ -206,10 +207,11 @@ describe("config 模块", () => {
   });
 
   describe("configToDatabaseUrl", () => {
-    it("应该正确生成 PostgreSQL URL", () => {
+    it("应该正确生成 PostgreSQL URL（密码包含特殊字符时自动编码）", () => {
       const url = configToDatabaseUrl(validConfig);
+      // 密码 p@ssw0rd!# 中的 @ 和 # 会被编码为 %40 和 %23
       expect(url).toBe(
-        "postgresql://testuser:p@ssw0rd!#@db.example.com:5432/testdb?ssl=true"
+        "postgresql://testuser:p%40ssw0rd!%23@db.example.com:5432/testdb?ssl=true"
       );
     });
 
@@ -244,8 +246,9 @@ describe("config 模块", () => {
       const configPath = join(process.cwd(), TEST_DATA_DIR, "db-config.json");
       writeFileSync(configPath, JSON.stringify(validConfig), "utf-8");
       loadConfigFromEnv();
+      // 密码 p@ssw0rd!# 中的 @ 和 # 会被编码为 %40 和 %23
       expect(process.env.DATABASE_URL).toBe(
-        "postgresql://testuser:p@ssw0rd!#@db.example.com:5432/testdb?ssl=true"
+        "postgresql://testuser:p%40ssw0rd!%23@db.example.com:5432/testdb?ssl=true"
       );
     });
 

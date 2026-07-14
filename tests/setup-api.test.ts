@@ -294,9 +294,10 @@ describe("Setup API - POST /api/setup/configure", () => {
       expect(data).toHaveProperty("success");
       expect(data).toHaveProperty("message");
       expect(data).toHaveProperty("data");
-      expect(data.data).toHaveProperty("adminUsername");
       expect(data.data).toHaveProperty("savedToConfigFile");
       expect(data.data.savedToConfigFile).toBe(true);
+      expect(data.data).toHaveProperty("databaseMigrated");
+      expect(data.data.databaseMigrated).toBe(true);
     });
 
     it("失败响应应该包含错误信息", async () => {
