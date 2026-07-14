@@ -63,18 +63,22 @@ export async function POST(request: Request) {
       );
     }
 
-    // 从 DATABASE_URL 解析配置并保存到 db-config.json
+    // 保存数据库配置到 db-config.json
+    // 直接保存原始 DATABASE_URL，避免解析/重新生成导致参数丢失
     try {
       const url = new URL(config.DATABASE_URL);
       const dbConfig = {
         type: url.protocol === "postgresql:" ? "postgresql" as const : "mysql" as const,
         hostname: url.hostname,
         port: url.port ? parseInt(url.port) : (url.protocol === "postgresql:" ? 5432 : 3306),
-        dbName: decodeURIComponent(url.pathname.slice(1)), // 去掉开头的 / 并解码
+        dbName: decodeURIComponent(url.pathname.slice(1)),
         username: decodeURIComponent(url.username),
         password: decodeURIComponent(url.password),
         ssl: url.searchParams.get("ssl") === "true" || url.searchParams.get("sslmode") !== null,
-        jwksKey: config.JWKS_KEY || undefined, // 保存 JWKS_KEY 到配置文件
+        sslAccept: url.searchParams.get("sslaccept") || undefined, // TiDB Cloud 特有参数
+        jwksKey: config.JWKS_KEY || undefined,
+        // 保存原始 URL，确保特殊参数不丢失
+        rawUrl: config.DATABASE_URL,
       };
       const saved = saveDbConfig(dbConfig);
       if (!saved) {
@@ -108,15 +112,41 @@ export async function POST(request: Request) {
     // Docker 入口脚本或构建阶段已处理 provider 切换
     console.log("[Setup API] 开始执行数据库迁移...");
     try {
-      execSync("npx prisma db push --accept-data-loss", {
+      // 获取详细输出以便调试
+      const output = execSync("npx prisma db push --accept-data-loss", {
         stdio: "pipe",
         timeout: 60000, // 60秒超时
+        encoding: "utf-8",
       });
       console.log("[Setup API] 数据库迁移完成");
-    } catch (error) {
-      console.error("[Setup API] 数据库迁移失败:", error);
+      console.log("[Setup API] Prisma 输出:", output);
+    } catch (error: unknown) {
+      // 提取具体的错误信息
+      const err = error as { stdout?: string; stderr?: string; message?: string };
+      const stderr = err.stderr || "";
+      const stdout = err.stdout || "";
+      const errorMsg = stderr || stdout || err.message || "未知错误";
+
+      console.error("[Setup API] 数据库迁移失败:", errorMsg);
+
+      // 返回更具体的错误信息
+      let userMessage = "数据库迁移失败";
+      if (errorMsg.includes("ECONNREFUSED")) {
+        userMessage = "数据库连接被拒绝，请检查主机地址和端口是否正确";
+      } else if (errorMsg.includes("Access denied")) {
+        userMessage = "数据库访问被拒绝，请检查用户名和密码是否正确";
+      } else if (errorMsg.includes("Unknown database")) {
+        userMessage = "数据库不存在，请先在 TiDB Cloud 控制台创建数据库";
+      } else if (errorMsg.includes("SSL")) {
+        userMessage = "SSL 连接失败，请检查 sslaccept 参数是否正确";
+      } else if (errorMsg.includes("timeout")) {
+        userMessage = "数据库连接超时，请检查网络连接和防火墙设置";
+      } else if (errorMsg.includes("P1001")) {
+        userMessage = "无法连接到数据库服务器，请检查网络连接";
+      }
+
       return NextResponse.json(
-        { success: false, error: "数据库迁移失败，请检查数据库连接是否正确" },
+        { success: false, error: `${userMessage}\n\n详细信息: ${errorMsg.slice(0, 500)}` },
         { status: 500 }
       );
     }

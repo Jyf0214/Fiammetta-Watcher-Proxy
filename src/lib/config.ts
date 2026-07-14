@@ -14,7 +14,9 @@ interface DbConfig {
   username: string;
   password: string;
   ssl?: boolean;
+  sslAccept?: string; // TiDB Cloud 特有参数：sslaccept=strict
   jwksKey?: string; // JWKS_KEY 配置（用于 RS256 非对称加密）
+  rawUrl?: string; // 原始 DATABASE_URL，保留所有特殊参数
 }
 
 const CONFIG_DIR = "data";
@@ -118,7 +120,7 @@ export function isDatabaseConfigured(): boolean {
 
 /**
  * 获取数据库 URL
- * 优先级：环境变量 > 配置文件
+ * 优先级：环境变量 > 配置文件中的 rawUrl > 配置文件生成的 URL
  */
 export function getDatabaseUrl(): string | null {
   // 优先使用环境变量
@@ -129,6 +131,10 @@ export function getDatabaseUrl(): string | null {
   // 从配置文件读取
   const config = readDbConfig();
   if (config) {
+    // 优先使用 rawUrl（保留所有特殊参数如 sslaccept=strict）
+    if (config.rawUrl) {
+      return config.rawUrl;
+    }
     return configToDatabaseUrl(config);
   }
 
