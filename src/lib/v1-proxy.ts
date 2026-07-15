@@ -29,6 +29,7 @@ import {
 } from "./proxy-handler";
 import { prisma } from "./prisma";
 import { detectModelType, MODEL_TYPE_NAMES, type ModelType } from "./model-type";
+import { applyRequestTemplates } from "./request-templates";
 
 // ==================== 配置接口 ====================
 
@@ -175,7 +176,7 @@ export async function proxyV1Request(
         });
       } else {
         // JSON 转发
-        const upstreamBody = config.buildUpstreamBody
+        const baseBody = config.buildUpstreamBody
           ? config.buildUpstreamBody(body)
           : {
               ...body,
@@ -184,6 +185,12 @@ export async function proxyV1Request(
                 ? { stream_options: { include_usage: true } }
                 : {}),
             };
+
+        // 应用请求模板（自动注入自定义字段）
+        const upstreamBody = await applyRequestTemplates(
+          baseBody,
+          config.upstreamPath.replace(/^\//, "")
+        );
 
         upstreamResponse = await platformFetch(upstreamUrl, route.platform, {
           method: "POST",
