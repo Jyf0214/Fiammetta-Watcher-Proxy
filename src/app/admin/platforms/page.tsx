@@ -63,7 +63,7 @@ export default function PlatformsPage() {
 
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [modelPlatform, setModelPlatform] = useState<Platform | null>(null);
-  const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; fetchedAt: string }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; type: string; fetchedAt: string }>>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
@@ -691,6 +691,22 @@ export default function PlatformsPage() {
               dataIndex: "modelId",
               key: "modelId",
               ellipsis: true,
+            },
+            {
+              title: "类型",
+              dataIndex: "type",
+              key: "type",
+              width: 100,
+              render: (v: string) => {
+                const typeMap: Record<string, { color: string; label: string }> = {
+                  chat: { color: "blue", label: "文字" },
+                  image: { color: "purple", label: "图片" },
+                  audio: { color: "orange", label: "音频" },
+                  embedding: { color: "cyan", label: "向量" },
+                };
+                const info = typeMap[v] || typeMap.chat;
+                return <Tag color={info.color}>{info.label}</Tag>;
+              },
             },
             {
               title: t("platform.model_source") || "来源",

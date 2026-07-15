@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth";
 import { fetchPlatformModels } from "@/lib/model-fetcher";
+import { detectModelType } from "@/lib/model-type";
 
 /**
  * GET /api/admin/platforms/[id]/models — 获取平台的模型列表
@@ -72,6 +73,7 @@ export async function POST(
       modelId: modelId.trim(),
       ownedBy: ownedBy || platform.name,
       source: "manual",
+      type: detectModelType(modelId.trim()),
     },
   });
 
@@ -172,6 +174,7 @@ export async function PUT(
             modelId: upstream.id,
             ownedBy: upstream.owned_by ?? platform.name,
             source: "auto",
+            type: detectModelType(upstream.id),
             fetchedAt: now,
           },
         });
