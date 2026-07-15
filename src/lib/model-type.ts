@@ -36,8 +36,8 @@ export function detectModelType(modelId: string): ModelType {
     id.includes("ideogram") ||
     id.includes("kandinsky") ||
     id.includes("firefly") ||
-    id.startsWith("sd-") ||
-    id.startsWith("image-")
+    id.includes("image") ||
+    id.startsWith("sd-")
   ) {
     return "image";
   }

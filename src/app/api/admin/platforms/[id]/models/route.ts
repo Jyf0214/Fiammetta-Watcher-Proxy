@@ -158,11 +158,11 @@ export async function PUT(
     for (const upstream of upstreamModels) {
       const existing = existingMap.get(upstream.id);
       if (existing) {
-        // 已存在：只更新 auto 模型的 fetchedAt，manual 不动
+        // 已存在：更新 auto 模型的 fetchedAt 和 type（校正历史数据），manual 不动
         if (existing.source === "auto") {
           await tx.platformModel.update({
             where: { id: existing.id },
-            data: { fetchedAt: now, ownedBy: upstream.owned_by ?? platform.name },
+            data: { fetchedAt: now, ownedBy: upstream.owned_by ?? platform.name, type: detectModelType(existing.modelId) },
           });
         }
         // manual 模型：跳过
@@ -196,5 +196,43 @@ export async function PUT(
     success: true,
     data: { total: finalCount, fetched: upstreamModels.length },
     message: `模型刷新完成，当前共 ${finalCount} 个模型`,
+  });
+}
+
+/**
+ * PATCH /api/admin/platforms/[id]/models — 批量校正所有模型的 type 字段
+ * 用于修复历史数据中 type 默认为 "chat" 的问题
+ */
+export async function PATCH(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const admin = await getAdminFromRequest();
+  if (!admin) {
+    return NextResponse.json({ success: false, error: "未授权" }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  const models = await prisma.platformModel.findMany({
+    where: { platformId: id },
+  });
+
+  let updated = 0;
+  for (const model of models) {
+    const correctType = detectModelType(model.modelId);
+    if (model.type !== correctType) {
+      await prisma.platformModel.update({
+        where: { id: model.id },
+        data: { type: correctType },
+      });
+      updated++;
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: { total: models.length, updated },
+    message: `校正完成，共 ${models.length} 个模型，修正 ${updated} 个`,
   });
 }
