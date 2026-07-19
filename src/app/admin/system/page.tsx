@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Descriptions, Tag, Alert, Form, Input, message } from "antd";
+import { Tag, Alert, Form, InputPassword, toast } from "@lobehub/ui";
+import { Descriptions } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw, Lock, Settings } from "lucide-react";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -73,13 +74,13 @@ export default function SystemPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(t("auth.password_changed"));
+        toast.success(t("auth.password_changed"));
         passwordForm.resetFields();
       } else {
-        message.error(data.error || t("auth.password_change_failed"));
+        toast.error(data.error || t("auth.password_change_failed"));
       }
     } catch {
-      message.error(t("auth.password_change_failed"));
+      toast.error(t("auth.password_change_failed"));
     } finally {
       setChangePasswordLoading(false);
     }
@@ -166,7 +167,7 @@ export default function SystemPage() {
             label={t("auth.current_password")}
             rules={[{ required: true, message: t("validation.field_required") }]}
           >
-            <Input.Password />
+            <InputPassword />
           </Form.Item>
 
           <Form.Item
@@ -177,7 +178,7 @@ export default function SystemPage() {
               { min: 8, message: t("auth.password_too_short") },
             ]}
           >
-            <Input.Password />
+            <InputPassword />
           </Form.Item>
 
           <Form.Item
@@ -196,7 +197,7 @@ export default function SystemPage() {
               }),
             ]}
           >
-            <Input.Password />
+            <InputPassword />
           </Form.Item>
 
           <Form.Item>
