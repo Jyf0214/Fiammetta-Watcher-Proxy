@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // 生产环境禁用源码映射，防止源码泄露
   productionBrowserSourceMaps: false,
+  // Lobe UI 需要转译
+  transpilePackages: ["@lobehub/ui"],
   // 安全响应头
   async headers() {
     return [

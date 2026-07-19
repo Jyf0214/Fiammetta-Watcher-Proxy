@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Form, Input, Button, message, Alert, Steps, Typography } from "antd";
+import { Form, Input, InputPassword, TextArea, Button, Alert } from "@lobehub/ui";
+import { Steps, Typography, message } from "antd";
 import { Database, Key, Shield, CheckCircle, ArrowRight } from "lucide-react";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -125,7 +126,7 @@ export default function SetupPage() {
                 { min: 6, message: "密码至少6位" },
               ]}
             >
-              <Input.Password placeholder="至少6位密码" size="large" />
+              <InputPassword placeholder="至少6位密码" size="large" />
             </Form.Item>
 
             <Form.Item
@@ -133,7 +134,7 @@ export default function SetupPage() {
               label="JWT 密钥（可选）"
               extra="留空将自动生成安全密钥。与 JWKS_KEY 二选一"
             >
-              <Input.Password placeholder="留空自动生成" size="large" />
+              <InputPassword placeholder="留空自动生成" size="large" />
             </Form.Item>
 
             <Form.Item
@@ -141,7 +142,7 @@ export default function SetupPage() {
               label="JWKS_KEY（可选）"
               extra="用于 RS256 非对称加密的 JWKS 密钥。与 JWT_SECRET 二选一"
             >
-              <Input.TextArea
+              <TextArea
                 placeholder='{"keys":[{"kty":"RSA","d":"...",...}]}'
                 rows={4}
                 size="large"

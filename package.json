@@ -18,9 +18,11 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.1",
+    "@lobehub/ui": "^5.20.3",
     "@prisma/client": "^6.19.3",
     "@tailwindcss/postcss": "^4.3.1",
     "antd": "^6.4.5",
+    "antd-style": "^4.1.0",
     "clsx": "^2.1.1",
     "https-proxy-agent": "^9.1.0",
     "i18next": "^26.3.3",
