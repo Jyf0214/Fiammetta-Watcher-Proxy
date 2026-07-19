@@ -2,24 +2,16 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Space,
-  Tag,
   Modal,
   Form,
   Input,
   InputNumber,
   Select,
-  message,
-  Popconfirm,
   Tooltip,
-  type TableColumnsType,
-} from "antd";
-import {
-  PlusOutlined,
-  DeleteOutlined,
-  CopyOutlined,
-  KeyOutlined,
-} from "@ant-design/icons";
+  toast,
+} from "@lobehub/ui";
+import { Space, Tag, Popconfirm, type TableColumnsType } from "antd";
+import { Plus, Trash2, Copy, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -63,7 +55,7 @@ export default function KeysPage() {
         if (data.success && Array.isArray(data.data)) setKeys(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -92,17 +84,17 @@ export default function KeysPage() {
 
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        toast.success(data.message);
         setModalOpen(false);
         form.resetFields();
         setNewKeyValue(data.data.key);
         setNewKeyVisible(true);
         handleRefresh();
       } else {
-        message.error(data.error);
+        toast.error(data.error);
       }
     } catch (err) {
-      if (!('errorFields' in (err as Record<string, unknown>))) message.error(t("common.error"));
+      if (!('errorFields' in (err as Record<string, unknown>))) toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -113,22 +105,22 @@ export default function KeysPage() {
       const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(t("api_key.delete_success") || "删除成功");
+        toast.success(t("api_key.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      message.success(t("common.copied"));
+      toast.success(t("common.copied"));
     } catch {
-      message.error(t("common.copy_failed") || "复制失败");
+      toast.error(t("common.copy_failed") || "复制失败");
     }
   };
 
@@ -158,7 +150,7 @@ export default function KeysPage() {
             <Button
               variant="ghost"
               size="sm"
-              icon={<CopyOutlined />}
+              icon={<Copy />}
               iconOnly
               aria-label={t("common.copy")}
               onClick={() => copyToClipboard(v)}
@@ -208,7 +200,7 @@ export default function KeysPage() {
           <Button
             variant="dangerGhost"
             size="sm"
-            icon={<DeleteOutlined />}
+            icon={<Trash2 />}
             iconOnly
             aria-label={t("common.delete")}
           />
@@ -224,13 +216,13 @@ export default function KeysPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<KeyOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<Key size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.keys")}
         description={t("admin.keys_desc")}
         extra={
           <Button
             variant="primary"
-            icon={<PlusOutlined />}
+            icon={<Plus />}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);
@@ -309,17 +301,13 @@ export default function KeysPage() {
             label={t("api_key.reset_period")}
             initialValue="monthly"
           >
-            <Select>
-              <Select.Option value="monthly">
-                {t("api_key.reset_monthly")}
-              </Select.Option>
-              <Select.Option value="daily">
-                {t("api_key.reset_daily")}
-              </Select.Option>
-              <Select.Option value="never">
-                {t("api_key.reset_never")}
-              </Select.Option>
-            </Select>
+            <Select
+              options={[
+                { value: "monthly", label: t("api_key.reset_monthly") },
+                { value: "daily", label: t("api_key.reset_daily") },
+                { value: "never", label: t("api_key.reset_never") },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -351,7 +339,7 @@ export default function KeysPage() {
         <Button
           variant="default"
           className="mt-3 w-full sm:w-auto"
-          icon={<CopyOutlined />}
+          icon={<Copy />}
           aria-label={t("api_key.copy_key")}
           onClick={() => copyToClipboard(newKeyValue)}
         >
