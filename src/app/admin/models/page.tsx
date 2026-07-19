@@ -6,11 +6,11 @@ import {
   Form,
   Input,
   Select,
-  message,
   Popconfirm,
   type TableColumnsType,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, SwapOutlined } from "@ant-design/icons";
+import { toast } from "@lobehub/ui";
+import { Plus, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -54,7 +54,7 @@ export default function ModelsPage() {
         if (data.success && Array.isArray(data.data)) setModels(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -69,7 +69,7 @@ export default function ModelsPage() {
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       }
     };
 
@@ -95,16 +95,16 @@ export default function ModelsPage() {
 
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        toast.success(data.message);
         setModalOpen(false);
         form.resetFields();
         handleRefresh();
       } else {
-        message.error(data.error);
+        toast.error(data.error);
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -115,13 +115,13 @@ export default function ModelsPage() {
       const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message || t("model_map.delete_success") || "删除成功");
+        toast.success(data.message || t("model_map.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -155,7 +155,7 @@ export default function ModelsPage() {
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button variant="dangerGhost" size="sm" icon={<DeleteOutlined />} iconOnly aria-label={t("common.delete")}>
+          <Button variant="dangerGhost" size="sm" icon={<Trash2 />} iconOnly aria-label={t("common.delete")}>
           </Button>
         </Popconfirm>
       ),
@@ -169,13 +169,13 @@ export default function ModelsPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<SwapOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<RefreshCw size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.models")}
         description={t("admin.models_desc")}
         extra={
           <Button
             variant="primary"
-            icon={<PlusOutlined />}
+            icon={<Plus />}
             onClick={() => {
               form.resetFields();
               setModalOpen(true);

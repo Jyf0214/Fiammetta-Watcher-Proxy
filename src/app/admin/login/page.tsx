@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
+import { toast } from "@lobehub/ui";
 import { message } from "antd";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthCard from "@/components/auth/AuthCard";
@@ -43,7 +44,7 @@ export default function AdminLoginPage() {
         setTimeout(() => setCopied(false), 2000);
       } catch {
         // 最终回退：显示提示信息
-        message.error(t("common.copy_failed") || "复制失败，请手动复制");
+        toast.error(t("common.copy_failed") || "复制失败，请手动复制");
       }
     }
   };
