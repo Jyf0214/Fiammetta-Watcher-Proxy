@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { message, Form, Input, Select, Modal } from "antd";
+import { Form, Input, TextArea, Select, toast } from "@lobehub/ui";
+import { Modal } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -168,11 +169,11 @@ export default function RequestTemplatesPage() {
         });
         const data = await res.json();
         if (data.success) {
-          message.success(t("system.rt_update_success"));
+          toast.success(t("system.rt_update_success"));
           setModalOpen(false);
           fetchTemplates();
         } else {
-          message.error(data.error);
+          toast.error(data.error);
         }
       } else {
         const res = await fetch("/api/admin/request-templates", {
@@ -187,11 +188,11 @@ export default function RequestTemplatesPage() {
         });
         const data = await res.json();
         if (data.success) {
-          message.success(t("system.rt_create_success"));
+          toast.success(t("system.rt_create_success"));
           setModalOpen(false);
           fetchTemplates();
         } else {
-          message.error(data.error);
+          toast.error(data.error);
         }
       }
     } catch {
@@ -230,13 +231,13 @@ export default function RequestTemplatesPage() {
           });
           const data = await res.json();
           if (data.success) {
-            message.success(t("system.rt_delete_success"));
+            toast.success(t("system.rt_delete_success"));
             fetchTemplates();
           } else {
-            message.error(data.error);
+            toast.error(data.error);
           }
         } catch {
-          message.error("删除失败");
+          toast.error("删除失败");
         }
       },
     });
@@ -371,7 +372,7 @@ export default function RequestTemplatesPage() {
           </Form.Item>
 
           <Form.Item name="description" label={t("system.rt_desc")}>
-            <Input.TextArea rows={2} placeholder={t("system.rt_desc_placeholder")} />
+            <TextArea rows={2} placeholder={t("system.rt_desc_placeholder")} />
           </Form.Item>
 
           <div className="flex gap-4">
@@ -413,7 +414,7 @@ export default function RequestTemplatesPage() {
             validateStatus={bodyJsonError ? "error" : undefined}
             help={bodyJsonError ? t("system.rt_json_error") : t("system.rt_merge_body_help")}
           >
-            <Input.TextArea
+            <TextArea
               rows={8}
               placeholder={t("system.rt_merge_body_placeholder")}
               className="font-mono text-xs"

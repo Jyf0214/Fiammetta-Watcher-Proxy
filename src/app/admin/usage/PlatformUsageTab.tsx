@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Tag, Tooltip, message, type TableColumnsType } from "antd";
+import { Tag, Tooltip, toast } from "@lobehub/ui";
+import type { TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
-import { ThunderboltOutlined, RiseOutlined, GlobalOutlined, WarningOutlined } from "@ant-design/icons";
+import { Zap, TrendingUp, Globe, AlertTriangle } from "lucide-react";
 import "@/lib/i18n";
 
 interface PlatformUsage {
@@ -58,7 +59,7 @@ export default function PlatformUsageTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -84,7 +85,7 @@ export default function PlatformUsageTab({
       key: "requests",
       title: t("usage.total_requests"),
       value: summary.totalRequests,
-      icon: <ThunderboltOutlined />,
+      icon: <Zap />,
       bgColor: "bg-blue-50",
       iconColor: "text-blue-500",
     },
@@ -92,7 +93,7 @@ export default function PlatformUsageTab({
       key: "tokens",
       title: t("usage.total_tokens"),
       value: summary.totalTokens,
-      icon: <RiseOutlined />,
+      icon: <TrendingUp />,
       bgColor: "bg-emerald-50",
       iconColor: "text-emerald-500",
     },
@@ -101,7 +102,7 @@ export default function PlatformUsageTab({
       title: t("dashboard.active_platforms"),
       value: summary.activePlatforms,
       suffix: `/ ${data.length}`,
-      icon: <GlobalOutlined />,
+      icon: <Globe />,
       bgColor: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -109,7 +110,7 @@ export default function PlatformUsageTab({
       key: "errors",
       title: t("common.error") || "错误",
       value: summary.errorRequests,
-      icon: <WarningOutlined />,
+      icon: <AlertTriangle />,
       bgColor: "bg-red-50",
       iconColor: "text-red-500",
     },

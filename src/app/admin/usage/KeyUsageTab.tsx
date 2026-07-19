@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Tag, Tooltip, message, type TableColumnsType } from "antd";
+import { Tag, Tooltip, toast } from "@lobehub/ui";
+import type { TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
-import { ThunderboltOutlined, RiseOutlined, CloudServerOutlined, FieldTimeOutlined } from "@ant-design/icons";
+import { Zap, TrendingUp, Cloud, Clock } from "lucide-react";
 import "@/lib/i18n";
 
 interface KeyUsage {
@@ -54,7 +55,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -85,7 +86,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "requests",
       title: t("usage.total_requests"),
       value: summary.totalRequests,
-      icon: <ThunderboltOutlined />,
+      icon: <Zap />,
       bgColor: "bg-blue-50",
       iconColor: "text-blue-500",
     },
@@ -93,7 +94,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "tokens",
       title: t("usage.total_tokens"),
       value: summary.totalTokens,
-      icon: <RiseOutlined />,
+      icon: <TrendingUp />,
       bgColor: "bg-emerald-50",
       iconColor: "text-emerald-500",
     },
@@ -102,7 +103,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       title: t("usage.active_keys"),
       value: summary.activeKeys,
       suffix: `/ ${data.length}`,
-      icon: <CloudServerOutlined />,
+      icon: <Cloud />,
       bgColor: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -111,7 +112,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       title: t("usage.avg_ttft"),
       value: summary.avgTtft,
       suffix: "ms",
-      icon: <FieldTimeOutlined />,
+      icon: <Clock />,
       bgColor: "bg-amber-50",
       iconColor: "text-amber-500",
     },

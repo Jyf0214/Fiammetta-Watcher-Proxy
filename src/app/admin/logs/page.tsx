@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   Tag,
   Select,
-  DatePicker,
   Tabs,
-  message,
-  type TableColumnsType,
-} from "antd";
+  toast,
+} from "@lobehub/ui";
+import { DatePicker } from "antd";
+import type { TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -17,11 +17,11 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import {
-  ReloadOutlined,
-  FileTextOutlined,
-  SearchOutlined,
-  CloudSyncOutlined,
-} from "@ant-design/icons";
+  RefreshCw,
+  FileText,
+  Search,
+  Cloud,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 
@@ -132,7 +132,7 @@ function DetailedLogsTab({
           signal: controller.signal,
         });
         if (res.status === 401) {
-          message.warning(
+          toast.warning(
             t("auth.unauthorized") || "登录已过期，请重新登录"
           );
           router.push("/admin/login");
@@ -145,7 +145,7 @@ function DetailedLogsTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -326,14 +326,15 @@ function DetailedLogsTab({
             setStatusFilter(v);
             setPage(1);
           }}
-        >
-          <Select.Option value="200">200</Select.Option>
-          <Select.Option value="400">400</Select.Option>
-          <Select.Option value="401">401</Select.Option>
-          <Select.Option value="429">429</Select.Option>
-          <Select.Option value="500">500</Select.Option>
-          <Select.Option value="503">503</Select.Option>
-        </Select>
+          options={[
+            { value: "200", label: "200" },
+            { value: "400", label: "400" },
+            { value: "401", label: "401" },
+            { value: "429", label: "429" },
+            { value: "500", label: "500" },
+            { value: "503", label: "503" },
+          ]}
+        />
         <Select
           placeholder={t("log.error_filter_placeholder")}
           allowClear
@@ -343,19 +344,16 @@ function DetailedLogsTab({
             setErrorFilter(v || "");
             setPage(1);
           }}
-        >
-          <Select.Option value="true">
-            {t("log.filter_error_only")}
-          </Select.Option>
-          <Select.Option value="false">
-            {t("log.filter_normal_only")}
-          </Select.Option>
-        </Select>
+          options={[
+            { value: "true", label: t("log.filter_error_only") },
+            { value: "false", label: t("log.filter_normal_only") },
+          ]}
+        />
         {(statusFilter || errorFilter || keyFilter || dateRange) && (
           <Button
             variant="ghost"
             size="sm"
-            icon={<SearchOutlined />}
+            icon={<Search />}
             onClick={handleResetFilters}
           >
             {t("common.reset") || "重置"}
@@ -364,7 +362,7 @@ function DetailedLogsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<ReloadOutlined />}
+          icon={<RefreshCw />}
           onClick={handleRefresh}
           disabled={loading}
         >
@@ -451,7 +449,7 @@ function ArchivedStatsTab({
           signal: controller.signal,
         });
         if (res.status === 401) {
-          message.warning(
+          toast.warning(
             t("auth.unauthorized") || "登录已过期，请重新登录"
           );
           router.push("/admin/login");
@@ -464,7 +462,7 @@ function ArchivedStatsTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("log.fetch_failed") || "获取归档数据失败");
+        toast.error(t("log.fetch_failed") || "获取归档数据失败");
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -486,13 +484,13 @@ function ArchivedStatsTab({
       const res = await fetch("/api/admin/logs/archive", { method: "POST" });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message || "归档完成");
+        toast.success(data.message || "归档完成");
         handleRefresh();
       } else {
-        message.error(data.error || "归档失败");
+        toast.error(data.error || "归档失败");
       }
     } catch {
-      message.error("归档请求失败");
+      toast.error("归档请求失败");
     } finally {
       setArchiving(false);
     }
@@ -628,7 +626,7 @@ function ArchivedStatsTab({
           <Button
             variant="ghost"
             size="sm"
-            icon={<SearchOutlined />}
+            icon={<Search />}
             onClick={() => {
               setKeyFilter(undefined);
               setDateRange(null);
@@ -641,7 +639,7 @@ function ArchivedStatsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<ReloadOutlined />}
+          icon={<RefreshCw />}
           onClick={handleRefresh}
           disabled={loading}
         >
@@ -650,7 +648,7 @@ function ArchivedStatsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<CloudSyncOutlined />}
+          icon={<Cloud />}
           onClick={handleManualArchive}
           disabled={archiving}
         >
@@ -702,7 +700,7 @@ export default function LogsPage() {
     <PageContainer>
       <PageHeader
         icon={
-          <FileTextOutlined
+          <FileText
             size={20}
             className="text-zinc-500 dark:text-zinc-400"
           />

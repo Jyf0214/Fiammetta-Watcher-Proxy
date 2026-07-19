@@ -1,26 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Tag, message, Tooltip } from "antd";
+import { Tag, Tooltip, toast } from "@lobehub/ui";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import {
-  CloudServerOutlined,
-  KeyOutlined,
-  ApiOutlined,
-  AlertOutlined,
-  DashboardOutlined,
-  ReloadOutlined,
-  PauseCircleOutlined,
-  PlayCircleOutlined,
-  FieldTimeOutlined,
-  ClockCircleOutlined,
-  AppstoreOutlined,
-  UnorderedListOutlined,
-} from "@ant-design/icons";
+  Cloud,
+  Key,
+  Globe,
+  AlertTriangle,
+  LayoutDashboard,
+  RefreshCw,
+  Pause,
+  Play,
+  Clock,
+  Grid,
+  List,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -90,7 +89,7 @@ export default function DashboardPage() {
         }
       } catch {
         if (isManual) {
-          message.error(t("common.error"));
+          toast.error(t("common.error"));
         }
       } finally {
         setLoading(false);
@@ -232,7 +231,7 @@ export default function DashboardPage() {
       key: "platforms",
       title: t("dashboard.active_platforms"),
       value: stats?.activePlatforms ?? 0,
-      icon: <CloudServerOutlined />,
+      icon: <Cloud />,
       color: "bg-emerald-50",
       iconColor: "text-emerald-500",
     },
@@ -240,7 +239,7 @@ export default function DashboardPage() {
       key: "keys",
       title: t("dashboard.active_keys"),
       value: stats?.activeKeys ?? 0,
-      icon: <KeyOutlined />,
+      icon: <Key />,
       color: "bg-blue-50",
       iconColor: "text-blue-500",
     },
@@ -248,7 +247,7 @@ export default function DashboardPage() {
       key: "requests",
       title: t("dashboard.total_requests"),
       value: stats?.totalRequests ?? 0,
-      icon: <ApiOutlined />,
+      icon: <Globe />,
       color: "bg-amber-50",
       iconColor: "text-amber-500",
     },
@@ -256,7 +255,7 @@ export default function DashboardPage() {
       key: "tokens",
       title: t("dashboard.total_tokens"),
       value: stats?.totalTokens ?? 0,
-      icon: <AlertOutlined />,
+      icon: <AlertTriangle />,
       color: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -265,7 +264,7 @@ export default function DashboardPage() {
       title: t("usage.avg_ttft"),
       value: stats?.avgTtft ?? 0,
       suffix: "ms",
-      icon: <FieldTimeOutlined />,
+      icon: <Clock />,
       color: "bg-orange-50",
       iconColor: "text-orange-500",
     },
@@ -274,7 +273,7 @@ export default function DashboardPage() {
       title: t("usage.avg_duration"),
       value: stats?.avgDuration ?? 0,
       suffix: "ms",
-      icon: <ClockCircleOutlined />,
+      icon: <Clock />,
       color: "bg-cyan-50",
       iconColor: "text-cyan-500",
     },
@@ -302,7 +301,7 @@ export default function DashboardPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<DashboardOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<LayoutDashboard size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("dashboard.adminConsole")}
         description={
           lastRefreshed
@@ -318,7 +317,7 @@ export default function DashboardPage() {
                 variant="ghost"
                 size="sm"
                 iconOnly
-                icon={viewMode === "grid" ? <UnorderedListOutlined /> : <AppstoreOutlined />}
+                icon={viewMode === "grid" ? <List /> : <Grid />}
                 onClick={toggleViewMode}
               />
             </Tooltip>
@@ -333,14 +332,14 @@ export default function DashboardPage() {
                 variant="ghost"
                 size="sm"
                 iconOnly
-                icon={autoRefresh ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                icon={autoRefresh ? <Pause /> : <Play />}
                 onClick={toggleAutoRefresh}
                 className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
               />
             </Tooltip>
             <Button
               variant="default"
-              icon={<ReloadOutlined className={refreshing ? "animate-spin" : ""} />}
+              icon={<RefreshCw className={refreshing ? "animate-spin" : ""} />}
               onClick={handleRefresh}
               disabled={refreshing}
             >

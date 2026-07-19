@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Select, Tabs, message } from "antd";
+import { Select, Tabs, toast } from "@lobehub/ui";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import {
-  ReloadOutlined,
-  BarChartOutlined,
-  WarningOutlined,
-} from "@ant-design/icons";
+  RefreshCw,
+  BarChart3,
+  AlertTriangle,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -73,7 +73,7 @@ export default function UsagePage() {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[用量趋势] 请求异常:", errMsg, err);
         setTrendError(errMsg);
-        message.error(t("dashboard.fetch_failed"));
+        toast.error(t("dashboard.fetch_failed"));
       } finally {
         if (!controller.signal.aborted) setTrendLoading(false);
       }
@@ -113,7 +113,7 @@ export default function UsagePage() {
     <PageContainer>
       <PageHeader
         icon={
-          <BarChartOutlined
+          <BarChart3
             size={20}
             className="text-zinc-500 dark:text-zinc-400"
           />
@@ -135,7 +135,7 @@ export default function UsagePage() {
             />
             <Button
               variant="default"
-              icon={<ReloadOutlined />}
+              icon={<RefreshCw />}
               onClick={handleRefresh}
               disabled={trendLoading}
             >
@@ -160,7 +160,7 @@ export default function UsagePage() {
           </div>
         ) : trendError ? (
           <div className="h-[320px] flex flex-col items-center justify-center gap-2">
-            <WarningOutlined className="text-2xl text-red-400" />
+            <AlertTriangle className="text-2xl text-red-400" />
             <p className="text-sm text-red-500 font-medium">
               {t("dashboard.fetch_failed")}
             </p>
@@ -170,7 +170,7 @@ export default function UsagePage() {
             <Button
               variant="ghost"
               size="sm"
-              icon={<ReloadOutlined />}
+              icon={<RefreshCw />}
               onClick={handleRefresh}
               className="mt-1"
             >
@@ -179,7 +179,7 @@ export default function UsagePage() {
           </div>
         ) : trendData.length === 0 ? (
           <div className="h-[320px] flex flex-col items-center justify-center gap-2">
-            <BarChartOutlined className="text-3xl text-zinc-300" />
+            <BarChart3 className="text-3xl text-zinc-300" />
             <p className="text-sm text-zinc-400">
               {t("common.no_data")}
             </p>

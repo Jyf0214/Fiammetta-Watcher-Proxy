@@ -6,7 +6,9 @@ import {
   Modal,
   Form,
   Input,
-  message,
+  toast,
+} from "@lobehub/ui";
+import {
   Popconfirm,
   type TableColumnsType,
 } from "antd";
@@ -16,7 +18,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { PlusOutlined, DeleteOutlined, EditOutlined, ReloadOutlined, DatabaseOutlined } from "@ant-design/icons";
+import { Plus, Trash2, Pencil, RefreshCw, Database } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -52,7 +54,7 @@ export default function ProxyPoolsPage() {
         if (data.success && Array.isArray(data.data)) setPools(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -97,11 +99,11 @@ export default function ProxyPoolsPage() {
         });
         const data = await res.json();
         if (data.success) {
-          message.success(t("proxy_pool.edit_success") || "更新成功");
+          toast.success(t("proxy_pool.edit_success") || "更新成功");
           closeForm();
           handleRefresh();
         } else {
-          message.error(data.error || t("common.error"));
+          toast.error(data.error || t("common.error"));
         }
       } else {
         const res = await fetch("/api/admin/pools", {
@@ -111,16 +113,16 @@ export default function ProxyPoolsPage() {
         });
         const data = await res.json();
         if (data.success) {
-          message.success(t("proxy_pool.create_success") || "创建成功");
+          toast.success(t("proxy_pool.create_success") || "创建成功");
           closeForm();
           handleRefresh();
         } else {
-          message.error(data.error || t("common.error"));
+          toast.error(data.error || t("common.error"));
         }
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -131,13 +133,13 @@ export default function ProxyPoolsPage() {
       const res = await fetch(`/api/admin/pools/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(t("proxy_pool.delete_success") || "删除成功");
+        toast.success(t("proxy_pool.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -150,9 +152,9 @@ export default function ProxyPoolsPage() {
       });
       const data = await res.json();
       if (data.success) handleRefresh();
-      else message.error(data.error || t("common.error"));
+      else toast.error(data.error || t("common.error"));
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -197,14 +199,14 @@ export default function ProxyPoolsPage() {
             variant="ghost"
             size="sm"
             iconOnly
-            icon={<EditOutlined />}
+            icon={<Pencil />}
             onClick={() => openEditForm(record)}
           />
           <Popconfirm
             title={t("proxy_pool.confirm_delete")}
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button variant="dangerGhost" size="sm" iconOnly icon={<DeleteOutlined />} />
+            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
           </Popconfirm>
         </div>
       ),
@@ -216,15 +218,15 @@ export default function ProxyPoolsPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<DatabaseOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<Database size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.proxy_pools")}
         description={t("admin.proxy_pools_desc")}
         extra={
           <div className="flex gap-2">
-            <Button variant="default" icon={<ReloadOutlined />} onClick={handleRefresh} disabled={loading}>
+            <Button variant="default" icon={<RefreshCw />} onClick={handleRefresh} disabled={loading}>
               {t("common.refresh")}
             </Button>
-            <Button variant="primary" icon={<PlusOutlined />} onClick={openCreateForm}>
+            <Button variant="primary" icon={<Plus />} onClick={openCreateForm}>
               {t("proxy_pool.create_pool")}
             </Button>
           </div>

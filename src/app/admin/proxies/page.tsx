@@ -6,8 +6,11 @@ import {
   Modal,
   Form,
   Input,
+  TextArea,
   Select,
-  message,
+  toast,
+} from "@lobehub/ui";
+import {
   Popconfirm,
   type TableColumnsType,
 } from "antd";
@@ -16,7 +19,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, GlobalOutlined } from "@ant-design/icons";
+import { Plus, Trash2, RefreshCw, Upload, Globe } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -69,7 +72,7 @@ export default function ProxiesPage() {
         if (data.success && Array.isArray(data.data)) setProxies(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -105,16 +108,16 @@ export default function ProxiesPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(t("proxy.create_success") || "创建成功");
+        toast.success(t("proxy.create_success") || "创建成功");
         setModalOpen(false);
         form.resetFields();
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -125,13 +128,13 @@ export default function ProxiesPage() {
       const res = await fetch(`/api/admin/proxies/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(t("proxy.delete_success") || "删除成功");
+        toast.success(t("proxy.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -144,9 +147,9 @@ export default function ProxiesPage() {
       });
       const data = await res.json();
       if (data.success) handleRefresh();
-      else message.error(data.error || t("common.error"));
+      else toast.error(data.error || t("common.error"));
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -159,17 +162,17 @@ export default function ProxiesPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(t("proxy.reset_success") || "已重置");
+        toast.success(t("proxy.reset_success") || "已重置");
         handleRefresh();
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
   const handleImport = async () => {
     if (!importText.trim()) {
-      message.warning(t("proxy.import_empty") || "导入内容不能为空");
+      toast.warning(t("proxy.import_empty") || "导入内容不能为空");
       return;
     }
     setImporting(true);
@@ -183,16 +186,16 @@ export default function ProxiesPage() {
       if (data.success) {
         const { created, updated, parseErrors } = data.data || {};
         const msg = `新增 ${created} 个，覆盖 ${updated} 个` + (parseErrors?.length ? `，${parseErrors.length} 行格式错误` : "");
-        message.success(msg);
+        toast.success(msg);
         setImportModalOpen(false);
         setImportText("");
         setImportPoolId(undefined);
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setImporting(false);
     }
@@ -248,7 +251,7 @@ export default function ProxiesPage() {
             </Button>
           )}
           <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDelete(r.id)}>
-            <Button variant="dangerGhost" size="sm" iconOnly icon={<DeleteOutlined />} />
+            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
           </Popconfirm>
         </div>
       ),
@@ -260,18 +263,18 @@ export default function ProxiesPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<GlobalOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<Globe size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.proxies")}
         description={t("admin.proxies_desc")}
         extra={
           <div className="flex gap-2">
-            <Button variant="default" icon={<ReloadOutlined />} onClick={handleRefresh} disabled={loading}>
+            <Button variant="default" icon={<RefreshCw />} onClick={handleRefresh} disabled={loading}>
               {t("common.refresh")}
             </Button>
-            <Button variant="default" icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
+            <Button variant="default" icon={<Upload />} onClick={() => setImportModalOpen(true)}>
               {t("proxy.import") || "批量导入"}
             </Button>
-            <Button variant="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
+            <Button variant="primary" icon={<Plus />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
               {t("proxy.create_proxy") || "添加代理"}
             </Button>
           </div>
@@ -289,11 +292,8 @@ export default function ProxiesPage() {
               allowClear
               className="w-40"
               onChange={(v) => setFilterPool(v)}
-            >
-              {pools.map((p) => (
-                <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
-              ))}
-            </Select>
+              options={pools.map((p) => ({ value: p.id, label: p.name }))}
+            />
           </div>
         }
       >
@@ -330,11 +330,11 @@ export default function ProxiesPage() {
             name="poolId"
             label={t("proxy.pool")}
           >
-            <Select placeholder={t("proxy.select_pool") || "选择代理池"} allowClear>
-              {pools.map((p) => (
-                <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
-              ))}
-            </Select>
+            <Select
+              placeholder={t("proxy.select_pool") || "选择代理池"}
+              allowClear
+              options={pools.map((p) => ({ value: p.id, label: p.name }))}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -363,15 +363,12 @@ export default function ProxiesPage() {
               value={importPoolId}
               onChange={setImportPoolId}
               allowClear
-            >
-              {pools.map((p) => (
-                <Select.Option key={p.id} value={p.id}>{p.name}</Select.Option>
-              ))}
-            </Select>
+              options={pools.map((p) => ({ value: p.id, label: p.name }))}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">代理列表</label>
-            <Input.TextArea
+            <TextArea
               rows={10}
               value={importText}
               onChange={(e) => setImportText(e.target.value)}

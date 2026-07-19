@@ -2,15 +2,19 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Space,
   Tag,
   Form,
   Input,
+  InputPassword,
+  TextArea,
   InputNumber,
   Select,
   Drawer,
+  toast,
+} from "@lobehub/ui";
+import {
+  Space,
   Table,
-  message,
   Popconfirm,
   type TableColumnsType,
 } from "antd";
@@ -20,7 +24,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { PlusOutlined, EditOutlined, DeleteOutlined, CloseOutlined, DatabaseOutlined, ReloadOutlined, CloudServerOutlined, CopyOutlined } from "@ant-design/icons";
+import { Plus, Pencil, Trash2, X, Database, RefreshCw, Cloud, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -79,7 +83,7 @@ export default function PlatformsPage() {
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -116,7 +120,7 @@ export default function PlatformsPage() {
   // 删除密钥
   const removeNamedKey = (index: number) => {
     if (namedKeys.length <= 1) {
-      message.warning("至少保留一个密钥");
+      toast.warning("至少保留一个密钥");
       return;
     }
     const newKeys = namedKeys.filter((_, i) => i !== index);
@@ -140,7 +144,7 @@ export default function PlatformsPage() {
   // 复制密钥值
   const copyKeyValue = (key: string) => {
     navigator.clipboard.writeText(key);
-    message.success("已复制到剪贴板");
+    toast.success("已复制到剪贴板");
   };
 
   const openEditForm = (platform: Platform) => {
@@ -223,15 +227,15 @@ export default function PlatformsPage() {
       const data = await res.json();
 
       if (data.success) {
-        message.success(data.message);
+        toast.success(data.message);
         closeForm();
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -242,13 +246,13 @@ export default function PlatformsPage() {
       const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        message.success(t("platform.delete_success") || "删除成功");
+        toast.success(t("platform.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -264,10 +268,10 @@ export default function PlatformsPage() {
       if (data.success) {
         handleRefresh();
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setTogglingId(null);
     }
@@ -286,7 +290,7 @@ export default function PlatformsPage() {
       const data = await res.json();
       if (data.success) setModels(data.data || []);
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setModelsLoading(false);
     }
@@ -301,13 +305,13 @@ export default function PlatformsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        toast.success(data.message);
         fetchModels(modelPlatform.id);
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setRefreshing(false);
     }
@@ -323,14 +327,14 @@ export default function PlatformsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(data.message);
+        toast.success(data.message);
         setNewModelId("");
         fetchModels(modelPlatform.id);
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -345,10 +349,10 @@ export default function PlatformsPage() {
       if (data.success) {
         fetchModels(modelPlatform.id);
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     }
   };
 
@@ -436,14 +440,14 @@ export default function PlatformsPage() {
             variant="ghost"
             size="sm"
             iconOnly
-            icon={<DatabaseOutlined />}
+            icon={<Database />}
             onClick={() => openModelDrawer(record)}
           />
           <Button
             variant="ghost"
             size="sm"
             iconOnly
-            icon={<EditOutlined />}
+            icon={<Pencil />}
             onClick={() => openEditForm(record)}
           />
           <Popconfirm
@@ -454,7 +458,7 @@ export default function PlatformsPage() {
               variant="dangerGhost"
               size="sm"
               iconOnly
-              icon={<DeleteOutlined />}
+              icon={<Trash2 />}
             />
           </Popconfirm>
         </Space>
@@ -469,13 +473,13 @@ export default function PlatformsPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<CloudServerOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<Cloud size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.platforms")}
         description={t("admin.platforms_desc")}
         extra={
           <Button
             variant="primary"
-            icon={<PlusOutlined />}
+            icon={<Plus />}
             onClick={openCreateForm}
           >
             {t("platform.create_platform")}
@@ -508,7 +512,7 @@ export default function PlatformsPage() {
                 variant="ghost"
                 size="sm"
                 iconOnly
-                icon={<CloseOutlined />}
+                icon={<X />}
                 onClick={closeForm}
               />
             </div>
@@ -517,7 +521,7 @@ export default function PlatformsPage() {
         >
           <Form form={form} layout="vertical" onFinish={handleSubmit} onFinishFailed={({ errorFields }) => {
             if (errorFields && errorFields.length > 0) {
-              message.error(errorFields[0].errors[0] || t("validation.field_required"));
+              toast.error(errorFields[0].errors[0] || t("validation.field_required"));
             }
           }}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -551,7 +555,7 @@ export default function PlatformsPage() {
                         className="w-24 flex-shrink-0"
                         size="small"
                       />
-                      <Input.Password
+                      <InputPassword
                         value={namedKey.key}
                         onChange={(e) => updateKeyValue(index, e.target.value)}
                         placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"}
@@ -562,7 +566,7 @@ export default function PlatformsPage() {
                         variant="ghost"
                         size="sm"
                         iconOnly
-                        icon={<CopyOutlined />}
+                        icon={<Copy />}
                         onClick={() => copyKeyValue(namedKey.key)}
                         disabled={!namedKey.key}
                         title="复制密钥"
@@ -571,7 +575,7 @@ export default function PlatformsPage() {
                         variant="dangerGhost"
                         size="sm"
                         iconOnly
-                        icon={<DeleteOutlined />}
+                        icon={<Trash2 />}
                         onClick={() => removeNamedKey(index)}
                         disabled={namedKeys.length <= 1}
                         title="删除密钥"
@@ -581,7 +585,7 @@ export default function PlatformsPage() {
                   <Button
                     variant="default"
                     onClick={addNamedKey}
-                    icon={<PlusOutlined />}
+                    icon={<Plus />}
                     block
                     size="sm"
                   >
@@ -594,11 +598,13 @@ export default function PlatformsPage() {
                 label={t("platform.type")}
                 initialValue="openai"
               >
-                <Select>
-                  <Select.Option value="openai">OpenAI</Select.Option>
-                  <Select.Option value="azure">Azure</Select.Option>
-                  <Select.Option value="custom">Custom</Select.Option>
-                </Select>
+                <Select
+                  options={[
+                    { value: "openai", label: "OpenAI" },
+                    { value: "azure", label: "Azure" },
+                    { value: "custom", label: "Custom" },
+                  ]}
+                />
               </Form.Item>
               <Form.Item
                 name="priority"
@@ -629,7 +635,7 @@ export default function PlatformsPage() {
                 />
               </Form.Item>
               <Form.Item name="forwardHeaders" label={t("platform.forward_headers")}>
-                <Input.TextArea
+                <TextArea
                   rows={2}
                   placeholder='["X-Thinking-Mode", "X-Reasoning-Effort"]'
                 />
@@ -650,7 +656,7 @@ export default function PlatformsPage() {
       <Drawer
         title={
           <span className="flex items-center gap-2">
-            <DatabaseOutlined />
+            <Database />
             {modelPlatform?.name} — {t("platform.models") || "模型管理"}
           </span>
         }
@@ -672,7 +678,7 @@ export default function PlatformsPage() {
           <Button
             variant="default"
             size="sm"
-            icon={<ReloadOutlined />}
+            icon={<RefreshCw />}
             onClick={handleRefreshModels}
             loading={refreshing}
           >
@@ -728,7 +734,7 @@ export default function PlatformsPage() {
                   title={t("common.confirm_delete")}
                   onConfirm={() => handleDeleteModel(record.modelId)}
                 >
-                  <Button variant="dangerGhost" size="sm" iconOnly icon={<DeleteOutlined />} />
+                  <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
                 </Popconfirm>
               ),
             },
