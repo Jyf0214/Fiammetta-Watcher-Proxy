@@ -1,18 +1,18 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { message } from "antd";
+import { toast } from "@lobehub/ui";
 import {
-  DownloadOutlined,
-  UploadOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  FileTextOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  ReloadOutlined,
-  InfoCircleOutlined,
-} from "@ant-design/icons";
+  Download,
+  Upload,
+  Database,
+  Cloud,
+  FileText,
+  CheckCircle,
+  AlertTriangle,
+  RefreshCw,
+  Info,
+} from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -69,7 +69,7 @@ export default function DataManagerPage() {
       value: "system",
       label: t("admin.dm_system_config"),
       desc: t("admin.dm_system_config_desc"),
-      icon: <CloudServerOutlined />,
+      icon: <Cloud size={16} />,
       tag: t("admin.dm_system_config_tag"),
       tagColor: "bg-blue-50 text-blue-600 border-blue-200",
     },
@@ -77,13 +77,13 @@ export default function DataManagerPage() {
       value: "data",
       label: t("admin.dm_business_data"),
       desc: t("admin.dm_business_data_desc"),
-      icon: <FileTextOutlined />,
+      icon: <FileText size={16} />,
     },
     {
       value: "all",
       label: t("admin.dm_all_export"),
       desc: t("admin.dm_all_export_desc"),
-      icon: <DatabaseOutlined />,
+      icon: <Database size={16} />,
       tag: t("admin.dm_all_export_tag"),
       tagColor: "bg-amber-50 text-amber-600 border-amber-200",
     },
@@ -110,9 +110,9 @@ export default function DataManagerPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      message.success(t("admin.dm_export_success"));
+      toast.success(t("admin.dm_export_success"));
     } catch (err) {
-      message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+      toast.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
     } finally {
       setExporting(false);
     }
@@ -141,12 +141,12 @@ export default function DataManagerPage() {
         setImportResult(result);
 
         if (result.success) {
-          message.success(result.message);
+          toast.success(result.message);
         } else {
-          message.error(result.error || t("admin.dm_err_export"));
+          toast.error(result.error || t("admin.dm_err_export"));
         }
       } catch (err) {
-        message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+        toast.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
         setImportResult({
           success: false,
           message: err instanceof Error ? err.message : t("admin.dm_err_export"),
@@ -165,11 +165,11 @@ export default function DataManagerPage() {
 
       const isJson = file.type === "application/json" || file.name.endsWith(".json");
       if (!isJson) {
-        message.error(t("admin.dm_err_json_only"));
+        toast.error(t("admin.dm_err_json_only"));
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
-        message.error(t("admin.dm_err_file_too_large"));
+        toast.error(t("admin.dm_err_file_too_large"));
         return;
       }
 
@@ -187,7 +187,7 @@ export default function DataManagerPage() {
       if (!file) return;
 
       if (!file.name.endsWith(".json")) {
-        message.error(t("admin.dm_err_json_only"));
+        toast.error(t("admin.dm_err_json_only"));
         return;
       }
       processImportFile(file);
@@ -198,7 +198,7 @@ export default function DataManagerPage() {
   return (
     <PageContainer>
       <PageHeader
-        icon={<DatabaseOutlined size={20} className="text-zinc-500 dark:text-zinc-400" />}
+        icon={<Database size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.data_manager")}
         description={t("admin.data_manager_desc")}
       />
@@ -276,7 +276,7 @@ export default function DataManagerPage() {
             {/* 导出按钮 */}
             <Button
               variant="primary"
-              icon={<DownloadOutlined />}
+              icon={<Download />}
               onClick={handleExport}
               loading={exporting}
               block
@@ -323,9 +323,9 @@ export default function DataManagerPage() {
                 )}
               >
                 {importing ? (
-                  <ReloadOutlined className="text-xl animate-spin" />
+                  <RefreshCw className="text-xl animate-spin" />
                 ) : (
-                  <UploadOutlined className="text-xl" />
+                  <Upload className="text-xl" />
                 )}
               </div>
 
@@ -351,9 +351,9 @@ export default function DataManagerPage() {
               >
                 <div className="flex items-center gap-2 mb-3">
                   {importResult.success ? (
-                    <CheckCircleOutlined className="text-emerald-500 text-base" />
+                    <CheckCircle className="text-emerald-500 text-base" />
                   ) : (
-                    <ExclamationCircleOutlined className="text-red-500 text-base" />
+                    <AlertTriangle className="text-red-500 text-base" />
                   )}
                   <span
                     className={cn(
@@ -402,7 +402,7 @@ export default function DataManagerPage() {
       {/* ========== 使用提示 ========== */}
       <ProCard className="mt-6" bodyClassName="p-4">
         <div className="flex items-start gap-2 mb-3">
-          <InfoCircleOutlined className="text-zinc-400 mt-0.5 flex-shrink-0" />
+          <Info className="text-zinc-400 mt-0.5 flex-shrink-0" />
           <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
             {t("admin.dm_tips")}
           </span>

@@ -1,4 +1,4 @@
-import { Select, Input as AntInput } from 'antd';
+import { Select, TextArea } from '@lobehub/ui';
 import { Input } from '@/components/ui/Input';
 
 export interface FormFieldProps {
@@ -26,7 +26,7 @@ export default function FormField({
     <div className={className}>
       <label className="block text-sm font-medium mb-2 dark:text-zinc-300">{label}</label>
       {type === 'textarea' && (
-        <AntInput.TextArea
+        <TextArea
           rows={rows}
           value={value}
           onChange={e => onChange(e.target.value)}

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Tag, message, type TableColumnsType } from "antd";
+import { Tag, toast } from "@lobehub/ui";
+import type { TableColumnsType } from "antd"; // @lobehub/ui 没有 TableColumnsType 类型，保留 antd
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -41,7 +42,7 @@ export default function EventsPage() {
           { signal: controller.signal }
         );
         if (res.status === 401) {
-          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          toast.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
           router.push("/admin/login");
           return;
         }
@@ -52,7 +53,7 @@ export default function EventsPage() {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);

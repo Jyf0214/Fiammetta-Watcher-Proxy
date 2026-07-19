@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+// @lobehub/ui 没有 Table / Pagination 组件，保留 antd
 import { Table, Pagination } from 'antd';
 import type { TableProps } from 'antd';
 

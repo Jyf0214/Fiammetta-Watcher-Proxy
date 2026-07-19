@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { message, Select, Empty } from "antd";
+import { Select, Empty, toast } from "@lobehub/ui";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -80,7 +80,7 @@ export default function AutoModelPage() {
           setModels(allModels);
         }
       } catch {
-        message.error(t("common.error"));
+        toast.error(t("common.error"));
       } finally {
         setModelsLoading(false);
       }
@@ -107,12 +107,12 @@ export default function AutoModelPage() {
       const data = await res.json();
       if (data.success) {
         setAutoModelId(newId);
-        message.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
+        toast.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setAutoModelLoading(false);
     }
@@ -141,12 +141,12 @@ export default function AutoModelPage() {
       });
       const data = await res.json();
       if (data.success) {
-        message.success(t("system.auto_model_selected_saved") || "模型选择已保存");
+        toast.success(t("system.auto_model_selected_saved") || "模型选择已保存");
       } else {
-        message.error(data.error || t("common.error"));
+        toast.error(data.error || t("common.error"));
       }
     } catch {
-      message.error(t("common.error"));
+      toast.error(t("common.error"));
     } finally {
       setSelectedModelsLoading(false);
     }
@@ -275,7 +275,7 @@ export default function AutoModelPage() {
             loading={modelsLoading}
             showSearch
             filterOption={(input, option) =>
-              (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+              String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
             }
             options={models.map((m) => ({
               value: m.modelId,
