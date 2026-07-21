@@ -23,6 +23,13 @@ jobs:
 
       # ==================== 验证 Cloudflare Token ====================
 
+      - name: Debug Token
+        run: |
+          echo "Token length: ${#CLOUDFLARE_API_TOKEN}"
+          echo "Token first8: ${CLOUDFLARE_API_TOKEN:0:8}"
+          echo "Token last4: ${CLOUDFLARE_API_TOKEN: -4}"
+          echo -n "$CLOUDFLARE_API_TOKEN" | xxd | head -3
+
       - name: Verify CF Token
         run: |
           RESP=$(curl -s -w "\n%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
