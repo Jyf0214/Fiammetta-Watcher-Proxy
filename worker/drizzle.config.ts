@@ -4,7 +4,10 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dialect: "sqlite",
+  driver: "d1-http",
   dbCredentials: {
-    url: process.env.DRIZZLE_DATABASE_URL ?? "file:./local.db",
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID!,
+    databaseId: process.env.CLOUDFLARE_DATABASE_ID!,
+    token: process.env.CLOUDFLARE_API_TOKEN!,
   },
 });
