@@ -111,10 +111,10 @@ id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 ```bash
 cd worker
-npx drizzle-kit push
+npx wrangler d1 execute fiammetta-proxy --remote --file=drizzle/0000_init.sql
 ```
 
-该命令会自动将 `src/db/schema.ts` 中定义的表结构同步到 D1 数据库，无需手写 SQL。
+该命令将 SQL 文件中的建表语句执行到远程 D1 数据库。`CREATE TABLE IF NOT EXISTS` 确保重复执行不会报错。
 
 ### 第六步：部署 Worker
 

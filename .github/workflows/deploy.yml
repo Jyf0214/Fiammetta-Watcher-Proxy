@@ -7,14 +7,12 @@ on:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -22,126 +20,122 @@ jobs:
           node-version: 24
           cache: "npm"
 
-      # ==================== 验证 Cloudflare Token ====================
+      # ==================== 获取 Account ID ====================
 
-      - name: Verify CF Token
-        run: |
-          if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
-            echo "ℹ️ 检测到账户级 API Token (cfat_ 前缀)"
-            echo "⚠️ 账户级 Token 不支持 /user/tokens/verify，将在获取账户 ID 后验证"
-          else
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json")
-            if [ "$HTTP_CODE" != "200" ]; then
-              echo "❌ Token 验证失败 (HTTP $HTTP_CODE)"
-              exit 1
-            fi
-            echo "✅ Token 有效"
-          fi
-
-      # ==================== 获取/验证 Cloudflare 账户 ID ====================
-
-      - name: Get Account ID
+      - name: Fetch Account ID
         id: account
         run: |
-          # 优先使用 Secrets 中配置的 Account ID
-          if [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::add-mask::${CLOUDFLARE_ACCOUNT_ID}"
-            echo "account_id=$CLOUDFLARE_ACCOUNT_ID" >> "$GITHUB_OUTPUT"
-            echo "✅ 已从配置中获取 Account ID"
-
-            # cfat_ Token 针对账户进行验证
-            if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                -H "Content-Type: application/json")
-              if [ "$HTTP_CODE" != "200" ]; then
-                echo "❌ Token 对该账户验证失败 (HTTP $HTTP_CODE)"
-                exit 1
-              fi
-              echo "✅ Token 验证成功"
+          if [[ -n "$CLOUDFLARE_ACCOUNT_ID_SECRET" ]]; then
+            ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID_SECRET"
+          else
+            ACCOUNT_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" | jq -r '.result[0].id')
+            if [[ -z "$ACCOUNT_ID" ]] || [[ "$ACCOUNT_ID" == "null" ]]; then
+              echo "❌ 无法获取账户 ID，请检查 CLOUDFLARE_API_TOKEN"
+              exit 1
             fi
-            exit 0
-          fi
-
-          # cfat_ Token 必须配置 Account ID
-          if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
-            echo "❌ 使用账户级 Token 时必须配置 CLOUDFLARE_ACCOUNT_ID Secret"
-            exit 1
-          fi
-
-          # 用户级 Token 自动获取 Account ID
-          ACCOUNTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
-          ACCOUNT_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].id')
-          ERRORS=$(echo "$ACCOUNTS" | jq -r '.errors[]?.message' 2>/dev/null)
-          if [ -n "$ERRORS" ] || [ "$ACCOUNT_ID" = "null" ] || [ -z "$ACCOUNT_ID" ]; then
-            echo "❌ 无法获取账户 ID"
-            exit 1
           fi
           echo "::add-mask::${ACCOUNT_ID}"
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
           echo "✅ Account ID 已获取"
+        env:
+          CLOUDFLARE_ACCOUNT_ID_SECRET: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # ==================== 创建/获取 D1 数据库 ====================
+      # ==================== 创建 D1 数据库 + 初始化表 ====================
 
-      - name: Setup D1 Database
+      - name: Create D1 Database
         id: d1
         run: |
-          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           DB_NAME="fiammetta-proxy"
 
-          EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
+          # 尝试创建（已存在则跳过）
+          CREATE_RESP=$(curl -s -X POST "$API/d1/database" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            -d "{\"name\": \"$DB_NAME\"}")
+          CREATE_SUCCESS=$(echo "$CREATE_RESP" | jq -r '.success')
+          ERROR_CODE=$(echo "$CREATE_RESP" | jq -r '.errors[0].code // empty')
 
-          DB_ID=$(echo "$EXISTING" | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .id' | head -1)
-
-          if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
-            CREATE_RESULT=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"name\": \"$DB_NAME\"}")
-            DB_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
+          if [[ "$CREATE_SUCCESS" == "true" ]]; then
             echo "✅ D1 数据库已创建"
+          elif [[ "$ERROR_CODE" == "7502" ]]; then
+            echo "✅ D1 数据库已存在，复用"
           else
-            echo "✅ 复用已有 D1 数据库"
+            echo "❌ D1 创建失败"
+            echo "$CREATE_RESP" | jq -r '.errors[0].message'
+            exit 1
+          fi
+
+          # 查询数据库 ID
+          DB_ID=$(curl -s -X GET "$API/d1/database?per_page=1000" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .uuid')
+
+          if [[ -z "$DB_ID" ]] || [[ "$DB_ID" == "null" ]]; then
+            echo "❌ 无法获取 D1 数据库 ID"
+            exit 1
           fi
 
           echo "::add-mask::${DB_ID}"
           echo "db_id=$DB_ID" >> "$GITHUB_OUTPUT"
+          echo "✅ D1 数据库 ID 已获取"
 
-      # ==================== 创建/获取 KV 命名空间 ====================
+      - name: Init D1 Schema
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
 
-      - name: Setup KV Namespace
+          INIT_SQL=$(cat worker/drizzle/0000_init.sql)
+
+          RESP=$(curl -s -X POST "$API/d1/database/${{ steps.d1.outputs.db_id }}/query" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg sql "$INIT_SQL" '{sql: $sql, params: []}')")
+
+          if echo "$RESP" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✅ D1 Schema 初始化完成"
+          else
+            echo "❌ D1 Schema 初始化失败"
+            echo "$RESP" | jq -r '.errors[0].message'
+            exit 1
+          fi
+
+      # ==================== 创建 KV 命名空间 ====================
+
+      - name: Create KV Namespace
         id: kv
         run: |
-          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           KV_NAME="fiammetta-proxy"
 
-          EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+          # 查找已有
+          KV_ID=$(curl -s -X GET "$API/storage/kv/namespaces" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
+            | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
 
-          KV_ID=$(echo "$EXISTING" | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
-
-          if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
-            CREATE_RESULT=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+          if [[ -n "$KV_ID" ]] && [[ "$KV_ID" != "null" ]]; then
+            echo "✅ 复用已有 KV 命名空间"
+          else
+            # 创建
+            CREATE_RESP=$(curl -s -X POST "$API/storage/kv/namespaces" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"title\": \"$KV_NAME\"}")
-            KV_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
+            KV_ID=$(echo "$CREATE_RESP" | jq -r '.result.id')
+
+            if [[ -z "$KV_ID" ]] || [[ "$KV_ID" == "null" ]]; then
+              echo "❌ KV 创建失败"
+              echo "$CREATE_RESP" | jq -r '.errors[0].message'
+              exit 1
+            fi
             echo "✅ KV 命名空间已创建"
-          else
-            echo "✅ 复用已有 KV 命名空间"
           fi
 
           echo "::add-mask::${KV_ID}"
           echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
 
-      # ==================== 更新 wrangler 配置 ====================
+      # ==================== 更新 wrangler.toml 占位符 ====================
 
       - name: Update Wrangler Configs
         run: |
@@ -155,23 +149,13 @@ jobs:
 
           echo "✅ Wrangler 配置已更新"
 
-      # ==================== 安装依赖 ====================
+      # ==================== 安装依赖 & 构建 ====================
 
       - name: Install Worker Dependencies
         run: cd worker && npm ci --legacy-peer-deps
 
       - name: Install Frontend Dependencies
         run: cd frontend && npm ci
-
-      # ==================== 初始化数据库 Schema ====================
-
-      - name: Init D1 Schema
-        run: |
-          cd worker
-          npx wrangler d1 migrations apply fiammetta-proxy --remote
-          echo "✅ D1 Schema 增量同步完成"
-
-      # ==================== 构建 ====================
 
       - name: Build Frontend
         run: cd frontend && npm run build
@@ -196,51 +180,31 @@ jobs:
 
       - name: Configure Pages Bindings
         run: |
-          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           DB_ID="${{ steps.d1.outputs.db_id }}"
           KV_ID="${{ steps.kv.outputs.kv_id }}"
 
           # D1 绑定
-          BIND_RESULT=$(curl -s -X PATCH \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
+          BIND_RESP=$(curl -s -X PATCH "$API/pages/projects/fiammetta-watcher" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"deployment_configs\": {
-                \"production\": {
-                  \"d1_databases\": {
-                    \"DB\": { \"database_id\": \"$DB_ID\" }
-                  }
-                }
-              }
-            }")
-          if echo "$BIND_RESULT" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✅ D1 绑定配置成功"
+            -d "{\"deployment_configs\":{\"production\":{\"d1_databases\":{\"DB\":{\"database_id\":\"$DB_ID\"}}}}}")
+          if echo "$BIND_RESP" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✅ D1 绑定成功"
           else
-            echo "❌ D1 绑定配置失败"
-            echo "$BIND_RESULT" | jq -r '.errors' 2>/dev/null
+            echo "❌ D1 绑定失败"
             exit 1
           fi
 
           # KV 绑定
-          BIND_RESULT=$(curl -s -X PATCH \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
+          BIND_RESP=$(curl -s -X PATCH "$API/pages/projects/fiammetta-watcher" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"deployment_configs\": {
-                \"production\": {
-                  \"kv_namespaces\": {
-                    \"KV\": { \"namespace_id\": \"$KV_ID\" }
-                  }
-                }
-              }
-            }")
-          if echo "$BIND_RESULT" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✅ KV 绑定配置成功"
+            -d "{\"deployment_configs\":{\"production\":{\"kv_namespaces\":{\"KV\":{\"namespace_id\":\"$KV_ID\"}}}}}")
+          if echo "$BIND_RESP" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✅ KV 绑定成功"
           else
-            echo "❌ KV 绑定配置失败"
-            echo "$BIND_RESULT" | jq -r '.errors' 2>/dev/null
+            echo "❌ KV 绑定失败"
             exit 1
           fi
 
