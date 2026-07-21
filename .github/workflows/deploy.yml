@@ -154,10 +154,8 @@ jobs:
       - name: Init D1 Schema
         run: |
           cd worker
-          CLOUDFLARE_ACCOUNT_ID="${{ steps.account.outputs.account_id }}" \
-          CLOUDFLARE_DATABASE_ID="${{ steps.d1.outputs.db_id }}" \
-          npx --no-install drizzle-kit push
-          echo "✅ D1 Schema 同步完成"
+          npx wrangler d1 migrations apply fiammetta-proxy --remote --yes
+          echo "✅ D1 Schema 增量同步完成"
 
       # ==================== 更新 wrangler 配置 ====================
 

@@ -12,6 +12,7 @@ port = 8787
 binding = "DB"
 database_name = "fiammetta-proxy"
 database_id = "<YOUR_D1_DATABASE_ID>"  # 部署时替换
+migrations_dir = "drizzle"
 
 # KV 命名空间绑定（速率限制、缓存、熔断器状态）
 [[kv_namespaces]]
