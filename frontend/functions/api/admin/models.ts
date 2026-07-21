@@ -10,8 +10,8 @@ interface Env {
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { modelMaps, platforms } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { modelMaps, platforms } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
 
   const rows = await db.select({
@@ -28,8 +28,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { modelMaps } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { modelMaps } = await import("../../lib/schema");
 
   let body: { alias?: string; targetModel?: string; platformId?: string };
   try {

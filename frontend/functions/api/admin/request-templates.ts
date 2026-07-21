@@ -7,8 +7,8 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; KV: KVNamespace; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { configs } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { configs } = await import("../../lib/schema");
   const { eq: eqFn } = await import("drizzle-orm");
 
   const config = await db.select().from(configs).where(eqFn(configs.key, "system:request_templates")).get();
@@ -17,9 +17,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
   const env = (context.data as { env?: Env }).env;
-  const { configs } = await import("../../../lib/schema");
+  const { configs } = await import("../../lib/schema");
   const { eq: eqFn } = await import("drizzle-orm");
 
   let body: { id?: string; name: string; description: string; endpoint: string; mergeBody: Record<string, unknown>; enabled: boolean };
@@ -56,9 +56,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
   const env = (context.data as { env?: Env }).env;
-  const { configs } = await import("../../../lib/schema");
+  const { configs } = await import("../../lib/schema");
   const { eq: eqFn } = await import("drizzle-orm");
 
   let body: { id?: string };

@@ -11,7 +11,7 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
   const url = new URL(context.request.url);
   const type = url.searchParams.get("type") || "requests";
   const page = parseInt(url.searchParams.get("page") || "1");
@@ -19,7 +19,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const offset = (page - 1) * pageSize;
 
   if (type === "events") {
-    const { systemEvents } = await import("../../../lib/schema");
+    const { systemEvents } = await import("../../lib/schema");
     const { desc } = await import("drizzle-orm");
     const rows = await db.select().from(systemEvents).orderBy(desc(systemEvents.createdAt)).limit(pageSize).offset(offset).all();
     const total = (await db.select({ total: (await import("drizzle-orm")).count() }).from(systemEvents).get())?.total ?? 0;
@@ -27,7 +27,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   if (type === "archive") {
-    const { dailyStats } = await import("../../../lib/schema");
+    const { dailyStats } = await import("../../lib/schema");
     const { desc, eq: eqFn, and, gte: gteFn, lte: lteFn } = await import("drizzle-orm");
     const conditions = [];
     const keyId = url.searchParams.get("keyId");
@@ -47,7 +47,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   // 默认：请求日志
-  const { requestLogs } = await import("../../../lib/schema");
+  const { requestLogs } = await import("../../lib/schema");
   const { desc, eq: eqFn, and, gte: gteFn, lte: lteFn } = await import("drizzle-orm");
   const conditions = [];
   const keyId = url.searchParams.get("keyId");

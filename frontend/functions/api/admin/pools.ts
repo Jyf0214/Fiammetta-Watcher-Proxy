@@ -7,15 +7,15 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { proxyPools } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { proxyPools } = await import("../../lib/schema");
   const rows = await db.select().from(proxyPools).all();
   return Response.json({ success: true, data: rows });
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { proxyPools } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { proxyPools } = await import("../../lib/schema");
 
   let body: { name?: string; enabled?: boolean };
   try {

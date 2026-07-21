@@ -7,9 +7,9 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; KV: KVNamespace; ENVIRONMENT?: string; }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
   const env = (context.data as { env?: Env }).env;
-  const schema = await import("../../../lib/schema");
+  const schema = await import("../../lib/schema");
 
   let body: Record<string, unknown>;
   try {

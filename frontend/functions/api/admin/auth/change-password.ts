@@ -5,7 +5,7 @@
  */
 
 import { type PagesFunction } from "@cloudflare/workers-types";
-import { verifyPassword, hashPassword } from "../../../../lib/auth";
+import { verifyPassword, hashPassword } from "../../lib/auth";
 
 interface Env {
   DB: D1Database;
@@ -16,7 +16,7 @@ interface Env {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const admin = (context.data as { admin: { adminId: string; username: string } }).admin;
-  const db = (context.data as { db: ReturnType<typeof import("../../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
 
   let body: { currentPassword?: string; newPassword?: string };
   try {
@@ -35,7 +35,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // 获取当前密码哈希
-  const { admins } = await import("../../../../lib/schema");
+  const { admins } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
   const adminRow = await db.select().from(admins).where(eq(admins.id, admin.adminId)).get();
 

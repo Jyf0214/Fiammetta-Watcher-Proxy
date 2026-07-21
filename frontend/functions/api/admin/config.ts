@@ -7,8 +7,8 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { configs } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { configs } = await import("../../lib/schema");
 
   const rows = await db.select().from(configs).all();
   const result: Record<string, string> = {};
@@ -19,8 +19,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { configs } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { configs } = await import("../../lib/schema");
   const { eq: eqFn } = await import("drizzle-orm");
 
   let body: Record<string, string>;

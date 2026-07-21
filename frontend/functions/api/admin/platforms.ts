@@ -11,8 +11,8 @@ interface Env {
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { platforms } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { platforms } = await import("../../lib/schema");
   const { asc } = await import("drizzle-orm");
 
   const rows = await db.select().from(platforms).orderBy(asc(platforms.priority)).all();
@@ -28,8 +28,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { platforms } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { platforms } = await import("../../lib/schema");
 
   let body: Record<string, unknown>;
   try {

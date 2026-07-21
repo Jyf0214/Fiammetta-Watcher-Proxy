@@ -7,16 +7,16 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { proxies } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { proxies } = await import("../../lib/schema");
   const { desc } = await import("drizzle-orm");
   const rows = await db.select().from(proxies).orderBy(desc(proxies.createdAt)).all();
   return Response.json({ success: true, data: rows });
 };
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { proxies } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { proxies } = await import("../../lib/schema");
 
   let body: Record<string, unknown>;
   try {

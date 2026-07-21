@@ -5,7 +5,7 @@
  */
 
 import { type PagesFunction } from "@cloudflare/workers-types";
-import { hashPassword } from "../../../../lib/auth";
+import { hashPassword } from "../../lib/auth";
 
 interface Env {
   DB: D1Database;
@@ -16,7 +16,7 @@ interface Env {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const admin = (context.data as { admin: { adminId: string; username: string } }).admin;
-  const db = (context.data as { db: ReturnType<typeof import("../../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
 
   let body: { newPassword?: string };
   try {
@@ -30,7 +30,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return Response.json({ success: false, error: "新密码不能为空" }, { status: 400 });
   }
 
-  const { admins } = await import("../../../../lib/schema");
+  const { admins } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
   const newHash = await hashPassword(newPassword);
   const now = new Date().toISOString();

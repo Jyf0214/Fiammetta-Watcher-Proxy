@@ -9,11 +9,11 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
   const url = new URL(context.request.url);
   const type = url.searchParams.get("type") || "all";
 
-  const schema = await import("../../../lib/schema");
+  const schema = await import("../../lib/schema");
   const result: Record<string, unknown> = {};
 
   if (type === "system" || type === "all") {

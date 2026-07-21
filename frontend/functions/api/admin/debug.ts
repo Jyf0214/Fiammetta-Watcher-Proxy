@@ -11,8 +11,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return Response.json({ success: false, error: "生产环境不可用" }, { status: 403 });
   }
 
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { platforms, apiKeys, admins } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { platforms, apiKeys, admins } = await import("../../lib/schema");
   const { count } = await import("drizzle-orm");
 
   return Response.json({

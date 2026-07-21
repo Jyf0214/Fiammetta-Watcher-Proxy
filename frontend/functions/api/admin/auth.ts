@@ -6,7 +6,7 @@
  */
 
 import { type PagesFunction } from "@cloudflare/workers-types";
-import { verifyPassword, generateToken, setAuthCookie } from "../../../lib/auth";
+import { verifyPassword, generateToken, setAuthCookie } from "../../lib/auth";
 
 interface Env {
   DB: D1Database;
@@ -19,7 +19,7 @@ interface Env {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { env } = context;
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
 
   let body: { username?: string; password?: string };
   try {
@@ -46,7 +46,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // 验证密码 — 从 DB 读取密码哈希进行比对
-  const { admins } = await import("../../../lib/schema");
+  const { admins } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
   const admin = await db.select().from(admins).where(eq(admins.username, username)).get();
 

@@ -7,8 +7,8 @@ import { type PagesFunction } from "@cloudflare/workers-types";
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../lib/db").createDb> }).db;
-  const { auditLogs, admins } = await import("../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { auditLogs, admins } = await import("../../lib/schema");
   const { desc, eq: eqFn } = await import("drizzle-orm");
   const url = new URL(context.request.url);
   const page = parseInt(url.searchParams.get("page") || "1");

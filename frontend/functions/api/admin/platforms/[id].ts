@@ -11,8 +11,8 @@ interface Env {
 }
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../../lib/db").createDb> }).db;
-  const { platforms } = await import("../../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { platforms } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
   const id = (context.params as { id: string }).id;
 
@@ -49,8 +49,8 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
-  const db = (context.data as { db: ReturnType<typeof import("../../../../lib/db").createDb> }).db;
-  const { platforms } = await import("../../../../lib/schema");
+  const db = (context.data as { db: ReturnType<typeof import("../../lib/db").createDb> }).db;
+  const { platforms } = await import("../../lib/schema");
   const { eq } = await import("drizzle-orm");
   const id = (context.params as { id: string }).id;
 
