@@ -46,6 +46,8 @@ jobs:
 
       - name: Create D1 Database
         id: d1
+        env:
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
         run: |
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           DB_NAME="fiammetta-proxy"
@@ -83,6 +85,8 @@ jobs:
           echo "✅ D1 数据库 ID 已获取"
 
       - name: Init D1 Schema
+        env:
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
         run: |
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
 
@@ -105,6 +109,8 @@ jobs:
 
       - name: Create KV Namespace
         id: kv
+        env:
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
         run: |
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           KV_NAME="fiammetta-proxy"
@@ -179,6 +185,8 @@ jobs:
       # ==================== 配置 Pages 绑定 ====================
 
       - name: Configure Pages Bindings
+        env:
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
         run: |
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
           DB_ID="${{ steps.d1.outputs.db_id }}"
