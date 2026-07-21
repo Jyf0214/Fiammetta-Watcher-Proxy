@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
 jobs:
   deploy:
@@ -27,7 +27,7 @@ jobs:
         id: account
         run: |
           ACCOUNTS=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
           ACCOUNT_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].id')
           if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" = "null" ]; then
@@ -47,14 +47,14 @@ jobs:
           DB_NAME="fiammetta-proxy"
 
           EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
 
           DB_ID=$(echo "$EXISTING" | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .id' | head -1)
 
           if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
             CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
-              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"name\": \"$DB_NAME\"}")
             DB_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
@@ -75,14 +75,14 @@ jobs:
           KV_NAME="fiammetta-proxy"
 
           EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
 
           KV_ID=$(echo "$EXISTING" | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
 
           if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
             CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
-              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"title\": \"$KV_NAME\"}")
             KV_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
@@ -164,7 +164,7 @@ jobs:
           # D1 绑定
           BIND_RESULT=$(curl -sf -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{
               \"deployment_configs\": {
@@ -186,7 +186,7 @@ jobs:
           # KV 绑定
           BIND_RESULT=$(curl -sf -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{
               \"deployment_configs\": {
