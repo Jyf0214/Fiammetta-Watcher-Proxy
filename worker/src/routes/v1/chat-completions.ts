@@ -17,7 +17,8 @@ import { recordSuccess, recordFailure } from "../../lib/circuit-breaker";
 import { sanitizeUpstreamError } from "../../lib/proxy-handler";
 import { applyRequestTemplates } from "../../lib/request-templates";
 import { apiKeys, requestLogs } from "../../db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { recordPlatformTokens, recordApiKeyTokens } from "../../lib/rate-limiter";
 
 interface ChatCompletionRequest {
   model: string;
@@ -104,7 +105,8 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
   if (!rateResult.allowed) {
     return c.json(
       { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
     );
   }
 
@@ -115,7 +117,8 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
   if (!apiKeyRateResult.allowed) {
     return c.json(
       { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
     );
   }
 
@@ -240,18 +243,18 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
           try {
             const effectiveTokenLimit = apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
             if (effectiveTokenLimit !== null) {
-              const current = await db.select({ usedTokens: apiKeys.usedTokens })
-                .from(apiKeys).where(eq(apiKeys.id, apiKey.id)).get();
-              const newUsed = (current?.usedTokens ?? 0) + totalTokens;
-              await db.update(apiKeys).set({ usedTokens: newUsed })
-                .where(eq(apiKeys.id, apiKey.id));
+              const result = await db.update(apiKeys)
+                .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
+                .where(eq(apiKeys.id, apiKey.id))
+                .returning({ usedTokens: apiKeys.usedTokens });
+              const newUsed = result[0]?.usedTokens ?? 0;
               if (newUsed >= effectiveTokenLimit) {
                 await db.update(apiKeys).set({ status: "disabled" })
                   .where(eq(apiKeys.id, apiKey.id));
               }
             } else {
               await db.update(apiKeys)
-                .set({ usedTokens: (apiKey.usedTokens ?? 0) + totalTokens })
+                .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
                 .where(eq(apiKeys.id, apiKey.id));
             }
 
@@ -269,6 +272,18 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
               isError: false,
               createdAt: new Date().toISOString(),
             }).catch(() => {});
+
+            // 追溯性 TPM 检查：流式响应已完成，记录实际 token 用量
+            if (totalTokens > 0) {
+              const tpmResult = await recordPlatformTokens(c.env, route.platform.id, route.platform.tpmLimit, totalTokens);
+              if (!tpmResult.allowed) {
+                console.warn(`[chat/completions] 流式响应 平台 ${route.platform.id} TPM 已超限`, { totalTokens, tpmLimit: route.platform.tpmLimit });
+              }
+              const apiKeyTpmResult = await recordApiKeyTokens(c.env, apiKey.id, effectiveTpmLimit, totalTokens);
+              if (!apiKeyTpmResult.allowed) {
+                console.warn(`[chat/completions] 流式响应 API Key ${apiKey.id} TPM 已超限`, { totalTokens, tpmLimit: effectiveTpmLimit });
+              }
+            }
           } catch (dbError) {
             console.error("[chat/completions] flush 阶段数据库操作失败:", dbError);
           }
@@ -303,18 +318,18 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
     try {
       const effectiveTokenLimit = apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
       if (effectiveTokenLimit !== null) {
-        const current = await db.select({ usedTokens: apiKeys.usedTokens })
-          .from(apiKeys).where(eq(apiKeys.id, apiKey.id)).get();
-        const newUsed = (current?.usedTokens ?? 0) + totalTokens;
-        await db.update(apiKeys).set({ usedTokens: newUsed })
-          .where(eq(apiKeys.id, apiKey.id));
+        const result = await db.update(apiKeys)
+          .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
+          .where(eq(apiKeys.id, apiKey.id))
+          .returning({ usedTokens: apiKeys.usedTokens });
+        const newUsed = result[0]?.usedTokens ?? 0;
         if (newUsed >= effectiveTokenLimit) {
           await db.update(apiKeys).set({ status: "disabled" })
             .where(eq(apiKeys.id, apiKey.id));
         }
       } else {
         await db.update(apiKeys)
-          .set({ usedTokens: (apiKey.usedTokens ?? 0) + totalTokens })
+          .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
           .where(eq(apiKeys.id, apiKey.id));
       }
 
@@ -332,6 +347,18 @@ export async function chatCompletions(c: Context<{ Bindings: Env }>) {
         isError: false,
         createdAt: new Date().toISOString(),
       }).catch(() => {});
+
+      // 追溯性 TPM 检查：非流式响应已完成，记录实际 token 用量
+      if (totalTokens > 0) {
+        const tpmResult = await recordPlatformTokens(c.env, route.platform.id, route.platform.tpmLimit, totalTokens);
+        if (!tpmResult.allowed) {
+          console.warn(`[chat/completions] 非流式 平台 ${route.platform.id} TPM 已超限`, { totalTokens, tpmLimit: route.platform.tpmLimit });
+        }
+        const apiKeyTpmResult = await recordApiKeyTokens(c.env, apiKey.id, effectiveTpmLimit, totalTokens);
+        if (!apiKeyTpmResult.allowed) {
+          console.warn(`[chat/completions] 非流式 API Key ${apiKey.id} TPM 已超限`, { totalTokens, tpmLimit: effectiveTpmLimit });
+        }
+      }
     } catch (txErr) {
       console.error("[chat/completions] token扣减失败:", txErr);
     }

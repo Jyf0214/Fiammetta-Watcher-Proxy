@@ -1,19 +1,18 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp
 .pnp.js
 
 # testing
-/coverage
+coverage/
 
-# next.js
-/.next/
-/out/
+# next.js (旧版本遗留)
+.next/
+out/
 
 # production
-/build
+build/
+dist/
 
 # misc
 .DS_Store
@@ -29,21 +28,18 @@ yarn-error.log*
 .env*
 !.env.example
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+tsconfig.tsbuildinfo
 
-# prisma
-prisma/*.db
-prisma/migrations/
+# wrangler
+.wrangler/
+.dev.vars
 
-# docker
-docker-compose.override.yml
+# Drizzle
+local.db
 
-# data directory (contains sensitive config like db-config.json)
+# data directory (contains sensitive config)
 data/
 
 # IDE
@@ -54,3 +50,17 @@ data/
 
 # Qwen Code
 .qwen/
+
+# 原 Next.js 项目文件（本地保留，不提交到 Cloudflare 分支）
+src/
+prisma/
+tests/
+next-env.d.ts
+middleware.ts
+vitest.config.mjs
+
+# 原项目遗留文件
+docs/
+home/
+tmp/
+CODE_REVIEW_REPORT.md

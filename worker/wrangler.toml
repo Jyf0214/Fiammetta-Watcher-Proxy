@@ -1,0 +1,34 @@
+name = "fiammetta-watcher"
+main = "src/index.ts"
+compatibility_date = "2025-07-21"
+compatibility_flags = ["nodejs_compat"]
+
+# 开发环境配置
+[dev]
+port = 8787
+
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "fiammetta-proxy"
+database_id = "<YOUR_D1_DATABASE_ID>"  # 部署时替换
+
+# KV 命名空间绑定（速率限制、缓存、熔断器状态）
+[[kv_namespaces]]
+binding = "KV"
+id = "<YOUR_KV_NAMESPACE_ID>"  # 部署时替换
+
+# 环境变量（敏感信息通过 Cloudflare Dashboard 设置）
+[vars]
+ENVIRONMENT = "production"
+
+# Cron Triggers — 定时任务
+# 每小时: API Key 用量重置检查
+# 每10分钟: 平台模型自动发现
+# 每天凌晨3点: 日志归档
+[triggers]
+crons = [
+  "0 */1 * * *",
+  "*/10 * * * *",
+  "0 3 * * *",
+]

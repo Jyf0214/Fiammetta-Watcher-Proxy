@@ -12,7 +12,9 @@ import { validateApiKey } from "../../lib/auth";
 import { routeRequest } from "../../lib/router";
 import { getNextKey } from "../../lib/platform-keys";
 import { extractForwardableHeaders } from "../../lib/forward-headers";
-import { checkPlatformRateLimit } from "../../lib/rate-limiter";
+import { checkPlatformRateLimit, checkKeyRateLimit } from "../../lib/rate-limiter";
+import { detectModelType, MODEL_TYPE_NAMES } from "../../lib/model-type";
+import type { ModelType } from "../../lib/model-type";
 import { recordSuccess, recordFailure } from "../../lib/circuit-breaker";
 import { sanitizeUpstreamError } from "../../lib/proxy-handler";
 import { requestLogs } from "../../db/schema";
@@ -108,6 +110,21 @@ async function handleJsonAudio(
     );
   }
 
+  // 3.1 模型类型校验 — 仅允许 audio 类型
+  const allowedModelTypes: ModelType[] = ["audio"];
+  const modelType = detectModelType(body.model);
+  if (!allowedModelTypes.includes(modelType)) {
+    const allowedNames = allowedModelTypes.map(t => MODEL_TYPE_NAMES[t]).join("、");
+    return c.json({
+      error: {
+        message: `模型 '${body.model}' 是${MODEL_TYPE_NAMES[modelType]}模型，不支持此端点。请使用对应类型的端点（支持：${allowedNames}）`,
+        type: "invalid_request_error",
+        param: "model",
+        code: "model_not_supported",
+      }
+    }, 400);
+  }
+
   // 4. 速率限制检查
   const rateResult = await checkPlatformRateLimit(
     c.env, route.platform.id, route.platform.rpmLimit, route.platform.tpmLimit
@@ -115,7 +132,20 @@ async function handleJsonAudio(
   if (!rateResult.allowed) {
     return c.json(
       { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
+    );
+  }
+
+  // 4.1 API Key 级速率限制
+  const effectiveRpmLimit = apiKey.rpmLimit ?? apiKey.plan?.rpmLimit ?? null;
+  const effectiveTpmLimit = apiKey.tpmLimit ?? apiKey.plan?.tpmLimit ?? null;
+  const apiKeyRateResult = await checkKeyRateLimit(c.env, apiKey.id, effectiveRpmLimit, effectiveTpmLimit);
+  if (!apiKeyRateResult.allowed) {
+    return c.json(
+      { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
     );
   }
 
@@ -278,6 +308,21 @@ async function handleMultipartAudio(
     );
   }
 
+  // 3.1 模型类型校验 — 仅允许 audio 类型
+  const allowedModelTypes: ModelType[] = ["audio"];
+  const modelType = detectModelType(model);
+  if (!allowedModelTypes.includes(modelType)) {
+    const allowedNames = allowedModelTypes.map(t => MODEL_TYPE_NAMES[t]).join("、");
+    return c.json({
+      error: {
+        message: `模型 '${model}' 是${MODEL_TYPE_NAMES[modelType]}模型，不支持此端点。请使用对应类型的端点（支持：${allowedNames}）`,
+        type: "invalid_request_error",
+        param: "model",
+        code: "model_not_supported",
+      }
+    }, 400);
+  }
+
   // 4. 速率限制检查
   const rateResult = await checkPlatformRateLimit(
     c.env, route.platform.id, route.platform.rpmLimit, route.platform.tpmLimit
@@ -285,7 +330,20 @@ async function handleMultipartAudio(
   if (!rateResult.allowed) {
     return c.json(
       { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
+    );
+  }
+
+  // 4.1 API Key 级速率限制
+  const effectiveRpmLimit = apiKey.rpmLimit ?? apiKey.plan?.rpmLimit ?? null;
+  const effectiveTpmLimit = apiKey.tpmLimit ?? apiKey.plan?.tpmLimit ?? null;
+  const apiKeyRateResult = await checkKeyRateLimit(c.env, apiKey.id, effectiveRpmLimit, effectiveTpmLimit);
+  if (!apiKeyRateResult.allowed) {
+    return c.json(
+      { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
     );
   }
 

@@ -1,0 +1,25 @@
+{
+  "name": "fiammetta-watcher-worker",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 migrations apply fiammetta-proxy",
+    "db:init:local": "wrangler d1 migrations apply fiammetta-proxy --local",
+    "db:studio": "wrangler d1 execute fiammetta-proxy --command 'SELECT * FROM admins'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.2",
+    "hono": "^4.8.3",
+    "jose": "^6.0.11"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250710.0",
+    "drizzle-kit": "^0.31.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.28.0"
+  }
+}

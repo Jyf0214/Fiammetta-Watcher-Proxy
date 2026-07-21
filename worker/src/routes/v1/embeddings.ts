@@ -14,11 +14,14 @@ import { routeRequest, isAutoModelRequest, freezeAutoModel } from "../../lib/rou
 import { getNextKey } from "../../lib/platform-keys";
 import { extractForwardableHeaders } from "../../lib/forward-headers";
 import { checkPlatformRateLimit, checkKeyRateLimit } from "../../lib/rate-limiter";
+import { detectModelType, MODEL_TYPE_NAMES } from "../../lib/model-type";
+import type { ModelType } from "../../lib/model-type";
 import { recordSuccess, recordFailure } from "../../lib/circuit-breaker";
 import { sanitizeUpstreamError } from "../../lib/proxy-handler";
 import { applyRequestTemplates } from "../../lib/request-templates";
 import { apiKeys, requestLogs } from "../../db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { recordPlatformTokens, recordApiKeyTokens } from "../../lib/rate-limiter";
 
 interface EmbeddingRequest {
   model: string;
@@ -81,6 +84,21 @@ export async function embeddings(c: Context<{ Bindings: Env }>) {
     );
   }
 
+  // 3.1 模型类型校验 — 仅允许 embedding 类型
+  const allowedModelTypes: ModelType[] = ["embedding"];
+  const modelType = detectModelType(body.model);
+  if (!allowedModelTypes.includes(modelType)) {
+    const allowedNames = allowedModelTypes.map(t => MODEL_TYPE_NAMES[t]).join("、");
+    return c.json({
+      error: {
+        message: `模型 '${body.model}' 是${MODEL_TYPE_NAMES[modelType]}模型，不支持此端点。请使用对应类型的端点（支持：${allowedNames}）`,
+        type: "invalid_request_error",
+        param: "model",
+        code: "model_not_supported",
+      }
+    }, 400);
+  }
+
   // 4. 速率限制检查
   const rateResult = await checkPlatformRateLimit(
     c.env, route.platform.id, route.platform.rpmLimit, route.platform.tpmLimit
@@ -88,7 +106,8 @@ export async function embeddings(c: Context<{ Bindings: Env }>) {
   if (!rateResult.allowed) {
     return c.json(
       { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
     );
   }
 
@@ -99,7 +118,8 @@ export async function embeddings(c: Context<{ Bindings: Env }>) {
   if (!apiKeyRateResult.allowed) {
     return c.json(
       { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
     );
   }
 
@@ -184,18 +204,18 @@ export async function embeddings(c: Context<{ Bindings: Env }>) {
     try {
       const effectiveTokenLimit = apiKey.tokenLimit ?? apiKey.plan?.tokenQuota ?? null;
       if (effectiveTokenLimit !== null) {
-        const current = await db.select({ usedTokens: apiKeys.usedTokens })
-          .from(apiKeys).where(eq(apiKeys.id, apiKey.id)).get();
-        const newUsed = (current?.usedTokens ?? 0) + totalTokens;
-        await db.update(apiKeys).set({ usedTokens: newUsed })
-          .where(eq(apiKeys.id, apiKey.id));
+        const result = await db.update(apiKeys)
+          .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
+          .where(eq(apiKeys.id, apiKey.id))
+          .returning({ usedTokens: apiKeys.usedTokens });
+        const newUsed = result[0]?.usedTokens ?? 0;
         if (newUsed >= effectiveTokenLimit) {
           await db.update(apiKeys).set({ status: "disabled" })
             .where(eq(apiKeys.id, apiKey.id));
         }
       } else {
         await db.update(apiKeys)
-          .set({ usedTokens: (apiKey.usedTokens ?? 0) + totalTokens })
+          .set({ usedTokens: sql`COALESCE(${apiKeys.usedTokens}, 0) + ${totalTokens}` })
           .where(eq(apiKeys.id, apiKey.id));
       }
 
@@ -213,6 +233,18 @@ export async function embeddings(c: Context<{ Bindings: Env }>) {
         isError: false,
         createdAt: new Date().toISOString(),
       }).catch(() => {});
+
+      // 追溯性 TPM 检查：embeddings 完成，记录实际 token 用量
+      if (totalTokens > 0) {
+        const tpmResult = await recordPlatformTokens(c.env, route.platform.id, route.platform.tpmLimit, totalTokens);
+        if (!tpmResult.allowed) {
+          console.warn(`[embeddings] 平台 ${route.platform.id} TPM 已超限`, { totalTokens, tpmLimit: route.platform.tpmLimit });
+        }
+        const apiKeyTpmResult = await recordApiKeyTokens(c.env, apiKey.id, effectiveTpmLimit, totalTokens);
+        if (!apiKeyTpmResult.allowed) {
+          console.warn(`[embeddings] API Key ${apiKey.id} TPM 已超限`, { totalTokens, tpmLimit: effectiveTpmLimit });
+        }
+      }
     } catch (txErr) {
       console.error("[embeddings] token扣减失败:", txErr);
     }

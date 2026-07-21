@@ -14,6 +14,8 @@ import { routeRequest, isAutoModelRequest, freezeAutoModel } from "../../lib/rou
 import { getNextKey } from "../../lib/platform-keys";
 import { extractForwardableHeaders } from "../../lib/forward-headers";
 import { checkPlatformRateLimit, checkKeyRateLimit } from "../../lib/rate-limiter";
+import { detectModelType, MODEL_TYPE_NAMES } from "../../lib/model-type";
+import type { ModelType } from "../../lib/model-type";
 import { recordSuccess, recordFailure } from "../../lib/circuit-breaker";
 import { sanitizeUpstreamError } from "../../lib/proxy-handler";
 import { requestLogs } from "../../db/schema";
@@ -75,6 +77,21 @@ export async function images(c: Context<{ Bindings: Env }>) {
       );
     }
 
+    // 4.1 模型类型校验 — 仅允许 image 类型
+    const allowedModelTypes: ModelType[] = ["image"];
+    const modelType = detectModelType(bodyModel);
+    if (!allowedModelTypes.includes(modelType)) {
+      const allowedNames = allowedModelTypes.map(t => MODEL_TYPE_NAMES[t]).join("、");
+      return c.json({
+        error: {
+          message: `模型 '${bodyModel}' 是${MODEL_TYPE_NAMES[modelType]}模型，不支持此端点。请使用对应类型的端点（支持：${allowedNames}）`,
+          type: "invalid_request_error",
+          param: "model",
+          code: "model_not_supported",
+        }
+      }, 400);
+    }
+
     // 5. 速率限制检查
     const rateResult = await checkPlatformRateLimit(
       c.env, route.platform.id, route.platform.rpmLimit, route.platform.tpmLimit
@@ -82,7 +99,8 @@ export async function images(c: Context<{ Bindings: Env }>) {
     if (!rateResult.allowed) {
       return c.json(
         { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-        429
+        429,
+        { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
       );
     }
 
@@ -93,7 +111,8 @@ export async function images(c: Context<{ Bindings: Env }>) {
     if (!apiKeyRateResult.allowed) {
       return c.json(
         { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-        429
+        429,
+        { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
       );
     }
 
@@ -272,6 +291,21 @@ export async function images(c: Context<{ Bindings: Env }>) {
     );
   }
 
+  // 4.1 模型类型校验 — 仅允许 image 类型
+  const allowedModelTypes: ModelType[] = ["image"];
+  const modelType = detectModelType(bodyModel);
+  if (!allowedModelTypes.includes(modelType)) {
+    const allowedNames = allowedModelTypes.map(t => MODEL_TYPE_NAMES[t]).join("、");
+    return c.json({
+      error: {
+        message: `模型 '${bodyModel}' 是${MODEL_TYPE_NAMES[modelType]}模型，不支持此端点。请使用对应类型的端点（支持：${allowedNames}）`,
+        type: "invalid_request_error",
+        param: "model",
+        code: "model_not_supported",
+      }
+    }, 400);
+  }
+
   // 5. 速率限制检查
   const rateResult = await checkPlatformRateLimit(
     c.env, route.platform.id, route.platform.rpmLimit, route.platform.tpmLimit
@@ -279,7 +313,8 @@ export async function images(c: Context<{ Bindings: Env }>) {
   if (!rateResult.allowed) {
     return c.json(
       { error: { message: "请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(rateResult.resetAt / 1000)) }
     );
   }
 
@@ -290,7 +325,8 @@ export async function images(c: Context<{ Bindings: Env }>) {
   if (!apiKeyRateResult.allowed) {
     return c.json(
       { error: { message: "API Key 请求速率超过限制，请稍后重试", type: "rate_limit_error" } },
-      429
+      429,
+      { "X-RateLimit-Reset": String(Math.ceil(apiKeyRateResult.resetAt / 1000)) }
     );
   }
 
