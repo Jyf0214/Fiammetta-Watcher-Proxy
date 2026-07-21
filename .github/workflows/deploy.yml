@@ -21,17 +21,39 @@ jobs:
           node-version: 20
           cache: "npm"
 
+      # ==================== 验证 Cloudflare Token ====================
+
+      - name: Verify CF Token
+        run: |
+          RESP=$(curl -s -w "\n%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json")
+          HTTP_CODE=$(echo "$RESP" | tail -1)
+          BODY=$(echo "$RESP" | sed '$d')
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY" | jq -r '.errors[]?.message' 2>/dev/null
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Token 验证失败"
+            exit 1
+          fi
+          echo "✅ Token 有效"
+
       # ==================== 获取 Cloudflare 账户 ID ====================
 
       - name: Get Account ID
         id: account
         run: |
-          ACCOUNTS=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts" \
+          ACCOUNTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
           ACCOUNT_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].id')
+          ERRORS=$(echo "$ACCOUNTS" | jq -r '.errors[]?.message' 2>/dev/null)
+          if [ -n "$ERRORS" ]; then
+            echo "❌ API 错误: $ERRORS"
+            exit 1
+          fi
           if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" = "null" ]; then
-            echo "❌ 无法获取 Cloudflare 账户 ID，请检查 CF_API_TOKEN"
+            echo "❌ 无法获取账户 ID"
             exit 1
           fi
           echo "::add-mask::${ACCOUNT_ID}"
@@ -46,14 +68,14 @@ jobs:
           ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
           DB_NAME="fiammetta-proxy"
 
-          EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
+          EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
 
           DB_ID=$(echo "$EXISTING" | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .id' | head -1)
 
           if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
-            CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
+            CREATE_RESULT=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"name\": \"$DB_NAME\"}")
@@ -74,14 +96,14 @@ jobs:
           ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
           KV_NAME="fiammetta-proxy"
 
-          EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+          EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
 
           KV_ID=$(echo "$EXISTING" | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
 
           if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
-            CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+            CREATE_RESULT=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"title\": \"$KV_NAME\"}")
@@ -162,7 +184,7 @@ jobs:
           KV_ID="${{ steps.kv.outputs.kv_id }}"
 
           # D1 绑定
-          BIND_RESULT=$(curl -sf -X PATCH \
+          BIND_RESULT=$(curl -s -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
@@ -184,7 +206,7 @@ jobs:
           fi
 
           # KV 绑定
-          BIND_RESULT=$(curl -sf -X PATCH \
+          BIND_RESULT=$(curl -s -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" \
