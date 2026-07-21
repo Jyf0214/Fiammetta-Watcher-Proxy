@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250710.0",
+    "@libsql/client": "^0.17.4",
     "drizzle-kit": "^0.31.1",
     "typescript": "^5.8.3",
     "wrangler": "^4.28.0"
