@@ -23,24 +23,13 @@ jobs:
 
       # ==================== 验证 Cloudflare Token ====================
 
-      - name: Debug Token
-        run: |
-          echo "Token length: ${#CLOUDFLARE_API_TOKEN}"
-          echo "Token first8: ${CLOUDFLARE_API_TOKEN:0:8}"
-          echo "Token last4: ${CLOUDFLARE_API_TOKEN: -4}"
-          echo -n "$CLOUDFLARE_API_TOKEN" | xxd | head -3
-
       - name: Verify CF Token
         run: |
-          RESP=$(curl -s -w "\n%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
-          HTTP_CODE=$(echo "$RESP" | tail -1)
-          BODY=$(echo "$RESP" | sed '$d')
-          echo "HTTP $HTTP_CODE"
-          echo "$BODY" | jq -r '.errors[]?.message' 2>/dev/null
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ Token 验证失败"
+            echo "❌ Token 验证失败 (HTTP $HTTP_CODE)，请检查 CLOUDFLARE_API_TOKEN Secret"
             exit 1
           fi
           echo "✅ Token 有效"
