@@ -141,6 +141,14 @@ jobs:
           echo "::add-mask::${KV_ID}"
           echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
 
+      # ==================== 安装依赖 ====================
+
+      - name: Install Worker Dependencies
+        run: cd worker && npm ci
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && npm ci
+
       # ==================== 初始化数据库 Schema ====================
 
       - name: Init D1 Schema
@@ -149,7 +157,7 @@ jobs:
           DB_ID="${{ steps.d1.outputs.db_id }}"
           D1_URL="d1://${{ steps.account.outputs.account_id }}:${CLOUDFLARE_API_TOKEN}@${{ steps.account.outputs.account_id }}.cloudflare-d1.com/${DB_ID}"
 
-          DRIZZLE_DATABASE_URL="$D1_URL" npx drizzle-kit push
+          DRIZZLE_DATABASE_URL="$D1_URL" npx --no-install drizzle-kit push
           echo "✅ D1 Schema 同步完成"
 
       # ==================== 更新 wrangler 配置 ====================
@@ -166,13 +174,7 @@ jobs:
 
           echo "✅ Wrangler 配置已更新"
 
-      # ==================== 安装依赖 & 构建 ====================
-
-      - name: Install Worker Dependencies
-        run: cd worker && npm ci
-
-      - name: Install Frontend Dependencies
-        run: cd frontend && npm ci
+      # ==================== 构建 ====================
 
       - name: Build Frontend
         run: cd frontend && npm run build
