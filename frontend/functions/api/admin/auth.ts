@@ -5,7 +5,7 @@
  * 验证通过后签发 JWT 并设置 HttpOnly Cookie。
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 import { verifyPassword, generateToken, setAuthCookie } from "../../../lib/auth";
 
 interface Env {

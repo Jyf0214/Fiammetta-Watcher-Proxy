@@ -2,7 +2,7 @@
  * GET/PUT /api/admin/config — 系统配置
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

@@ -2,7 +2,7 @@
  * PUT/DELETE /api/admin/pools/[id] — 更新/删除代理池
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

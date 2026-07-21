@@ -7,7 +7,7 @@
  * - keyId（可选，过滤指定 Key）
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

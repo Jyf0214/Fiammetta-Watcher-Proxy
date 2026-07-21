@@ -2,7 +2,7 @@
  * PUT/DELETE /api/admin/models/[id] — 更新/删除模型映射
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env {
   DB: D1Database;

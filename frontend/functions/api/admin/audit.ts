@@ -2,7 +2,7 @@
  * GET /api/admin/audit — 审计日志
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

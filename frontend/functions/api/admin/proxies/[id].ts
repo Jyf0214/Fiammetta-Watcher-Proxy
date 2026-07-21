@@ -2,7 +2,7 @@
  * PUT/DELETE /api/admin/proxies/[id] — 更新/删除代理
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

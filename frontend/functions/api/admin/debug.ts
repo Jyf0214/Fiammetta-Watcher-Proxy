@@ -2,7 +2,7 @@
  * GET /api/admin/debug — 调试诊断（仅非生产环境）
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

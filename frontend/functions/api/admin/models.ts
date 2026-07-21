@@ -2,7 +2,7 @@
  * GET/POST /api/admin/models — 模型映射列表/创建
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env {
   DB: D1Database;

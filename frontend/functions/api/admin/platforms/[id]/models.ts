@@ -2,7 +2,7 @@
  * GET/POST/DELETE /api/admin/platforms/[id]/models — 平台模型管理
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env {
   DB: D1Database;

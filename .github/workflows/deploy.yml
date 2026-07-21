@@ -1,0 +1,247 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [feat/cloudflare-workers]
+  workflow_dispatch:
+
+env:
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      # ==================== 获取 Cloudflare 账户 ID ====================
+
+      - name: Get Account ID
+        id: account
+        run: |
+          ACCOUNTS=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json")
+          ACCOUNT_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].id')
+          if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" = "null" ]; then
+            echo "❌ 无法获取 Cloudflare 账户 ID，请检查 CF_API_TOKEN"
+            exit 1
+          fi
+          echo "::add-mask::${ACCOUNT_ID}"
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "✅ Account ID 已获取"
+
+      # ==================== 创建/获取 D1 数据库 ====================
+
+      - name: Setup D1 Database
+        id: d1
+        run: |
+          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          DB_NAME="fiammetta-proxy"
+
+          EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json")
+
+          DB_ID=$(echo "$EXISTING" | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .id' | head -1)
+
+          if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
+            CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database" \
+              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"$DB_NAME\"}")
+            DB_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
+            echo "✅ D1 数据库已创建"
+          else
+            echo "✅ 复用已有 D1 数据库"
+          fi
+
+          echo "::add-mask::${DB_ID}"
+          echo "db_id=$DB_ID" >> "$GITHUB_OUTPUT"
+
+      # ==================== 创建/获取 KV 命名空间 ====================
+
+      - name: Setup KV Namespace
+        id: kv
+        run: |
+          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          KV_NAME="fiammetta-proxy"
+
+          EXISTING=$(curl -sf -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json")
+
+          KV_ID=$(echo "$EXISTING" | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
+
+          if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
+            CREATE_RESULT=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/storage/kv/namespaces" \
+              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"title\": \"$KV_NAME\"}")
+            KV_ID=$(echo "$CREATE_RESULT" | jq -r '.result.id')
+            echo "✅ KV 命名空间已创建"
+          else
+            echo "✅ 复用已有 KV 命名空间"
+          fi
+
+          echo "::add-mask::${KV_ID}"
+          echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
+
+      # ==================== 初始化数据库 Schema ====================
+
+      - name: Init D1 Schema
+        run: |
+          cd worker
+          DB_ID="${{ steps.d1.outputs.db_id }}"
+          SQL_FILE="drizzle/0000_init.sql"
+
+          if [ ! -f "$SQL_FILE" ]; then
+            echo "❌ 迁移文件不存在: $SQL_FILE"
+            exit 1
+          fi
+
+          npx wrangler d1 execute "$DB_ID" \
+            --file="$SQL_FILE" \
+            --remote
+          echo "✅ D1 Schema 初始化完成"
+
+      # ==================== 更新 wrangler 配置 ====================
+
+      - name: Update Wrangler Configs
+        run: |
+          DB_ID="${{ steps.d1.outputs.db_id }}"
+          KV_ID="${{ steps.kv.outputs.kv_id }}"
+
+          sed -i "s|<YOUR_D1_DATABASE_ID>|$DB_ID|g" worker/wrangler.toml
+          sed -i "s|<YOUR_KV_NAMESPACE_ID>|$KV_ID|g" worker/wrangler.toml
+          sed -i "s|<YOUR_D1_DATABASE_ID>|$DB_ID|g" frontend/wrangler.toml
+          sed -i "s|<YOUR_KV_NAMESPACE_ID>|$KV_ID|g" frontend/wrangler.toml
+
+          echo "✅ Wrangler 配置已更新"
+
+      # ==================== 安装依赖 & 构建 ====================
+
+      - name: Install Worker Dependencies
+        run: cd worker && npm ci
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && npm ci
+
+      - name: Build Frontend
+        run: cd frontend && npm run build
+
+      # ==================== 部署 Worker ====================
+
+      - name: Deploy Worker
+        run: |
+          cd worker
+          npx wrangler deploy
+          echo "✅ Worker 部署完成"
+
+      # ==================== 部署 Pages ====================
+
+      - name: Deploy Pages
+        run: |
+          cd frontend
+          npx wrangler pages deploy dist --project-name=fiammetta-watcher
+          echo "✅ Pages 部署完成"
+
+      # ==================== 配置 Pages 绑定 ====================
+
+      - name: Configure Pages Bindings
+        run: |
+          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          DB_ID="${{ steps.d1.outputs.db_id }}"
+          KV_ID="${{ steps.kv.outputs.kv_id }}"
+
+          # D1 绑定
+          BIND_RESULT=$(curl -sf -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"deployment_configs\": {
+                \"production\": {
+                  \"d1_databases\": {
+                    \"DB\": { \"database_id\": \"$DB_ID\" }
+                  }
+                }
+              }
+            }")
+          if echo "$BIND_RESULT" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✅ D1 绑定配置成功"
+          else
+            echo "❌ D1 绑定配置失败"
+            echo "$BIND_RESULT" | jq -r '.errors' 2>/dev/null
+            exit 1
+          fi
+
+          # KV 绑定
+          BIND_RESULT=$(curl -sf -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/fiammetta-watcher" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"deployment_configs\": {
+                \"production\": {
+                  \"kv_namespaces\": {
+                    \"KV\": { \"namespace_id\": \"$KV_ID\" }
+                  }
+                }
+              }
+            }")
+          if echo "$BIND_RESULT" | jq -e '.success' > /dev/null 2>&1; then
+            echo "✅ KV 绑定配置成功"
+          else
+            echo "❌ KV 绑定配置失败"
+            echo "$BIND_RESULT" | jq -r '.errors' 2>/dev/null
+            exit 1
+          fi
+
+      # ==================== 配置 Pages 环境变量 ====================
+
+      - name: Configure Pages Secrets
+        env:
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          ADMIN_USER="${ADMIN_USERNAME:-admin}"
+
+          if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "❌ 未设置 ADMIN_PASSWORD Secret"
+            exit 1
+          fi
+
+          JWT_SECRET=$(openssl rand -base64 32)
+          echo "::add-mask::${JWT_SECRET}"
+
+          tmp_dir=$(mktemp -d)
+          trap "rm -rf $tmp_dir" EXIT
+
+          echo -n "$ADMIN_USER" > "$tmp_dir/admin_user"
+          echo -n "$ADMIN_PASSWORD" > "$tmp_dir/admin_pass"
+          echo -n "$JWT_SECRET" > "$tmp_dir/jwt_secret"
+
+          npx wrangler pages secret put ADMIN_USERNAME \
+            --project-name=fiammetta-watcher --env=production \
+            < "$tmp_dir/admin_user"
+          npx wrangler pages secret put ADMIN_PASSWORD \
+            --project-name=fiammetta-watcher --env=production \
+            < "$tmp_dir/admin_pass"
+          npx wrangler pages secret put JWT_SECRET \
+            --project-name=fiammetta-watcher --env=production \
+            < "$tmp_dir/jwt_secret"
+
+          echo "✅ Pages 环境变量配置完成"
+
+      # ==================== 完成 ====================
+
+      - name: Done
+        run: echo "🎉 部署完成"

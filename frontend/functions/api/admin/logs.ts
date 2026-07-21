@@ -6,7 +6,7 @@
  * - page, pageSize, keyId, platformId, model, startDate, endDate
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 

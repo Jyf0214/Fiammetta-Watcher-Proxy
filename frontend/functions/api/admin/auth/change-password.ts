@@ -4,7 +4,7 @@
  * 验证旧密码 → 更新密码哈希（存储在 DB 中）
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 import { verifyPassword, hashPassword } from "../../../../lib/auth";
 
 interface Env {

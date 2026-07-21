@@ -2,7 +2,7 @@
  * GET /api/admin/auth — 获取当前管理员信息
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env {
   DB: D1Database;

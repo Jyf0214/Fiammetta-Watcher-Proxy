@@ -1,34 +1,57 @@
 #!/bin/sh
-# Pre-push 钩子：推送前执行构建验证
-# 检查内容：测试 + Prisma 生成 + Next.js 构建
+# Pre-push 钩子：推送前构建验证
+# 检查内容：TypeScript + ESLint + Worker 构建 + Frontend 构建
 
 echo "🚀 [pre-push] 开始构建验证..."
 
-# 1. 运行全部测试（vitest）
-echo "🧪 [pre-push] 运行测试..."
-npx vitest run 2>&1
+# 1. Worker TypeScript 类型检查
+echo "📝 [pre-push] 检查 Worker TypeScript..."
+cd worker && npx tsc --noEmit 2>&1
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] 测试失败，推送被阻止"
+  echo "❌ [pre-push] Worker TypeScript 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] 测试通过"
+cd ..
+echo "✅ [pre-push] Worker TypeScript 通过"
 
-# 2. Prisma Schema 生成
-echo "📦 [pre-push] 运行 Prisma generate..."
-npx prisma generate 2>/dev/null
+# 2. Frontend TypeScript 类型检查
+echo "📝 [pre-push] 检查 Frontend TypeScript..."
+cd frontend && npx tsc --noEmit 2>&1
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] Prisma generate 失败，推送被阻止"
+  echo "❌ [pre-push] Frontend TypeScript 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Prisma generate 通过"
+cd ..
+echo "✅ [pre-push] Frontend TypeScript 通过"
 
-# 3. Next.js 构建
-echo "🔨 [pre-push] 运行 Next.js 构建..."
-npx next build 2>&1 | tail -5
+# 3. Worker ESLint
+echo "🔍 [pre-push] 检查 Worker ESLint..."
+cd worker && npx eslint src/ 2>&1
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] Next.js 构建失败，推送被阻止"
+  echo "❌ [pre-push] Worker ESLint 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Next.js 构建通过"
+cd ..
+echo "✅ [pre-push] Worker ESLint 通过"
+
+# 4. Worker 构建（wrangler dry-run）
+echo "🔨 [pre-push] 构建 Worker..."
+cd worker && npx wrangler deploy --dry-run --outdir=dist 2>&1 | tail -5
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Worker 构建失败，推送被阻止"
+  exit 1
+fi
+cd ..
+echo "✅ [pre-push] Worker 构建通过"
+
+# 5. Frontend 构建（vite build）
+echo "🔨 [pre-push] 构建 Frontend..."
+cd frontend && npx vite build 2>&1 | tail -5
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Frontend 构建失败，推送被阻止"
+  exit 1
+fi
+cd ..
+echo "✅ [pre-push] Frontend 构建通过"
 
 echo "🎉 [pre-push] 所有验证通过，允许推送"

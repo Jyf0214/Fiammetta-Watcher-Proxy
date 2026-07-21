@@ -2,7 +2,7 @@
  * POST /api/admin/import — 数据导入
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; KV: KVNamespace; ENVIRONMENT?: string; }
 

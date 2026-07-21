@@ -4,7 +4,7 @@
  * 需要管理员登录。直接更新密码哈希。
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 import { hashPassword } from "../../../../lib/auth";
 
 interface Env {

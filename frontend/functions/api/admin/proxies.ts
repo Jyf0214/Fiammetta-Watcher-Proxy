@@ -2,7 +2,7 @@
  * GET/POST /api/admin/proxies — 代理列表/创建/批量导入
  */
 
-import { type PagesFunction } from "@cloudflare/next-on-pages";
+import { type PagesFunction } from "@cloudflare/workers-types";
 
 interface Env { DB: D1Database; ENVIRONMENT?: string; }
 
