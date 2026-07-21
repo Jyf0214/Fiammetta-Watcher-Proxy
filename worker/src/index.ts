@@ -79,7 +79,7 @@ app.onError((err, c) => {
 
 // ==================== 导出 ====================
 
-export default {
+const worker = {
   // HTTP 请求处理
   fetch: app.fetch,
 
@@ -88,3 +88,5 @@ export default {
     ctx.waitUntil(handleCron(event, env));
   },
 };
+
+export default worker;

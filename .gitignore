@@ -52,7 +52,8 @@ data/
 .qwen/
 
 # 原 Next.js 项目文件（本地保留，不提交到 Cloudflare 分支）
-src/
+# 只忽略根目录的 src/，不忽略 worker/src/ 和 frontend/src/
+/src/
 prisma/
 tests/
 next-env.d.ts

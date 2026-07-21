@@ -20,6 +20,7 @@
  */
 
 import type { KVNamespace, D1Database } from "@cloudflare/workers-types";
+import type { Env } from "../types";
 import { createDb } from "../db";
 import { platforms } from "../db/schema";
 import { eq, or } from "drizzle-orm";
@@ -187,7 +188,7 @@ export async function syncFromDatabase(env: { KV: KVNamespace; DB: D1Database })
 async function notifyRouteCacheRefresh(env: { KV: KVNamespace; DB: D1Database }): Promise<void> {
   try {
     const router = await import("./router");
-    await router.forceRefreshRouterCache(env as any);
+    await router.forceRefreshRouterCache(env as Env);
   } catch (err) {
     console.error("[circuit-breaker] 路由缓存刷新失败:", err);
   }
