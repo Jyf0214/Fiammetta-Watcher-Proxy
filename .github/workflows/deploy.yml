@@ -195,7 +195,7 @@ jobs:
             CREATE_RESP=$(curl -s -X POST "$API/pages/projects" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "{\"name\": \"$PROJECT_NAME\"}")
+              -d "{\"name\": \"$PROJECT_NAME\", \"production_branch\": \"main\"}")
             CREATE_SUCCESS=$(echo "$CREATE_RESP" | jq -r '.success')
 
             if [[ "$CREATE_SUCCESS" == "true" ]]; then
