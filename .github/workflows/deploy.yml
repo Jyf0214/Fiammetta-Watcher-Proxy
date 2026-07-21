@@ -176,6 +176,37 @@ jobs:
 
       # ==================== 部署 Pages ====================
 
+      - name: Create Pages Project
+        env:
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
+          PROJECT_NAME="fiammetta-watcher"
+
+          # 检查项目是否已存在
+          CHECK_RESP=$(curl -s -X GET "$API/pages/projects/$PROJECT_NAME" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          CHECK_SUCCESS=$(echo "$CHECK_RESP" | jq -r '.success')
+
+          if [[ "$CHECK_SUCCESS" == "true" ]]; then
+            echo "✅ Pages 项目已存在"
+          else
+            # 创建项目
+            CREATE_RESP=$(curl -s -X POST "$API/pages/projects" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"$PROJECT_NAME\"}")
+            CREATE_SUCCESS=$(echo "$CREATE_RESP" | jq -r '.success')
+
+            if [[ "$CREATE_SUCCESS" == "true" ]]; then
+              echo "✅ Pages 项目已创建"
+            else
+              echo "❌ Pages 项目创建失败"
+              echo "$CREATE_RESP" | jq -r '.errors[0].message'
+              exit 1
+            fi
+          fi
+
       - name: Deploy Pages
         run: |
           cd frontend
