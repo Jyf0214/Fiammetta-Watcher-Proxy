@@ -110,10 +110,11 @@ id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ### 第五步：初始化数据库
 
 ```bash
-npx wrangler d1 execute fiammetta-proxy --file=drizzle/0000_init.sql --remote
+cd worker
+npx drizzle-kit push
 ```
 
-执行成功后会显示 `✅ Successfully executed SQL`。
+该命令会自动将 `src/db/schema.ts` 中定义的表结构同步到 D1 数据库，无需手写 SQL。
 
 ### 第六步：部署 Worker
 

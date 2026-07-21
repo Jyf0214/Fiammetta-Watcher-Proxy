@@ -147,17 +147,10 @@ jobs:
         run: |
           cd worker
           DB_ID="${{ steps.d1.outputs.db_id }}"
-          SQL_FILE="drizzle/0000_init.sql"
+          D1_URL="d1://${{ steps.account.outputs.account_id }}:${CLOUDFLARE_API_TOKEN}@${{ steps.account.outputs.account_id }}.cloudflare-d1.com/${DB_ID}"
 
-          if [ ! -f "$SQL_FILE" ]; then
-            echo "❌ 迁移文件不存在: $SQL_FILE"
-            exit 1
-          fi
-
-          npx wrangler d1 execute "$DB_ID" \
-            --file="$SQL_FILE" \
-            --remote
-          echo "✅ D1 Schema 初始化完成"
+          DRIZZLE_DATABASE_URL="$D1_URL" npx drizzle-kit push
+          echo "✅ D1 Schema 同步完成"
 
       # ==================== 更新 wrangler 配置 ====================
 
