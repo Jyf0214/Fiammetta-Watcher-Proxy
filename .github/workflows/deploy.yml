@@ -144,7 +144,7 @@ jobs:
       # ==================== 安装依赖 ====================
 
       - name: Install Worker Dependencies
-        run: cd worker && npm ci
+        run: cd worker && npm ci --legacy-peer-deps
 
       - name: Install Frontend Dependencies
         run: cd frontend && npm ci
