@@ -141,22 +141,6 @@ jobs:
           echo "::add-mask::${KV_ID}"
           echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
 
-      # ==================== 安装依赖 ====================
-
-      - name: Install Worker Dependencies
-        run: cd worker && npm ci --legacy-peer-deps
-
-      - name: Install Frontend Dependencies
-        run: cd frontend && npm ci
-
-      # ==================== 初始化数据库 Schema ====================
-
-      - name: Init D1 Schema
-        run: |
-          cd worker
-          npx wrangler d1 migrations apply fiammetta-proxy --remote --yes
-          echo "✅ D1 Schema 增量同步完成"
-
       # ==================== 更新 wrangler 配置 ====================
 
       - name: Update Wrangler Configs
@@ -170,6 +154,22 @@ jobs:
           sed -i "s|<YOUR_KV_NAMESPACE_ID>|$KV_ID|g" frontend/wrangler.toml
 
           echo "✅ Wrangler 配置已更新"
+
+      # ==================== 安装依赖 ====================
+
+      - name: Install Worker Dependencies
+        run: cd worker && npm ci --legacy-peer-deps
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && npm ci
+
+      # ==================== 初始化数据库 Schema ====================
+
+      - name: Init D1 Schema
+        run: |
+          cd worker
+          npx wrangler d1 migrations apply fiammetta-proxy --remote
+          echo "✅ D1 Schema 增量同步完成"
 
       # ==================== 构建 ====================
 
