@@ -7,6 +7,7 @@ on:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
   deploy:
@@ -25,30 +26,58 @@ jobs:
 
       - name: Verify CF Token
         run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ Token 验证失败 (HTTP $HTTP_CODE)，请检查 CLOUDFLARE_API_TOKEN Secret"
-            exit 1
+          if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
+            echo "ℹ️ 检测到账户级 API Token (cfat_ 前缀)"
+            echo "⚠️ 账户级 Token 不支持 /user/tokens/verify，将在获取账户 ID 后验证"
+          else
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json")
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "❌ Token 验证失败 (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+            echo "✅ Token 有效"
           fi
-          echo "✅ Token 有效"
 
-      # ==================== 获取 Cloudflare 账户 ID ====================
+      # ==================== 获取/验证 Cloudflare 账户 ID ====================
 
       - name: Get Account ID
         id: account
         run: |
+          # 优先使用 Secrets 中配置的 Account ID
+          if [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::add-mask::${CLOUDFLARE_ACCOUNT_ID}"
+            echo "account_id=$CLOUDFLARE_ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+            echo "✅ 已从配置中获取 Account ID"
+
+            # cfat_ Token 针对账户进行验证
+            if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify" \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                -H "Content-Type: application/json")
+              if [ "$HTTP_CODE" != "200" ]; then
+                echo "❌ Token 对该账户验证失败 (HTTP $HTTP_CODE)"
+                exit 1
+              fi
+              echo "✅ Token 验证成功"
+            fi
+            exit 0
+          fi
+
+          # cfat_ Token 必须配置 Account ID
+          if [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
+            echo "❌ 使用账户级 Token 时必须配置 CLOUDFLARE_ACCOUNT_ID Secret"
+            exit 1
+          fi
+
+          # 用户级 Token 自动获取 Account ID
           ACCOUNTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
           ACCOUNT_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].id')
           ERRORS=$(echo "$ACCOUNTS" | jq -r '.errors[]?.message' 2>/dev/null)
-          if [ -n "$ERRORS" ]; then
-            echo "❌ API 错误: $ERRORS"
-            exit 1
-          fi
-          if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" = "null" ]; then
+          if [ -n "$ERRORS" ] || [ "$ACCOUNT_ID" = "null" ] || [ -z "$ACCOUNT_ID" ]; then
             echo "❌ 无法获取账户 ID"
             exit 1
           fi
