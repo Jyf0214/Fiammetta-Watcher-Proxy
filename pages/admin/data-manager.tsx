@@ -215,50 +215,75 @@ export default function DataManagerPage() {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            const event = JSON.parse(line);
+          // 只在完整行上解析（以 \n 结尾）
+          let newlineIdx: number;
+          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx).trim();
+            buffer = buffer.slice(newlineIdx + 1);
 
-            if (event.type === "progress") {
-              const ev = event as ProgressEvent;
-              setTotalProcessed(ev.totalProcessed);
-              setTotalRecords(ev.totalRecords);
-              setCurrentStepKey(ev.step);
-              setStepProgressList((prev) => {
-                // 检查是否已有该 step 的记录
-                const idx = prev.findIndex((p) => p.labelKey === STEP_LABELS[ev.step]?.labelKey);
-                const newEntry: StepProgress = {
-                  labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
-                  detailKey: STEP_LABELS[ev.step]?.detailKey,
-                  stepTotal: ev.stepTotal,
-                  imported: ev.imported,
-                  skipped: ev.skipped,
-                  status: ev.imported === 0 && ev.skipped === ev.stepTotal ? "error" : "done",
-                };
-                if (idx >= 0) {
-                  const next = [...prev];
-                  next[idx] = newEntry;
-                  return next;
+            if (!line) continue;
+
+            try {
+              const event = JSON.parse(line);
+
+              if (event.type === "progress") {
+                const ev = event as ProgressEvent;
+                setTotalProcessed(ev.totalProcessed);
+                setTotalRecords(ev.totalRecords);
+                setCurrentStepKey(ev.step);
+                setStepProgressList((prev) => {
+                  const idx = prev.findIndex((p) => p.labelKey === STEP_LABELS[ev.step]?.labelKey);
+                  const newEntry: StepProgress = {
+                    labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
+                    detailKey: STEP_LABELS[ev.step]?.detailKey,
+                    stepTotal: ev.stepTotal,
+                    imported: ev.imported,
+                    skipped: ev.skipped,
+                    status: ev.imported === 0 && ev.skipped === ev.stepTotal ? "error" : "done",
+                  };
+                  if (idx >= 0) {
+                    const next = [...prev];
+                    next[idx] = newEntry;
+                    return next;
+                  }
+                  return [...prev, newEntry];
+                });
+              } else if (event.type === "complete") {
+                const ev = event as CompleteEvent;
+                setImportResult({
+                  success: ev.success,
+                  message: ev.message,
+                  details: ev.details,
+                });
+                if (ev.success) {
+                  message.success(ev.message);
                 }
-                return [...prev, newEntry];
-              });
-            } else if (event.type === "complete") {
+              } else if (event.type === "error") {
+                const ev = event as ErrorEvent;
+                throw new Error(ev.error);
+              }
+            } catch (parseErr) {
+              console.warn("[import] 解析进度事件失败:", parseErr, "line:", line.slice(0, 100));
+            }
+          }
+        }
+
+        // 处理 buffer 中剩余的内容（最后一行可能没有 \n）
+        if (buffer.trim()) {
+          try {
+            const event = JSON.parse(buffer.trim());
+            if (event.type === "complete") {
               const ev = event as CompleteEvent;
               setImportResult({
                 success: ev.success,
                 message: ev.message,
                 details: ev.details,
               });
-              if (ev.success) {
-                message.success(ev.message);
-              }
-            } else if (event.type === "error") {
-              const ev = event as ErrorEvent;
-              throw new Error(ev.error);
+              if (ev.success) message.success(ev.message);
             }
+          } catch {
+            // 忽略最后不完整的行
           }
         }
       } catch (err) {
