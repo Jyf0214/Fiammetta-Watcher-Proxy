@@ -42,7 +42,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     const rows = await db
       .select({
@@ -86,7 +86,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
   const body = req.body as Record<string, unknown>;
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 检查代理池是否存在
     const [existing] = await db
@@ -190,7 +190,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 检查代理池是否存在
     const [existing] = await db

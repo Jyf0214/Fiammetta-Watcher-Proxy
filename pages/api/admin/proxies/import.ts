@@ -84,7 +84,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ success: false, error: "导入内容不能为空" });
     }
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 校验代理池（可选）
     if (poolId && typeof poolId === "string") {

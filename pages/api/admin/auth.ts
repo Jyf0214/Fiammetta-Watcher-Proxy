@@ -1,4 +1,5 @@
 /**
+import { getCloudflareContext } from "@opennextjs/cloudflare";
  * 认证 API — 登录 / 登出 / 获取当前管理员信息
  *
  * POST   /api/admin/auth  — 管理员登录（验证用户名密码 → 生成 JWT → 设置 Cookie）
@@ -142,7 +143,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
 async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
-    DB: (process.env as unknown as { DB: D1Database }).DB,
+    DB: ((await getCloudflareContext({ async: true })).env as Record<string, unknown>).DB as D1Database,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
     ENVIRONMENT: process.env.ENVIRONMENT,

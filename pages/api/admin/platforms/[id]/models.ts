@@ -34,7 +34,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     const token = authHeader.slice(7);
     await verifyToken(token, process.env.JWT_SECRET);
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
     const models = await db
       .select()
       .from(schema.platform_models)
@@ -82,7 +82,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       return res.status(400).json({ success: false, error: "模型 ID 不能为空" });
     }
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 检查平台是否存在
     const platformRows = await db
@@ -163,7 +163,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       return res.status(400).json({ success: false, error: "缺少 modelId 参数" });
     }
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 删除匹配的记录
     await db

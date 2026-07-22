@@ -13,7 +13,7 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
     // 执行简单查询验证数据库连接
     await db.all<{ ok: number }>("SELECT 1 as ok");
     res.status(200).json({ status: "ok", database: "connected" });

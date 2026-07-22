@@ -212,7 +212,7 @@ export default async function handler(
     let config: FrontendConfig;
 
     try {
-      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+      const db = await createDb();
       const rows = await db
         .select()
         .from(schema.configs)

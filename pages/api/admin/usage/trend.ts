@@ -27,12 +27,11 @@ export default async function handler(
   }
 
   try {
-    const db = (process.env as unknown as { DB: D1Database }).DB;
     if (!db) {
       res.status(500).json({ success: false, error: "数据库未配置" });
       return;
     }
-    const orm = createDb(db);
+    const orm = await createDb();
 
     const period = (req.query.period as string) || "month";
     const keyId = req.query.keyId as string | undefined;

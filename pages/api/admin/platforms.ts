@@ -40,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
-      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+      const db = await createDb();
       const platforms = await db
         .select({
           id: schema.platforms.id,
@@ -251,7 +251,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // 生成唯一 ID（cuid 格式）
       const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+      const db = await createDb();
 
       // 写入数据库
       await db.insert(schema.platforms).values({

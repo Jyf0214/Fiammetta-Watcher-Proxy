@@ -33,7 +33,7 @@ export default async function handler(
   try {
     const exportType = ((req.query.type as string) || "all") as ExportType;
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     const now = Math.floor(Date.now() / 1000);
 

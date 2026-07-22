@@ -46,7 +46,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 2. 检查模型映射是否存在
     const [existing] = await db

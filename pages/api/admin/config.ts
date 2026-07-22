@@ -22,7 +22,7 @@ export default async function handler(
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     if (req.method === "GET") {
       // 查询所有 system: 前缀的配置

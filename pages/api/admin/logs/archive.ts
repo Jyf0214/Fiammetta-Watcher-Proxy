@@ -52,12 +52,11 @@ export default async function handler(
   const model = req.query.model as string | undefined;
 
   try {
-    const db = (process.env as unknown as { DB: D1Database }).DB;
     if (!db) {
       res.status(500).json({ success: false, error: "数据库未配置" });
       return;
     }
-    const orm = createDb(db);
+    const orm = await createDb();
 
     // 构建查询条件
     const conditions = [];

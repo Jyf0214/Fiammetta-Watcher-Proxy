@@ -46,7 +46,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
   // 2. 查询模型映射（含关联平台信息）
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     const models = await db
       .select({
@@ -147,7 +147,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   // 平台存在性校验
   if (platformId) {
     try {
-      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+      const db = await createDb();
       const [platform] = await db
         .select({ id: schema.platforms.id })
         .from(schema.platforms)
@@ -186,7 +186,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
   // 4. 创建模型映射
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     const now = Math.floor(Date.now() / 1000);
     const id = crypto.randomUUID();

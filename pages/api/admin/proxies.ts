@@ -83,7 +83,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   try {
     const poolId = req.query.poolId as string | undefined;
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 构建查询：代理列表 + 关联代理池名称
     let rows;
@@ -183,7 +183,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     // 校验代理池（可选）
     if (poolId && typeof poolId === "string") {
-      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+      const db = await createDb();
       const [pool] = await db
         .select({ id: schema.proxyPools.id })
         .from(schema.proxyPools)
@@ -198,7 +198,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ success: false, error: errors.join("; ") });
     }
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
     const now = Math.floor(Date.now() / 1000);
     const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 

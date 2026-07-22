@@ -36,7 +36,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     const token = authHeader.slice(7);
     await verifyToken(token, process.env.JWT_SECRET);
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
     const rows = await db
       .select()
       .from(schema.platforms)
@@ -175,7 +175,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       return res.status(400).json({ success: false, error: errors.join("; ") });
     }
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 获取现有平台数据，用于编辑时保留未修改的字段
     const existingRows = await db
@@ -343,7 +343,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const token = authHeader.slice(7);
     const admin = await verifyToken(token, process.env.JWT_SECRET);
 
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 检查是否存在关联的 model_mappings 记录
     const relatedMappings = await db

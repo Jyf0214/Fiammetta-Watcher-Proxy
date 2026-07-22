@@ -42,7 +42,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 使用 LEFT JOIN + COUNT 获取每个池的代理数量
     const pools = await db
@@ -97,7 +97,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   }
 
   try {
-    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
+    const db = await createDb();
 
     // 检查名称唯一性
     const [existing] = await db
