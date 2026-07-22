@@ -119,13 +119,13 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: python3 deploy/init_pages.py
 
-      # ==================== 部署 Pages（OpenNext Upload） ====================
+      # ==================== 部署 Pages ====================
 
       - name: Deploy Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx opennextjs-cloudflare deploy
+          npx wrangler pages deploy .open-next --project-name fiammetta-watcher
           echo "✅ Pages 部署完成"
 
       # ==================== 完成 ====================
