@@ -9,25 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq, desc, sql } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { verifyToken } from "@/lib/auth";
-
-
-/**
- * 验证管理员身份的通用守卫（Bearer Token 方式）
- */
-async function requireAdmin(req: NextApiRequest) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyToken(token, process.env.JWT_SECRET);
-    return payload;
-  } catch {
-    return null;
-  }
-}
+import { getAdminFromRequest } from "./_auth";
 
 /**
  * GET /api/admin/pools — 获取代理池列表
@@ -36,7 +18,7 @@ async function requireAdmin(req: NextApiRequest) {
  * 按创建时间倒序排列。
  */
 async function handleGet(req: NextApiRequest, res: NextApiResponse) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
@@ -77,7 +59,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
  * - name (string, 必填) — 代理池名称，全局唯一
  */
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }

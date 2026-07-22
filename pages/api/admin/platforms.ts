@@ -7,34 +7,16 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
 import * as schema from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-
-
-/**
- * 验证管理员身份的通用守卫
- */
-async function requireAdmin(req: NextApiRequest) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyToken(token, process.env.JWT_SECRET);
-    return payload;
-  } catch {
-    return null;
-  }
-}
+import { getAdminFromRequest } from "./_auth";
 
 /**
  * GET /api/admin/platforms — 获取平台列表
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const admin = await requireAdmin(req);
+    const admin = await getAdminFromRequest(req);
     if (!admin) {
       return res.status(401).json({ success: false, error: "未授权" });
     }
@@ -74,7 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
-    const admin = await requireAdmin(req);
+    const admin = await getAdminFromRequest(req);
     if (!admin) {
       return res.status(401).json({ success: false, error: "未授权" });
     }

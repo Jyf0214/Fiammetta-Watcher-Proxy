@@ -13,25 +13,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { verifyToken } from "@/lib/auth";
-
-const COOKIE_NAME = "admin_token";
-
-async function getAdminFromRequest(req: NextApiRequest): Promise<{ adminId: string; username: string } | null> {
-  try {
-    const cookieHeader = req.headers.cookie;
-    if (!cookieHeader) return null;
-    let token: string | null = null;
-    for (const cookie of cookieHeader.split(";")) {
-      const [name, ...rest] = cookie.trim().split("=");
-      if (name === COOKIE_NAME) { token = rest.join("="); break; }
-    }
-    if (!token) return null;
-    const payload = await verifyToken(token, { JWT_SECRET: process.env.JWT_SECRET });
-    if (!payload || !payload.adminId || !payload.username) return null;
-    return { adminId: payload.adminId as string, username: payload.username as string };
-  } catch { return null; }
-}
+import { getAdminFromRequest } from "../_auth";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);

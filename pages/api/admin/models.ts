@@ -9,7 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq, desc } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { verifyToken } from "@/lib/auth";
+import { getAdminFromRequest } from "./_auth";
 
 
 /**
@@ -19,28 +19,12 @@ import { verifyToken } from "@/lib/auth";
  * 返回平台的基本信息（id、名称、状态等），按创建时间倒序排列。
  */
 async function handleGet(req: NextApiRequest, res: NextApiResponse) {
-  // 1. JWT 验证
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  // 1. Cookie 认证
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({
       success: false,
       error: { message: "未授权", type: "invalid_request_error" },
-    });
-  }
-
-  try {
-    const token = authHeader.slice(7);
-    const payload = await verifyToken(token, process.env.JWT_SECRET!);
-    if (!payload) {
-      return res.status(401).json({
-        success: false,
-        error: { message: "未授权", type: "invalid_request_error" },
-      });
-    }
-  } catch {
-    return res.status(401).json({
-      success: false,
-      error: { message: "令牌无效或已过期", type: "invalid_request_error" },
     });
   }
 
@@ -101,30 +85,12 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
  * - platformId 如提供，必须对应已存在的平台
  */
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
-  // 1. JWT 验证
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  // 1. Cookie 认证
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({
       success: false,
       error: { message: "未授权", type: "invalid_request_error" },
-    });
-  }
-
-  let adminId: string | null = null;
-  try {
-    const token = authHeader.slice(7);
-    const payload = await verifyToken(token, process.env.JWT_SECRET!);
-    if (!payload) {
-      return res.status(401).json({
-        success: false,
-        error: { message: "未授权", type: "invalid_request_error" },
-      });
-    }
-    adminId = (payload as any).adminId as string | null;
-  } catch {
-    return res.status(401).json({
-      success: false,
-      error: { message: "令牌无效或已过期", type: "invalid_request_error" },
     });
   }
 
@@ -207,7 +173,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
       await db.insert(schema.auditLogs).values({
         id: crypto.randomUUID(),
-        adminId: adminId || "",
+        adminId: admin.adminId,
         action: "create_model_map",
         detail: JSON.stringify({ modelId: model.id, sourceModel, targetModel }),
         ip,

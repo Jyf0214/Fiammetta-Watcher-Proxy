@@ -10,25 +10,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq, sql } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { verifyToken } from "@/lib/auth";
-
-
-/**
- * 验证管理员身份的通用守卫（Bearer Token 方式）
- */
-async function requireAdmin(req: NextApiRequest) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyToken(token, process.env.JWT_SECRET);
-    return payload;
-  } catch {
-    return null;
-  }
-}
+import { getAdminFromRequest } from "../_auth";
 
 /**
  * GET /api/admin/pools/:id — 获取单个代理池详情
@@ -36,7 +18,7 @@ async function requireAdmin(req: NextApiRequest) {
  * 返回代理池信息及其关联的代理数量。
  */
 async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
@@ -77,7 +59,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
  * - enabled (boolean) — 是否启用
  */
 async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
@@ -149,7 +131,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       const now = Math.floor(Date.now() / 1000);
       await db.insert(schema.auditLogs).values({
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: String(admin.adminId || ""),
+        adminId: admin.adminId,
         action: "update_proxy_pool",
         detail: JSON.stringify({ poolId: id, changes: updateData }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
@@ -184,7 +166,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
  * 然后删除代理池，最后记录审计日志。
  */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
@@ -217,7 +199,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       const now = Math.floor(Date.now() / 1000);
       await db.insert(schema.auditLogs).values({
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: String(admin.adminId || ""),
+        adminId: admin.adminId,
         action: "delete_proxy_pool",
         detail: JSON.stringify({ poolId: id, name: existing.name }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,

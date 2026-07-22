@@ -15,7 +15,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { verifyToken } from "@/lib/auth";
+import { getAdminFromRequest } from "../_auth";
 
 
 /**
@@ -33,23 +33,6 @@ function isDangerousHostname(hostname: string): boolean {
     hostname === "[::1]" ||
     hostname === "::1"
   );
-}
-
-/**
- * 验证管理员身份的通用守卫（Bearer Token 方式）
- */
-async function requireAdmin(req: NextApiRequest) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyToken(token, process.env.JWT_SECRET);
-    return payload;
-  } catch {
-    return null;
-  }
 }
 
 /** 批量导入数量上限 */
@@ -70,7 +53,7 @@ const MAX_IMPORT = 1000;
  *   - 如果提供了 poolId，对应的代理池必须存在
  */
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
-  const admin = await requireAdmin(req);
+  const admin = await getAdminFromRequest(req);
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
@@ -212,7 +195,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     try {
       await db.insert(schema.auditLogs).values({
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: String((admin as any).adminId || (admin as any).sub || ""),
+        adminId: admin.adminId,
         action: "import_proxies",
         detail: JSON.stringify({
           target: poolId || null,

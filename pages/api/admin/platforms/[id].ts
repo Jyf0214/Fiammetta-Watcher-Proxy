@@ -8,9 +8,9 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { getAdminFromRequest } from "../_auth";
 
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
@@ -27,15 +27,12 @@ function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
  * GET /api/admin/platforms/:id — 获取单个平台详情（包含 apiKeys 用于编辑回填）
  */
 async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    await verifyToken(token, process.env.JWT_SECRET);
-
     const db = await createDb();
     const rows = await db
       .select()
@@ -74,15 +71,12 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
  * PUT /api/admin/platforms/:id — 更新平台
  */
 async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    const admin = await verifyToken(token, process.env.JWT_SECRET);
-
     const body: any = req.body;
 
     // 字段类型校验
@@ -300,7 +294,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const now = Math.floor(Date.now() / 1000);
     await db.insert(schema.auditLogs).values({
       id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: String((admin as any).adminId || (admin as any).sub || ""),
+      adminId: admin.adminId,
       action: "update_platform",
       detail: JSON.stringify({ platformId: id, changes: sanitized }),
       ip:
@@ -334,15 +328,12 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
  * - 清理关联的请求日志和平台模型
  */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    const admin = await verifyToken(token, process.env.JWT_SECRET);
-
     const db = await createDb();
 
     // 检查是否存在关联的 model_mappings 记录
@@ -376,7 +367,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const now = Math.floor(Date.now() / 1000);
     await db.insert(schema.auditLogs).values({
       id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: String((admin as any).adminId || (admin as any).sub || ""),
+      adminId: admin.adminId,
       action: "delete_platform",
       detail: JSON.stringify({ platformId: id }),
       ip:
