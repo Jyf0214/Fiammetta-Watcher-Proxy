@@ -28,7 +28,7 @@
     "@types/react-dom": "^19.2.3",
     "dayjs": "^1.11.21",
     "esbuild": "^0.28.1",
-    "typescript": "7.0.2",
+    "typescript": "^5.9.3",
     "wrangler": "^4.113.0"
   }
 }
