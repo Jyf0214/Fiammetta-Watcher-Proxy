@@ -99,7 +99,6 @@ async function createMysqlDb(): Promise<Database> {
   const pool = await mysql2.createPool(url);
 
   const { drizzle: drizzleMysql } = await import("drizzle-orm/mysql2");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mysqlSchema = require("./schema-mysql");
   return drizzleMysql(pool, { schema: mysqlSchema }) as unknown as Database;
 }
@@ -117,7 +116,6 @@ async function createPgDb(): Promise<Database> {
   const pool = new Pool({ connectionString: url });
 
   const { drizzle: drizzlePg } = await import("drizzle-orm/node-postgres");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pgSchema = require("./schema-pg");
   return drizzlePg(pool, { schema: pgSchema }) as unknown as Database;
 }

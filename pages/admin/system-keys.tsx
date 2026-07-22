@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Space, Tag, Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
+import { Space, Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
 import { Plus, Trash2, Copy, Shield } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";

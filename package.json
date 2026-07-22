@@ -10,7 +10,8 @@
     "deploy": "npm run build:cf && wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
@@ -35,6 +36,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@opennextjs/cloudflare": "^1.9.2",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.1.1",
@@ -43,10 +45,13 @@
     "@types/react-dom": "^19.2.3",
     "dayjs": "^1.11.21",
     "esbuild": "^0.28.1",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "postcss": "^8.5.21",
     "sql.js": "^1.14.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10",
     "wrangler": "^4.113.0"
   }

@@ -95,7 +95,7 @@ async function parseRequestBody<T>(
 
 // ==================== 速率限制检查 ====================
 
-function checkRateLimits(
+function _checkRateLimits(
   platform: { id: string; rpmLimit: number | null; tpmLimit: number | null },
   apiKey: ApiKeyRecord
 ): { allowed: true } | { error: Response } {
@@ -149,10 +149,9 @@ export async function proxyV1Request(
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
 
   // ── 1. 解析请求体 ──
-  let body: Record<string, unknown> = {};
   const parseResult = await parseRequestBody<Record<string, unknown>>(request);
   if ("error" in parseResult) return parseResult.error;
-  body = parseResult.body;
+  const body = parseResult.body;
 
   // ── 2. 额外校验 ──
   if (config.validateBody) {
@@ -280,7 +279,7 @@ export async function proxyV1Request(
 
   // ── 6. 发送上游请求 ──
   let upstreamResponse: Response;
-  let upstreamSucceeded = false;
+  let _upstreamSucceeded = false;
 
   try {
     const controller = new AbortController();
@@ -391,7 +390,7 @@ export async function proxyV1Request(
     });
 
     const pipedStream = stream.pipeThrough(transformer);
-    upstreamSucceeded = true;
+    _upstreamSucceeded = true;
     await recordSuccess(route.platform.id);
 
     return new Response(pipedStream, {
@@ -410,7 +409,7 @@ export async function proxyV1Request(
 
   // multipart 响应（audio/images）直接透传
   if (responseContentType.includes("multipart/")) {
-    upstreamSucceeded = true;
+    _upstreamSucceeded = true;
     await recordSuccess(route.platform.id);
 
     try {
@@ -492,7 +491,7 @@ export async function proxyV1Request(
     // JSON 解析或日志记录失败不影响响应
   }
 
-  upstreamSucceeded = true;
+  _upstreamSucceeded = true;
   await recordSuccess(route.platform.id);
 
   return new Response(responseBody, {

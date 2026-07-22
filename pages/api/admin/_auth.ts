@@ -10,7 +10,7 @@
 
 import type { NextApiRequest } from "next";
 import { verifyToken } from "@/lib/auth";
-import { validateSystemApiKey, type SystemAuthResult } from "./_system-auth";
+import { validateSystemApiKey } from "./_system-auth";
 
 /** 统一认证结果 */
 export interface AuthResult {

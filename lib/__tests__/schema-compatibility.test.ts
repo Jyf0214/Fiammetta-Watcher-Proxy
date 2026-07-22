@@ -67,24 +67,6 @@ describe("Schema 表名一致性", () => {
 
 // ==================== 列名对比 ====================
 
-/** 从 Drizzle table 对象中提取列名 */
-function getColumnConfig(table: any): Record<string, any> {
-  // Drizzle SQLite/MySQL/PG table 对象的配置存储在 Symbol 或内部属性中
-  // 尝试多种访问方式
-  const config = table?.[Symbol.for("drizzle:SqliteTable")];
-  if (config) return config;
-
-  // 回退：直接遍历属性找列定义
-  const columns: Record<string, any> = {};
-  for (const key of Object.keys(table)) {
-    const val = table[key];
-    if (val && typeof val === "object" && val.name && val.tableName) {
-      columns[key] = val;
-    }
-  }
-  return columns;
-}
-
 describe("Schema 列名一致性", () => {
   const coreTables = [
     "admins",

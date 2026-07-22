@@ -117,7 +117,7 @@ function importRequestLogs(
       completionTokens: (log.completionTokens as number) || 0,
       ttft: (log.ttft as number) || 0,
       cost: (log.cost as number) || 0,
-      isError: Boolean(log.isError) ? 1 : 0,
+      isError: log.isError ? 1 : 0,
       ipAddress: (log.ipAddress as string) || null,
       userAgent: (log.userAgent as string) || null,
       errorMessage: (log.errorMessage as string) || null,

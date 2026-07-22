@@ -105,7 +105,7 @@ export function createUsageTransformer(params: {
   kv: KVNamespace;
   db: D1Database;
 }): TransformStream<Uint8Array, Uint8Array> {
-  let buffer = "";
+  let _buffer = "";
   let lastUsage: Record<string, unknown> | undefined;
 
   return new TransformStream({
@@ -114,7 +114,7 @@ export function createUsageTransformer(params: {
 
       // 解码并缓冲 SSE 数据
       const text = new TextDecoder().decode(chunk);
-      buffer += text;
+      _buffer += text;
 
       // 提取 usage（通常在最后一个 chunk）
       const usageMatch = text.match(/"usage"\s*:\s*(\{[^}]+\})/);

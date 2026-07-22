@@ -1,0 +1,60 @@
+#!/bin/sh
+# Pre-push: ESLint + TypeScript + 测试 + 完整构建（零容忍）
+
+echo "🚀 [pre-push] 完整构建验证..."
+
+# 1. Worker TypeScript 类型检查
+echo "📝 [pre-push] Worker TypeScript..."
+(cd worker && npx tsc --noEmit 2>&1 | head -20)
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Worker TypeScript 失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] Worker TypeScript 通过"
+
+# 2. Frontend TypeScript 类型检查
+echo "📝 [pre-push] Frontend TypeScript..."
+npx tsc --noEmit --pretty 2>&1 | head -30
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Frontend TypeScript 失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] Frontend TypeScript 通过"
+
+# 3. Worker ESLint（零 warning）
+echo "🔍 [pre-push] Worker ESLint..."
+(cd worker && npx eslint src/ --max-warnings=0 2>&1 | head -20)
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Worker ESLint 失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] Worker ESLint 通过"
+
+# 4. Frontend ESLint（零 warning）
+echo "🔍 [pre-push] Frontend ESLint..."
+npx eslint pages/ lib/ --max-warnings=0 2>&1 | head -30
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Frontend ESLint 失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] Frontend ESLint 通过"
+
+# 5. Vitest 测试
+echo "🧪 [pre-push] 运行测试..."
+npx vitest run 2>&1 | tail -10
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] 测试失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] 测试通过"
+
+# 6. Next.js 完整构建
+echo "🔨 [pre-push] Next.js 构建..."
+npx next build 2>&1 | tail -10
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-push] Next.js 构建失败，推送被阻止"
+  exit 1
+fi
+echo "✅ [pre-push] Next.js 构建通过"
+
+echo "🎉 [pre-push] 所有验证通过，允许推送"

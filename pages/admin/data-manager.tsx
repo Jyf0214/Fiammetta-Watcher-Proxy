@@ -369,8 +369,8 @@ export default function DataManagerPage() {
 
         {/* 各步骤明细 */}
         {stepProgressList.map((sp, i) => {
-          const isCurrent = currentStepKey && STEP_LABELS[currentStepKey]?.labelKey === sp.labelKey;
-          const stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
+          const _isCurrent = currentStepKey && STEP_LABELS[currentStepKey]?.labelKey === sp.labelKey;
+          const _stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
 
           return (
             <div key={i}>

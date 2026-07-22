@@ -1,0 +1,42 @@
+#!/bin/sh
+# Pre-commit: ESLint + TypeScript 类型检查（零容忍：零 error 零 warning）
+
+echo "🔍 [pre-commit] 代码质量检查..."
+
+# 1. Worker TypeScript 类型检查
+echo "📝 [pre-commit] Worker TypeScript..."
+(cd worker && npx tsc --noEmit 2>&1 | head -20)
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-commit] Worker TypeScript 类型错误，提交被阻止"
+  exit 1
+fi
+echo "✅ [pre-commit] Worker TypeScript 通过"
+
+# 2. Frontend TypeScript 类型检查
+echo "📝 [pre-commit] Frontend TypeScript..."
+npx tsc --noEmit --pretty 2>&1 | head -30
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-commit] Frontend TypeScript 类型错误，提交被阻止"
+  exit 1
+fi
+echo "✅ [pre-commit] Frontend TypeScript 通过"
+
+# 3. Worker ESLint（零 warning）
+echo "🔍 [pre-commit] Worker ESLint..."
+(cd worker && npx eslint src/ --max-warnings=0 2>&1 | head -20)
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-commit] Worker ESLint 错误，提交被阻止"
+  exit 1
+fi
+echo "✅ [pre-commit] Worker ESLint 通过"
+
+# 4. Frontend ESLint（零 warning）
+echo "🔍 [pre-commit] Frontend ESLint..."
+npx eslint pages/ lib/ --max-warnings=0 2>&1 | head -30
+if [ $? -ne 0 ]; then
+  echo "❌ [pre-commit] Frontend ESLint 错误，提交被阻止"
+  exit 1
+fi
+echo "✅ [pre-commit] Frontend ESLint 通过"
+
+echo "🎉 [pre-commit] 所有检查通过"

@@ -48,7 +48,7 @@ function createRecordingD1() {
       return { success: true, results: [] };
     },
     async batch(stmts: any[]) {
-      for (const s of stmts) {
+      for (const _s of stmts) {
         calls.push({ sql: "batch", params: [] });
       }
       return stmts.map(() => ({ success: true, meta: { changes: 0 } }));

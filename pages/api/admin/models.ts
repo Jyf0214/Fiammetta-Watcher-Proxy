@@ -100,7 +100,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   const sourceModel = body.sourceModel as string | undefined;
   const targetModel = body.targetModel as string | undefined;
   const platformId = (body.platformId as string | null) ?? null;
-  const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : 1;
+  const _enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : 1;
 
   // 3. 参数校验
   if (!sourceModel || !targetModel) {

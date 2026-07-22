@@ -8,7 +8,6 @@
  * - 权重轮询选择平台
  */
 
-import { eq } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import type { PlatformConfig, CircuitBreakerState } from "@/lib/types";
@@ -167,7 +166,7 @@ async function updatePlatformStatus(
   platformId: string,
   status: string,
   failCount: number,
-  cooldownEnd: number | null
+  _cooldownEnd: number | null
 ): Promise<void> {
   try {
     // 这里需要通过 Worker 的 Env.DB 来更新，但 load-balancer 不直接持有 DB

@@ -7,7 +7,7 @@
  * - Schema 导出完整性
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as sqliteSchema from "../schema";
 
 // ==================== Mock D1Database ====================
@@ -80,7 +80,7 @@ function createMockD1(): any {
       };
       return stmt;
     },
-    async exec(sql: string) {
+    async exec(_sql: string) {
       return { success: true, results: [] };
     },
     async batch(stmts: any[]) {

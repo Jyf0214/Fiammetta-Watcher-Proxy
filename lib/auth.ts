@@ -9,7 +9,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import { eq } from "drizzle-orm";
-import { createDb, type Database } from "./db";
+import { createDb } from "./db";
 import * as schema from "./schema";
 
 // ==================== 常量 ====================
