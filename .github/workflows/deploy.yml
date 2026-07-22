@@ -90,7 +90,9 @@ jobs:
       # ==================== 安装依赖 & 构建 ====================
 
       - name: Install Dependencies
-        run: npm ci --legacy-peer-deps
+        run: |
+          npm install --legacy-peer-deps
+          npx tsc --version
 
       - name: Build Pages
         run: npm run build
