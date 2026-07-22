@@ -764,7 +764,7 @@ async function importSystemEvents(
 /**
  * 导入请求日志
  *
- * 无外键依赖，使用 db.batch() 批量执行（一次往返多条 SQL）
+ * 无外键依赖，Promise.all 并发插入（每批50条并行）
  * 导出数据中 duration 字段映射为 latency
  */
 async function importRequestLogs(
@@ -776,45 +776,47 @@ async function importRequestLogs(
 
   // 过滤无效记录
   const validLogs = logs.filter((log) => log.model);
+  skipped += logs.length - validLogs.length;
 
-  // 每 50 条一批用 db.batch 执行
+  // 每 50 条一批，并发插入
   const batchSize = 50;
   for (let i = 0; i < validLogs.length; i += batchSize) {
     const batch = validLogs.slice(i, i + batchSize);
-    const stmts = batch.map((log) =>
-      db.insert(schema.requestLogs).values({
-        id: generateId(),
-        keyId: (log.keyId as string) || null,
-        keyName: (log.keyName as string) || null,
-        platformId: (log.platformId as string) || null,
-        proxyId: (log.proxyId as string) || null,
-        model: log.model as string,
-        endpoint: (log.endpoint as string) || null,
-        method: (log.method as string) || null,
-        status: (log.status as number) || 0,
-        latency: (log.duration as number) || (log.latency as number) || 0,
-        tokens: (log.tokens as number) || 0,
-        promptTokens: (log.promptTokens as number) || 0,
-        completionTokens: (log.completionTokens as number) || 0,
-        ttft: (log.ttft as number) || 0,
-        cost: (log.cost as number) || 0,
-        isError: Boolean(log.isError),
-        ipAddress: (log.ipAddress as string) || null,
-        userAgent: (log.userAgent as string) || null,
-        errorMessage: (log.errorMessage as string) || null,
-        createdAt: toUnixSeconds(log.createdAt),
-      } as any)
+    const results = await Promise.allSettled(
+      batch.map((log) =>
+        db.insert(schema.requestLogs).values({
+          id: generateId(),
+          keyId: (log.keyId as string) || null,
+          keyName: (log.keyName as string) || null,
+          platformId: (log.platformId as string) || null,
+          proxyId: (log.proxyId as string) || null,
+          model: log.model as string,
+          endpoint: (log.endpoint as string) || null,
+          method: (log.method as string) || null,
+          status: (log.status as number) || 0,
+          latency: (log.duration as number) || (log.latency as number) || 0,
+          tokens: (log.tokens as number) || 0,
+          promptTokens: (log.promptTokens as number) || 0,
+          completionTokens: (log.completionTokens as number) || 0,
+          ttft: (log.ttft as number) || 0,
+          cost: (log.cost as number) || 0,
+          isError: Boolean(log.isError),
+          ipAddress: (log.ipAddress as string) || null,
+          userAgent: (log.userAgent as string) || null,
+          errorMessage: (log.errorMessage as string) || null,
+          createdAt: toUnixSeconds(log.createdAt),
+        } as any)
+      )
     );
 
-    try {
-      await db.batch(stmts);
-      imported += batch.length;
-    } catch (err) {
-      console.error("[import] 批量导入请求日志失败:", err);
-      skipped += batch.length;
+    for (const r of results) {
+      if (r.status === "fulfilled") imported++;
+      else {
+        skipped++;
+        console.error("[import] 请求日志插入失败:", r.reason);
+      }
     }
   }
 
-  skipped += logs.length - validLogs.length;
   return { imported, skipped };
 }
