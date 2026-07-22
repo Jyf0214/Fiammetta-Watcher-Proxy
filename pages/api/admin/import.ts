@@ -782,32 +782,56 @@ async function importRequestLogs(
   const validLogs = logs.filter((log) => log.model);
   skipped += logs.length - validLogs.length;
 
+  // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
+  // 备份中的旧 ID 在目标库中可能不存在（导入 platforms/apiKeys 时生成了新 UUID），需置 null 避免外键约束失败
+  const referencedKeyIds = [...new Set(validLogs.map((l) => l.keyId).filter(Boolean) as string[])];
+  const referencedPlatformIds = [...new Set(validLogs.map((l) => l.platformId).filter(Boolean) as string[])];
+
+  const existingKeyIds = new Set(
+    referencedKeyIds.length > 0
+      ? (await db.select({ id: schema.apiKeys.id }).from(schema.apiKeys)
+          .then((rows) => rows.map((r) => r.id)))
+      : []
+  );
+  const existingPlatformIds = new Set(
+    referencedPlatformIds.length > 0
+      ? (await db.select({ id: schema.platforms.id }).from(schema.platforms)
+          .then((rows) => rows.map((r) => r.id)))
+      : []
+  );
+
+  // 构建安全的插入数据：外键不存在时置 null
+  const buildValues = (log: Record<string, unknown>) => {
+    const rawKeyId = (log.keyId as string) || null;
+    const rawPlatformId = (log.platformId as string) || null;
+    return {
+      id: generateId(),
+      keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
+      keyName: (log.keyName as string) || null,
+      platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
+      proxyId: (log.proxyId as string) || null,
+      model: log.model as string,
+      endpoint: (log.endpoint as string) || null,
+      method: (log.method as string) || null,
+      status: (log.status as number) || 0,
+      latency: (log.duration as number) || (log.latency as number) || 0,
+      tokens: (log.tokens as number) || 0,
+      promptTokens: (log.promptTokens as number) || 0,
+      completionTokens: (log.completionTokens as number) || 0,
+      ttft: (log.ttft as number) || 0,
+      cost: (log.cost as number) || 0,
+      isError: Boolean(log.isError),
+      ipAddress: (log.ipAddress as string) || null,
+      userAgent: (log.userAgent as string) || null,
+      errorMessage: (log.errorMessage as string) || null,
+      createdAt: toUnixSeconds(log.createdAt),
+    } as any;
+  };
+
   // 先尝试插入第一条，捕获错误原因
   if (validLogs.length > 0) {
     try {
-      const log = validLogs[0];
-      await db.insert(schema.requestLogs).values({
-        id: generateId(),
-        keyId: (log.keyId as string) || null,
-        keyName: (log.keyName as string) || null,
-        platformId: (log.platformId as string) || null,
-        proxyId: (log.proxyId as string) || null,
-        model: log.model as string,
-        endpoint: (log.endpoint as string) || null,
-        method: (log.method as string) || null,
-        status: (log.status as number) || 0,
-        latency: (log.duration as number) || (log.latency as number) || 0,
-        tokens: (log.tokens as number) || 0,
-        promptTokens: (log.promptTokens as number) || 0,
-        completionTokens: (log.completionTokens as number) || 0,
-        ttft: (log.ttft as number) || 0,
-        cost: (log.cost as number) || 0,
-        isError: Boolean(log.isError),
-        ipAddress: (log.ipAddress as string) || null,
-        userAgent: (log.userAgent as string) || null,
-        errorMessage: (log.errorMessage as string) || null,
-        createdAt: toUnixSeconds(log.createdAt),
-      } as any);
+      await db.insert(schema.requestLogs).values(buildValues(validLogs[0]));
       imported++;
     } catch (err: any) {
       firstError = err?.message || String(err);
@@ -823,28 +847,7 @@ async function importRequestLogs(
     for (let i = 0; i < remaining.length; i += batchSize) {
       const batch = remaining.slice(i, i + batchSize);
       const stmts = batch.map((log) =>
-        db.insert(schema.requestLogs).values({
-          id: generateId(),
-          keyId: (log.keyId as string) || null,
-          keyName: (log.keyName as string) || null,
-          platformId: (log.platformId as string) || null,
-          proxyId: (log.proxyId as string) || null,
-          model: log.model as string,
-          endpoint: (log.endpoint as string) || null,
-          method: (log.method as string) || null,
-          status: (log.status as number) || 0,
-          latency: (log.duration as number) || (log.latency as number) || 0,
-          tokens: (log.tokens as number) || 0,
-          promptTokens: (log.promptTokens as number) || 0,
-          completionTokens: (log.completionTokens as number) || 0,
-          ttft: (log.ttft as number) || 0,
-          cost: (log.cost as number) || 0,
-          isError: Boolean(log.isError),
-          ipAddress: (log.ipAddress as string) || null,
-          userAgent: (log.userAgent as string) || null,
-          errorMessage: (log.errorMessage as string) || null,
-          createdAt: toUnixSeconds(log.createdAt),
-        } as any)
+        db.insert(schema.requestLogs).values(buildValues(log))
       );
 
       try {
