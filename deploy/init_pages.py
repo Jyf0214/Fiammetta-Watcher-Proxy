@@ -33,6 +33,7 @@ KV_ID = os.environ.get("KV_ID", "")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
+WORKER_NAME = os.environ.get("WORKER_NAME", "fiammetta_worker")
 
 API_BASE = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
 HEADERS = {
@@ -143,7 +144,27 @@ def main():
         msg = data.get("errors", [{}])[0].get("message", "未知")
         fail(f"KV 绑定失败: {msg}")
 
-    # ========== 4. 设置 Pages Secrets ==========
+    # ========== 5. 配置 Service Binding（Worker 内网调用） ==========
+    print(f"🔗 配置 Service Binding: {WORKER_NAME}")
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": {
+                "services": {
+                    "WORKER": {
+                        "service": WORKER_NAME,
+                        "environment": "production"
+                    }
+                }
+            }
+        }
+    })
+    if data.get("success"):
+        print(f"  ✅ Service Binding 设置成功")
+    else:
+        msg = data.get("errors", [{}])[0].get("message", "未知")
+        print(f"  ⚠️ Service Binding 设置失败: {msg}")
+
+    # ========== 6. 设置 Pages Secrets ==========
     secrets_to_set = {
         "ADMIN_USERNAME": ADMIN_USERNAME,
         "ADMIN_PASSWORD": ADMIN_PASSWORD,
