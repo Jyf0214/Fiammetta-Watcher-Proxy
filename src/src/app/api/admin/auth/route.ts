@@ -1,0 +1,274 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import {
+  generateToken,
+  setAuthCookie,
+  clearAuthCookie,
+  hashPassword,
+  verifyPassword,
+  getAdminFromRequest,
+} from "@/lib/auth";
+import { isDebug } from "@/lib/auth-helpers";
+
+// ---------- 登录速率限制（原子化检查+递增，防竞态） ----------
+
+interface LoginAttemptEntry {
+  count: number;
+  windowStart: number;
+}
+
+/** 每个 IP 的登录失败尝试记录 */
+const loginAttempts = new Map<string, LoginAttemptEntry>();
+
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 分钟
+const LOGIN_CLEANUP_INTERVAL = 60_000; // 清理间隔
+
+function cleanupLoginAttempts() {
+  const now = Date.now();
+  for (const [ip, entry] of loginAttempts.entries()) {
+    if (now - entry.windowStart >= LOGIN_WINDOW_MS) {
+      loginAttempts.delete(ip);
+    }
+  }
+}
+
+// 定期清理防止内存泄漏
+const globalForLoginCleanup = globalThis as unknown as { __loginCleanupTimer?: ReturnType<typeof setInterval> };
+if (!globalForLoginCleanup.__loginCleanupTimer) {
+  globalForLoginCleanup.__loginCleanupTimer = setInterval(cleanupLoginAttempts, LOGIN_CLEANUP_INTERVAL);
+}
+
+/** 从请求中提取客户端 IP */
+function getClientIp(request: NextRequest): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
+/**
+ * 原子化检查并递增登录失败计数
+ *
+ * 将「检查是否超限」和「递增计数」合为一步操作，
+ * 避免两个并发请求同时通过检查后都执行登录的竞态条件。
+ * 返回 null 表示允许，否则返回 429 响应。
+ */
+function checkAndRecordLoginAttempt(ip: string): NextResponse | null {
+  const now = Date.now();
+  let entry = loginAttempts.get(ip);
+
+  // 窗口过期，重置
+  if (!entry || now - entry.windowStart >= LOGIN_WINDOW_MS) {
+    entry = { count: 0, windowStart: now };
+    loginAttempts.set(ip, entry);
+  }
+
+  // 先递增再检查：确保并发请求不会同时通过
+  entry.count += 1;
+
+  if (entry.count > LOGIN_MAX_ATTEMPTS) {
+    const resetAt = new Date(entry.windowStart + LOGIN_WINDOW_MS).toISOString();
+    return NextResponse.json(
+      {
+        success: false,
+        error: "登录尝试次数过多，请稍后再试",
+        resetAt,
+      },
+      { status: 429 }
+    );
+  }
+
+  return null;
+}
+
+/** 登录成功，清除该 IP 的失败计数 */
+function clearLoginFailures(ip: string): void {
+  loginAttempts.delete(ip);
+}
+
+/**
+ * POST /api/admin/auth — 管理员登录
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const clientIp = getClientIp(request);
+
+    // 原子化限流检查+递增，避免并发绕过限制
+    const rateLimitResponse = checkAndRecordLoginAttempt(clientIp);
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
+
+    const body = await request.json();
+    const { username, password } = body;
+
+    if (!username || !password) {
+      return NextResponse.json(
+        { success: false, error: "用户名和密码不能为空" },
+        { status: 400 }
+      );
+    }
+
+    const admin = await prisma.admin.findUnique({
+      where: { username },
+    });
+
+    if (!admin) {
+      await hashPassword("dummy");
+      // 计数已在 checkAndRecordLoginAttempt 中原子递增，无需再次记录
+      return NextResponse.json(
+        { success: false, error: "用户名或密码错误" },
+        { status: 401 }
+      );
+    }
+
+    const valid = await verifyPassword(password, admin.passwordHash);
+
+    // DEBUG 模式：仅记录匹配结果，不泄露盐值、哈希值等敏感信息
+    if (isDebug) {
+      console.log("[DEBUG] 密码验证结果:", valid ? "✅ 匹配" : "❌ 不匹配");
+    }
+
+    if (!valid) {
+      // 计数已在 checkAndRecordLoginAttempt 中原子递增，无需再次记录
+      await prisma.auditLog.create({
+        data: {
+          adminId: admin.id,
+          action: "login_failed",
+          detail: JSON.stringify({ username: admin.username }),
+          ip: clientIp,
+        },
+      });
+      return NextResponse.json(
+        { success: false, error: "用户名或密码错误" },
+        { status: 401 }
+      );
+    }
+
+    // 密码验证通过后，处理密码重置标志
+    const resetFlag = await prisma.config.findUnique({
+      where: { key: "admin_reset_password" },
+    });
+
+    if (resetFlag && resetFlag.value === "pending") {
+      const envUsername = process.env.ADMIN_USERNAME;
+      const envPassword = process.env.ADMIN_PASSWORD;
+      if (envPassword && envUsername && admin.username === envUsername) {
+        try {
+          const newHash = await hashPassword(envPassword);
+          await prisma.admin.update({
+            where: { id: admin.id },
+            data: { passwordHash: newHash },
+          });
+          await prisma.config.delete({
+            where: { key: "admin_reset_password" },
+          });
+          if (isDebug) console.log("[auth] 密码重置标志已处理，密码已更新");
+        } catch (e) {
+          console.error("[auth] 密码重置处理失败:", e);
+        }
+      } else {
+        console.warn("[auth] 密码重置标志存在但无法处理，已跳过");
+        await prisma.config.delete({
+          where: { key: "admin_reset_password" },
+        });
+      }
+    }
+
+    clearLoginFailures(clientIp);
+
+    const token = generateToken({
+      adminId: admin.id,
+      username: admin.username,
+    });
+
+    await setAuthCookie(token);
+
+    await prisma.auditLog.create({
+      data: {
+        adminId: admin.id,
+        action: "login",
+        detail: JSON.stringify({ username: admin.username }),
+        ip: clientIp,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { username: admin.username },
+      message: "登录成功",
+    });
+  } catch (error) {
+    console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
+    return NextResponse.json(
+      {
+        success: false,
+        error: "登录失败",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/admin/auth — 管理员登出
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const admin = await getAdminFromRequest();
+    const clientIp = getClientIp(request);
+
+    await clearAuthCookie();
+
+    if (admin) {
+      await prisma.auditLog.create({
+        data: {
+          adminId: admin.adminId,
+          action: "logout",
+          detail: JSON.stringify({ username: admin.username }),
+          ip: clientIp,
+        },
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "已退出登录",
+    });
+  } catch (err) {
+    console.error("[DELETE /api/admin/auth] 登出异常:", err);
+    await clearAuthCookie();
+    return NextResponse.json(
+      { success: false, error: "登出过程中发生错误，但登录状态已清除" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * GET /api/admin/auth — 获取当前管理员信息
+ */
+export async function GET() {
+  try {
+    const admin = await getAdminFromRequest();
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, error: "未授权" },
+        { status: 401 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: { adminId: admin.adminId, username: admin.username },
+    });
+  } catch (err) {
+    console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
+    return NextResponse.json(
+      { success: false, error: "未授权" },
+      { status: 401 }
+    );
+  }
+}

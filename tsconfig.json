@@ -19,17 +19,24 @@
     "incremental": true,
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ]
     },
     "types": [
       "@cloudflare/workers-types"
+    ],
+    "plugins": [
+      {
+        "name": "next"
+      }
     ]
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

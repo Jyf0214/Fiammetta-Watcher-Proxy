@@ -1,0 +1,430 @@
+@import "tailwindcss";
+
+/* 使用 class 控制深色模式（而非 media query） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 全局基础字号：由 CSS 变量控制，FontSizeProvider 从配置读取并动态设置 */
+html {
+  font-size: var(--base-font-size, 15px);
+}
+
+body {
+  background-color: #ffffff;
+  color: #18181b;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark body {
+  background-color: #18181b;
+  color: #f4f4f5;
+}
+
+/* 自定义滚动条 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(209 213 219);
+  border-radius: 2px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(63 63 70);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+  .ant-modal {
+    margin: 0 auto !important;
+    max-width: calc(100vw - 16px) !important;
+  }
+  .ant-modal-content {
+    border-radius: 0 !important;
+  }
+}
+
+/* ===== Antd Modal 居中 + 响应式修复 ===== */
+/* 修复 antd 6.x ::before 居中机制被 Tailwind @layer base 重置干扰的问题 */
+/* 不用 flexbox（会破坏超长内容的滚动），而是重新声明 ::before 关键属性 */
+.ant-modal-wrap.ant-modal-centered::before {
+  content: "" !important;
+  display: inline-block !important;
+  width: 0 !important;
+  height: 100% !important;
+  vertical-align: middle !important;
+}
+.ant-modal-wrap.ant-modal-centered .ant-modal {
+  top: 0 !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+}
+/* 表单内容区可滚动 */
+.ant-modal-wrap.ant-modal-centered .ant-modal-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 180px);
+  padding: 16px 20px !important;
+}
+/* 紧凑表单项间距 */
+.ant-modal-wrap.ant-modal-centered .ant-form-item {
+  margin-bottom: 12px !important;
+}
+/* footer 紧凑 */
+.ant-modal-wrap.ant-modal-centered .ant-modal-footer {
+  padding: 10px 20px !important;
+}
+@media (max-width: 768px) {
+  .ant-modal-wrap.ant-modal-centered .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 16px);
+  }
+  .ant-modal-wrap.ant-modal-centered .ant-modal-body {
+    max-height: calc(100vh - 120px);
+    padding: 12px 16px !important;
+  }
+}
+
+/* Antd 弹层 z-index 分层 */
+.ant-modal-wrap { z-index: 1000 !important; }
+.ant-modal-mask { z-index: 999 !important; }
+.ant-popover { z-index: 1050 !important; }
+.ant-tooltip { z-index: 1070 !important; }
+.ant-dropdown { z-index: 1050 !important; }
+.ant-message-notice-wrapper,
+.ant-notification-notice-wrapper { z-index: 1100 !important; }
+
+/* 文章主色调：使用封面提取的主色调 */
+article header h1 {
+  color: var(--main-tone, #18181b) !important;
+}
+
+/* 按钮轻加载动画 — 柔和的呼吸脉冲，配合 opacity 变淡 */
+@keyframes btn-loading-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.98); }
+}
+
+.animate-btn-loading {
+  animation: btn-loading-pulse 0.9s ease-in-out infinite;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* 全局焦点可见性样式 */
+*:focus-visible {
+  outline: 2px solid rgb(113 113 122);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 图片懒加载淡入过渡 */
+.lazy-image {
+  transition: opacity 0.3s ease-in-out;
+}
+
+/* ===== Antd 组件深色模式覆盖 ===== */
+.dark .ant-layout {
+  background: #141414;
+}
+
+.dark .ant-layout-header {
+  background: #1f1f1f !important;
+  border-bottom: 1px solid #303030;
+}
+
+/* Modal */
+.dark .ant-modal-content {
+  background: #1f1f1f;
+  border-radius: 16px;
+}
+.dark .ant-modal-header {
+  background: #1f1f1f;
+  border-bottom: 1px solid #303030;
+}
+.dark .ant-modal-title {
+  color: #e4e4e7;
+}
+.dark .ant-modal-close {
+  color: #71717a;
+}
+.dark .ant-modal-close:hover {
+  color: #d4d4d8;
+}
+.dark .ant-modal-mask {
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+/* Input */
+.dark .ant-input,
+.dark .ant-input-affix-wrapper {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+.dark .ant-input::placeholder {
+  color: #71717a;
+}
+.dark .ant-input:focus,
+.dark .ant-input-affix-wrapper-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+
+/* InputNumber */
+.dark .ant-input-number {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-input-number-input {
+  color: #e4e4e7;
+}
+.dark .ant-input-number-input::placeholder {
+  color: #71717a;
+}
+.dark .ant-input-number:hover {
+  border-color: #52525b;
+}
+.dark .ant-input-number-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+.dark .ant-input-number-affix-wrapper {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-input-number-affix-wrapper:hover {
+  border-color: #52525b;
+}
+.dark .ant-input-number-affix-wrapper-focused {
+  border-color: #52525b;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15);
+}
+.dark .ant-input-number-handler-wrap {
+  background: #27272a;
+  border-inline-start: 1px solid #3f3f46;
+}
+.dark .ant-input-number-handler {
+  color: #a1a1aa;
+}
+.dark .ant-input-number-handler:hover .ant-input-number-handler-up-inner,
+.dark .ant-input-number-handler:hover .ant-input-number-handler-down-inner {
+  color: #e4e4e7;
+}
+
+/* Select */
+.dark .ant-select-selector {
+  background: #27272a !important;
+  border-color: #3f3f46 !important;
+  color: #e4e4e7 !important;
+}
+.dark .ant-select-selection-placeholder {
+  color: #71717a !important;
+}
+.dark .ant-select-selection-item {
+  color: #e4e4e7 !important;
+}
+.dark .ant-select:hover .ant-select-selector {
+  border-color: #52525b !important;
+}
+.dark .ant-select-focused .ant-select-selector {
+  border-color: #52525b !important;
+  box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.15) !important;
+}
+.dark .ant-select-arrow {
+  color: #71717a;
+}
+.dark .ant-select-clear {
+  color: #71717a;
+  background: #27272a;
+}
+.dark .ant-select-clear:hover {
+  color: #e4e4e7;
+}
+
+/* Select 下拉菜单 */
+.dark .ant-select-dropdown {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+}
+.dark .ant-select-item {
+  color: #d4d4d8;
+}
+.dark .ant-select-item-option-active {
+  background: #3f3f46;
+}
+.dark .ant-select-item-option-selected {
+  background: #3f3f46;
+  color: #fff;
+}
+
+/* Form */
+.dark .ant-form-item-label > label {
+  color: #d4d4d8;
+}
+.dark .ant-form-item-explain-error {
+  color: #f87171;
+}
+
+/* Modal Footer 按钮 */
+.dark .ant-btn-default {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+.dark .ant-btn-default:hover {
+  background: #3f3f46;
+  border-color: #52525b;
+  color: #e4e4e7;
+}
+.dark .ant-btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.dark .ant-btn-primary:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* Popconfirm / Tooltip 深色 */
+.dark .ant-popover-inner {
+  background: #27272a;
+}
+.dark .ant-popconfirm-message-title {
+  color: #d4d4d8;
+}
+
+/* Table 深色 */
+.dark .ant-table {
+  background: transparent;
+}
+.dark .ant-table-thead > tr > th {
+  background: #27272a;
+  color: #a1a1aa;
+  border-bottom: 1px solid #3f3f46;
+}
+.dark .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #3f3f46;
+  color: #d4d4d8;
+}
+.dark .ant-table-tbody > tr:hover > td {
+  background: #27272a;
+}
+.dark .ant-pagination .ant-pagination-item {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+.dark .ant-pagination .ant-pagination-item a {
+  color: #d4d4d8;
+}
+.dark .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.dark .ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+
+/* Text 类型按钮 */
+.dark .ant-btn-text {
+  color: #d4d4d8;
+}
+.dark .ant-btn-text:hover {
+  color: #e4e4e7;
+  background: #3f3f46;
+}
+
+/* Danger 按钮 */
+.dark .ant-btn-dangerous {
+  color: #f87171;
+  border-color: #7f1d1d;
+}
+.dark .ant-btn-dangerous:hover {
+  color: #fca5a5;
+  border-color: #991b1b;
+  background: #450a0a;
+}
+
+/* Danger + Default 组合按钮 */
+.dark .ant-btn-default.ant-btn-dangerous {
+  color: #f87171;
+  border-color: #7f1d1d;
+  background: transparent;
+}
+.dark .ant-btn-default.ant-btn-dangerous:hover {
+  color: #fca5a5;
+  border-color: #991b1b;
+  background: #450a0a;
+}
+
+/* Text + Danger 组合按钮 */
+.dark .ant-btn-text.ant-btn-dangerous {
+  color: #f87171;
+}
+.dark .ant-btn-text.ant-btn-dangerous:hover {
+  color: #fca5a5;
+  background: #450a0a;
+}
+
+/* Tag 标签 */
+.dark .ant-tag-default {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #d4d4d8;
+}
+
+/* Card 深色模式 */
+.dark .ant-card {
+  background-color: rgb(24 24 27);
+  border-color: rgb(39 39 42);
+}
+.dark .ant-card .ant-card-head {
+  color: rgb(244 244 245);
+  border-bottom-color: rgb(39 39 42);
+}
+.dark .ant-card .ant-card-body {
+  color: rgb(244 244 245);
+}
+
+/* message 弹窗深色模式 */
+.dark .ant-message-notice-content {
+  background-color: rgb(24 24 27);
+  color: rgb(244 244 245);
+}
+
+/* Tooltip 深色模式 */
+.dark .ant-tooltip-inner {
+  background-color: rgb(39 39 42);
+  color: rgb(244 244 245);
+}
+
+/* Descriptions 深色模式 */
+.dark .ant-descriptions-item-label,
+.dark .ant-descriptions-item-content {
+  color: rgb(244 244 245);
+  border-color: rgb(39 39 42);
+}
+.dark .ant-descriptions-title {
+  color: rgb(244 244 245);
+}
+
+/* Tag 带颜色变体深色模式 */
+.dark .ant-tag {
+  border-color: rgb(39 39 42);
+}
+
+/* Popconfirm 深色模式补充 */
+.dark .ant-popconfirm-description {
+  color: rgb(161 161 170);
+}
+.dark .ant-popconfirm .ant-btn-default {
+  background-color: rgb(39 39 42);
+  border-color: rgb(63 63 70);
+  color: rgb(244 244 245);
+}
+
