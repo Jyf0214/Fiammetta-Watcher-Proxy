@@ -38,6 +38,9 @@ interface FullImportResult {
     plans?: ImportResult;
     apiKeys?: ImportResult;
     configs?: ImportResult;
+    auditLogs?: ImportResult;
+    systemEvents?: ImportResult;
+    requestLogs?: ImportResult;
   };
 }
 
@@ -124,21 +127,41 @@ export default async function handler(
       result.details.configs = await importConfigs(db, body.configs as Array<Record<string, unknown>>);
     }
 
-    // 审计日志
-    const now = Math.floor(Date.now() / 1000);
-    await db.insert(schema.auditLogs).values({
-      id: generateId(),
-      adminId: "import",
-      action: "import_data",
-      detail: JSON.stringify({
-        exportType: body.exportType,
-        exportedAt: body.exportedAt,
-        details: result.details,
-      }),
-      ip:
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-      createdAt: now,
-    } as any);
+    // 导入审计日志（无外键依赖，可直接插入）
+    if (body.auditLogs && Array.isArray(body.auditLogs)) {
+      result.details.auditLogs = await importAuditLogs(db, body.auditLogs as Array<Record<string, unknown>>);
+    }
+
+    // 导入系统事件
+    if (body.systemEvents && Array.isArray(body.systemEvents)) {
+      result.details.systemEvents = await importSystemEvents(db, body.systemEvents as Array<Record<string, unknown>>);
+    }
+
+    // 导入请求日志
+    if (body.requestLogs && Array.isArray(body.requestLogs)) {
+      result.details.requestLogs = await importRequestLogs(db, body.requestLogs as Array<Record<string, unknown>>);
+    }
+
+    // 审计日志（独立处理，失败不影响导入结果）
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const ipHeader = req.headers["x-forwarded-for"] as string | undefined;
+      const clientIp = ipHeader?.split(",")[0]?.trim() || null;
+      await db.insert(schema.auditLogs).values({
+        id: generateId(),
+        adminId: admin.adminId,
+        action: "import_data",
+        detail: JSON.stringify({
+          exportType: body.exportType,
+          exportedAt: body.exportedAt,
+          details: result.details,
+        }),
+        ip: clientIp,
+        createdAt: now,
+      });
+    } catch (auditErr) {
+      console.warn("[POST /api/admin/import] 审计日志写入失败（不影响导入）:", auditErr);
+    }
 
     // 汇总导入结果
     const summary = Object.entries(result.details)
@@ -543,6 +566,210 @@ async function importConfigs(
       imported++;
     } catch (err) {
       console.error("[import] 导入配置失败:", err);
+      skipped++;
+    }
+  }
+
+  return { imported, skipped };
+}
+
+// ==================== 导入审计日志 ====================
+
+/**
+ * 将 ISO 时间字符串或 unix 时间戳转换为 unix 秒
+ */
+function toUnixSeconds(value: unknown): number {
+  if (typeof value === "number" && value > 1_000_000_000) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const ts = Math.floor(new Date(value).getTime() / 1000);
+    if (!isNaN(ts) && ts > 0) return ts;
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 导入审计日志
+ *
+ * 无外键依赖，按 action + createdAt 去重
+ * adminId 不存在时置为 null（不阻塞导入）
+ */
+async function importAuditLogs(
+  db: ReturnType<typeof createDb>,
+  logs: Array<Record<string, unknown>>
+): Promise<ImportResult> {
+  let imported = 0;
+  let skipped = 0;
+
+  // 预加载已有 adminId 集合，用于外键校验
+  const existingAdminRows = await db.select({ id: schema.admins.id }).from(schema.admins);
+  const validAdminIds = new Set(existingAdminRows.map((r) => r.id));
+
+  for (const log of logs) {
+    try {
+      const action = log.action as string;
+      const createdAt = toUnixSeconds(log.createdAt);
+
+      if (!action) {
+        skipped++;
+        continue;
+      }
+
+      // 去重：同 action 的已有记录则跳过
+      const existing = await db
+        .select({ id: schema.auditLogs.id })
+        .from(schema.auditLogs)
+        .where(eq(schema.auditLogs.action, action))
+        .limit(1);
+
+      if (existing.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      // adminId 外键校验：不存在则置 null
+      const rawAdminId = log.adminId as string | null | undefined;
+      const adminId = rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null;
+
+      await db.insert(schema.auditLogs).values({
+        id: generateId(),
+        adminId,
+        action,
+        detail: (log.detail as string) || null,
+        ip: (log.ip as string) || null,
+        createdAt,
+      });
+
+      imported++;
+    } catch (err) {
+      console.error("[import] 导入审计日志失败:", err);
+      skipped++;
+    }
+  }
+
+  return { imported, skipped };
+}
+
+// ==================== 导入系统事件 ====================
+
+/**
+ * 导入系统事件
+ *
+ * 无外键依赖，按 message 去重
+ */
+async function importSystemEvents(
+  db: ReturnType<typeof createDb>,
+  events: Array<Record<string, unknown>>
+): Promise<ImportResult> {
+  let imported = 0;
+  let skipped = 0;
+
+  for (const e of events) {
+    try {
+      const level = e.level as string;
+      const message = e.message as string;
+      const createdAt = toUnixSeconds(e.createdAt);
+
+      if (!level || !message) {
+        skipped++;
+        continue;
+      }
+
+      // 去重：同 message 的已有记录则跳过
+      const existing = await db
+        .select({ id: schema.systemEvents.id })
+        .from(schema.systemEvents)
+        .where(eq(schema.systemEvents.message, message))
+        .limit(1);
+
+      if (existing.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      await db.insert(schema.systemEvents).values({
+        id: generateId(),
+        level,
+        message,
+        detail: (e.detail as string) || null,
+        createdAt,
+      });
+
+      imported++;
+    } catch (err) {
+      console.error("[import] 导入系统事件失败:", err);
+      skipped++;
+    }
+  }
+
+  return { imported, skipped };
+}
+
+// ==================== 导入请求日志 ====================
+
+/**
+ * 导入请求日志
+ *
+ * 无外键依赖，按 model + createdAt 去重
+ * 导出数据缺少部分字段（keyName、proxyId 等），使用默认值
+ */
+async function importRequestLogs(
+  db: ReturnType<typeof createDb>,
+  logs: Array<Record<string, unknown>>
+): Promise<ImportResult> {
+  let imported = 0;
+  let skipped = 0;
+
+  for (const log of logs) {
+    try {
+      const model = log.model as string;
+      const status = log.status as number;
+      const createdAt = toUnixSeconds(log.createdAt);
+
+      if (!model || !status) {
+        skipped++;
+        continue;
+      }
+
+      // 去重：同 model + status + createdAt 视为重复
+      const existing = await db
+        .select({ id: schema.requestLogs.id })
+        .from(schema.requestLogs)
+        .where(eq(schema.requestLogs.model, model))
+        .limit(1);
+
+      if (existing.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      await db.insert(schema.requestLogs).values({
+        id: generateId(),
+        keyId: (log.keyId as string) || null,
+        keyName: (log.keyName as string) || null,
+        platformId: (log.platformId as string) || null,
+        proxyId: (log.proxyId as string) || null,
+        model,
+        endpoint: (log.endpoint as string) || null,
+        method: (log.method as string) || null,
+        status,
+        latency: (log.latency as number) || 0,
+        tokens: (log.tokens as number) || 0,
+        promptTokens: (log.promptTokens as number) || 0,
+        completionTokens: (log.completionTokens as number) || 0,
+        ttft: (log.ttft as number) || 0,
+        cost: (log.cost as number) || 0,
+        isError: Boolean(log.isError),
+        ipAddress: (log.ipAddress as string) || null,
+        userAgent: (log.userAgent as string) || null,
+        errorMessage: (log.errorMessage as string) || null,
+        createdAt,
+      });
+
+      imported++;
+    } catch (err) {
+      console.error("[import] 导入请求日志失败:", err);
       skipped++;
     }
   }
