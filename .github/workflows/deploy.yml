@@ -93,7 +93,10 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Build Pages
-        run: npx opennextjs-cloudflare build
+        run: |
+          npx opennextjs-cloudflare build
+          mv .open-next/worker.js .open-next/_worker.js
+          cp -r .open-next/assets/* .open-next/
 
       # ==================== 部署 Worker ====================
 
