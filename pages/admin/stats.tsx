@@ -339,7 +339,7 @@ export default function StatsPage() {
                     borderRadius: 8,
                     fontSize: 13,
                   }}
-                  formatter={(value: number, name: string) => [value.toLocaleString(), name]}
+                  formatter={((value: number, name: string) => [value.toLocaleString(), name]) as any}
                 />
                 <Legend wrapperStyle={{ fontSize: 13, paddingTop: 8 }} />
                 <Line
@@ -380,7 +380,7 @@ export default function StatsPage() {
                   cy="50%"
                   outerRadius={100}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                   labelLine={{ strokeWidth: 1 }}
                 >
                   {pieData.map((_, index) => (
@@ -388,7 +388,7 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => [value.toLocaleString(), "请求数"]}
+                  formatter={((value: number) => [value.toLocaleString(), "请求数"]) as any}
                   contentStyle={{
                     backgroundColor: "#fff",
                     border: "1px solid #e4e4e7",

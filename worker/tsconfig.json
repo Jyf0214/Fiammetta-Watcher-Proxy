@@ -11,12 +11,12 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "outDir": "dist",
+    "noEmit": true,
+    "rootDir": "..",
     "paths": {
       "@/lib/*": ["../lib/*"],
       "@/*": ["./*"]
-    },
-    "baseUrl": "."
+    }
   },
-  "include": ["src/**/*.ts", "../lib/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

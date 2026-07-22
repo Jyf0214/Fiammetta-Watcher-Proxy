@@ -9,24 +9,24 @@
     "preview": "npx @cloudflare/next-on-pages && wrangler pages dev .vercel/output/static"
   },
   "dependencies": {
-    "next": "15.5.2",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "next": "^16.2.11",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "@cloudflare/workers-types": "^5.20260721.1",
-    "drizzle-orm": "^0.38.0",
-    "jose": "^6.0.0",
-    "antd": "^5.22.0",
-    "@ant-design/icons": "^5.5.0",
-    "@ant-design/cssinjs": "^1.21.0",
-    "recharts": "^2.15.0"
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.4",
+    "antd": "^6.5.1",
+    "@ant-design/icons": "^6.3.2",
+    "@ant-design/cssinjs": "^2.1.2",
+    "recharts": "^3.10.0"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.12",
-    "wrangler": "^4.0.0",
-    "typescript": "^5.7.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
-    "@types/node": "^22.0.0",
-    "dayjs": "^1.11.0"
+    "@cloudflare/next-on-pages": "^1.13.16",
+    "wrangler": "^4.113.0",
+    "typescript": "^7.0.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/node": "^26.1.1",
+    "dayjs": "^1.11.21"
   }
 }

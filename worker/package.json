@@ -9,11 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "^0.39.0"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260721.1",
-    "typescript": "^5.5.0",
-    "wrangler": "^4.0.0"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.113.0"
   }
 }

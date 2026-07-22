@@ -515,7 +515,7 @@ function TrendTab({ period, refreshKey }: { period: string; refreshKey: number }
               borderRadius: 8,
               fontSize: 13,
             }}
-            formatter={(value: number, name: string) => [value.toLocaleString(), name]}
+            formatter={((value: number, name: string) => [value.toLocaleString(), name]) as any}
           />
           <Legend wrapperStyle={{ fontSize: 13, paddingTop: 8 }} />
           <Line
