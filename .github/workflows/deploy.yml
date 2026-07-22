@@ -125,7 +125,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx wrangler pages deploy .open-next --project-name fiammetta-watcher
+          npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch production
           echo "✅ Pages 部署完成"
 
       # ==================== 完成 ====================

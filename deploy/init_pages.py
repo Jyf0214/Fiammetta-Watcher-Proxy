@@ -111,7 +111,22 @@ def main():
         msg = data.get("errors", [{}])[0].get("message", "未知")
         fail(f"D1 绑定失败: {msg}")
 
-    # ========== 3. 配置 KV 绑定 ==========
+    # ========== 3. 配置兼容性标志（nodejs_compat） ==========
+    print(f"⚙️ 配置兼容性标志: nodejs_compat")
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": {
+                "compatibility_flags": ["nodejs_compat"]
+            }
+        }
+    })
+    if data.get("success"):
+        print(f"  ✅ 兼容性标志设置成功")
+    else:
+        msg = data.get("errors", [{}])[0].get("message", "未知")
+        print(f"  ⚠️ 兼容性标志设置失败（可能已存在）: {msg}")
+
+    # ========== 4. 配置 KV 绑定 ==========
     print(f"🔗 配置 KV 绑定: {KV_ID}")
     data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
         "deployment_configs": {
