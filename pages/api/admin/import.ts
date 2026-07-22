@@ -18,7 +18,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Database } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -184,7 +184,7 @@ export default async function handler(
       const clientIp = ipHeader?.split(",")[0]?.trim() || null;
       await db.insert(schema.auditLogs).values({
         id: generateId(),
-        adminId: admin.adminId,
+        adminId: getAuditAdminId(admin),
         action: "import_data",
         detail: JSON.stringify({
           exportType: body.exportType,

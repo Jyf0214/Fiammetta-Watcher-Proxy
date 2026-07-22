@@ -23,6 +23,15 @@ export interface AuthResult {
 }
 
 /**
+ * 获取审计日志用的 adminId
+ *
+ * system-key 认证时返回 null（系统 Key 不在 admins 表中，外键约束会失败）
+ */
+export function getAuditAdminId(admin: AuthResult): string | null {
+  return admin.authMethod === "system-key" ? null : admin.adminId;
+}
+
+/**
  * 从请求中提取管理员身份
  *
  * 优先级：Cookie+JWT > Bearer system-api-key

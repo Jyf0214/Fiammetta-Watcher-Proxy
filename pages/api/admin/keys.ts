@@ -12,7 +12,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -129,7 +129,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: admin.adminId, action: "create_api_key",
+      id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
       detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
       ip, createdAt: currentTime,
     } as any);

@@ -15,7 +15,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
 /**
@@ -195,7 +195,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     try {
       await db.insert(schema.auditLogs).values({
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: admin.adminId,
+        adminId: getAuditAdminId(admin),
         action: "import_proxies",
         detail: JSON.stringify({
           target: poolId || null,

@@ -13,7 +13,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "../_auth";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -133,7 +133,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
 
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: admin.adminId, action: "update_api_key",
+      id: generateId(), adminId: getAuditAdminId(admin), action: "update_api_key",
       detail: JSON.stringify({ target: id, keyId: id, changes: sanitizedChanges }),
       ip, createdAt: currentTime,
     } as any);
@@ -157,7 +157,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     const currentTime = now();
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: admin.adminId, action: "delete_api_key",
+      id: generateId(), adminId: getAuditAdminId(admin), action: "delete_api_key",
       detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogs.length }),
       ip, createdAt: currentTime,
     } as any);

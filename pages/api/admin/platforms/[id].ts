@@ -10,7 +10,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
@@ -294,7 +294,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const now = Math.floor(Date.now() / 1000);
     await db.insert(schema.auditLogs).values({
       id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: admin.adminId,
+      adminId: getAuditAdminId(admin),
       action: "update_platform",
       detail: JSON.stringify({ platformId: id, changes: sanitized }),
       ip:
@@ -367,7 +367,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const now = Math.floor(Date.now() / 1000);
     await db.insert(schema.auditLogs).values({
       id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: admin.adminId,
+      adminId: getAuditAdminId(admin),
       action: "delete_platform",
       detail: JSON.stringify({ platformId: id }),
       ip:

@@ -9,7 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -60,7 +60,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     try {
       await db.insert(schema.auditLogs).values({
         id: generateId(),
-        adminId: admin.adminId,
+        adminId: getAuditAdminId(admin),
         action: "delete_system_key",
         detail: JSON.stringify({ target: id, name: existing[0].name }),
         ip: null,

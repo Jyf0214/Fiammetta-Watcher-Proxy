@@ -8,7 +8,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
 /**
@@ -55,7 +55,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
       await db.insert(schema.auditLogs).values({
         id: crypto.randomUUID(),
-        adminId: admin.adminId,
+        adminId: getAuditAdminId(admin),
         action: "delete_model_map",
         detail: JSON.stringify({ modelId: id, sourceModel: existing.sourceModel }),
         ip,

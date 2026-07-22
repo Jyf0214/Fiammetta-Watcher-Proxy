@@ -9,7 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { eq, desc, sql } from "drizzle-orm";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 /**
  * GET /api/admin/pools — 获取代理池列表
@@ -108,7 +108,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     try {
       await db.insert(schema.auditLogs).values({
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: String((admin as any).adminId || (admin as any).sub || ""),
+        adminId: getAuditAdminId(admin),
         action: "create_proxy_pool",
         target: JSON.stringify({ poolId: id, name: name.trim() }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,

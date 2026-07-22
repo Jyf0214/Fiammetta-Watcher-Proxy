@@ -16,7 +16,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { desc } from "drizzle-orm";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 /** 导出类型 */
 type ExportType = "system" | "data" | "all";
@@ -235,7 +235,7 @@ export default async function handler(
     // 审计日志：记录导出操作
     await db.insert(schema.auditLogs).values({
       id: crypto.randomUUID(),
-      adminId: admin.adminId,
+      adminId: getAuditAdminId(admin),
       action: "export_data",
       detail: JSON.stringify({ exportType }),
       ip:

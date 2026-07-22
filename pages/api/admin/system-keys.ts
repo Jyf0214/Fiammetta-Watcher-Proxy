@@ -12,7 +12,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { desc } from "drizzle-orm";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 // ==================== 工具函数 ====================
 
@@ -118,7 +118,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     try {
       await db.insert(schema.auditLogs).values({
         id: generateId(),
-        adminId: admin.adminId,
+        adminId: getAuditAdminId(admin),
         action: "create_system_key",
         detail: JSON.stringify({ target: keyId, name: name.trim() }),
         ip: null,
