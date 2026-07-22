@@ -13,9 +13,9 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
+import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from "sql.js";
 
-let SQL: typeof initSqlJs;
+let SQL: SqlJsStatic;
 
 beforeAll(async () => {
   SQL = await initSqlJs();
