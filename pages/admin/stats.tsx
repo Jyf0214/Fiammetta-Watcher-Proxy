@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
-import { Tag, Tooltip, toast } from "@lobehub/ui";
+import { Tag, Tooltip, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -84,7 +84,7 @@ function StatsContent() {
       try {
         const res = await fetch("/api/admin/stats");
         if (res.status === 401) {
-          toast.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
           router.push("/admin/login");
           return;
         }
@@ -95,7 +95,7 @@ function StatsContent() {
         }
       } catch {
         if (isManual) {
-          toast.error(t("common.error"));
+          message.error(t("common.error"));
         }
       } finally {
         setLoading(false);

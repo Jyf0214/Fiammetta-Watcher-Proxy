@@ -7,8 +7,6 @@ const nextConfig: NextConfig = {
   },
   // 生产环境禁用源码映射，防止源码泄露
   productionBrowserSourceMaps: false,
-  // Lobe UI 需要转译
-  transpilePackages: ["@lobehub/ui"],
   // 临时跳过 TypeScript 类型检查（迁移期间）
   typescript: {
     ignoreBuildErrors: true,

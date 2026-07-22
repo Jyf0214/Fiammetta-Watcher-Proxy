@@ -1,14 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import {
-  Modal,
-  Form,
-  Input,
-  InputNumber,
-  Select,
-  Tooltip,
-  toast,
-} from "@lobehub/ui";
-import { Space, Tag, Popconfirm, type TableColumnsType } from "antd";
+import { Space, Tag, Popconfirm, Tooltip, Modal, Form, Input, InputNumber, Select, message, type TableColumnsType } from "antd";
 import { Plus, Trash2, Copy, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -54,7 +45,7 @@ export default function KeysPage() {
         if (data.success && Array.isArray(data.data)) setKeys(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -83,17 +74,17 @@ export default function KeysPage() {
 
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message);
+        message.success(data.message);
         setModalOpen(false);
         form.resetFields();
         setNewKeyValue(data.data.key);
         setNewKeyVisible(true);
         handleRefresh();
       } else {
-        toast.error(data.error);
+        message.error(data.error);
       }
     } catch (err) {
-      if (!('errorFields' in (err as Record<string, unknown>))) toast.error(t("common.error"));
+      if (!('errorFields' in (err as Record<string, unknown>))) message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -104,22 +95,22 @@ export default function KeysPage() {
       const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        toast.success(t("api_key.delete_success") || "删除成功");
+        message.success(t("api_key.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        toast.error(data.error || t("common.error"));
+        message.error(data.error || t("common.error"));
       }
     } catch {
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     }
   };
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success(t("common.copied"));
+      message.success(t("common.copied"));
     } catch {
-      toast.error(t("common.copy_failed") || "复制失败");
+      message.error(t("common.copy_failed") || "复制失败");
     }
   };
 

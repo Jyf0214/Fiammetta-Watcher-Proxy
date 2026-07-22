@@ -1,19 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Tag,
-  Form,
-  Input,
-  InputPassword,
-  TextArea,
-  InputNumber,
-  Select,
-  Drawer,
-  toast,
-} from "@lobehub/ui";
-import {
   Space,
   Table,
   Popconfirm,
+  Tag,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Drawer,
+  message,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -78,7 +74,7 @@ export default function PlatformsPage() {
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -107,7 +103,7 @@ export default function PlatformsPage() {
   };
 
   const removeNamedKey = (index: number) => {
-    if (namedKeys.length <= 1) { toast.warning("至少保留一个密钥"); return; }
+    if (namedKeys.length <= 1) { message.warning("至少保留一个密钥"); return; }
     setNamedKeys(namedKeys.filter((_, i) => i !== index));
   };
 
@@ -125,7 +121,7 @@ export default function PlatformsPage() {
 
   const copyKeyValue = (key: string) => {
     navigator.clipboard.writeText(key);
-    toast.success("已复制到剪贴板");
+    message.success("已复制到剪贴板");
   };
 
   const openEditForm = (platform: Platform) => {
@@ -173,11 +169,11 @@ export default function PlatformsPage() {
       const method = editing ? "PUT" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
       const data = await res.json();
-      if (data.success) { toast.success(data.message); closeForm(); handleRefresh(); }
-      else toast.error(data.error || t("common.error"));
+      if (data.success) { message.success(data.message); closeForm(); handleRefresh(); }
+      else message.error(data.error || t("common.error"));
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally { setSubmitting(false); }
   };
 
@@ -185,9 +181,9 @@ export default function PlatformsPage() {
     try {
       const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (data.success) { toast.success(t("platform.delete_success") || "删除成功"); handleRefresh(); }
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(t("platform.delete_success") || "删除成功"); handleRefresh(); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const handleToggle = async (platform: Platform) => {
@@ -199,8 +195,8 @@ export default function PlatformsPage() {
       });
       const data = await res.json();
       if (data.success) handleRefresh();
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
     finally { setTogglingId(null); }
   };
 
@@ -214,7 +210,7 @@ export default function PlatformsPage() {
       const res = await fetch(`/api/admin/platforms/${platformId}/models`);
       const data = await res.json();
       if (data.success) setModels(data.data || []);
-    } catch { toast.error(t("common.error")); }
+    } catch { message.error(t("common.error")); }
     finally { setModelsLoading(false); }
   };
 
@@ -224,9 +220,9 @@ export default function PlatformsPage() {
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, { method: "PUT" });
       const data = await res.json();
-      if (data.success) { toast.success(data.message); fetchModels(modelPlatform.id); }
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(data.message); fetchModels(modelPlatform.id); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
     finally { setRefreshing(false); }
   };
 
@@ -238,9 +234,9 @@ export default function PlatformsPage() {
         body: JSON.stringify({ modelId: newModelId.trim() }),
       });
       const data = await res.json();
-      if (data.success) { toast.success(data.message); setNewModelId(""); fetchModels(modelPlatform.id); }
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(data.message); setNewModelId(""); fetchModels(modelPlatform.id); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const handleDeleteModel = async (modelId: string) => {
@@ -249,8 +245,8 @@ export default function PlatformsPage() {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models?modelId=${encodeURIComponent(modelId)}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) fetchModels(modelPlatform.id);
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const columns: TableColumnsType<Platform> = [
@@ -335,7 +331,7 @@ export default function PlatformsPage() {
           >
             <Form form={form} layout="vertical" onFinish={handleSubmit} onFinishFailed={({ errorFields }) => {
               if (errorFields && errorFields.length > 0) {
-                toast.error(errorFields[0].errors[0] || t("validation.field_required"));
+                message.error(errorFields[0].errors[0] || t("validation.field_required"));
               }
             }}>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -355,7 +351,7 @@ export default function PlatformsPage() {
                     {namedKeys.map((namedKey, index) => (
                       <div key={index} className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
                         <Input value={namedKey.name} onChange={(e) => updateKeyName(index, e.target.value)} placeholder="密钥名称" className="w-24 flex-shrink-0" size="small" />
-                        <InputPassword value={namedKey.key} onChange={(e) => updateKeyValue(index, e.target.value)} placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"} className="flex-1 font-mono text-xs" size="small" />
+                        <Input.Password value={namedKey.key} onChange={(e) => updateKeyValue(index, e.target.value)} placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"} className="flex-1 font-mono text-xs" size="small" />
                         <Button variant="ghost" size="sm" iconOnly icon={<Copy />} onClick={() => copyKeyValue(namedKey.key)} disabled={!namedKey.key} title="复制密钥" />
                         <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} onClick={() => removeNamedKey(index)} disabled={namedKeys.length <= 1} title="删除密钥" />
                       </div>
@@ -379,7 +375,7 @@ export default function PlatformsPage() {
                   <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
                 </Form.Item>
                 <Form.Item name="forwardHeaders" label={t("platform.forward_headers")}>
-                  <TextArea rows={2} placeholder='["X-Thinking-Mode", "X-Reasoning-Effort"]' />
+                  <Input.TextArea rows={2} placeholder='["X-Thinking-Mode", "X-Reasoning-Effort"]' />
                 </Form.Item>
               </div>
               <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">

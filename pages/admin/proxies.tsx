@@ -4,12 +4,9 @@ import {
   Modal,
   Form,
   Input,
-  TextArea,
   Select,
-  toast,
-} from "@lobehub/ui";
-import {
   Popconfirm,
+  message,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -70,7 +67,7 @@ export default function ProxiesPage() {
         if (data.success && Array.isArray(data.data)) setProxies(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -100,12 +97,12 @@ export default function ProxiesPage() {
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(t("proxy.create_success") || "创建成功");
+        message.success(t("proxy.create_success") || "创建成功");
         setModalOpen(false); form.resetFields(); handleRefresh();
-      } else toast.error(data.error || t("common.error"));
+      } else message.error(data.error || t("common.error"));
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally { setSubmitting(false); }
   };
 
@@ -113,9 +110,9 @@ export default function ProxiesPage() {
     try {
       const res = await fetch(`/api/admin/proxies/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (data.success) { toast.success(t("proxy.delete_success") || "删除成功"); handleRefresh(); }
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(t("proxy.delete_success") || "删除成功"); handleRefresh(); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const handleToggle = async (proxy: ProxyItem) => {
@@ -126,8 +123,8 @@ export default function ProxiesPage() {
       });
       const data = await res.json();
       if (data.success) handleRefresh();
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const handleReset = async (proxy: ProxyItem) => {
@@ -137,12 +134,12 @@ export default function ProxiesPage() {
         body: JSON.stringify({ status: "healthy" }),
       });
       const data = await res.json();
-      if (data.success) { toast.success(t("proxy.reset_success") || "已重置"); handleRefresh(); }
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(t("proxy.reset_success") || "已重置"); handleRefresh(); }
+    } catch { message.error(t("common.error")); }
   };
 
   const handleImport = async () => {
-    if (!importText.trim()) { toast.warning(t("proxy.import_empty") || "导入内容不能为空"); return; }
+    if (!importText.trim()) { message.warning(t("proxy.import_empty") || "导入内容不能为空"); return; }
     setImporting(true);
     try {
       const res = await fetch("/api/admin/proxies/import", {
@@ -153,10 +150,10 @@ export default function ProxiesPage() {
       if (data.success) {
         const { created, updated, parseErrors } = data.data || {};
         const msg = `新增 ${created} 个，覆盖 ${updated} 个` + (parseErrors?.length ? `，${parseErrors.length} 行格式错误` : "");
-        toast.success(msg);
+        message.success(msg);
         setImportModalOpen(false); setImportText(""); setImportPoolId(undefined); handleRefresh();
-      } else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      } else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
     finally { setImporting(false); }
   };
 
@@ -267,7 +264,7 @@ export default function ProxiesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">代理列表</label>
-              <TextArea rows={10} value={importText} onChange={(e) => setImportText(e.target.value)}
+              <Input.TextArea rows={10} value={importText} onChange={(e) => setImportText(e.target.value)}
                 placeholder={"142.111.67.146:5611:user1:pass1\n10.0.0.1:1080:user2:pass2"} className="font-mono text-xs" />
             </div>
           </div>

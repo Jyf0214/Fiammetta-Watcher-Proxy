@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Tag, Tooltip, toast } from "@lobehub/ui";
+import { Tag, Tooltip, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -90,7 +90,7 @@ function DashboardContent() {
         }
       } catch {
         if (isManual) {
-          toast.error(t("common.error"));
+          message.error(t("common.error"));
         }
       } finally {
         setLoading(false);

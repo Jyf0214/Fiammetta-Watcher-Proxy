@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Select, Tabs, toast } from "@lobehub/ui";
+import { Select, Tabs, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -72,7 +72,7 @@ export default function UsagePage() {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[用量趋势] 请求异常:", errMsg, err);
         setTrendError(errMsg);
-        toast.error(t("dashboard.fetch_failed"));
+        message.error(t("dashboard.fetch_failed"));
       } finally {
         if (!controller.signal.aborted) setTrendLoading(false);
       }

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { toast } from "@lobehub/ui";
+import { message } from "antd";
 import {
   Download,
   Upload,
@@ -109,9 +109,9 @@ export default function DataManagerPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      toast.success(t("admin.dm_export_success"));
+      message.success(t("admin.dm_export_success"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+      message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
     } finally {
       setExporting(false);
     }
@@ -140,12 +140,12 @@ export default function DataManagerPage() {
         setImportResult(result);
 
         if (result.success) {
-          toast.success(result.message);
+          message.success(result.message);
         } else {
-          toast.error(result.error || t("admin.dm_err_export"));
+          message.error(result.error || t("admin.dm_err_export"));
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+        message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
         setImportResult({
           success: false,
           message: err instanceof Error ? err.message : t("admin.dm_err_export"),
@@ -164,11 +164,11 @@ export default function DataManagerPage() {
 
       const isJson = file.type === "application/json" || file.name.endsWith(".json");
       if (!isJson) {
-        toast.error(t("admin.dm_err_json_only"));
+        message.error(t("admin.dm_err_json_only"));
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
-        toast.error(t("admin.dm_err_file_too_large"));
+        message.error(t("admin.dm_err_file_too_large"));
         return;
       }
 
@@ -186,7 +186,7 @@ export default function DataManagerPage() {
       if (!file) return;
 
       if (!file.name.endsWith(".json")) {
-        toast.error(t("admin.dm_err_json_only"));
+        message.error(t("admin.dm_err_json_only"));
         return;
       }
       processImportFile(file);

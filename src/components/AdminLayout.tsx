@@ -29,7 +29,7 @@ import {
   Zap,
   Download,
 } from "lucide-react";
-import { toast } from "@lobehub/ui";
+import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
 import "@/lib/i18n";
 
@@ -345,10 +345,10 @@ export default function AdminLayout({
     try {
       const res = await fetch("/api/admin/auth", { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      toast.success(t("auth.logout_success") || "退出成功");
+      message.success(t("auth.logout_success") || "退出成功");
       router.push("/");
     } catch {
-      toast.error(t("auth.logout_failed") || "退出失败，请重试");
+      message.error(t("auth.logout_failed") || "退出失败，请重试");
     } finally {
       setLogoutLoading(false);
     }

@@ -5,9 +5,9 @@ import {
   Input,
   Select,
   Popconfirm,
+  message,
   type TableColumnsType,
 } from "antd";
-import { toast } from "@lobehub/ui";
 import { Plus, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -53,7 +53,7 @@ export default function ModelsPage() {
         if (data.success && Array.isArray(data.data)) setModels(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -68,7 +68,7 @@ export default function ModelsPage() {
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       }
     };
 
@@ -94,16 +94,16 @@ export default function ModelsPage() {
 
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message);
+        message.success(data.message);
         setModalOpen(false);
         form.resetFields();
         handleRefresh();
       } else {
-        toast.error(data.error);
+        message.error(data.error);
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
@@ -114,13 +114,13 @@ export default function ModelsPage() {
       const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message || t("model_map.delete_success") || "删除成功");
+        message.success(data.message || t("model_map.delete_success") || "删除成功");
         handleRefresh();
       } else {
-        toast.error(data.error || t("common.error"));
+        message.error(data.error || t("common.error"));
       }
     } catch {
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     }
   };
 

@@ -11,10 +11,8 @@
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
-    "@ant-design/cssinjs": "^2.1.2",
     "@ant-design/icons": "^6.3.2",
     "@cloudflare/workers-types": "^5.20260721.1",
-    "@lobehub/ui": "^5.23.1",
     "antd": "^6.5.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
@@ -22,6 +20,7 @@
     "i18next-browser-languagedetector": "^8.2.1",
     "jose": "^6.2.4",
     "lucide-react": "^1.25.0",
+    "motion": "^12.42.2",
     "next": "^16.2.11",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

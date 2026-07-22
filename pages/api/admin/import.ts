@@ -41,6 +41,15 @@ interface FullImportResult {
   };
 }
 
+/** 增大 body size limit（导出数据可能超过默认 4MB） */
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "50mb",
+    },
+  },
+};
+
 /** 生成唯一 ID */
 function generateId(): string {
   return crypto.randomUUID();

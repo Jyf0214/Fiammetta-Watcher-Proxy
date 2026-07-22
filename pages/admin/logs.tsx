@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
-import {
-  Tag,
-  Select,
-  Tabs,
-  toast,
-} from "@lobehub/ui";
-import { DatePicker } from "antd";
-import type { TableColumnsType } from "antd";
+import { Tag, Select, Tabs, DatePicker, message, type TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -131,7 +124,7 @@ function DetailedLogsTab({
           signal: controller.signal,
         });
         if (res.status === 401) {
-          toast.warning(
+          message.warning(
             t("auth.unauthorized") || "登录已过期，请重新登录"
           );
           router.push("/admin/login");
@@ -144,7 +137,7 @@ function DetailedLogsTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -448,7 +441,7 @@ function ArchivedStatsTab({
           signal: controller.signal,
         });
         if (res.status === 401) {
-          toast.warning(
+          message.warning(
             t("auth.unauthorized") || "登录已过期，请重新登录"
           );
           router.push("/admin/login");
@@ -461,7 +454,7 @@ function ArchivedStatsTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("log.fetch_failed") || "获取归档数据失败");
+        message.error(t("log.fetch_failed") || "获取归档数据失败");
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -483,13 +476,13 @@ function ArchivedStatsTab({
       const res = await fetch("/api/admin/logs/archive", { method: "POST" });
       const data: any = await res.json();
       if (data.success) {
-        toast.success(data.message || "归档完成");
+        message.success(data.message || "归档完成");
         handleRefresh();
       } else {
-        toast.error(data.error || "归档失败");
+        message.error(data.error || "归档失败");
       }
     } catch {
-      toast.error("归档请求失败");
+      message.error("归档请求失败");
     } finally {
       setArchiving(false);
     }

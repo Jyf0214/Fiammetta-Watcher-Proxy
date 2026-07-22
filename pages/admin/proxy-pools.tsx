@@ -4,10 +4,8 @@ import {
   Modal,
   Form,
   Input,
-  toast,
-} from "@lobehub/ui";
-import {
   Popconfirm,
+  message,
   type TableColumnsType,
 } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -52,7 +50,7 @@ export default function ProxyPoolsPage() {
         if (data.success && Array.isArray(data.data)) setPools(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -80,19 +78,19 @@ export default function ProxyPoolsPage() {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
         });
         const data = await res.json();
-        if (data.success) { toast.success(t("proxy_pool.edit_success") || "更新成功"); closeForm(); handleRefresh(); }
-        else toast.error(data.error || t("common.error"));
+        if (data.success) { message.success(t("proxy_pool.edit_success") || "更新成功"); closeForm(); handleRefresh(); }
+        else message.error(data.error || t("common.error"));
       } else {
         const res = await fetch("/api/admin/pools", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
         });
         const data = await res.json();
-        if (data.success) { toast.success(t("proxy_pool.create_success") || "创建成功"); closeForm(); handleRefresh(); }
-        else toast.error(data.error || t("common.error"));
+        if (data.success) { message.success(t("proxy_pool.create_success") || "创建成功"); closeForm(); handleRefresh(); }
+        else message.error(data.error || t("common.error"));
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally { setSubmitting(false); }
   };
 
@@ -100,9 +98,9 @@ export default function ProxyPoolsPage() {
     try {
       const res = await fetch(`/api/admin/pools/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (data.success) { toast.success(t("proxy_pool.delete_success") || "删除成功"); handleRefresh(); }
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      if (data.success) { message.success(t("proxy_pool.delete_success") || "删除成功"); handleRefresh(); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const handleToggle = async (pool: PoolItem) => {
@@ -113,8 +111,8 @@ export default function ProxyPoolsPage() {
       });
       const data = await res.json();
       if (data.success) handleRefresh();
-      else toast.error(data.error || t("common.error"));
-    } catch { toast.error(t("common.error")); }
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
   };
 
   const columns: TableColumnsType<PoolItem> = [

@@ -1,5 +1,7 @@
-import { Select, TextArea } from '@lobehub/ui';
+import { Select, Input as AntInput } from 'antd';
 import { Input } from '@/components/ui/Input';
+
+const { TextArea } = AntInput;
 
 export interface FormFieldProps {
   label: string;

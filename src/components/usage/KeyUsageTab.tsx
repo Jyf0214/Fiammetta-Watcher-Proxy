@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Tag, Tooltip, toast } from "@lobehub/ui";
-import type { TableColumnsType } from "antd";
+import { Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
 import { Zap, TrendingUp, Cloud, Clock } from "lucide-react";
@@ -53,7 +52,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

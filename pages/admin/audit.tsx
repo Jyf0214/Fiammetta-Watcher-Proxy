@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
-import { Tag, toast } from "@lobehub/ui";
-import type { TableColumnsType } from "antd";
+import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -39,7 +38,7 @@ function AuditContent() {
       try {
         const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal: controller.signal });
         if (res.status === 401) {
-          toast.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
           router.push("/admin/login");
           return;
         }
@@ -50,7 +49,7 @@ function AuditContent() {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Select, Empty, toast } from "@lobehub/ui";
+import { Select, Empty, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -79,7 +79,7 @@ export default function AutoModelPage() {
           setModels(allModels);
         }
       } catch {
-        toast.error(t("common.error"));
+        message.error(t("common.error"));
       } finally {
         setModelsLoading(false);
       }
@@ -106,12 +106,12 @@ export default function AutoModelPage() {
       const data = await res.json();
       if (data.success) {
         setAutoModelId(newId);
-        toast.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
+        message.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
       } else {
-        toast.error(data.error || t("common.error"));
+        message.error(data.error || t("common.error"));
       }
     } catch {
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally {
       setAutoModelLoading(false);
     }
@@ -140,12 +140,12 @@ export default function AutoModelPage() {
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(t("system.auto_model_selected_saved") || "模型选择已保存");
+        message.success(t("system.auto_model_selected_saved") || "模型选择已保存");
       } else {
-        toast.error(data.error || t("common.error"));
+        message.error(data.error || t("common.error"));
       }
     } catch {
-      toast.error(t("common.error"));
+      message.error(t("common.error"));
     } finally {
       setSelectedModelsLoading(false);
     }

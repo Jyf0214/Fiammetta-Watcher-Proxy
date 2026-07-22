@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
-import { Tag, Alert } from "@lobehub/ui";
-import { Descriptions } from "antd";
+import { Tag, Alert, Descriptions } from "antd";
 import { Button } from "@/components/ui/Button";
 import { RefreshCw, Settings } from "lucide-react";
 import { PageContainer } from "@/components/ui/PageContainer";
