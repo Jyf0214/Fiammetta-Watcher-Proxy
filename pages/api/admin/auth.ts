@@ -10,10 +10,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq } from "drizzle-orm";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
 
 const COOKIE_NAME = "admin_token";
 
@@ -74,16 +71,11 @@ function clearAuthCookie(res: NextApiResponse): void {
   res.setHeader("Set-Cookie", cookie);
 }
 
-async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string; DB: D1Database }): Promise<AdminPayload | null> {
+async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string }): Promise<AdminPayload | null> {
   const token = getTokenFromCookie(req);
   if (!token) return null;
   const payload = await verifyToken(token, env);
   if (!payload) return null;
-  try {
-    const db = createDb(env.DB);
-    const [admin] = await db.select({ id: schema.admins.id }).from(schema.admins).where(eq(schema.admins.id, payload.adminId)).limit(1);
-    if (!admin) return null;
-  } catch { return null; }
   return payload;
 }
 
@@ -184,13 +176,9 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
 async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
-    DB: (process.env as unknown as { DB: D1Database }).DB,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
-    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
-    ENVIRONMENT: process.env.ENVIRONMENT,
   };
   if (!env.JWT_SECRET) return res.status(500).json({ success: false, error: "JWT_SECRET 环境变量未配置" });
-  if (!env.DB) return res.status(500).json({ success: false, error: "数据库未配置" });
 
   try {
     const admin = await getAdmin(req, env);
