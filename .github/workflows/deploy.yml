@@ -90,9 +90,7 @@ jobs:
       # ==================== 安装依赖 & 构建 ====================
 
       - name: Install Dependencies
-        run: |
-          npm install --legacy-peer-deps
-          npx tsc --version
+        run: npm install --legacy-peer-deps
 
       - name: Build Pages
         run: npx opennextjs-cloudflare build
@@ -104,7 +102,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           cd worker
-          npx wrangler deploy --config wrangler.toml
+          npx wrangler deploy --config wrangler.toml 2>&1 | grep -v "https://"
           echo "✅ Worker 部署完成"
 
       # ==================== Pages 项目 + 绑定 + Secrets ====================
@@ -125,7 +123,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch production
+          npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -v "https://"
           echo "✅ Pages 部署完成"
 
       # ==================== 完成 ====================
