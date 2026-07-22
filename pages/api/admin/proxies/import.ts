@@ -217,7 +217,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/proxies/import] 批量导入失败:", err);
-    return res.status(500).json({ success: false, error: "批量导入失败" });
+    return res.status(500).json({ success: false, error: "批量导入失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

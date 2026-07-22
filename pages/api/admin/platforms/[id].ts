@@ -63,7 +63,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[GET /api/admin/platforms/[id]] 获取平台失败:", err);
-    return res.status(500).json({ success: false, error: "获取平台失败" });
+    return res.status(500).json({ success: false, error: "获取平台失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -316,7 +316,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[PUT /api/admin/platforms/[id]] 更新平台失败:", err);
-    return res.status(500).json({ success: false, error: "更新平台失败" });
+    return res.status(500).json({ success: false, error: "更新平台失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

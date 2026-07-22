@@ -172,6 +172,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/logs] 获取日志失败:", err);
-    res.status(500).json({ success: false, error: "获取日志失败" });
+    res.status(500).json({ success: false, error: "获取日志失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

@@ -216,7 +216,7 @@ export default async function handler(
       if (!res.headersSent) {
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       }
-      res.write(JSON.stringify({ type: "error", error: "导入数据失败: " + (err instanceof Error ? err.message : String(err)) }) + "\n");
+      res.write(JSON.stringify({ type: "error", error: "导入数据失败", detail: err instanceof Error ? err.message : String(err) }) + "\n");
       res.end();
     } catch {
       // 如果流已关闭，忽略

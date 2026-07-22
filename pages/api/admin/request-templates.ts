@@ -224,6 +224,6 @@ export default async function handler(
     res.status(405).json({ success: false, error: "Method not allowed" });
   } catch (error) {
     console.error("[request-templates] 操作失败:", error);
-    res.status(500).json({ success: false, error: "操作失败" });
+    res.status(500).json({ success: false, error: "操作失败", detail: error instanceof Error ? error.message : String(error) });
   }
 }

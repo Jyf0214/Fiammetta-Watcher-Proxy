@@ -66,7 +66,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: models });
   } catch (err) {
     console.error("[GET /api/admin/models] 获取模型映射失败:", err);
-    return res.status(500).json({ success: false, error: "获取模型映射失败" });
+    return res.status(500).json({ success: false, error: "获取模型映射失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -131,6 +131,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(500).json({
         success: false,
         error: "校验平台存在性失败",
+        detail: err instanceof Error ? err.message : String(err),
       });
     }
   }
@@ -191,7 +192,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/models] 创建模型映射失败:", err);
-    return res.status(500).json({ success: false, error: "创建模型映射失败" });
+    return res.status(500).json({ success: false, error: "创建模型映射失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

@@ -187,7 +187,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[PUT /api/admin/proxies/[id]] 更新代理失败:", err);
-    return res.status(500).json({ success: false, error: "更新代理失败" });
+    return res.status(500).json({ success: false, error: "更新代理失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -240,7 +240,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     });
   } catch (err) {
     console.error("[DELETE /api/admin/proxies/[id]] 删除代理失败:", err);
-    return res.status(500).json({ success: false, error: "删除代理失败" });
+    return res.status(500).json({ success: false, error: "删除代理失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

@@ -73,7 +73,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
     console.error("[GET /api/admin/system-keys] 获取系统 Key 列表失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "获取系统 Key 列表失败" });
+    return res.status(500).json({ success: false, error: "获取系统 Key 列表失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -136,6 +136,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/system-keys] 创建系统 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "创建系统 Key 失败" });
+    return res.status(500).json({ success: false, error: "创建系统 Key 失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

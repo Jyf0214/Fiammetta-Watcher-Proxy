@@ -54,7 +54,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adm
     return res.status(200).json({ success: true, data: { ...key, key: maskKey(key.key) } });
   } catch (err) {
     console.error("[GET /api/admin/keys/[id]] 获取 Key 详情失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "获取 Key 详情失败", type: "server_error" } });
+    return res.status(500).json({ success: false, error: { message: "获取 Key 详情失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -133,7 +133,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
 
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: getAuditAdminId(admin), action: "update_api_key",
+      id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "update_api_key",
       detail: JSON.stringify({ target: id, keyId: id, changes: sanitizedChanges }),
       ip, createdAt: currentTime,
     } as any);
@@ -141,7 +141,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key) }, message: "API Key 更新成功" });
   } catch (err) {
     console.error("[PUT /api/admin/keys/[id]] 更新失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "更新 API Key 失败", type: "server_error" } });
+    return res.status(500).json({ success: false, error: { message: "更新 API Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -157,7 +157,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     const currentTime = now();
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: getAuditAdminId(admin), action: "delete_api_key",
+      id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "delete_api_key",
       detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogs.length }),
       ip, createdAt: currentTime,
     } as any);
@@ -165,6 +165,6 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogs.length });
   } catch (err) {
     console.error("[DELETE /api/admin/keys/[id]] 删除失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "删除 API Key 失败", type: "server_error" } });
+    return res.status(500).json({ success: false, error: { message: "删除 API Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
   }
 }

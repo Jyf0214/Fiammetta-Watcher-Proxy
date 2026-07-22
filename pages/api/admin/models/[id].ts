@@ -72,7 +72,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     });
   } catch (err) {
     console.error("[DELETE /api/admin/models/[id]] 删除模型映射失败:", err);
-    return res.status(500).json({ success: false, error: "删除模型映射失败" });
+    return res.status(500).json({ success: false, error: "删除模型映射失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

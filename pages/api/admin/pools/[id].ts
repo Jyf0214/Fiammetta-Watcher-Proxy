@@ -47,7 +47,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     return res.status(200).json({ success: true, data: rows[0] });
   } catch (err) {
     console.error("[GET /api/admin/pools/[id]] 获取代理池详情失败:", err);
-    return res.status(500).json({ success: false, error: "获取代理池详情失败" });
+    return res.status(500).json({ success: false, error: "获取代理池详情失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -155,7 +155,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[PUT /api/admin/pools/[id]] 更新代理池失败:", err);
-    return res.status(500).json({ success: false, error: "更新代理池失败" });
+    return res.status(500).json({ success: false, error: "更新代理池失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -215,7 +215,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     });
   } catch (err) {
     console.error("[DELETE /api/admin/pools/[id]] 删除代理池失败:", err);
-    return res.status(500).json({ success: false, error: "删除代理池失败" });
+    return res.status(500).json({ success: false, error: "删除代理池失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

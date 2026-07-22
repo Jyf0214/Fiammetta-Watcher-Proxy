@@ -136,7 +136,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: { username: env.ADMIN_USERNAME }, message: "登录成功" });
   } catch (error) {
     console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
-    return res.status(500).json({ success: false, error: "登录失败" });
+    return res.status(500).json({ success: false, error: "登录失败", detail: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -169,7 +169,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
   } catch (err) {
     console.error("[DELETE /api/admin/auth] 登出异常:", err);
     clearAuthCookie(res);
-    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除" });
+    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -188,6 +188,6 @@ async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: { adminId: admin.adminId, username: admin.username } });
   } catch (err) {
     console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
-    return res.status(401).json({ success: false, error: "未授权" });
+    return res.status(401).json({ success: false, error: "未授权", detail: err instanceof Error ? err.message : String(err) });
   }
 }

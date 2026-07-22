@@ -125,7 +125,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[GET /api/admin/proxies] 获取代理列表失败:", err);
-    return res.status(500).json({ success: false, error: "获取代理列表失败" });
+    return res.status(500).json({ success: false, error: "获取代理列表失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -229,7 +229,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/proxies] 创建代理失败:", err);
-    return res.status(500).json({ success: false, error: "创建代理失败" });
+    return res.status(500).json({ success: false, error: "创建代理失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

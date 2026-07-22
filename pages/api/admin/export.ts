@@ -252,6 +252,6 @@ export default async function handler(
     res.status(200).send(jsonContent);
   } catch (err) {
     console.error("[GET /api/admin/export] 导出数据失败:", err);
-    res.status(500).json({ success: false, error: "导出数据失败" });
+    res.status(500).json({ success: false, error: "导出数据失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

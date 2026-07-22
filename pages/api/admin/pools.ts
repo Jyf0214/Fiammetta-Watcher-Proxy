@@ -48,7 +48,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[GET /api/admin/pools] 获取代理池列表失败:", err);
-    return res.status(500).json({ success: false, error: "获取代理池列表失败" });
+    return res.status(500).json({ success: false, error: "获取代理池列表失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -125,7 +125,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/pools] 创建代理池失败:", err);
-    return res.status(500).json({ success: false, error: "创建代理池失败" });
+    return res.status(500).json({ success: false, error: "创建代理池失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 

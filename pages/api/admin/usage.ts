@@ -165,6 +165,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/usage] 获取用量统计失败:", err);
-    res.status(500).json({ success: false, error: "获取用量统计失败" });
+    res.status(500).json({ success: false, error: "获取用量统计失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
