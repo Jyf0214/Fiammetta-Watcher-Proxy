@@ -56,6 +56,7 @@ const menuItems: MenuItem[] = [
   { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
   { key: "admin.events", icon: Bell, href: "/admin/events", group: "monitor" },
   { key: "admin.data_manager", icon: Download, href: "/admin/data-manager", group: "system" },
+  { key: "admin.system_keys", icon: Key, href: "/admin/system-keys", group: "system" },
   { key: "admin.system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
@@ -235,6 +236,7 @@ function TopHeader({
     "/admin/system": "admin.system",
     "/admin/events": "admin.events",
     "/admin/data-manager": "admin.data_manager",
+    "/admin/system-keys": "admin.system_keys",
   };
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";

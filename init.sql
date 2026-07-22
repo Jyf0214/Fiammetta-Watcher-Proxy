@@ -220,6 +220,19 @@ CREATE INDEX IF NOT EXISTS idx_platforms_enabled_status ON platforms(enabled, st
 CREATE INDEX IF NOT EXISTS idx_proxies_pool_enabled ON proxies(pool_id, enabled, status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
 CREATE INDEX IF NOT EXISTS idx_api_keys_status_expires ON api_keys(status, expires_at);
+
+-- 11. 系统 API 密钥（管理后台专用，不可用于 v1 代理）
+CREATE TABLE IF NOT EXISTS system_api_keys (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_used_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_system_api_keys_key ON system_api_keys(key);
+
 CREATE INDEX IF NOT EXISTS idx_platform_models_platform_id ON platform_models(platform_id);
 CREATE INDEX IF NOT EXISTS idx_platform_models_model_id ON platform_models(model_id);
 CREATE INDEX IF NOT EXISTS idx_request_logs_key_id ON request_logs(key_id);

@@ -123,6 +123,8 @@
     "request_templates_desc": "自定义上游请求格式，自动注入额外字段",
     "data_manager": "数据管理",
     "data_manager_desc": "导出和导入系统数据，支持备份和迁移",
+    "system_keys": "系统 API Key",
+    "system_keys_desc": "管理后台 API 认证密钥，不可用于 v1 代理",
     "dm_export": "数据导出",
     "dm_import": "数据导入",
     "dm_select_type": "选择导出类型",

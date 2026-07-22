@@ -123,6 +123,8 @@
     "request_templates_desc": "Customize upstream request format with auto-injected fields",
     "data_manager": "Data Manager",
     "data_manager_desc": "Export and import system data for backup and migration",
+    "system_keys": "System API Keys",
+    "system_keys_desc": "Manage admin API authentication keys, cannot be used for v1 proxy",
     "dm_export": "Data Export",
     "dm_import": "Data Import",
     "dm_select_type": "Select export type",

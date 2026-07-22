@@ -107,6 +107,20 @@ export const apiKeys = sqliteTable("api_keys", {
   index("idx_api_keys_status_expires").on(t.status, t.expiresAt),
 ]);
 
+// ==================== 系统 API 密钥（管理后台专用，不可用于 v1 代理） ====================
+
+export const systemApiKeys = sqliteTable("system_api_keys", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastUsedAt: integer("last_used_at", { mode: "number" }),
+  createdAt: integer("created_at", { mode: "number" }).notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
+  updatedAt: integer("updated_at", { mode: "number" }).notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
+}, (t) => [
+  index("idx_system_api_keys_key").on(t.key),
+]);
+
 // ==================== 模型映射 ====================
 
 export const modelMappings = sqliteTable("model_maps", {
