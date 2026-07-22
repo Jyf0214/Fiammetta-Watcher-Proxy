@@ -132,9 +132,9 @@ export default function ProxyPoolsPage() {
       title: t("common.actions"), key: "actions", fixed: "right", width: 120, align: "center",
       render: (_: unknown, record: PoolItem) => (
         <div className="flex items-center justify-center gap-1">
-          <Button variant="ghost" size="sm" iconOnly icon={<Pencil />} onClick={() => openEditForm(record)} />
+          <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} onClick={() => openEditForm(record)} />
           <Popconfirm title={t("proxy_pool.confirm_delete")} onConfirm={() => handleDelete(record.id)}>
-            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
+            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
           </Popconfirm>
         </div>
       ),
@@ -153,8 +153,8 @@ export default function ProxyPoolsPage() {
           title={t("admin.proxy_pools")} description={t("admin.proxy_pools_desc")}
           extra={
             <div className="flex gap-2">
-              <Button variant="default" icon={<RefreshCw />} onClick={handleRefresh} disabled={loading}>{t("common.refresh")}</Button>
-              <Button variant="primary" icon={<Plus />} onClick={openCreateForm}>{t("proxy_pool.create_pool")}</Button>
+              <Button variant="default" icon={<RefreshCw size={14} />} onClick={handleRefresh} disabled={loading}>{t("common.refresh")}</Button>
+              <Button variant="primary" icon={<Plus size={14} />} onClick={openCreateForm}>{t("proxy_pool.create_pool")}</Button>
             </div>
           }
         />

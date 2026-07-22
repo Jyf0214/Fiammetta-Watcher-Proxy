@@ -345,7 +345,7 @@ function DetailedLogsTab({
           <Button
             variant="ghost"
             size="sm"
-            icon={<Search />}
+            icon={<Search size={14} />}
             onClick={handleResetFilters}
           >
             {t("common.reset") || "重置"}
@@ -354,7 +354,7 @@ function DetailedLogsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<RefreshCw />}
+          icon={<RefreshCw size={14} />}
           onClick={handleRefresh}
           disabled={loading}
         >
@@ -618,7 +618,7 @@ function ArchivedStatsTab({
           <Button
             variant="ghost"
             size="sm"
-            icon={<Search />}
+            icon={<Search size={14} />}
             onClick={() => {
               setKeyFilter(undefined);
               setDateRange(null);
@@ -631,7 +631,7 @@ function ArchivedStatsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<RefreshCw />}
+          icon={<RefreshCw size={14} />}
           onClick={handleRefresh}
           disabled={loading}
         >
@@ -640,7 +640,7 @@ function ArchivedStatsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<Cloud />}
+          icon={<Cloud size={14} />}
           onClick={handleManualArchive}
           disabled={archiving}
         >

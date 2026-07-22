@@ -276,7 +276,7 @@ export default function DataManagerPage() {
               {/* 导出按钮 */}
               <Button
                 variant="primary"
-                icon={<Download />}
+                icon={<Download size={14} />}
                 onClick={handleExport}
                 loading={exporting}
                 block
@@ -323,9 +323,9 @@ export default function DataManagerPage() {
                   )}
                 >
                   {importing ? (
-                    <RefreshCw className="text-xl animate-spin" />
+                    <RefreshCw size={14} className="text-xl animate-spin" />
                   ) : (
-                    <Upload className="text-xl" />
+                    <Upload size={14} className="text-xl" />
                   )}
                 </div>
 

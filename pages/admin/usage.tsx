@@ -135,7 +135,7 @@ export default function UsagePage() {
               />
               <Button
                 variant="default"
-                icon={<RefreshCw />}
+                icon={<RefreshCw size={14} />}
                 onClick={handleRefresh}
                 disabled={trendLoading}
               >
@@ -170,7 +170,7 @@ export default function UsagePage() {
               <Button
                 variant="ghost"
                 size="sm"
-                icon={<RefreshCw />}
+                icon={<RefreshCw size={14} />}
                 onClick={handleRefresh}
                 className="mt-1"
               >

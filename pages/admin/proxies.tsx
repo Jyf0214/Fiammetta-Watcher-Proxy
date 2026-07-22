@@ -191,7 +191,7 @@ export default function ProxiesPage() {
             </Button>
           )}
           <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDelete(r.id)}>
-            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
+            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
           </Popconfirm>
         </div>
       ),
@@ -210,9 +210,9 @@ export default function ProxiesPage() {
           title={t("admin.proxies")} description={t("admin.proxies_desc")}
           extra={
             <div className="flex gap-2">
-              <Button variant="default" icon={<RefreshCw />} onClick={handleRefresh} disabled={loading}>{t("common.refresh")}</Button>
-              <Button variant="default" icon={<Upload />} onClick={() => setImportModalOpen(true)}>{t("proxy.import") || "批量导入"}</Button>
-              <Button variant="primary" icon={<Plus />} onClick={() => { form.resetFields(); setModalOpen(true); }}>{t("proxy.create_proxy") || "添加代理"}</Button>
+              <Button variant="default" icon={<RefreshCw size={14} />} onClick={handleRefresh} disabled={loading}>{t("common.refresh")}</Button>
+              <Button variant="default" icon={<Upload size={14} />} onClick={() => setImportModalOpen(true)}>{t("proxy.import") || "批量导入"}</Button>
+              <Button variant="primary" icon={<Plus size={14} />} onClick={() => { form.resetFields(); setModalOpen(true); }}>{t("proxy.create_proxy") || "添加代理"}</Button>
             </div>
           }
         />

@@ -288,10 +288,10 @@ export default function PlatformsPage() {
       title: t("common.actions"), key: "actions", fixed: "right", width: 150, align: "center",
       render: (_: unknown, record: Platform) => (
         <Space size="small">
-          <Button variant="ghost" size="sm" iconOnly icon={<Database />} onClick={() => openModelDrawer(record)} />
-          <Button variant="ghost" size="sm" iconOnly icon={<Pencil />} onClick={() => openEditForm(record)} />
+          <Button variant="ghost" size="sm" iconOnly icon={<Database size={14} />} onClick={() => openModelDrawer(record)} />
+          <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} onClick={() => openEditForm(record)} />
           <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDelete(record.id)}>
-            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
+            <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
           </Popconfirm>
         </Space>
       ),
@@ -308,7 +308,7 @@ export default function PlatformsPage() {
         <PageHeader
           icon={<Cloud size={20} className="text-zinc-500 dark:text-zinc-400" />}
           title={t("admin.platforms")} description={t("admin.platforms_desc")}
-          extra={<Button variant="primary" icon={<Plus />} onClick={openCreateForm}>{t("platform.create_platform")}</Button>}
+          extra={<Button variant="primary" icon={<Plus size={14} />} onClick={openCreateForm}>{t("platform.create_platform")}</Button>}
         />
         <ProCard>
           <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
@@ -324,7 +324,7 @@ export default function PlatformsPage() {
                 <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                   {editing ? t("platform.edit_platform") : t("platform.create_platform")}
                 </span>
-                <Button variant="ghost" size="sm" iconOnly icon={<X />} onClick={closeForm} />
+                <Button variant="ghost" size="sm" iconOnly icon={<X size={14} />} onClick={closeForm} />
               </div>
             }
             className="mt-4"
@@ -352,11 +352,11 @@ export default function PlatformsPage() {
                       <div key={index} className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
                         <Input value={namedKey.name} onChange={(e) => updateKeyName(index, e.target.value)} placeholder="密钥名称" className="w-24 flex-shrink-0" size="small" />
                         <Input.Password value={namedKey.key} onChange={(e) => updateKeyValue(index, e.target.value)} placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"} className="flex-1 font-mono text-xs" size="small" />
-                        <Button variant="ghost" size="sm" iconOnly icon={<Copy />} onClick={() => copyKeyValue(namedKey.key)} disabled={!namedKey.key} title="复制密钥" />
-                        <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} onClick={() => removeNamedKey(index)} disabled={namedKeys.length <= 1} title="删除密钥" />
+                        <Button variant="ghost" size="sm" iconOnly icon={<Copy size={14} />} onClick={() => copyKeyValue(namedKey.key)} disabled={!namedKey.key} title="复制密钥" />
+                        <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} onClick={() => removeNamedKey(index)} disabled={namedKeys.length <= 1} title="删除密钥" />
                       </div>
                     ))}
-                    <Button variant="default" onClick={addNamedKey} icon={<Plus />} block size="sm">添加密钥</Button>
+                    <Button variant="default" onClick={addNamedKey} icon={<Plus size={14} />} block size="sm">添加密钥</Button>
                   </div>
                 </Form.Item>
                 <Form.Item name="type" label={t("platform.type")} initialValue="openai">
@@ -396,7 +396,7 @@ export default function PlatformsPage() {
             <Input placeholder={t("platform.model_placeholder") || "输入模型 ID"} value={newModelId}
               onChange={(e) => setNewModelId(e.target.value)} onPressEnter={handleAddModel} className="flex-1" />
             <Button variant="primary" size="sm" onClick={handleAddModel} disabled={!newModelId.trim()}>{t("common.create")}</Button>
-            <Button variant="default" size="sm" icon={<RefreshCw />} onClick={handleRefreshModels} loading={refreshing}>{t("platform.refresh_models") || "刷新"}</Button>
+            <Button variant="default" size="sm" icon={<RefreshCw size={14} />} onClick={handleRefreshModels} loading={refreshing}>{t("platform.refresh_models") || "刷新"}</Button>
           </div>
           <Table dataSource={models} loading={modelsLoading} rowKey="id" size="small" pagination={false}
             columns={[
@@ -420,7 +420,7 @@ export default function PlatformsPage() {
                 title: t("common.actions"), key: "actions", width: 60,
                 render: (_: unknown, record: { modelId: string }) => (
                   <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDeleteModel(record.modelId)}>
-                    <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 />} />
+                    <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
                   </Popconfirm>
                 ),
               },

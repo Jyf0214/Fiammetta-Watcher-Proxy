@@ -18,7 +18,7 @@ export async function getAdminFromRequest(
     const token = req.cookies["admin_token"];
     if (!token) return null;
 
-    const payload = await verifyToken(token);
+    const payload = await verifyToken(token, { JWT_SECRET: process.env.JWT_SECRET });
     if (!payload || !payload.adminId || !payload.username) return null;
 
     return { adminId: payload.adminId as string, username: payload.username as string };

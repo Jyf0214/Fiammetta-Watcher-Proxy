@@ -154,7 +154,7 @@ export default function ModelsPage() {
           title={t("common.confirm_delete")}
           onConfirm={() => handleDelete(record.id)}
         >
-          <Button variant="dangerGhost" size="sm" icon={<Trash2 />} iconOnly aria-label={t("common.delete")}>
+          <Button variant="dangerGhost" size="sm" icon={<Trash2 size={14} />} iconOnly aria-label={t("common.delete")}>
           </Button>
         </Popconfirm>
       ),
@@ -175,7 +175,7 @@ export default function ModelsPage() {
           extra={
             <Button
               variant="primary"
-              icon={<Plus />}
+              icon={<Plus size={14} />}
               onClick={() => {
                 form.resetFields();
                 setModalOpen(true);

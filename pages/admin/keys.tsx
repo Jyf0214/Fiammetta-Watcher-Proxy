@@ -140,7 +140,7 @@ export default function KeysPage() {
             <Button
               variant="ghost"
               size="sm"
-              icon={<Copy />}
+              icon={<Copy size={14} />}
               iconOnly
               aria-label={t("common.copy")}
               onClick={() => copyToClipboard(v)}
@@ -190,7 +190,7 @@ export default function KeysPage() {
           <Button
             variant="dangerGhost"
             size="sm"
-            icon={<Trash2 />}
+            icon={<Trash2 size={14} />}
             iconOnly
             aria-label={t("common.delete")}
           />
@@ -213,7 +213,7 @@ export default function KeysPage() {
           extra={
             <Button
               variant="primary"
-              icon={<Plus />}
+              icon={<Plus size={14} />}
               onClick={() => {
                 form.resetFields();
                 setModalOpen(true);
@@ -330,7 +330,7 @@ export default function KeysPage() {
           <Button
             variant="default"
             className="mt-3 w-full sm:w-auto"
-            icon={<Copy />}
+            icon={<Copy size={14} />}
             aria-label={t("api_key.copy_key")}
             onClick={() => copyToClipboard(newKeyValue)}
           >

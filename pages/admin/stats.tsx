@@ -329,7 +329,7 @@ function StatsContent() {
                 variant="ghost"
                 size="sm"
                 iconOnly
-                icon={viewMode === "grid" ? <List /> : <Grid />}
+                icon={viewMode === "grid" ? <List size={14} /> : <Grid size={14} />}
                 onClick={toggleViewMode}
               />
             </Tooltip>
@@ -344,14 +344,14 @@ function StatsContent() {
                 variant="ghost"
                 size="sm"
                 iconOnly
-                icon={autoRefresh ? <Pause /> : <Play />}
+                icon={autoRefresh ? <Pause size={14} /> : <Play size={14} />}
                 onClick={toggleAutoRefresh}
                 className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
               />
             </Tooltip>
             <Button
               variant="default"
-              icon={<RefreshCw className={refreshing ? "animate-spin" : ""} />}
+              icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
               onClick={handleRefresh}
               disabled={refreshing}
             >
