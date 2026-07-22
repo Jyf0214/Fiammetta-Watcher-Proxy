@@ -235,52 +235,54 @@ async function importPlatforms(
   let imported = 0;
   let skipped = 0;
 
-  for (const p of platforms) {
-    try {
-      // 按名称检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.platforms)
-        .where(eq(schema.platforms.name, p.name as string))
-        .limit(1);
+  // 预加载已有平台名称，用于去重
+  const existingNames = await db.select({ name: schema.platforms.name }).from(schema.platforms);
+  const existingNameSet = new Set(existingNames.map((r) => r.name));
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  // 过滤无效和重复记录
+  const validPlatforms = platforms.filter((p) => {
+    const name = p.name as string;
+    const apiKey = p.apiKey as string;
+    if (!name || !apiKey || apiKey.includes("***")) return false;
+    if (existingNameSet.has(name)) return false;
+    return true;
+  });
 
-      // 检查 apiKey 是否为脱敏值
-      const apiKey = p.apiKey as string;
-      if (!apiKey || apiKey.includes("***")) {
-        skipped++;
-        continue;
-      }
+  skipped += platforms.length - validPlatforms.length;
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.platforms).values({
-        id: generateId(),
-        name: p.name as string,
-        baseUrl: p.baseUrl as string,
-        apiKey,
-        apiKeys: (p.apiKeys as string) || "[]",
-        type: (p.type as string) || "openai",
-        enabled: p.enabled !== false,
-        priority: (p.priority as number) ?? 0,
-        weight: (p.weight as number) ?? 1,
-        rpmLimit: (p.rpmLimit as number) ?? null,
-        tpmLimit: (p.tpmLimit as number) ?? null,
-        forwardHeaders: (p.forwardHeaders as string) || "[]",
-        status: "healthy",
-        failCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      } as any);
+  if (validPlatforms.length === 0) {
+    return { imported, skipped };
+  }
 
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入平台失败:", err);
-      skipped++;
-    }
+  // 批量插入
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = validPlatforms.map((p) =>
+    db.insert(schema.platforms).values({
+      id: generateId(),
+      name: p.name as string,
+      baseUrl: p.baseUrl as string,
+      apiKey: p.apiKey as string,
+      apiKeys: (p.apiKeys as string) || "[]",
+      type: (p.type as string) || "openai",
+      enabled: p.enabled !== false,
+      priority: (p.priority as number) ?? 0,
+      weight: (p.weight as number) ?? 1,
+      rpmLimit: (p.rpmLimit as number) ?? null,
+      tpmLimit: (p.tpmLimit as number) ?? null,
+      forwardHeaders: (p.forwardHeaders as string) || "[]",
+      status: "healthy",
+      failCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+  );
+
+  try {
+    await db.batch(stmts);
+    imported += validPlatforms.length;
+  } catch (err) {
+    console.error("[import] 批量导入平台失败:", err);
+    skipped += validPlatforms.length;
   }
 
   return { imported, skipped };
@@ -289,7 +291,7 @@ async function importPlatforms(
 /**
  * 导入模型映射
  *
- * 按 alias + platformId 去重
+ * 按 alias 去重，使用 db.batch() 批量执行
  */
 async function importModelMaps(
   db: ReturnType<typeof createDb>,
@@ -298,40 +300,42 @@ async function importModelMaps(
   let imported = 0;
   let skipped = 0;
 
-  for (const m of modelMaps) {
-    try {
-      const alias = m.alias as string;
-      const targetModel = m.targetModel as string;
-      const platformId = (m.platformId as string) || null;
+  // 预加载已有 alias，用于去重
+  const existingAliases = await db.select({ alias: schema.modelMappings.alias }).from(schema.modelMappings);
+  const existingAliasSet = new Set(existingAliases.map((r) => r.alias));
 
-      // 检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.modelMappings)
-        .where(eq(schema.modelMappings.alias, alias))
-        .limit(1);
+  const validMaps = modelMaps.filter((m) => {
+    const alias = m.alias as string;
+    if (!alias) return false;
+    if (existingAliasSet.has(alias)) return false;
+    return true;
+  });
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  skipped += modelMaps.length - validMaps.length;
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.modelMappings).values({
-        id: generateId(),
-        alias,
-        targetModel,
-        platformId,
-        enabled: true,
-        createdAt: now,
-        updatedAt: now,
-      } as any);
+  if (validMaps.length === 0) {
+    return { imported, skipped };
+  }
 
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入模型映射失败:", err);
-      skipped++;
-    }
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = validMaps.map((m) =>
+    db.insert(schema.modelMappings).values({
+      id: generateId(),
+      alias: m.alias as string,
+      targetModel: (m.targetModel as string) || null,
+      platformId: (m.platformId as string) || null,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+  );
+
+  try {
+    await db.batch(stmts);
+    imported += validMaps.length;
+  } catch (err) {
+    console.error("[import] 批量导入模型映射失败:", err);
+    skipped += validMaps.length;
   }
 
   return { imported, skipped };
@@ -340,7 +344,7 @@ async function importModelMaps(
 /**
  * 导入代理池
  *
- * 按名称去重
+ * 按名称去重，使用 db.batch() 批量执行
  */
 async function importProxyPools(
   db: ReturnType<typeof createDb>,
@@ -349,34 +353,40 @@ async function importProxyPools(
   let imported = 0;
   let skipped = 0;
 
-  for (const p of pools) {
-    try {
-      // 按名称检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.proxyPools)
-        .where(eq(schema.proxyPools.name, p.name as string))
-        .limit(1);
+  // 预加载已有名称，用于去重
+  const existingNames = await db.select({ name: schema.proxyPools.name }).from(schema.proxyPools);
+  const existingNameSet = new Set(existingNames.map((r) => r.name));
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  const validPools = pools.filter((p) => {
+    const name = p.name as string;
+    if (!name) return false;
+    if (existingNameSet.has(name)) return false;
+    return true;
+  });
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.proxyPools).values({
-        id: generateId(),
-        name: p.name as string,
-        enabled: p.enabled !== false,
-        createdAt: now,
-        updatedAt: now,
-      } as any);
+  skipped += pools.length - validPools.length;
 
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入代理池失败:", err);
-      skipped++;
-    }
+  if (validPools.length === 0) {
+    return { imported, skipped };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = validPools.map((p) =>
+    db.insert(schema.proxyPools).values({
+      id: generateId(),
+      name: p.name as string,
+      enabled: p.enabled !== false,
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+  );
+
+  try {
+    await db.batch(stmts);
+    imported += validPools.length;
+  } catch (err) {
+    console.error("[import] 批量导入代理池失败:", err);
+    skipped += validPools.length;
   }
 
   return { imported, skipped };
@@ -385,7 +395,7 @@ async function importProxyPools(
 /**
  * 导入代理
  *
- * 按地址去重，address 含脱敏标记（***）时跳过
+ * 按地址去重，使用 db.batch() 批量执行
  */
 async function importProxies(
   db: ReturnType<typeof createDb>,
@@ -394,44 +404,44 @@ async function importProxies(
   let imported = 0;
   let skipped = 0;
 
-  for (const p of proxies) {
-    try {
-      const address = p.address as string;
-      if (!address || address.includes("***")) {
-        skipped++;
-        continue;
-      }
+  // 预加载已有地址，用于去重
+  const existingAddrs = await db.select({ address: schema.proxies.address }).from(schema.proxies);
+  const existingAddrSet = new Set(existingAddrs.map((r) => r.address));
 
-      // 按地址检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.proxies)
-        .where(eq(schema.proxies.address, address))
-        .limit(1);
+  const validProxies = proxies.filter((p) => {
+    const address = p.address as string;
+    if (!address || address.includes("***")) return false;
+    if (existingAddrSet.has(address)) return false;
+    return true;
+  });
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  skipped += proxies.length - validProxies.length;
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.proxies).values({
-        id: generateId(),
-        address,
-        poolId: (p.poolId as string) || null,
-        enabled: p.enabled !== false,
-        status: "healthy",
-        failCount: 0,
-        banCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      } as any);
+  if (validProxies.length === 0) {
+    return { imported, skipped };
+  }
 
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入代理失败:", err);
-      skipped++;
-    }
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = validProxies.map((p) =>
+    db.insert(schema.proxies).values({
+      id: generateId(),
+      address: p.address as string,
+      poolId: (p.poolId as string) || null,
+      enabled: p.enabled !== false,
+      status: "healthy",
+      failCount: 0,
+      banCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+  );
+
+  try {
+    await db.batch(stmts);
+    imported += validProxies.length;
+  } catch (err) {
+    console.error("[import] 批量导入代理失败:", err);
+    skipped += validProxies.length;
   }
 
   return { imported, skipped };
@@ -440,7 +450,7 @@ async function importProxies(
 /**
  * 导入套餐模板
  *
- * 按名称去重
+ * 按名称去重，使用 db.batch() 批量执行
  */
 async function importPlans(
   db: ReturnType<typeof createDb>,
@@ -449,39 +459,45 @@ async function importPlans(
   let imported = 0;
   let skipped = 0;
 
-  for (const p of plans) {
-    try {
-      // 按名称检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.plans)
-        .where(eq(schema.plans.name, p.name as string))
-        .limit(1);
+  // 预加载已有名称，用于去重
+  const existingNames = await db.select({ name: schema.plans.name }).from(schema.plans);
+  const existingNameSet = new Set(existingNames.map((r) => r.name));
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  const validPlans = plans.filter((p) => {
+    const name = p.name as string;
+    if (!name) return false;
+    if (existingNameSet.has(name)) return false;
+    return true;
+  });
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.plans).values({
-        id: generateId(),
-        name: p.name as string,
-        tokenQuota: (p.tokenQuota as number) ?? 0,
-        callLimit: (p.callLimit as number) ?? null,
-        rpmLimit: (p.rpmLimit as number) ?? null,
-        tpmLimit: (p.tpmLimit as number) ?? null,
-        resetPeriod: (p.resetPeriod as string) || "monthly",
-        enabled: true,
-        createdAt: now,
-        updatedAt: now,
-      } as any);
+  skipped += plans.length - validPlans.length;
 
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入套餐失败:", err);
-      skipped++;
-    }
+  if (validPlans.length === 0) {
+    return { imported, skipped };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = validPlans.map((p) =>
+    db.insert(schema.plans).values({
+      id: generateId(),
+      name: p.name as string,
+      tokenQuota: (p.tokenQuota as number) ?? 0,
+      callLimit: (p.callLimit as number) ?? null,
+      rpmLimit: (p.rpmLimit as number) ?? null,
+      tpmLimit: (p.tpmLimit as number) ?? null,
+      resetPeriod: (p.resetPeriod as string) || "monthly",
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+  );
+
+  try {
+    await db.batch(stmts);
+    imported += validPlans.length;
+  } catch (err) {
+    console.error("[import] 批量导入套餐失败:", err);
+    skipped += validPlans.length;
   }
 
   return { imported, skipped };
@@ -490,7 +506,7 @@ async function importPlans(
 /**
  * 导入 API Keys
  *
- * 按 key 值去重，key 含脱敏标记（***）时跳过
+ * 按 key 值去重，使用 db.batch() 批量执行
  */
 async function importApiKeys(
   db: ReturnType<typeof createDb>,
@@ -499,31 +515,33 @@ async function importApiKeys(
   let imported = 0;
   let skipped = 0;
 
-  for (const k of apiKeysData) {
-    try {
-      // 检查 key 是否为脱敏值
-      const key = k.key as string;
-      if (!key || key.includes("***")) {
-        skipped++;
-        continue;
-      }
+  // 预加载已有 key 集合，用于去重
+  const existingKeys = await db.select({ key: schema.apiKeys.key }).from(schema.apiKeys);
+  const existingKeySet = new Set(existingKeys.map((r) => r.key));
 
-      // 按 key 值检查是否已存在
-      const existing = await db
-        .select()
-        .from(schema.apiKeys)
-        .where(eq(schema.apiKeys.key, key))
-        .limit(1);
+  // 过滤无效和重复记录
+  const validKeys = apiKeysData.filter((k) => {
+    const key = k.key as string;
+    if (!key || key.includes("***")) return false;
+    if (existingKeySet.has(key)) return false;
+    return true;
+  });
 
-      if (existing.length > 0) {
-        skipped++;
-        continue;
-      }
+  skipped += apiKeysData.length - validKeys.length;
 
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.apiKeys).values({
+  if (validKeys.length === 0) {
+    return { imported, skipped };
+  }
+
+  // 批量插入
+  const now = Math.floor(Date.now() / 1000);
+  const batchSize = 50;
+  for (let i = 0; i < validKeys.length; i += batchSize) {
+    const batch = validKeys.slice(i, i + batchSize);
+    const stmts = batch.map((k) =>
+      db.insert(schema.apiKeys).values({
         id: generateId(),
-        key,
+        key: k.key as string,
         name: (k.name as string) || "导入的 Key",
         planId: (k.planId as string) || null,
         quota: k.quota ? Number(k.quota) : null,
@@ -541,12 +559,15 @@ async function importApiKeys(
         enabled: true,
         createdAt: now,
         updatedAt: now,
-      } as any);
+      } as any)
+    );
 
-      imported++;
+    try {
+      await db.batch(stmts);
+      imported += batch.length;
     } catch (err) {
-      console.error("[import] 导入 API Key 失败:", err);
-      skipped++;
+      console.error("[import] 批量导入 API Key 失败:", err);
+      skipped += batch.length;
     }
   }
 
@@ -557,7 +578,7 @@ async function importApiKeys(
  * 导入系统配置
  *
  * 按 key 做 upsert（已存在则更新 value，不存在则创建）
- * 跳过敏感配置（admin_reset_password）
+ * 跳过敏感配置（admin_reset_password），使用 db.batch() 批量执行
  */
 async function importConfigs(
   db: ReturnType<typeof createDb>,
@@ -566,47 +587,67 @@ async function importConfigs(
   let imported = 0;
   let skipped = 0;
 
+  // 预加载已有配置
+  const existingConfigs = await db.select({ key: schema.configs.key }).from(schema.configs);
+  const existingKeySet = new Set(existingConfigs.map((r) => r.key));
+
+  // 分离插入和更新
+  const toInsert: Array<Record<string, unknown>> = [];
+  const toUpdate: Array<Record<string, unknown>> = [];
+
   for (const c of configs) {
-    try {
-      const key = c.key as string;
-      const value = c.value as string;
+    const key = c.key as string;
+    const value = c.value as string;
 
-      if (!key || !value) {
-        skipped++;
-        continue;
-      }
-
-      // 跳过敏感配置
-      if (key === "admin_reset_password") {
-        skipped++;
-        continue;
-      }
-
-      // upsert：已存在则更新，不存在则创建
-      const now = Math.floor(Date.now() / 1000);
-      const existing = await db
-        .select()
-        .from(schema.configs)
-        .where(eq(schema.configs.key, key))
-        .limit(1);
-
-      if (existing.length > 0) {
-        await db
-          .update(schema.configs)
-          .set({ value, updatedAt: now } as any)
-          .where(eq(schema.configs.key, key));
-      } else {
-        await db.insert(schema.configs).values({
-          key,
-          value,
-          updatedAt: now,
-        } as any);
-      }
-
-      imported++;
-    } catch (err) {
-      console.error("[import] 导入配置失败:", err);
+    if (!key || !value) {
       skipped++;
+      continue;
+    }
+
+    if (key === "admin_reset_password") {
+      skipped++;
+      continue;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (existingKeySet.has(key)) {
+      toUpdate.push({ key, value, updatedAt: now });
+    } else {
+      toInsert.push({ key, value, updatedAt: now });
+    }
+  }
+
+  // 批量插入新配置
+  if (toInsert.length > 0) {
+    const stmts = toInsert.map((c) =>
+      db.insert(schema.configs).values({
+        key: c.key as string,
+        value: c.value as string,
+        updatedAt: c.updatedAt as number,
+      } as any)
+    );
+    try {
+      await db.batch(stmts);
+      imported += toInsert.length;
+    } catch (err) {
+      console.error("[import] 批量插入配置失败:", err);
+      skipped += toInsert.length;
+    }
+  }
+
+  // 批量更新已有配置
+  if (toUpdate.length > 0) {
+    const stmts = toUpdate.map((c) =>
+      db.update(schema.configs)
+        .set({ value: c.value as string, updatedAt: c.updatedAt as number } as any)
+        .where(eq(schema.configs.key, c.key as string))
+    );
+    try {
+      await db.batch(stmts);
+      imported += toUpdate.length;
+    } catch (err) {
+      console.error("[import] 批量更新配置失败:", err);
+      skipped += toUpdate.length;
     }
   }
 
@@ -632,7 +673,7 @@ function toUnixSeconds(value: unknown): number {
 /**
  * 导入审计日志
  *
- * 无外键依赖，逐条插入
+ * 无外键依赖，使用 db.batch() 批量执行
  * adminId 不存在时置为 null（不阻塞导入）
  */
 async function importAuditLogs(
@@ -646,31 +687,33 @@ async function importAuditLogs(
   const existingAdminRows = await db.select({ id: schema.admins.id }).from(schema.admins);
   const validAdminIds = new Set(existingAdminRows.map((r) => r.id));
 
-  for (const log of logs) {
-    try {
-      const action = log.action as string;
-      if (!action) {
-        skipped++;
-        continue;
-      }
+  const validLogs = logs.filter((log) => log.action);
 
+  const batchSize = 50;
+  for (let i = 0; i < validLogs.length; i += batchSize) {
+    const batch = validLogs.slice(i, i + batchSize);
+    const stmts = batch.map((log) => {
       const rawAdminId = log.adminId as string | null | undefined;
-      await db.insert(schema.auditLogs).values({
+      return db.insert(schema.auditLogs).values({
         id: generateId(),
         adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
-        action,
+        action: log.action as string,
         detail: (log.detail as string) || null,
         ip: (log.ip as string) || null,
         createdAt: toUnixSeconds(log.createdAt),
       } as any);
+    });
 
-      imported++;
+    try {
+      await db.batch(stmts);
+      imported += batch.length;
     } catch (err) {
-      console.error("[import] 导入审计日志失败:", err);
-      skipped++;
+      console.error("[import] 批量导入审计日志失败:", err);
+      skipped += batch.length;
     }
   }
 
+  skipped += logs.length - validLogs.length;
   return { imported, skipped };
 }
 
@@ -679,7 +722,7 @@ async function importAuditLogs(
 /**
  * 导入系统事件
  *
- * 无外键依赖，逐条插入
+ * 无外键依赖，使用 db.batch() 批量执行
  */
 async function importSystemEvents(
   db: ReturnType<typeof createDb>,
@@ -688,29 +731,31 @@ async function importSystemEvents(
   let imported = 0;
   let skipped = 0;
 
-  for (const e of events) {
-    try {
-      const message = e.message as string;
-      if (!message) {
-        skipped++;
-        continue;
-      }
+  const validEvents = events.filter((e) => e.message);
 
-      await db.insert(schema.systemEvents).values({
+  const batchSize = 50;
+  for (let i = 0; i < validEvents.length; i += batchSize) {
+    const batch = validEvents.slice(i, i + batchSize);
+    const stmts = batch.map((e) =>
+      db.insert(schema.systemEvents).values({
         id: generateId(),
         level: (e.level as string) || "info",
-        message,
+        message: e.message as string,
         detail: (e.detail as string) || null,
         createdAt: toUnixSeconds(e.createdAt),
-      } as any);
+      } as any)
+    );
 
-      imported++;
+    try {
+      await db.batch(stmts);
+      imported += batch.length;
     } catch (err) {
-      console.error("[import] 导入系统事件失败:", err);
-      skipped++;
+      console.error("[import] 批量导入系统事件失败:", err);
+      skipped += batch.length;
     }
   }
 
+  skipped += events.length - validEvents.length;
   return { imported, skipped };
 }
 
@@ -719,7 +764,7 @@ async function importSystemEvents(
 /**
  * 导入请求日志
  *
- * 无外键依赖，逐条插入（D1 不支持批量 values 数组）
+ * 无外键依赖，使用 db.batch() 批量执行（一次往返多条 SQL）
  * 导出数据中 duration 字段映射为 latency
  */
 async function importRequestLogs(
@@ -729,21 +774,21 @@ async function importRequestLogs(
   let imported = 0;
   let skipped = 0;
 
-  for (const log of logs) {
-    try {
-      const model = log.model as string;
-      if (!model) {
-        skipped++;
-        continue;
-      }
+  // 过滤无效记录
+  const validLogs = logs.filter((log) => log.model);
 
-      await db.insert(schema.requestLogs).values({
+  // 每 50 条一批用 db.batch 执行
+  const batchSize = 50;
+  for (let i = 0; i < validLogs.length; i += batchSize) {
+    const batch = validLogs.slice(i, i + batchSize);
+    const stmts = batch.map((log) =>
+      db.insert(schema.requestLogs).values({
         id: generateId(),
         keyId: (log.keyId as string) || null,
         keyName: (log.keyName as string) || null,
         platformId: (log.platformId as string) || null,
         proxyId: (log.proxyId as string) || null,
-        model,
+        model: log.model as string,
         endpoint: (log.endpoint as string) || null,
         method: (log.method as string) || null,
         status: (log.status as number) || 0,
@@ -758,14 +803,18 @@ async function importRequestLogs(
         userAgent: (log.userAgent as string) || null,
         errorMessage: (log.errorMessage as string) || null,
         createdAt: toUnixSeconds(log.createdAt),
-      } as any);
+      } as any)
+    );
 
-      imported++;
+    try {
+      await db.batch(stmts);
+      imported += batch.length;
     } catch (err) {
-      console.error("[import] 导入请求日志失败:", err);
-      skipped++;
+      console.error("[import] 批量导入请求日志失败:", err);
+      skipped += batch.length;
     }
   }
 
+  skipped += logs.length - validLogs.length;
   return { imported, skipped };
 }
