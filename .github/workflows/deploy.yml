@@ -95,7 +95,7 @@ jobs:
           npx tsc --version
 
       - name: Build Pages
-        run: npm run build
+        run: npx opennextjs-cloudflare build
 
       # ==================== 部署 Worker ====================
 
