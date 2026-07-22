@@ -38,6 +38,8 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // MySQL/PG 驱动仅在切换数据库时需要，标记为外部避免 Turbopack 打包
+  serverExternalPackages: ["mysql2", "pg", "pg-cloudflare"],
   experimental: {
     serverActions: {
       bodySizeLimit: "2mb",
