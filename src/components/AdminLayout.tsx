@@ -318,7 +318,7 @@ export default function AdminLayout({
           router.push("/admin/login");
           return;
         }
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && data.data?.username) {
           setUsername(data.data.username);
         } else {

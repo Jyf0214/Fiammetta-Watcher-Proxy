@@ -8,11 +8,14 @@
     "build:cf": "opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\"",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "npm run build:cf && wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
     "@cloudflare/workers-types": "^5.20260721.1",
+    "@types/pg": "^8.20.0",
     "antd": "^6.5.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
@@ -21,7 +24,9 @@
     "jose": "^6.2.4",
     "lucide-react": "^1.25.0",
     "motion": "^12.42.2",
+    "mysql2": "^3.23.1",
     "next": "^16.2.11",
+    "pg": "^8.22.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.10",
@@ -39,6 +44,7 @@
     "postcss": "^8.5.21",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
     "wrangler": "^4.113.0"
   }
 }

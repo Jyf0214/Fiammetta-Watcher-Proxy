@@ -70,7 +70,7 @@ export default function PlatformsPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/admin/platforms", { signal: controller.signal });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -168,7 +168,7 @@ export default function PlatformsPage() {
       const url = editing ? `/api/admin/platforms/${editing.id}` : "/api/admin/platforms";
       const method = editing ? "PUT" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(data.message); closeForm(); handleRefresh(); }
       else message.error(data.error || t("common.error"));
     } catch (err) {
@@ -180,7 +180,7 @@ export default function PlatformsPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(t("platform.delete_success") || "删除成功"); handleRefresh(); }
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -193,7 +193,7 @@ export default function PlatformsPage() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !platform.enabled }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) handleRefresh();
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -208,7 +208,7 @@ export default function PlatformsPage() {
     setModelsLoading(true);
     try {
       const res = await fetch(`/api/admin/platforms/${platformId}/models`);
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) setModels(data.data || []);
     } catch { message.error(t("common.error")); }
     finally { setModelsLoading(false); }
@@ -219,7 +219,7 @@ export default function PlatformsPage() {
     setRefreshing(true);
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, { method: "PUT" });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(data.message); fetchModels(modelPlatform.id); }
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -233,7 +233,7 @@ export default function PlatformsPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelId: newModelId.trim() }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(data.message); setNewModelId(""); fetchModels(modelPlatform.id); }
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -243,7 +243,7 @@ export default function PlatformsPage() {
     if (!modelPlatform) return;
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models?modelId=${encodeURIComponent(modelId)}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) fetchModels(modelPlatform.id);
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }

@@ -39,7 +39,7 @@ export async function updateKeyUsage(
 ): Promise<void> {
   if (tokenCount <= 0) return;
 
-  const orm = createDb(db);
+  const orm = await createDb(db);
   await orm
     .update(schema.apiKeys)
     .set({
@@ -69,7 +69,7 @@ export async function recordRequestLog(params: {
   errorMessage?: string;
   db: D1Database;
 }): Promise<void> {
-  const orm = createDb(params.db);
+  const orm = await createDb(params.db);
   const id = crypto.randomUUID();
 
   await orm.insert(schema.requestLogs).values({

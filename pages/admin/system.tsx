@@ -30,7 +30,7 @@ export default function SystemPage() {
     const fetchInfo = async () => {
       try {
         const res = await fetch("/api/admin/stats", { signal: controller.signal });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success && data.data) {
           setInfo({
             adminUsername: data.data.adminUsername || "",

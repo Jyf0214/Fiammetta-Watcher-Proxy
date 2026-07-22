@@ -77,7 +77,7 @@ export default function RequestTemplatesPage() {
   const fetchTemplates = async () => {
     try {
       const res = await fetch("/api/admin/request-templates");
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) {
         setTemplates(data.data);
       }
@@ -93,7 +93,7 @@ export default function RequestTemplatesPage() {
     const load = async () => {
       try {
         const res = await fetch("/api/admin/request-templates", { signal: controller.signal });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success) {
           setTemplates(data.data);
         }
@@ -165,7 +165,7 @@ export default function RequestTemplatesPage() {
             enabled: values.enabled,
           }),
         });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success) {
           message.success(t("system.rt_update_success"));
           setModalOpen(false);
@@ -184,7 +184,7 @@ export default function RequestTemplatesPage() {
             mergeBody,
           }),
         });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success) {
           message.success(t("system.rt_create_success"));
           setModalOpen(false);
@@ -207,7 +207,7 @@ export default function RequestTemplatesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: tpl.id, enabled: !tpl.enabled }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) {
         fetchTemplates();
       }
@@ -227,7 +227,7 @@ export default function RequestTemplatesPage() {
           const res = await fetch(`/api/admin/request-templates?id=${tpl.id}`, {
             method: "DELETE",
           });
-          const data = await res.json();
+          const data = await res.json() as Record<string, any>;
           if (data.success) {
             message.success(t("system.rt_delete_success"));
             fetchTemplates();

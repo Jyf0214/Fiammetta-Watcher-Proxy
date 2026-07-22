@@ -64,7 +64,7 @@ export async function checkAndResetApiKey(
   apiKeyId: string
 ): Promise<boolean> {
   try {
-    const orm = createDb(db);
+    const orm = await createDb(db);
     const rows = await orm
       .select({
         id: schema.apiKeys.id,
@@ -124,7 +124,7 @@ export async function checkAndResetApiKey(
  */
 export async function handleScheduledReset(db: D1Database): Promise<void> {
   try {
-    const orm = createDb(db);
+    const orm = await createDb(db);
     const keysToCheck = await orm
       .select({
         id: schema.apiKeys.id,

@@ -57,7 +57,7 @@ export default function UsagePage() {
         const res = await fetch(`/api/admin/usage/trend?${params}`, {
           signal: controller.signal,
         });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (!res.ok || !data.success) {
           const errMsg = data.error || `HTTP ${res.status}`;
           console.error("[用量趋势] 加载失败:", errMsg, data);

@@ -206,7 +206,7 @@ export async function getAdminFromRequest(
 
   // 验证管理员是否仍然存在于数据库中
   try {
-    const db = createDb(env.DB);
+    const db = await createDb(env.DB);
     const [admin] = await db
       .select({ id: schema.admins.id })
       .from(schema.admins)

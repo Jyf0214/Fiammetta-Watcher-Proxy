@@ -15,7 +15,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
+import { createDb, type Database } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { getAdminFromRequest } from "./_auth";
@@ -126,7 +126,7 @@ export default async function handler(
     const steps: Array<{
       key: string;
       data: unknown;
-      fn: (db: ReturnType<typeof createDb>, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
+      fn: (db: Database, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
     }> = [
       { key: "proxyPools", data: body.proxyPools, fn: importProxyPools },
       { key: "platforms", data: body.platforms, fn: importPlatforms },
@@ -229,7 +229,7 @@ export default async function handler(
  * 按名称去重，apiKey 含脱敏标记（***）时跳过
  */
 async function importPlatforms(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   platforms: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -278,7 +278,7 @@ async function importPlatforms(
   );
 
   try {
-    await db.batch(stmts);
+    (db as any).batch(stmts);
     imported += validPlatforms.length;
   } catch (err) {
     console.error("[import] 批量导入平台失败:", err);
@@ -294,7 +294,7 @@ async function importPlatforms(
  * 按 alias 去重，使用 db.batch() 批量执行
  */
 async function importModelMaps(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   modelMaps: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -331,7 +331,7 @@ async function importModelMaps(
   );
 
   try {
-    await db.batch(stmts);
+    (db as any).batch(stmts);
     imported += validMaps.length;
   } catch (err) {
     console.error("[import] 批量导入模型映射失败:", err);
@@ -347,7 +347,7 @@ async function importModelMaps(
  * 按名称去重，使用 db.batch() 批量执行
  */
 async function importProxyPools(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   pools: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -382,7 +382,7 @@ async function importProxyPools(
   );
 
   try {
-    await db.batch(stmts);
+    (db as any).batch(stmts);
     imported += validPools.length;
   } catch (err) {
     console.error("[import] 批量导入代理池失败:", err);
@@ -398,7 +398,7 @@ async function importProxyPools(
  * 按地址去重，使用 db.batch() 批量执行
  */
 async function importProxies(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   proxies: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -437,7 +437,7 @@ async function importProxies(
   );
 
   try {
-    await db.batch(stmts);
+    (db as any).batch(stmts);
     imported += validProxies.length;
   } catch (err) {
     console.error("[import] 批量导入代理失败:", err);
@@ -453,7 +453,7 @@ async function importProxies(
  * 按名称去重，使用 db.batch() 批量执行
  */
 async function importPlans(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   plans: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -493,7 +493,7 @@ async function importPlans(
   );
 
   try {
-    await db.batch(stmts);
+    (db as any).batch(stmts);
     imported += validPlans.length;
   } catch (err) {
     console.error("[import] 批量导入套餐失败:", err);
@@ -509,7 +509,7 @@ async function importPlans(
  * 按 key 值去重，使用 db.batch() 批量执行
  */
 async function importApiKeys(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   apiKeysData: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -563,7 +563,7 @@ async function importApiKeys(
     );
 
     try {
-      await db.batch(stmts);
+      (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入 API Key 失败:", err);
@@ -581,7 +581,7 @@ async function importApiKeys(
  * 跳过敏感配置（admin_reset_password），使用 db.batch() 批量执行
  */
 async function importConfigs(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   configs: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -627,7 +627,7 @@ async function importConfigs(
       } as any)
     );
     try {
-      await db.batch(stmts);
+      (db as any).batch(stmts);
       imported += toInsert.length;
     } catch (err) {
       console.error("[import] 批量插入配置失败:", err);
@@ -643,7 +643,7 @@ async function importConfigs(
         .where(eq(schema.configs.key, c.key as string))
     );
     try {
-      await db.batch(stmts);
+      (db as any).batch(stmts);
       imported += toUpdate.length;
     } catch (err) {
       console.error("[import] 批量更新配置失败:", err);
@@ -677,7 +677,7 @@ function toUnixSeconds(value: unknown): number {
  * adminId 不存在时置为 null（不阻塞导入）
  */
 async function importAuditLogs(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   logs: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -705,7 +705,7 @@ async function importAuditLogs(
     });
 
     try {
-      await db.batch(stmts);
+      (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入审计日志失败:", err);
@@ -725,7 +725,7 @@ async function importAuditLogs(
  * 无外键依赖，使用 db.batch() 批量执行
  */
 async function importSystemEvents(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   events: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;
@@ -747,7 +747,7 @@ async function importSystemEvents(
     );
 
     try {
-      await db.batch(stmts);
+      (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入系统事件失败:", err);
@@ -768,7 +768,7 @@ async function importSystemEvents(
  * 导出数据中 duration 字段映射为 latency
  */
 async function importRequestLogs(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   logs: Array<Record<string, unknown>>
 ): Promise<ImportResult> {
   let imported = 0;

@@ -46,7 +46,7 @@ export default function ProxyPoolsPage() {
       try {
         const res = await fetch("/api/admin/pools", { signal: controller.signal });
         if (res.status === 401) return;
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success && Array.isArray(data.data)) setPools(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -77,14 +77,14 @@ export default function ProxyPoolsPage() {
         const res = await fetch(`/api/admin/pools/${editing.id}`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
         });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success) { message.success(t("proxy_pool.edit_success") || "更新成功"); closeForm(); handleRefresh(); }
         else message.error(data.error || t("common.error"));
       } else {
         const res = await fetch("/api/admin/pools", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
         });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success) { message.success(t("proxy_pool.create_success") || "创建成功"); closeForm(); handleRefresh(); }
         else message.error(data.error || t("common.error"));
       }
@@ -97,7 +97,7 @@ export default function ProxyPoolsPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/admin/pools/${id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(t("proxy_pool.delete_success") || "删除成功"); handleRefresh(); }
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -109,7 +109,7 @@ export default function ProxyPoolsPage() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !pool.enabled }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) handleRefresh();
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }

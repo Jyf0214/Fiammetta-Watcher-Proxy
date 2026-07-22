@@ -63,7 +63,7 @@ export default function ProxiesPage() {
         const params = filterPool ? `?poolId=${filterPool}` : "";
         const res = await fetch(`/api/admin/proxies${params}`, { signal: controller.signal });
         if (res.status === 401) return;
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success && Array.isArray(data.data)) setProxies(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -75,7 +75,7 @@ export default function ProxiesPage() {
     const fetchPools = async () => {
       try {
         const res = await fetch("/api/admin/pools", { signal: controller.signal });
-        const data = await res.json();
+        const data = await res.json() as Record<string, any>;
         if (data.success && Array.isArray(data.data)) {
           setPools(data.data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
         }
@@ -95,7 +95,7 @@ export default function ProxiesPage() {
       const res = await fetch("/api/admin/proxies", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) {
         message.success(t("proxy.create_success") || "创建成功");
         setModalOpen(false); form.resetFields(); handleRefresh();
@@ -109,7 +109,7 @@ export default function ProxiesPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/admin/proxies/${id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(t("proxy.delete_success") || "删除成功"); handleRefresh(); }
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -121,7 +121,7 @@ export default function ProxiesPage() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !proxy.enabled }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) handleRefresh();
       else message.error(data.error || t("common.error"));
     } catch { message.error(t("common.error")); }
@@ -133,7 +133,7 @@ export default function ProxiesPage() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "healthy" }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) { message.success(t("proxy.reset_success") || "已重置"); handleRefresh(); }
     } catch { message.error(t("common.error")); }
   };
@@ -146,7 +146,7 @@ export default function ProxiesPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: importText, poolId: importPoolId || null }),
       });
-      const data = await res.json();
+      const data = await res.json() as Record<string, any>;
       if (data.success) {
         const { created, updated, parseErrors } = data.data || {};
         const msg = `新增 ${created} 个，覆盖 ${updated} 个` + (parseErrors?.length ? `，${parseErrors.length} 行格式错误` : "");

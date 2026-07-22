@@ -50,22 +50,16 @@ export default async function handler(
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [items, countResult] = await Promise.all([
-        db.all<{
-          id: string;
-          level: string;
-          message: string;
-          detail: string | null;
-          created_at: number;
-        }>(
+        (db as any).all(
           `SELECT id, level, message, detail, created_at
            FROM system_events
            ${whereClause}
            ORDER BY created_at DESC
            LIMIT ${pageSize} OFFSET ${offset}`
-        ),
-        db.get<{ count: number }>(
+        ) as Promise<Array<{ id: string; level: string; message: string; detail: string | null; created_at: number }>>,
+        (db as any).get(
           `SELECT COUNT(*) as count FROM system_events ${whereClause}`
-        ),
+        ) as Promise<{ count: number } | null>,
       ]);
 
       const total = countResult?.count ?? 0;
@@ -90,8 +84,28 @@ export default async function handler(
     }
 
     // ---------- 请求日志查询 ----------
+    interface RequestLogRow {
+      id: string;
+      key_id: string | null;
+      key_name: string | null;
+      platform_id: string | null;
+      model: string;
+      endpoint: string | null;
+      method: string | null;
+      status: number;
+      latency: number;
+      tokens: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      cost: number;
+      is_error: number;
+      ip_address: string | null;
+      user_agent: string | null;
+      error_message: string | null;
+      created_at: number;
+    }
     const conditions: string[] = [];
-    const params: unknown[] = [];
+    const params: any[] = [];
 
     // 状态码筛选
     if (status) {
@@ -137,27 +151,8 @@ export default async function handler(
     const itemsSql = `SELECT * FROM request_logs ${whereClause} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
 
     const [items, countResult] = await Promise.all([
-      db.all<{
-        id: string;
-        key_id: string | null;
-        key_name: string | null;
-        platform_id: string | null;
-        model: string;
-        endpoint: string | null;
-        method: string | null;
-        status: number;
-        latency: number;
-        tokens: number;
-        prompt_tokens: number;
-        completion_tokens: number;
-        cost: number;
-        is_error: number;
-        ip_address: string | null;
-        user_agent: string | null;
-        error_message: string | null;
-        created_at: number;
-      }>(itemsSql, ...params),
-      db.get<{ count: number }>(countSql, ...params),
+      (db as any).all(itemsSql, ...params) as Promise<RequestLogRow[]>,
+      (db as any).get(countSql, ...params) as Promise<{ count: number } | null>,
     ]);
 
     const total = countResult?.count ?? 0;

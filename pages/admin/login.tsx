@@ -83,7 +83,7 @@ export default function AdminLoginPage() {
         body: JSON.stringify({ username: username.trim(), password }),
       });
 
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
 
       if (data.success) {
         setSuccess(data.message || t("auth.login_success"));

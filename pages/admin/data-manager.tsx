@@ -153,7 +153,7 @@ export default function DataManagerPage() {
       const res = await fetch(`/api/admin/export?${params}`);
 
       if (!res.ok) {
-        const error = await res.json();
+        const error: Record<string, any> = await res.json();
         throw new Error(error.error || t("admin.dm_err_export"));
       }
 
@@ -201,7 +201,7 @@ export default function DataManagerPage() {
         });
 
         if (!res.ok) {
-          const err = await res.json();
+          const err: Record<string, any> = await res.json();
           throw new Error(err.error || t("admin.dm_err_export"));
         }
 

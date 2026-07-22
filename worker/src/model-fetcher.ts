@@ -120,7 +120,7 @@ function detectModelType(modelId: string): string {
  * 拉取所有平台的模型并更新数据库
  */
 export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
-  const orm = createDb(db);
+  const orm = await createDb(db);
 
   const platforms = await orm
     .select({

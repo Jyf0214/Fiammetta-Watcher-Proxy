@@ -58,7 +58,7 @@ export async function validateApiKey(
     };
   }
 
-  const orm = createDb(db);
+  const orm = await createDb(db);
 
   // 查询 API Key（D1 无 plans 表，所有限额字段在 api_keys 中）
   const rows = await orm

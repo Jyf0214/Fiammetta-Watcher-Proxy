@@ -46,7 +46,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         const res = await fetch(`/api/admin/usage?${params}`, {
           signal: controller.signal,
         });
-        const json = await res.json();
+        const json: Record<string, any> = await res.json();
         if (json.success && Array.isArray(json.data)) {
           setData(json.data);
         }

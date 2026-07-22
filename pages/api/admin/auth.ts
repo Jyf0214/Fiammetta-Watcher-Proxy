@@ -1,5 +1,4 @@
 /**
-import { getCloudflareContext } from "@opennextjs/cloudflare";
  * 认证 API — 登录 / 登出 / 获取当前管理员信息
  *
  * POST   /api/admin/auth  — 管理员登录（验证用户名密码 → 生成 JWT → 设置 Cookie）
@@ -12,6 +11,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
+import { createDb } from "@/lib/db";
+import * as schema from "@/lib/schema";
 
 const COOKIE_NAME = "admin_token";
 
@@ -143,7 +144,6 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
 async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
-    DB: ((await getCloudflareContext({ async: true })).env as Record<string, unknown>).DB as D1Database,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
     ENVIRONMENT: process.env.ENVIRONMENT,
@@ -156,7 +156,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
 
     if (admin) {
       try {
-        const db = createDb(env.DB);
+        const db = await createDb();
         await db.insert(schema.auditLogs).values({
           id: crypto.randomUUID(), adminId: admin.adminId, action: "logout",
           detail: JSON.stringify({ username: admin.username }), ip: clientIp, createdAt: Math.floor(Date.now() / 1000),

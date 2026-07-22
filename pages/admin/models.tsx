@@ -49,7 +49,7 @@ export default function ModelsPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/admin/models", { signal: controller.signal });
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && Array.isArray(data.data)) setModels(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -64,7 +64,7 @@ export default function ModelsPage() {
     const fetchPlatforms = async () => {
       try {
         const res = await fetch("/api/admin/platforms", { signal: controller.signal });
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -92,7 +92,7 @@ export default function ModelsPage() {
         body: JSON.stringify(values),
       });
 
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(data.message);
         setModalOpen(false);
@@ -112,7 +112,7 @@ export default function ModelsPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(data.message || t("model_map.delete_success") || "删除成功");
         handleRefresh();

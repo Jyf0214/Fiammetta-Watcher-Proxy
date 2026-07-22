@@ -13,7 +13,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
+import { createDb, type Database } from "@/lib/db";
 import * as schema from "@/lib/schema";
 
 // Config 表中的存储键
@@ -33,7 +33,7 @@ export interface RequestTemplate {
 
 /** 从 configs 表读取所有模板 */
 async function loadTemplates(
-  db: ReturnType<typeof createDb>
+  db: Database
 ): Promise<RequestTemplate[]> {
   const config = await db
     .select()
@@ -45,7 +45,7 @@ async function loadTemplates(
 
 /** 将模板列表写回 configs 表 */
 async function saveTemplates(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   templates: RequestTemplate[]
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);

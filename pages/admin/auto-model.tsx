@@ -42,7 +42,7 @@ export default function AutoModelPage() {
       setModelsLoading(true);
       try {
         const res = await fetch("/api/admin/config", { signal: controller.signal });
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && data.data) {
           setAutoModelId(data.data["system:auto_model_id"] || null);
           const savedModels = data.data["system:auto_model_selected"];
@@ -60,13 +60,13 @@ export default function AutoModelPage() {
 
       try {
         const pRes = await fetch("/api/admin/platforms", { signal: controller.signal });
-        const pData = await pRes.json();
+        const pData: Record<string, any> = await pRes.json();
         if (pData.success && Array.isArray(pData.data)) {
           const allModels: PlatformModel[] = [];
           for (const platform of pData.data) {
             try {
               const mRes = await fetch(`/api/admin/platforms/${platform.id}/models`, { signal: controller.signal });
-              const mData = await mRes.json();
+              const mData: Record<string, any> = await mRes.json();
               if (mData.success && Array.isArray(mData.data)) {
                 for (const m of mData.data) {
                   allModels.push({ ...m, platform: { name: platform.name } });
@@ -103,7 +103,7 @@ export default function AutoModelPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: "system:auto_model_id", value: newId }),
       });
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         setAutoModelId(newId);
         message.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
@@ -138,7 +138,7 @@ export default function AutoModelPage() {
           value: JSON.stringify(selectedModels),
         }),
       });
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("system.auto_model_selected_saved") || "模型选择已保存");
       } else {

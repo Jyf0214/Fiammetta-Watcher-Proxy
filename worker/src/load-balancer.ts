@@ -189,7 +189,7 @@ async function updatePlatformStatus(
  */
 export async function syncCircuitBreakersFromDatabase(db: D1Database): Promise<void> {
   try {
-    const orm = createDb(db);
+    const orm = await createDb(db);
     const platforms = await orm
       .select({
         id: schema.platforms.id,

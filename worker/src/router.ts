@@ -94,7 +94,7 @@ export async function refreshCache(db: D1Database): Promise<void> {
  * 执行实际的缓存刷新
  */
 async function doRefresh(db: D1Database): Promise<void> {
-  const orm = createDb(db);
+  const orm = await createDb(db);
 
   const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
     await Promise.all([

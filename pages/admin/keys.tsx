@@ -41,7 +41,7 @@ export default function KeysPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/admin/keys", { signal: controller.signal });
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && Array.isArray(data.data)) setKeys(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -72,7 +72,7 @@ export default function KeysPage() {
         body: JSON.stringify(values),
       });
 
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(data.message);
         setModalOpen(false);
@@ -93,7 +93,7 @@ export default function KeysPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("api_key.delete_success") || "删除成功");
         handleRefresh();

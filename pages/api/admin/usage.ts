@@ -33,10 +33,6 @@ export default async function handler(
   }
 
   try {
-    if (!db) {
-      res.status(500).json({ success: false, error: "数据库未配置" });
-      return;
-    }
     const orm = await createDb();
 
     const keyId = req.query.keyId as string | undefined;

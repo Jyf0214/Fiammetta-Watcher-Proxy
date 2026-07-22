@@ -83,7 +83,7 @@ function DashboardContent() {
       if (isManual) setRefreshing(true);
       try {
         const res = await fetch("/api/admin/stats");
-        const data = await res.json();
+        const data: Record<string, any> = await res.json();
         if (data.success && data.data) {
           setStats(data.data);
           setLastRefreshed(new Date());
@@ -106,7 +106,8 @@ function DashboardContent() {
     const controller = new AbortController();
     fetch("/api/admin/stats", { signal: controller.signal })
       .then((res) => res.json())
-      .then((data) => {
+      .then((value) => {
+        const data = value as Record<string, any>;
         if (data.success && data.data) {
           setStats(data.data);
           setLastRefreshed(new Date());
@@ -135,7 +136,7 @@ function DashboardContent() {
     try {
       // 获取最近 24 小时的趋势数据
       const res = await fetch("/api/admin/usage/trend?period=today");
-      const data = await res.json();
+      const data: Record<string, any> = await res.json();
       if (data.success && Array.isArray(data.data)) {
         // 转换为各指标的趋势数据
         const trends: Record<string, TrendPoint[]> = {
