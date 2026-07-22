@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { Tag, Alert, Form, InputPassword, toast } from "@lobehub/ui";
+import { Tag, Alert } from "@lobehub/ui";
 import { Descriptions } from "antd";
 import { Button } from "@/components/ui/Button";
-import { RefreshCw, Lock, Settings } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
@@ -23,8 +23,6 @@ export default function SystemPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [passwordForm] = Form.useForm();
-  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -58,32 +56,6 @@ export default function SystemPage() {
     fetchInfo();
     return () => controller.abort();
   }, [refreshKey]);
-
-  const handleChangePassword = async (values: {
-    currentPassword: string;
-    newPassword: string;
-    confirmPassword: string;
-  }) => {
-    setChangePasswordLoading(true);
-    try {
-      const res = await fetch("/api/admin/auth/change-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(t("auth.password_changed"));
-        passwordForm.resetFields();
-      } else {
-        toast.error(data.error || t("auth.password_change_failed"));
-      }
-    } catch {
-      toast.error(t("auth.password_change_failed"));
-    } finally {
-      setChangePasswordLoading(false);
-    }
-  };
 
   if (loading) {
     return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
@@ -148,71 +120,6 @@ export default function SystemPage() {
               {info?.keyCount ?? 0}
             </Descriptions.Item>
           </Descriptions>
-        </ProCard>
-
-        <ProCard
-          title={
-            <span className="flex items-center gap-2">
-              <Lock size={16} />
-              {t("auth.change_password")}
-            </span>
-          }
-        >
-          <Form
-            form={passwordForm}
-            layout="vertical"
-            onFinish={handleChangePassword}
-            autoComplete="off"
-          >
-            <Form.Item
-              name="currentPassword"
-              label={t("auth.current_password")}
-              rules={[{ required: true, message: t("validation.field_required") }]}
-            >
-              <InputPassword />
-            </Form.Item>
-
-            <Form.Item
-              name="newPassword"
-              label={t("auth.new_password")}
-              rules={[
-                { required: true, message: t("validation.field_required") },
-                { min: 8, message: t("auth.password_too_short") },
-              ]}
-            >
-              <InputPassword />
-            </Form.Item>
-
-            <Form.Item
-              name="confirmPassword"
-              label={t("auth.confirm_password")}
-              dependencies={["newPassword"]}
-              rules={[
-                { required: true, message: t("validation.field_required") },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue("newPassword") === value) {
-                      return Promise.resolve();
-                    }
-                    return Promise.reject(new Error(t("auth.password_mismatch")));
-                  },
-                }),
-              ]}
-            >
-              <InputPassword />
-            </Form.Item>
-
-            <Form.Item>
-              <Button
-                variant="primary"
-                type="submit"
-                loading={changePasswordLoading}
-                disabled={changePasswordLoading}
-              >
-                {t("auth.change_password")}
-              </Button>
-            </Form.Item>
-          </Form>
         </ProCard>
       </PageContainer>
     </AdminLayout>

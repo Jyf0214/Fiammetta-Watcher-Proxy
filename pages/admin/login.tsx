@@ -5,7 +5,7 @@ import { toast } from "@lobehub/ui";
 import { message } from "antd";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthCard from "@/components/auth/AuthCard";
-import { Mail, Lock, ChevronRight, ArrowLeft, KeyRound, Copy, Check } from "lucide-react";
+import { Mail, Lock, ChevronRight, ArrowLeft, Copy, Check } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/Button/LoadingSpinner";
 import "@/lib/i18n";
 
@@ -113,27 +113,6 @@ export default function AdminLoginPage() {
     setSuccess("");
   };
 
-  const handleForgotPassword = async () => {
-    setError("");
-    setSuccess("");
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/auth/reset-password", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSuccess(data.message || t("auth.reset_password_submitted"));
-      } else {
-        setError(data.error || t("auth.reset_password_failed"));
-      }
-    } catch {
-      setError(t("common.network_error"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const inputStyle =
     "w-full px-4 py-3.5 text-base rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-transparent transition-all";
 
@@ -210,16 +189,6 @@ export default function AdminLoginPage() {
       subtitle={t("auth.input_password") || "输入密码以登录"}
       footer={
         <div className="flex flex-col gap-3 mt-4">
-          <button
-            type="button"
-            onClick={handleForgotPassword}
-            disabled={loading}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium disabled:opacity-50"
-            aria-label={t("auth.forgot_password")}
-          >
-            <KeyRound size={14} />
-            {t("auth.forgot_password") || "忘记密码"}
-          </button>
           <button
             type="button"
             onClick={handleBack}
