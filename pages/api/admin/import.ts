@@ -109,9 +109,10 @@ export default async function handler(
       imported: number,
       skipped: number,
       totalProcessed: number,
-      totalRecords: number
+      totalRecords: number,
+      error?: string
     ) => {
-      writeEvent({
+      const event: Record<string, unknown> = {
         type: "progress",
         step,
         stepTotal,
@@ -119,14 +120,16 @@ export default async function handler(
         skipped,
         totalProcessed,
         totalRecords,
-      });
+      };
+      if (error) event.error = error;
+      writeEvent(event);
     };
 
     // 定义导入步骤（保持依赖顺序）
     const steps: Array<{
       key: string;
       data: unknown;
-      fn: (db: Database, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
+      fn: (db: Database, data: Array<Record<string, unknown>>) => Promise<ImportResult & { error?: string }>;
     }> = [
       { key: "proxyPools", data: body.proxyPools, fn: importProxyPools },
       { key: "platforms", data: body.platforms, fn: importPlatforms },
@@ -165,7 +168,7 @@ export default async function handler(
         result.details[step.key as keyof typeof result.details] = importResult;
         totalProcessed += stepTotal;
 
-        sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords);
+        sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords, importResult.error);
       } catch (err) {
         console.error(`[import] 导入 ${step.key} 失败:`, err);
         totalProcessed += stepTotal;
@@ -278,7 +281,7 @@ async function importPlatforms(
   );
 
   try {
-    (db as any).batch(stmts);
+    await (db as any).batch(stmts);
     imported += validPlatforms.length;
   } catch (err) {
     console.error("[import] 批量导入平台失败:", err);
@@ -331,7 +334,7 @@ async function importModelMaps(
   );
 
   try {
-    (db as any).batch(stmts);
+    await (db as any).batch(stmts);
     imported += validMaps.length;
   } catch (err) {
     console.error("[import] 批量导入模型映射失败:", err);
@@ -382,7 +385,7 @@ async function importProxyPools(
   );
 
   try {
-    (db as any).batch(stmts);
+    await (db as any).batch(stmts);
     imported += validPools.length;
   } catch (err) {
     console.error("[import] 批量导入代理池失败:", err);
@@ -437,7 +440,7 @@ async function importProxies(
   );
 
   try {
-    (db as any).batch(stmts);
+    await (db as any).batch(stmts);
     imported += validProxies.length;
   } catch (err) {
     console.error("[import] 批量导入代理失败:", err);
@@ -493,7 +496,7 @@ async function importPlans(
   );
 
   try {
-    (db as any).batch(stmts);
+    await (db as any).batch(stmts);
     imported += validPlans.length;
   } catch (err) {
     console.error("[import] 批量导入套餐失败:", err);
@@ -563,7 +566,7 @@ async function importApiKeys(
     );
 
     try {
-      (db as any).batch(stmts);
+      await (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入 API Key 失败:", err);
@@ -627,7 +630,7 @@ async function importConfigs(
       } as any)
     );
     try {
-      (db as any).batch(stmts);
+      await (db as any).batch(stmts);
       imported += toInsert.length;
     } catch (err) {
       console.error("[import] 批量插入配置失败:", err);
@@ -643,7 +646,7 @@ async function importConfigs(
         .where(eq(schema.configs.key, c.key as string))
     );
     try {
-      (db as any).batch(stmts);
+      await (db as any).batch(stmts);
       imported += toUpdate.length;
     } catch (err) {
       console.error("[import] 批量更新配置失败:", err);
@@ -705,7 +708,7 @@ async function importAuditLogs(
     });
 
     try {
-      (db as any).batch(stmts);
+      await (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入审计日志失败:", err);
@@ -747,7 +750,7 @@ async function importSystemEvents(
     );
 
     try {
-      (db as any).batch(stmts);
+      await (db as any).batch(stmts);
       imported += batch.length;
     } catch (err) {
       console.error("[import] 批量导入系统事件失败:", err);
@@ -770,20 +773,56 @@ async function importSystemEvents(
 async function importRequestLogs(
   db: Database,
   logs: Array<Record<string, unknown>>
-): Promise<ImportResult> {
+): Promise<ImportResult & { error?: string }> {
   let imported = 0;
   let skipped = 0;
+  let firstError: string | null = null;
 
   // 过滤无效记录
   const validLogs = logs.filter((log) => log.model);
   skipped += logs.length - validLogs.length;
 
-  // 每 50 条一批，并发插入
-  const batchSize = 50;
-  for (let i = 0; i < validLogs.length; i += batchSize) {
-    const batch = validLogs.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      batch.map((log) =>
+  // 先尝试插入第一条，捕获错误原因
+  if (validLogs.length > 0) {
+    try {
+      const log = validLogs[0];
+      await db.insert(schema.requestLogs).values({
+        id: generateId(),
+        keyId: (log.keyId as string) || null,
+        keyName: (log.keyName as string) || null,
+        platformId: (log.platformId as string) || null,
+        proxyId: (log.proxyId as string) || null,
+        model: log.model as string,
+        endpoint: (log.endpoint as string) || null,
+        method: (log.method as string) || null,
+        status: (log.status as number) || 0,
+        latency: (log.duration as number) || (log.latency as number) || 0,
+        tokens: (log.tokens as number) || 0,
+        promptTokens: (log.promptTokens as number) || 0,
+        completionTokens: (log.completionTokens as number) || 0,
+        ttft: (log.ttft as number) || 0,
+        cost: (log.cost as number) || 0,
+        isError: Boolean(log.isError),
+        ipAddress: (log.ipAddress as string) || null,
+        userAgent: (log.userAgent as string) || null,
+        errorMessage: (log.errorMessage as string) || null,
+        createdAt: toUnixSeconds(log.createdAt),
+      } as any);
+      imported++;
+    } catch (err: any) {
+      firstError = err?.message || String(err);
+      console.error("[import] 请求日志插入失败（首条）:", firstError);
+      skipped++;
+    }
+  }
+
+  // 如果首条成功，继续批量插入剩余的
+  if (imported > 0 && validLogs.length > 1) {
+    const remaining = validLogs.slice(1);
+    const batchSize = 50;
+    for (let i = 0; i < remaining.length; i += batchSize) {
+      const batch = remaining.slice(i, i + batchSize);
+      const stmts = batch.map((log) =>
         db.insert(schema.requestLogs).values({
           id: generateId(),
           keyId: (log.keyId as string) || null,
@@ -806,17 +845,22 @@ async function importRequestLogs(
           errorMessage: (log.errorMessage as string) || null,
           createdAt: toUnixSeconds(log.createdAt),
         } as any)
-      )
-    );
+      );
 
-    for (const r of results) {
-      if (r.status === "fulfilled") imported++;
-      else {
-        skipped++;
-        console.error("[import] 请求日志插入失败:", r.reason);
+      try {
+        await (db as any).batch(stmts);
+        imported += batch.length;
+      } catch (err) {
+        console.error("[import] 批量导入请求日志失败:", err);
+        skipped += batch.length;
       }
     }
+  } else if (imported === 0 && validLogs.length > 1) {
+    // 首条失败，剩余全部跳过
+    skipped += validLogs.length - 1;
   }
 
-  return { imported, skipped };
+  const result: ImportResult & { error?: string } = { imported, skipped };
+  if (firstError) result.error = firstError;
+  return result;
 }

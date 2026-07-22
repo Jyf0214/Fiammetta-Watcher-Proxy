@@ -38,6 +38,7 @@ interface ProgressEvent {
   skipped: number;
   totalProcessed: number;
   totalRecords: number;
+  error?: string;
 }
 
 /** 流式完成事件 */
@@ -78,6 +79,7 @@ interface StepProgress {
   imported: number;
   skipped: number;
   status: "done" | "error";
+  error?: string;
 }
 
 /** 格式化导入字段名 */
@@ -234,13 +236,15 @@ export default function DataManagerPage() {
                 setCurrentStepKey(ev.step);
                 setStepProgressList((prev) => {
                   const idx = prev.findIndex((p) => p.labelKey === STEP_LABELS[ev.step]?.labelKey);
+                  const hasError = (ev.imported === 0 && ev.skipped === ev.stepTotal) || !!ev.error;
                   const newEntry: StepProgress = {
                     labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
                     detailKey: STEP_LABELS[ev.step]?.detailKey,
                     stepTotal: ev.stepTotal,
                     imported: ev.imported,
                     skipped: ev.skipped,
-                    status: ev.imported === 0 && ev.skipped === ev.stepTotal ? "error" : "done",
+                    status: hasError ? "error" : "done",
+                    error: ev.error,
                   };
                   if (idx >= 0) {
                     const next = [...prev];
@@ -369,22 +373,29 @@ export default function DataManagerPage() {
           const stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
 
           return (
-            <div key={i} className="flex items-center gap-2 text-xs">
-              {sp.status === "done" && sp.imported > 0 ? (
-                <CheckCircle size={13} className="text-emerald-500 flex-shrink-0" />
-              ) : sp.status === "error" ? (
-                <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
-              ) : (
-                <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
+            <div key={i}>
+              <div className="flex items-center gap-2 text-xs">
+                {sp.status === "done" && sp.imported > 0 ? (
+                  <CheckCircle size={13} className="text-emerald-500 flex-shrink-0" />
+                ) : sp.status === "error" ? (
+                  <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
+                ) : (
+                  <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
+                )}
+                <span className="text-zinc-600 dark:text-zinc-400 min-w-0">
+                  {t(`admin.${sp.labelKey}`)}
+                </span>
+                <span className="text-zinc-400 dark:text-zinc-500 tabular-nums ml-auto flex-shrink-0">
+                  {sp.imported > 0 && <span className="text-emerald-500">+{sp.imported}</span>}
+                  {sp.skipped > 0 && <span className="ml-1">{t("admin.dm_skip")} {sp.skipped}</span>}
+                  {sp.imported === 0 && sp.skipped === 0 && <span>-</span>}
+                </span>
+              </div>
+              {sp.status === "error" && sp.error && (
+                <div className="text-xs text-red-500 dark:text-red-400 ml-5 truncate" title={sp.error}>
+                  {sp.error}
+                </div>
               )}
-              <span className="text-zinc-600 dark:text-zinc-400 min-w-0">
-                {t(`admin.${sp.labelKey}`)}
-              </span>
-              <span className="text-zinc-400 dark:text-zinc-500 tabular-nums ml-auto flex-shrink-0">
-                {sp.imported > 0 && <span className="text-emerald-500">+{sp.imported}</span>}
-                {sp.skipped > 0 && <span className="ml-1">{t("admin.dm_skip")} {sp.skipped}</span>}
-                {sp.imported === 0 && sp.skipped === 0 && <span>-</span>}
-              </span>
             </div>
           );
         })}
