@@ -65,3 +65,13 @@ docs/
 home/
 tmp/
 CODE_REVIEW_REPORT.md
+frontend/
+
+# 项目文档（不需要提交）
+plan.md
+AGENT-SETUP.md
+QWEN.md
+
+# Python
+__pycache__/
+*.pyc

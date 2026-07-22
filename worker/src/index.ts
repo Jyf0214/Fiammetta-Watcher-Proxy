@@ -1,92 +1,74 @@
 /**
- * Fiammetta Watcher Proxy — Cloudflare Worker 入口
+ * Worker 入口 — 处理 v1 代理请求 + Cron 定时任务
  *
  * 职责：
- * 1. 代理 OpenAI 兼容 API 请求（v1/*）
- * 2. 定时任务（Cron Triggers）：API Key 用量重置、模型发现、日志归档
+ * - /v1/* 路径 → handleV1Route（API 代理）
+ * - 其他路径 → 404
+ * - scheduled 事件 → Cron 任务分发（模型发现、Key 重置、日志归档）
  *
- * Admin 管理后台的 CRUD 操作由 Cloudflare Pages Functions 处理。
+ * D1 和 KV 通过 Wrangler Bindings 注入。
  */
 
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { logger } from "hono/logger";
-import type { ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types";
-import type { Env } from "./types";
-import { v1Routes } from "./routes/v1";
-import { handleCron } from "./cron";
+import { handleV1Route } from "./v1-route";
+import { classifyCronExpression } from "./types";
+import { fetchAllPlatformModels } from "./model-fetcher";
+import { handleScheduledReset } from "./key-reset";
+import { runArchiveTask } from "./log-archiver";
 
-const app = new Hono<{ Bindings: Env }>();
+export interface Env {
+  DB: D1Database;
+  KV: KVNamespace;
+}
 
-// ==================== 全局中间件 ====================
+export default {
+  /**
+   * HTTP 请求处理 — 代理 /v1/* 路由
+   */
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
 
-// 请求日志
-app.use("*", logger());
+    // 健康检查端点
+    if (url.pathname === "/health") {
+      return new Response(JSON.stringify({ status: "ok", timestamp: Math.floor(Date.now() / 1000) }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-// CORS — 允许前端域名访问 v1 API
-app.use(
-  "/api/v1/*",
-  cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
-    maxAge: 86400,
-  })
-);
+    // v1 代理路由
+    if (url.pathname.startsWith("/v1/")) {
+      return handleV1Route(request, env, ctx);
+    }
 
-// 安全响应头
-app.use("*", async (c, next) => {
-  await next();
-  c.header("X-Frame-Options", "DENY");
-  c.header("X-Content-Type-Options", "nosniff");
-  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  c.header("X-XSS-Protection", "0");
-  c.header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
-  c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
-});
+    return new Response(
+      JSON.stringify({ error: { message: "Not Found", type: "invalid_request_error" } }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  },
 
-// ==================== API 路由挂载 ====================
+  /**
+   * Cron 定时任务处理
+   *
+   * 根据 cron 表达式自动分发到对应任务：
+   * 模型发现（每 10 分钟）
+   * Key 用量重置（每小时）
+   * 日志归档（每天凌晨 3 点）
+   */
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    const task = classifyCronExpression(event.cron);
 
-app.route("/api/v1", v1Routes);
-
-// 根路径 — 返回 Worker 信息
-app.get("/", (c) => {
-  return c.json({
-    name: "Fiammetta Watcher Proxy",
-    version: "2.0.0",
-    runtime: "cloudflare-workers",
-    role: "proxy",
-  });
-});
-
-// 404 处理
-app.notFound((c) => {
-  return c.json(
-    { error: { message: "接口不存在", type: "invalid_request_error" } },
-    { status: 404 }
-  );
-});
-
-// 全局错误处理
-app.onError((err, c) => {
-  console.error("[worker] 未捕获异常:", err.message);
-  return c.json(
-    { error: { message: "服务器内部错误", type: "server_error" } },
-    { status: 500 }
-  );
-});
-
-// ==================== 导出 ====================
-
-const worker = {
-  // HTTP 请求处理
-  fetch: app.fetch,
-
-  // Cron 触发器处理（定时任务：API Key 重置、模型发现、日志归档）
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(handleCron(event, env));
+    switch (task) {
+      case "model-fetch":
+        ctx.waitUntil(fetchAllPlatformModels(env.DB));
+        break;
+      case "key-reset":
+        ctx.waitUntil(handleScheduledReset(env.DB));
+        break;
+      case "log-archive":
+        ctx.waitUntil(runArchiveTask(env.DB));
+        break;
+      default:
+        console.warn(`[cron] 未知的 cron 表达式: ${event.cron}`);
+    }
   },
 };
-
-export default worker;

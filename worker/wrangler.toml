@@ -1,35 +1,22 @@
-name = "fiammetta-watcher"
+name = "fiammetta_worker"
 main = "src/index.ts"
-compatibility_date = "2025-07-21"
+compatibility_date = "2025-04-02"
 compatibility_flags = ["nodejs_compat"]
 
-# 开发环境配置
-[dev]
-port = 8787
-
-# D1 数据库绑定
+# D1 数据库绑定（Worker 和 Pages 共享同一个 D1）
 [[d1_databases]]
 binding = "DB"
-database_name = "fiammetta-proxy"
-database_id = "<YOUR_D1_DATABASE_ID>"  # 部署时替换
-migrations_dir = "drizzle"
+database_name = "fiammetta_d1"
+database_id = "placeholder-d1-id"  # 部署时由 Terraform/CI 替换
 
-# KV 命名空间绑定（速率限制、缓存、熔断器状态）
+# KV 命名空间绑定（仅 Worker 使用：速率限制 + 熔断器状态缓存）
 [[kv_namespaces]]
 binding = "KV"
-id = "<YOUR_KV_NAMESPACE_ID>"  # 部署时替换
+id = "placeholder-kv-id"  # 部署时由 Terraform/CI 替换
 
-# 环境变量（敏感信息通过 Cloudflare Dashboard 设置）
-[vars]
-ENVIRONMENT = "production"
-
-# Cron Triggers — 定时任务
-# 每小时: API Key 用量重置检查
-# 每10分钟: 平台模型自动发现
-# 每天凌晨3点: 日志归档
+# Cron 定时任务
+# 每小时：Key 用量重置检查
+# 每 10 分钟：平台模型发现
+# 每天凌晨 3 点：日志归档
 [triggers]
-crons = [
-  "0 */1 * * *",
-  "*/10 * * * *",
-  "0 3 * * *",
-]
+crons = ["0 */1 * * *", "*/10 * * * *", "0 3 * * *"]

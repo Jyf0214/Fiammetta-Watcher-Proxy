@@ -1,26 +1,19 @@
 {
-  "name": "fiammetta-watcher-worker",
-  "version": "2.0.0",
+  "name": "fiammetta-worker",
+  "version": "1.0.0",
   "private": true,
-  "type": "module",
+  "description": "Fiammetta Watcher Proxy — v1 代理 Worker + Cron 定时任务",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 migrations apply fiammetta-proxy",
-    "db:init:local": "wrangler d1 migrations apply fiammetta-proxy --local",
-    "db:studio": "wrangler d1 execute fiammetta-proxy --command 'SELECT * FROM admins'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.2",
-    "hono": "^4.8.3",
-    "jose": "^6.0.11"
+    "drizzle-orm": "^0.39.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250710.0",
-    "@libsql/client": "^0.17.4",
-    "drizzle-kit": "^0.31.1",
-    "typescript": "^5.8.3",
-    "wrangler": "^4.28.0"
+    "@cloudflare/workers-types": "^4.20250410.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
   }
 }

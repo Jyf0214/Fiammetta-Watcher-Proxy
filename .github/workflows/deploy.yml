@@ -5,28 +5,35 @@ on:
     branches: [feat/cloudflare-workers]
   workflow_dispatch:
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # ==================== 环境准备 ====================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: "npm"
 
       # ==================== 获取 Account ID ====================
 
       - name: Fetch Account ID
         id: account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [[ -n "$CLOUDFLARE_ACCOUNT_ID_SECRET" ]]; then
-            ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID_SECRET"
+          if [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
           else
             ACCOUNT_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -39,249 +46,82 @@ jobs:
           echo "::add-mask::${ACCOUNT_ID}"
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
           echo "✅ Account ID 已获取"
-        env:
-          CLOUDFLARE_ACCOUNT_ID_SECRET: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # ==================== 创建 D1 数据库 + 初始化表 ====================
+      # ==================== D1 数据库初始化 ====================
 
-      - name: Create D1 Database
+      - name: Init D1 Database
         id: d1
         env:
-          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
-          DB_NAME="fiammetta-proxy"
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          D1_NAME: fiammetta_d1
+          INIT_SQL_PATH: init.sql
+        run: python3 deploy/init_d1.py
 
-          # 尝试创建（已存在则跳过）
-          CREATE_RESP=$(curl -s -X POST "$API/d1/database" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"name\": \"$DB_NAME\"}")
-          CREATE_SUCCESS=$(echo "$CREATE_RESP" | jq -r '.success')
-          ERROR_CODE=$(echo "$CREATE_RESP" | jq -r '.errors[0].code // empty')
+      # ==================== KV 命名空间初始化 ====================
 
-          if [[ "$CREATE_SUCCESS" == "true" ]]; then
-            echo "✅ D1 数据库已创建"
-          elif [[ "$ERROR_CODE" == "7502" ]]; then
-            echo "✅ D1 数据库已存在，复用"
-          else
-            echo "❌ D1 创建失败"
-            echo "$CREATE_RESP" | jq -r '.errors[0].message'
-            exit 1
-          fi
-
-          # 查询数据库 ID
-          DB_ID=$(curl -s -X GET "$API/d1/database?per_page=1000" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            | jq -r --arg name "$DB_NAME" '.result[] | select(.name == $name) | .uuid')
-
-          if [[ -z "$DB_ID" ]] || [[ "$DB_ID" == "null" ]]; then
-            echo "❌ 无法获取 D1 数据库 ID"
-            exit 1
-          fi
-
-          echo "::add-mask::${DB_ID}"
-          echo "db_id=$DB_ID" >> "$GITHUB_OUTPUT"
-          echo "✅ D1 数据库 ID 已获取"
-
-      - name: Init D1 Schema
-        env:
-          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
-
-          INIT_SQL=$(cat worker/drizzle/0000_init.sql)
-
-          RESP=$(curl -s -X POST "$API/d1/database/${{ steps.d1.outputs.db_id }}/query" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg sql "$INIT_SQL" '{sql: $sql, params: []}')")
-
-          if echo "$RESP" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✅ D1 Schema 初始化完成"
-          else
-            echo "❌ D1 Schema 初始化失败"
-            echo "$RESP" | jq -r '.errors[0].message'
-            exit 1
-          fi
-
-      # ==================== 创建 KV 命名空间 ====================
-
-      - name: Create KV Namespace
+      - name: Init KV Namespace
         id: kv
         env:
-          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
-          KV_NAME="fiammetta-proxy"
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          KV_NAME: fiammetta-proxy
+        run: python3 deploy/init_kv.py
 
-          # 查找已有
-          KV_ID=$(curl -s -X GET "$API/storage/kv/namespaces" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            | jq -r --arg title "$KV_NAME" '.result[] | select(.title == $title) | .id' | head -1)
-
-          if [[ -n "$KV_ID" ]] && [[ "$KV_ID" != "null" ]]; then
-            echo "✅ 复用已有 KV 命名空间"
-          else
-            # 创建
-            CREATE_RESP=$(curl -s -X POST "$API/storage/kv/namespaces" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"title\": \"$KV_NAME\"}")
-            KV_ID=$(echo "$CREATE_RESP" | jq -r '.result.id')
-
-            if [[ -z "$KV_ID" ]] || [[ "$KV_ID" == "null" ]]; then
-              echo "❌ KV 创建失败"
-              echo "$CREATE_RESP" | jq -r '.errors[0].message'
-              exit 1
-            fi
-            echo "✅ KV 命名空间已创建"
-          fi
-
-          echo "::add-mask::${KV_ID}"
-          echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
-
-      # ==================== 更新 wrangler.toml 占位符 ====================
+      # ==================== 替换 wrangler.toml 占位符 ====================
 
       - name: Update Wrangler Configs
+        env:
+          D1_ID: ${{ steps.d1.outputs.D1_ID }}
+          KV_ID: ${{ steps.kv.outputs.KV_ID }}
         run: |
-          DB_ID="${{ steps.d1.outputs.db_id }}"
-          KV_ID="${{ steps.kv.outputs.kv_id }}"
+          # Worker wrangler.toml
+          sed -i "s|placeholder-d1-id|$D1_ID|g" worker/wrangler.toml
+          sed -i "s|placeholder-kv-id|$KV_ID|g" worker/wrangler.toml
 
-          sed -i "s|<YOUR_D1_DATABASE_ID>|$DB_ID|g" worker/wrangler.toml
-          sed -i "s|<YOUR_KV_NAMESPACE_ID>|$KV_ID|g" worker/wrangler.toml
-          sed -i "s|<YOUR_D1_DATABASE_ID>|$DB_ID|g" frontend/wrangler.toml
-          sed -i "s|<YOUR_KV_NAMESPACE_ID>|$KV_ID|g" frontend/wrangler.toml
+          # 根目录 wrangler.toml（Pages）
+          sed -i "s|00000000-0000-0000-0000-000000000000|$D1_ID|g" wrangler.toml
 
           echo "✅ Wrangler 配置已更新"
 
       # ==================== 安装依赖 & 构建 ====================
 
-      - name: Install Worker Dependencies
-        run: cd worker && npm ci --legacy-peer-deps
+      - name: Install Dependencies
+        run: npm ci
 
-      - name: Install Frontend Dependencies
-        run: cd frontend && npm ci
-
-      - name: Build Frontend
-        run: cd frontend && npm run build
+      - name: Build Pages
+        run: npx @cloudflare/next-on-pages
 
       # ==================== 部署 Worker ====================
 
       - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           cd worker
           npx wrangler deploy
           echo "✅ Worker 部署完成"
 
-      # ==================== 部署 Pages ====================
+      # ==================== Pages 项目 + 绑定 + Secrets ====================
 
-      - name: Create Pages Project
+      - name: Init Pages Project
         env:
-          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
-          PROJECT_NAME="fiammetta-watcher"
-
-          # 检查项目是否已存在
-          CHECK_RESP=$(curl -s -X GET "$API/pages/projects/$PROJECT_NAME" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          CHECK_SUCCESS=$(echo "$CHECK_RESP" | jq -r '.success')
-
-          if [[ "$CHECK_SUCCESS" == "true" ]]; then
-            echo "✅ Pages 项目已存在"
-          else
-            # 创建项目
-            CREATE_RESP=$(curl -s -X POST "$API/pages/projects" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"name\": \"$PROJECT_NAME\", \"production_branch\": \"main\"}")
-            CREATE_SUCCESS=$(echo "$CREATE_RESP" | jq -r '.success')
-
-            if [[ "$CREATE_SUCCESS" == "true" ]]; then
-              echo "✅ Pages 项目已创建"
-            else
-              echo "❌ Pages 项目创建失败"
-              echo "$CREATE_RESP" | jq -r '.errors[0].message'
-              exit 1
-            fi
-          fi
-
-      - name: Deploy Pages
-        run: |
-          cd frontend
-          npx wrangler pages deploy dist --project-name=fiammetta-watcher
-          echo "✅ Pages 部署完成"
-
-      # ==================== 配置 Pages 绑定 ====================
-
-      - name: Configure Pages Bindings
-        env:
-          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID"
-          DB_ID="${{ steps.d1.outputs.db_id }}"
-          KV_ID="${{ steps.kv.outputs.kv_id }}"
-
-          # D1 绑定
-          BIND_RESP=$(curl -s -X PATCH "$API/pages/projects/fiammetta-watcher" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"deployment_configs\":{\"production\":{\"d1_databases\":{\"DB\":{\"database_id\":\"$DB_ID\"}}}}}")
-          if echo "$BIND_RESP" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✅ D1 绑定成功"
-          else
-            echo "❌ D1 绑定失败"
-            exit 1
-          fi
-
-          # KV 绑定
-          BIND_RESP=$(curl -s -X PATCH "$API/pages/projects/fiammetta-watcher" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"deployment_configs\":{\"production\":{\"kv_namespaces\":{\"KV\":{\"namespace_id\":\"$KV_ID\"}}}}}")
-          if echo "$BIND_RESP" | jq -e '.success' > /dev/null 2>&1; then
-            echo "✅ KV 绑定成功"
-          else
-            echo "❌ KV 绑定失败"
-            exit 1
-          fi
-
-      # ==================== 配置 Pages 环境变量 ====================
-
-      - name: Configure Pages Secrets
-        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          D1_ID: ${{ steps.d1.outputs.D1_ID }}
+          KV_ID: ${{ steps.kv.outputs.KV_ID }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: python3 deploy/init_pages.py
+
+      # ==================== 部署 Pages ====================
+
+      - name: Deploy Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          ADMIN_USER="${ADMIN_USERNAME:-admin}"
-
-          if [ -z "$ADMIN_PASSWORD" ]; then
-            echo "❌ 未设置 ADMIN_PASSWORD Secret"
-            exit 1
-          fi
-
-          JWT_SECRET=$(openssl rand -base64 32)
-          echo "::add-mask::${JWT_SECRET}"
-
-          tmp_dir=$(mktemp -d)
-          trap "rm -rf $tmp_dir" EXIT
-
-          echo -n "$ADMIN_USER" > "$tmp_dir/admin_user"
-          echo -n "$ADMIN_PASSWORD" > "$tmp_dir/admin_pass"
-          echo -n "$JWT_SECRET" > "$tmp_dir/jwt_secret"
-
-          npx wrangler pages secret put ADMIN_USERNAME \
-            --project-name=fiammetta-watcher --env=production \
-            < "$tmp_dir/admin_user"
-          npx wrangler pages secret put ADMIN_PASSWORD \
-            --project-name=fiammetta-watcher --env=production \
-            < "$tmp_dir/admin_pass"
-          npx wrangler pages secret put JWT_SECRET \
-            --project-name=fiammetta-watcher --env=production \
-            < "$tmp_dir/jwt_secret"
-
-          echo "✅ Pages 环境变量配置完成"
+          npx wrangler pages deploy .vercel/output/static --project-name=fiammetta-watcher
+          echo "✅ Pages 部署完成"
 
       # ==================== 完成 ====================
 

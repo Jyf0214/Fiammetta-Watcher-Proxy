@@ -1,0 +1,13 @@
+name = "fiammetta"
+compatibility_date = "2025-04-02"
+compatibility_flags = ["nodejs_compat"]
+
+# esbuild 路径别名 — 与 worker/tsconfig.json 的 paths 保持一致
+# 注意：wrangler 使用 esbuild 打包，不自动读取 tsconfig.json paths
+[alias]
+"@/lib/*" = "../lib/*"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fiammetta_d1"
+database_id = "00000000-0000-0000-0000-000000000000"
