@@ -30,6 +30,10 @@
     "recharts": "^3.10.0",
     "tailwind-merge": "^3.6.0"
   },
+  "optionalDependencies": {
+    "mysql2": "^3.23.1",
+    "pg": "^8.22.0"
+  },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.9.2",
     "@tailwindcss/postcss": "^4.3.3",
