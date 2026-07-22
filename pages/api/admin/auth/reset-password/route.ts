@@ -18,7 +18,6 @@ import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 
 // ==================== 声明 Edge Runtime ====================
-export const runtime = "edge";
 
 // ==================== 速率限制（24 小时内最多 3 次，基于 IP） ====================
 

@@ -14,7 +14,6 @@
  * - 有依赖关系的数据按顺序导入（proxy_pools → proxies）
  */
 
-export const runtime = "edge";
 
 import { NextRequest } from "next/server";
 import { createDb } from "@/lib/db";

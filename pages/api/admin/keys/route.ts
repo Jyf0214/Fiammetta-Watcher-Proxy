@@ -13,7 +13,6 @@
  * - serializeBigInt 不再需要（SQLite 直接存储整数/浮点数）
  */
 
-export const runtime = "edge";
 
 import { NextRequest } from "next/server";
 import { createDb } from "@/lib/db";

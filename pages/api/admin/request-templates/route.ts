@@ -11,7 +11,6 @@
  * - DELETE /api/admin/request-templates — 删除模板
  */
 
-export const runtime = "edge";
 
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";

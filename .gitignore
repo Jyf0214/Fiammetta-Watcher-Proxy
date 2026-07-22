@@ -36,6 +36,9 @@ tsconfig.tsbuildinfo
 .wrangler/
 .dev.vars
 
+# OpenNext build output
+.open-next/
+
 # Drizzle
 local.db
 

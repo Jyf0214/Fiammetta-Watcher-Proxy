@@ -12,7 +12,6 @@
  * 返回 JSON 文件下载，Content-Type: application/json
  */
 
-export const runtime = "edge";
 
 import { NextRequest } from "next/server";
 import { createDb } from "@/lib/db";

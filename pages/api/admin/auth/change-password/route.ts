@@ -19,7 +19,6 @@ import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 
 // ==================== 声明 Edge Runtime ====================
-export const runtime = "edge";
 
 // ==================== 速率限制（密码修改失败防暴力） ====================
 

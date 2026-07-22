@@ -22,7 +22,6 @@ import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 
 // ==================== 声明 Edge Runtime ====================
-export const runtime = "edge";
 
 // ==================== 速率限制（登录失败防暴力） ====================
 // Pages Functions 每次请求独立执行，使用惰性清理策略

@@ -5,28 +5,30 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "preview": "npx @cloudflare/next-on-pages && wrangler pages dev .vercel/output/static"
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
+    "@ant-design/cssinjs": "^2.1.2",
+    "@ant-design/icons": "^6.3.2",
+    "@cloudflare/workers-types": "^5.20260721.1",
+    "antd": "^6.5.1",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.4",
     "next": "^16.2.11",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "@cloudflare/workers-types": "^5.20260721.1",
-    "drizzle-orm": "^0.45.2",
-    "jose": "^6.2.4",
-    "antd": "^6.5.1",
-    "@ant-design/icons": "^6.3.2",
-    "@ant-design/cssinjs": "^2.1.2",
     "recharts": "^3.10.0"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.16",
-    "wrangler": "^4.113.0",
-    "typescript": "^7.0.2",
+    "@opennextjs/cloudflare": "^1.9.2",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@types/node": "^26.1.1",
-    "dayjs": "^1.11.21"
+    "dayjs": "^1.11.21",
+    "esbuild": "^0.28.1",
+    "typescript": "7.0.2",
+    "wrangler": "^4.113.0"
   }
 }

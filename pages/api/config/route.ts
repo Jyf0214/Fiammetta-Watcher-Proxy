@@ -2,7 +2,6 @@ import { createDb } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
-export const runtime = "edge";
 
 /**
  * FrontendConfig 类型定义（与前端 use-config hook 保持一致）

@@ -1,12 +1,12 @@
 { pkgs, ... }: {
- channel = "stable-24.05";
+ channel = "unstable";
  packages = [
    pkgs.git
    pkgs.openssl
    pkgs.curl
    pkgs.gh
    pkgs.wget
-   pkgs.nodejs_22
+   pkgs.nodejs_24
    pkgs.python313
    pkgs.docker
    pkgs.rclone     

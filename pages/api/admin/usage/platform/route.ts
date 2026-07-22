@@ -14,7 +14,6 @@ import { requestLogs, platforms } from "@/lib/schema";
 import { eq, and, gte, desc, sql, count, sum } from "drizzle-orm";
 import { verifyToken } from "@/lib/auth";
 
-export const runtime = "edge";
 
 /**
  * 从请求中提取管理员身份

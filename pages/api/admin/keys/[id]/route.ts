@@ -14,7 +14,6 @@
  * - serializeBigInt 不再需要
  */
 
-export const runtime = "edge";
 
 import { NextRequest } from "next/server";
 import { createDb } from "@/lib/db";

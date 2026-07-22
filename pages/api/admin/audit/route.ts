@@ -14,7 +14,6 @@ interface Env {
   DB: D1Database;
 }
 
-export const runtime = "edge";
 
 export async function GET(
   request: NextRequest,

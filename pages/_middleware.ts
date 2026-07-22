@@ -18,7 +18,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export const runtime = "edge";
 
 // ==================== Admin API 速率限制 (60 次/分钟/IP) ====================
 // Edge Runtime 中使用全局变量 Map 实现，不依赖 Node.js API

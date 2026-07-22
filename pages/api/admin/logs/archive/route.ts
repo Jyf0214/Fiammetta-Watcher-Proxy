@@ -21,7 +21,6 @@ import { dailyStats } from "@/lib/schema";
 import { eq, and, gte, lte, like, desc, sql, count } from "drizzle-orm";
 import { verifyToken } from "@/lib/auth";
 
-export const runtime = "edge";
 
 /**
  * 从请求中提取管理员身份

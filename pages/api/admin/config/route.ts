@@ -4,7 +4,6 @@ import * as schema from "@/lib/schema";
 import { like } from "drizzle-orm";
 import { verifyToken } from "@/lib/auth";
 
-export const runtime = "edge";
 
 /**
  * 从请求中提取管理员身份
