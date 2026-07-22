@@ -104,7 +104,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           cd worker
-          npx wrangler deploy
+          npx wrangler deploy --config wrangler.toml
           echo "✅ Worker 部署完成"
 
       # ==================== Pages 项目 + 绑定 + Secrets ====================
