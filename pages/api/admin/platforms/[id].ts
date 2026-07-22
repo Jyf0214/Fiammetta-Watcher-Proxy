@@ -339,7 +339,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     // 检查是否存在关联的 model_mappings 记录
     const relatedMappings = await db
       .select()
-      .from(schema.model_mappings)
+      .from(schema.modelMappings)
       .where(eq(schema.modelMappings.platformId, id));
 
     if (relatedMappings.length > 0) {
@@ -352,12 +352,12 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     // 统计并清理关联数据
     // 删除关联的请求日志
     await db
-      .delete(schema.request_logs)
+      .delete(schema.requestLogs)
       .where(eq(schema.requestLogs.platformId, id));
 
     // 删除关联的平台模型
     await db
-      .delete(schema.platform_models)
+      .delete(schema.platformModels)
       .where(eq(schema.platformModels.platformId, id));
 
     // 删除平台本身
@@ -381,7 +381,11 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     });
   } catch (err) {
     console.error("[DELETE /api/admin/platforms/[id]] 删除平台失败:", err);
-    return res.status(500).json({ success: false, error: "删除平台失败" });
+    return res.status(500).json({
+      success: false,
+      error: "删除平台失败",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
