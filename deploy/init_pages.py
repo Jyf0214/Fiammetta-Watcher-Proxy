@@ -100,7 +100,7 @@ def main():
         "deployment_configs": {
             "production": {
                 "d1_databases": {
-                    "DB": {"database_id": D1_ID}
+                    "DB": {"id": D1_ID}
                 }
             }
         }
