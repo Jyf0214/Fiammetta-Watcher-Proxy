@@ -29,53 +29,55 @@ interface ImportResult {
   details?: Record<string, { imported: number; skipped: number }>;
 }
 
-/** 导入阶段定义 */
-interface ImportPhase {
-  key: string;
-  labelKey: string;
-  detailKey?: string;
-  /** 从导出数据中提取该阶段需要的字段 */
-  extract: (data: Record<string, unknown>) => Record<string, unknown>;
+/** 流式进度事件 */
+interface ProgressEvent {
+  type: "progress";
+  step: string;
+  stepTotal: number;
+  imported: number;
+  skipped: number;
+  totalProcessed: number;
+  totalRecords: number;
 }
 
-/** 定义导入阶段 */
-const IMPORT_PHASES: ImportPhase[] = [
-  {
-    key: "system",
-    labelKey: "dm_progress_system",
-    detailKey: "dm_progress_system_detail",
-    extract: (d) => ({
-      proxyPools: d.proxyPools,
-      platforms: d.platforms,
-      modelMaps: d.modelMaps,
-      proxies: d.proxies,
-      plans: d.plans,
-      configs: d.configs,
-    }),
-  },
-  {
-    key: "keys",
-    labelKey: "dm_progress_keys",
-    extract: (d) => ({ apiKeys: d.apiKeys }),
-  },
-  {
-    key: "history",
-    labelKey: "dm_progress_history",
-    detailKey: "dm_progress_history_detail",
-    extract: (d) => ({
-      auditLogs: d.auditLogs,
-      systemEvents: d.systemEvents,
-      requestLogs: d.requestLogs,
-    }),
-  },
-];
+/** 流式完成事件 */
+interface CompleteEvent {
+  type: "complete";
+  success: boolean;
+  message: string;
+  details?: Record<string, { imported: number; skipped: number }>;
+}
 
-/** 单阶段导入结果 */
-interface PhaseResult {
-  status: "pending" | "active" | "done" | "error";
-  imported?: number;
-  skipped?: number;
-  error?: string;
+/** 流式错误事件 */
+interface ErrorEvent {
+  type: "error";
+  error: string;
+}
+
+// ==================== 导入步骤定义（用于显示名称） ====================
+
+const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
+  proxyPools: { labelKey: "dm_step_proxy_pools" },
+  platforms: { labelKey: "dm_step_platforms" },
+  modelMaps: { labelKey: "dm_step_model_maps" },
+  proxies: { labelKey: "dm_step_proxies" },
+  plans: { labelKey: "dm_step_plans" },
+  configs: { labelKey: "dm_step_configs" },
+  apiKeys: { labelKey: "dm_step_api_keys" },
+  auditLogs: { labelKey: "dm_step_audit_logs" },
+  systemEvents: { labelKey: "dm_step_system_events" },
+  requestLogs: { labelKey: "dm_step_request_logs", detailKey: "dm_step_request_logs_detail" },
+};
+
+// ==================== 进度状态 ====================
+
+interface StepProgress {
+  labelKey: string;
+  detailKey?: string;
+  stepTotal: number;
+  imported: number;
+  skipped: number;
+  status: "done" | "error";
 }
 
 /** 格式化导入字段名 */
@@ -105,9 +107,11 @@ export default function DataManagerPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 导入进度状态
-  const [currentPhase, setCurrentPhase] = useState(-1); // -1=未开始, 0~N=阶段索引, N+1=完成
-  const [phaseResults, setPhaseResults] = useState<PhaseResult[]>([]);
+  // 流式导入进度状态
+  const [totalProcessed, setTotalProcessed] = useState(0);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [stepProgressList, setStepProgressList] = useState<StepProgress[]>([]);
+  const [currentStepKey, setCurrentStepKey] = useState<string | null>(null);
 
   /** 导出类型配置 */
   const exportOptions: {
@@ -175,14 +179,13 @@ export default function DataManagerPage() {
     async (file: File) => {
       setImporting(true);
       setImportResult(null);
-      setCurrentPhase(-1);
-      setPhaseResults([]);
+      setTotalProcessed(0);
+      setTotalRecords(0);
+      setStepProgressList([]);
+      setCurrentStepKey(null);
 
       try {
-        // 阶段 0: 解析文件
-        setCurrentPhase(0);
-        setPhaseResults(IMPORT_PHASES.map(() => ({ status: "pending" as const })));
-
+        // 解析文件
         const text = await file.text();
         const data = JSON.parse(text);
 
@@ -190,107 +193,73 @@ export default function DataManagerPage() {
           throw new Error(t("admin.dm_err_invalid_format"));
         }
 
-        // 阶段 1~N: 逐阶段导入
-        const aggregatedDetails: Record<string, { imported: number; skipped: number }> = {};
-        let hasError = false;
+        // 发起流式请求
+        const res = await fetch("/api/admin/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
 
-        for (let i = 0; i < IMPORT_PHASES.length; i++) {
-          const phase = IMPORT_PHASES[i];
-          const phaseData = phase.extract(data);
-
-          // 检查该阶段是否有数据
-          const hasData = Object.values(phaseData).some(
-            (v) => Array.isArray(v) && v.length > 0
-          );
-
-          if (!hasData) {
-            // 无数据，直接跳过
-            setPhaseResults((prev) => {
-              const next = [...prev];
-              next[i] = { status: "done", imported: 0, skipped: 0 };
-              return next;
-            });
-            continue;
-          }
-
-          // 标记当前阶段为活跃
-          setCurrentPhase(i + 1); // +1 因为阶段 0 是解析
-          setPhaseResults((prev) => {
-            const next = [...prev];
-            next[i] = { status: "active" };
-            return next;
-          });
-
-          try {
-            const res = await fetch("/api/admin/import", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                version: data.version,
-                exportedAt: data.exportedAt,
-                exportType: data.exportType,
-                ...phaseData,
-              }),
-            });
-
-            const result: ImportResult = await res.json();
-
-            if (!result.success) {
-              throw new Error(result.error || "Import failed");
-            }
-
-            // 合并详情
-            if (result.details) {
-              for (const [k, v] of Object.entries(result.details)) {
-                if (v) {
-                  if (aggregatedDetails[k]) {
-                    aggregatedDetails[k].imported += v.imported;
-                    aggregatedDetails[k].skipped += v.skipped;
-                  } else {
-                    aggregatedDetails[k] = { ...v };
-                  }
-                }
-              }
-            }
-
-            // 标记完成
-            const totalImported = result.details
-              ? Object.values(result.details).reduce((s, v) => s + (v?.imported ?? 0), 0)
-              : 0;
-            const totalSkipped = result.details
-              ? Object.values(result.details).reduce((s, v) => s + (v?.skipped ?? 0), 0)
-              : 0;
-
-            setPhaseResults((prev) => {
-              const next = [...prev];
-              next[i] = { status: "done", imported: totalImported, skipped: totalSkipped };
-              return next;
-            });
-          } catch (err) {
-            hasError = true;
-            setPhaseResults((prev) => {
-              const next = [...prev];
-              next[i] = {
-                status: "error",
-                error: err instanceof Error ? err.message : String(err),
-              };
-              return next;
-            });
-          }
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || t("admin.dm_err_export"));
         }
 
-        // 阶段完成
-        setCurrentPhase(IMPORT_PHASES.length + 1);
+        // 读取 NDJSON 流
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        const finalResult: ImportResult = {
-          success: !hasError,
-          message: hasError ? t("admin.dm_err_export") : t("admin.dm_progress_complete"),
-          details: aggregatedDetails,
-        };
-        setImportResult(finalResult);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        if (!hasError) {
-          message.success(t("admin.dm_progress_complete"));
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line);
+
+            if (event.type === "progress") {
+              const ev = event as ProgressEvent;
+              setTotalProcessed(ev.totalProcessed);
+              setTotalRecords(ev.totalRecords);
+              setCurrentStepKey(ev.step);
+              setStepProgressList((prev) => {
+                // 检查是否已有该 step 的记录
+                const idx = prev.findIndex((p) => p.labelKey === STEP_LABELS[ev.step]?.labelKey);
+                const newEntry: StepProgress = {
+                  labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
+                  detailKey: STEP_LABELS[ev.step]?.detailKey,
+                  stepTotal: ev.stepTotal,
+                  imported: ev.imported,
+                  skipped: ev.skipped,
+                  status: ev.imported === 0 && ev.skipped === ev.stepTotal ? "error" : "done",
+                };
+                if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = newEntry;
+                  return next;
+                }
+                return [...prev, newEntry];
+              });
+            } else if (event.type === "complete") {
+              const ev = event as CompleteEvent;
+              setImportResult({
+                success: ev.success,
+                message: ev.message,
+                details: ev.details,
+              });
+              if (ev.success) {
+                message.success(ev.message);
+              }
+            } else if (event.type === "error") {
+              const ev = event as ErrorEvent;
+              throw new Error(ev.error);
+            }
+          }
         }
       } catch (err) {
         message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
@@ -300,6 +269,7 @@ export default function DataManagerPage() {
         });
       } finally {
         setImporting(false);
+        setCurrentStepKey(null);
       }
     },
     [t]
@@ -344,82 +314,68 @@ export default function DataManagerPage() {
 
   /** 渲染导入进度 */
   const renderImportProgress = () => {
-    if (currentPhase < 0) return null;
+    if (totalRecords === 0 && stepProgressList.length === 0) return null;
+
+    const percent = totalRecords > 0 ? Math.round((totalProcessed / totalRecords) * 100) : 0;
 
     return (
       <div className="space-y-3 mt-4">
-        {/* 阶段 0: 解析文件 */}
-        <div className="flex items-center gap-2 text-xs">
-          {currentPhase > 0 ? (
-            <CheckCircle size={14} className="text-emerald-500 flex-shrink-0" />
-          ) : currentPhase === 0 ? (
-            <Loader2 size={14} className="text-blue-500 animate-spin flex-shrink-0" />
-          ) : (
-            <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
-          )}
-          <span
-            className={cn(
-              currentPhase > 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : currentPhase === 0
-                  ? "text-blue-600 dark:text-blue-400 font-medium"
-                  : "text-zinc-400"
-            )}
-          >
-            {t("admin.dm_progress_parse")}
-          </span>
+        {/* 总进度条 */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400">
+              {t("admin.dm_importing")}
+            </span>
+            <span className="text-zinc-500 dark:text-zinc-400 tabular-nums">
+              {totalProcessed.toLocaleString()}/{totalRecords.toLocaleString()} ({percent}%)
+            </span>
+          </div>
+          <div className="h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
         </div>
 
-        {/* 阶段 1~N: 数据导入 */}
-        {IMPORT_PHASES.map((phase, i) => {
-          const result = phaseResults[i];
-          const status = result?.status ?? "pending";
-          const isActive = currentPhase === i + 1 && status === "active";
-          const isDone = status === "done";
-          const isError = status === "error";
+        {/* 各步骤明细 */}
+        {stepProgressList.map((sp, i) => {
+          const isCurrent = currentStepKey && STEP_LABELS[currentStepKey]?.labelKey === sp.labelKey;
+          const stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
 
           return (
-            <div key={phase.key} className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
-                {isDone ? (
-                  <CheckCircle size={14} className="text-emerald-500 flex-shrink-0" />
-                ) : isError ? (
-                  <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
-                ) : isActive ? (
-                  <Loader2 size={14} className="text-blue-500 animate-spin flex-shrink-0" />
-                ) : (
-                  <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
-                )}
-                <span
-                  className={cn(
-                    isDone && "text-emerald-600 dark:text-emerald-400",
-                    isError && "text-red-600 dark:text-red-400",
-                    isActive && "text-blue-600 dark:text-blue-400 font-medium",
-                    !isDone && !isError && !isActive && "text-zinc-400"
-                  )}
-                >
-                  {t(`admin.${phase.labelKey}`)}
-                </span>
-                {isDone && result.imported !== undefined && (
-                  <span className="text-zinc-400 dark:text-zinc-500">
-                    +{result.imported}
-                    {result.skipped ? ` / ${t("admin.dm_skip")} ${result.skipped}` : ""}
-                  </span>
-                )}
-              </div>
-              {phase.detailKey && (isActive || isDone) && (
-                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 pl-5">
-                  {t(`admin.${phase.detailKey}`)}
-                </p>
+            <div key={i} className="flex items-center gap-2 text-xs">
+              {sp.status === "done" && sp.imported > 0 ? (
+                <CheckCircle size={13} className="text-emerald-500 flex-shrink-0" />
+              ) : sp.status === "error" ? (
+                <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
+              ) : (
+                <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
               )}
-              {isError && result.error && (
-                <p className="text-[11px] text-red-400 dark:text-red-500 pl-5">
-                  {result.error}
-                </p>
-              )}
+              <span className="text-zinc-600 dark:text-zinc-400 min-w-0">
+                {t(`admin.${sp.labelKey}`)}
+              </span>
+              <span className="text-zinc-400 dark:text-zinc-500 tabular-nums ml-auto flex-shrink-0">
+                {sp.imported > 0 && <span className="text-emerald-500">+{sp.imported}</span>}
+                {sp.skipped > 0 && <span className="ml-1">{t("admin.dm_skip")} {sp.skipped}</span>}
+                {sp.imported === 0 && sp.skipped === 0 && <span>-</span>}
+              </span>
             </div>
           );
         })}
+
+        {/* 当前正在处理的步骤（尚未完成） */}
+        {currentStepKey && !stepProgressList.find((sp) => sp.labelKey === STEP_LABELS[currentStepKey]?.labelKey) && (
+          <div className="flex items-center gap-2 text-xs">
+            <Loader2 size={13} className="text-blue-500 animate-spin flex-shrink-0" />
+            <span className="text-blue-600 dark:text-blue-400 font-medium">
+              {t(`admin.${STEP_LABELS[currentStepKey]?.labelKey || currentStepKey}`)}
+            </span>
+            <span className="text-zinc-400 dark:text-zinc-500 ml-auto">
+              ...
+            </span>
+          </div>
+        )}
       </div>
     );
   };
@@ -437,7 +393,6 @@ export default function DataManagerPage() {
           {/* ========== 导出区域 ========== */}
           <ProCard title={t("admin.dm_export")}>
             <div className="space-y-4">
-              {/* 导出类型选择 */}
               <div className="space-y-2">
                 <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
                   {t("admin.dm_select_type")}
@@ -503,7 +458,6 @@ export default function DataManagerPage() {
                 </div>
               </div>
 
-              {/* 导出按钮 */}
               <Button
                 variant="primary"
                 icon={<Download size={14} />}
@@ -569,7 +523,7 @@ export default function DataManagerPage() {
                 </div>
               </div>
 
-              {/* 导入进度 */}
+              {/* 流式导入进度 */}
               {importing && renderImportProgress()}
 
               {/* 导入结果 */}

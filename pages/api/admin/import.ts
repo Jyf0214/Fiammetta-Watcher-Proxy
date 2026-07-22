@@ -92,54 +92,86 @@ export default async function handler(
     }
 
     const db = await createDb();
+
+    // 流式响应：边处理边推送进度
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    const writeEvent = (event: Record<string, unknown>) => {
+      res.write(JSON.stringify(event) + "\n");
+    };
+
+    /** 发送进度事件 */
+    const sendProgress = (
+      step: string,
+      stepTotal: number,
+      imported: number,
+      skipped: number,
+      totalProcessed: number,
+      totalRecords: number
+    ) => {
+      writeEvent({
+        type: "progress",
+        step,
+        stepTotal,
+        imported,
+        skipped,
+        totalProcessed,
+        totalRecords,
+      });
+    };
+
+    // 定义导入步骤（保持依赖顺序）
+    const steps: Array<{
+      key: string;
+      data: unknown;
+      fn: (db: ReturnType<typeof createDb>, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
+    }> = [
+      { key: "proxyPools", data: body.proxyPools, fn: importProxyPools },
+      { key: "platforms", data: body.platforms, fn: importPlatforms },
+      { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
+      { key: "proxies", data: body.proxies, fn: importProxies },
+      { key: "plans", data: body.plans, fn: importPlans },
+      { key: "configs", data: body.configs, fn: importConfigs },
+      { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
+      { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
+      { key: "systemEvents", data: body.systemEvents, fn: importSystemEvents },
+      { key: "requestLogs", data: body.requestLogs, fn: importRequestLogs },
+    ];
+
+    // 计算总记录数
+    const totalRecords = steps.reduce((sum, s) => {
+      const arr = s.data;
+      return sum + (Array.isArray(arr) ? arr.length : 0);
+    }, 0);
+
     const result: FullImportResult = {
       success: true,
       message: "导入完成",
       details: {},
     };
 
-    // 按顺序导入各类数据（有依赖关系：proxy_pools 需要先于 proxies）
-    if (body.proxyPools && Array.isArray(body.proxyPools)) {
-      result.details.proxyPools = await importProxyPools(db, body.proxyPools as Array<Record<string, unknown>>);
-    }
+    let totalProcessed = 0;
 
-    if (body.platforms && Array.isArray(body.platforms)) {
-      result.details.platforms = await importPlatforms(db, body.platforms as Array<Record<string, unknown>>);
-    }
+    for (const step of steps) {
+      const arr = step.data;
+      if (!Array.isArray(arr) || arr.length === 0) continue;
 
-    if (body.modelMaps && Array.isArray(body.modelMaps)) {
-      result.details.modelMaps = await importModelMaps(db, body.modelMaps as Array<Record<string, unknown>>);
-    }
+      const stepTotal = arr.length;
 
-    if (body.proxies && Array.isArray(body.proxies)) {
-      result.details.proxies = await importProxies(db, body.proxies as Array<Record<string, unknown>>);
-    }
+      try {
+        const importResult = await step.fn(db, arr as Array<Record<string, unknown>>);
+        result.details[step.key as keyof typeof result.details] = importResult;
+        totalProcessed += stepTotal;
 
-    if (body.plans && Array.isArray(body.plans)) {
-      result.details.plans = await importPlans(db, body.plans as Array<Record<string, unknown>>);
-    }
+        sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords);
+      } catch (err) {
+        console.error(`[import] 导入 ${step.key} 失败:`, err);
+        totalProcessed += stepTotal;
 
-    if (body.apiKeys && Array.isArray(body.apiKeys)) {
-      result.details.apiKeys = await importApiKeys(db, body.apiKeys as Array<Record<string, unknown>>);
-    }
-
-    if (body.configs && Array.isArray(body.configs)) {
-      result.details.configs = await importConfigs(db, body.configs as Array<Record<string, unknown>>);
-    }
-
-    // 导入审计日志（无外键依赖，可直接插入）
-    if (body.auditLogs && Array.isArray(body.auditLogs)) {
-      result.details.auditLogs = await importAuditLogs(db, body.auditLogs as Array<Record<string, unknown>>);
-    }
-
-    // 导入系统事件
-    if (body.systemEvents && Array.isArray(body.systemEvents)) {
-      result.details.systemEvents = await importSystemEvents(db, body.systemEvents as Array<Record<string, unknown>>);
-    }
-
-    // 导入请求日志
-    if (body.requestLogs && Array.isArray(body.requestLogs)) {
-      result.details.requestLogs = await importRequestLogs(db, body.requestLogs as Array<Record<string, unknown>>);
+        sendProgress(step.key, stepTotal, 0, stepTotal, totalProcessed, totalRecords);
+      }
     }
 
     // 审计日志（独立处理，失败不影响导入结果）
@@ -171,13 +203,21 @@ export default async function handler(
 
     result.message = summary ? `导入完成: ${summary}` : "没有需要导入的数据";
 
-    res.status(200).json(result);
+    // 发送最终结果
+    writeEvent({ type: "complete", ...result });
+    res.end();
   } catch (err) {
     console.error("[POST /api/admin/import] 导入数据失败:", err);
-    res.status(500).json({
-      success: false,
-      error: "导入数据失败: " + (err instanceof Error ? err.message : String(err)),
-    });
+    // 尝试发送错误事件
+    try {
+      if (!res.headersSent) {
+        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      }
+      res.write(JSON.stringify({ type: "error", error: "导入数据失败: " + (err instanceof Error ? err.message : String(err)) }) + "\n");
+      res.end();
+    } catch {
+      // 如果流已关闭，忽略
+    }
   }
 }
 
