@@ -58,6 +58,7 @@ def api_request(method: str, path: str, json_data=None) -> dict:
 
 
 def main():
+    global JWT_SECRET
     # 校验必需环境变量
     if not ACCOUNT_ID:
         fail("未设置 CLOUDFLARE_ACCOUNT_ID")
