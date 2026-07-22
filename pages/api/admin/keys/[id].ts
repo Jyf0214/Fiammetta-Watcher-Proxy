@@ -66,7 +66,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
-    const db = createDb((globalThis as any).DB);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const key = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
     if (!key) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
     return res.status(200).json({ success: true, data: { ...key, key: maskKey(key.key) } });
@@ -78,7 +78,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adm
 
 async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
-    const db = createDb((globalThis as any).DB);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const existing = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
@@ -165,7 +165,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
 
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
-    const db = createDb((globalThis as any).DB);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const existing = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 

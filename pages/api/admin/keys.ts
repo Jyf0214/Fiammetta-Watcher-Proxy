@@ -68,7 +68,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
 
   try {
-    const db = createDb((globalThis as any).DB);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const keys = await db.select().from(schema.apiKeys).orderBy(desc(schema.apiKeys.createdAt));
     const maskedKeys = keys.map((k) => ({ ...k, key: maskKey(k.key) }));
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
@@ -115,7 +115,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     }
 
     if (planId !== undefined && planId !== null) {
-      const db = createDb((globalThis as any).DB);
+      const db = createDb((process.env as unknown as { DB: D1Database }).DB);
       const planExists = await db.select({ id: schema.plans.id }).from(schema.plans).where(eq(schema.plans.id, planId)).get();
       if (!planExists) {
         return res.status(400).json({ success: false, error: { message: "指定的 planId 对应的套餐不存在", type: "invalid_request_error" } });
@@ -131,7 +131,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       expiresAtTimestamp = Math.floor(parsed.getTime() / 1000);
     }
 
-    const db = createDb((globalThis as any).DB);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const keyId = generateId();
     const keyValue = generateApiKey();
     const currentTime = now();

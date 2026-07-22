@@ -14,7 +14,7 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    const db = createDb((globalThis as Record<string, unknown>).DB as D1Database);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
 
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10) || 1);
     const pageSize = Math.min(

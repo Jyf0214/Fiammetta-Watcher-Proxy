@@ -31,7 +31,7 @@ export interface RequestTemplate {
 
 /** 从 globalThis 获取 db 实例 */
 function getDb() {
-  return createDb((globalThis as Record<string, unknown>).DB as D1Database);
+  return createDb((process.env as unknown as { DB: D1Database }).DB);
 }
 
 /** 从 configs 表读取所有模板 */

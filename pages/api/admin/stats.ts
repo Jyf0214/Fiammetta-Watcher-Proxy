@@ -17,7 +17,7 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    const db = createDb((globalThis as Record<string, unknown>).DB as D1Database);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
 
     // 并行查询所有统计数据
     const [

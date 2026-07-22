@@ -27,7 +27,7 @@ export default async function handler(
   }
 
   try {
-    const db = (globalThis as Record<string, unknown>).DB as D1Database;
+    const db = (process.env as unknown as { DB: D1Database }).DB;
     if (!db) {
       res.status(500).json({ success: false, error: "数据库未配置" });
       return;

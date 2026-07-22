@@ -88,7 +88,7 @@ export default async function handler(
       return;
     }
 
-    const db = createDb((globalThis as Record<string, unknown>).DB as D1Database);
+    const db = createDb((process.env as unknown as { DB: D1Database }).DB);
     const result: FullImportResult = {
       success: true,
       message: "导入完成",
