@@ -222,4 +222,3 @@ export async function getAdminFromRequest(
 // ==================== 导出 ====================
 
 export { COOKIE_NAME };
-export { hashPassword, verifyPassword } from "./auth-helpers";

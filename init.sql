@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS admins (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 2. 上游平台
@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS platforms (
   last_fail_at INTEGER,
   cooldown_end INTEGER,
   forward_headers TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 3. 代理池
@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS proxy_pools (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 4. 代理
@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS proxies (
   ban_count INTEGER NOT NULL DEFAULT 0,
   last_fail_at INTEGER,
   cooldown_end INTEGER,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (pool_id) REFERENCES proxy_pools(id) ON DELETE SET NULL
 );
 
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS plans (
   tpm_limit INTEGER NOT NULL DEFAULT 0,
   reset_period TEXT NOT NULL DEFAULT 'monthly',
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 6. API 密钥
@@ -91,8 +91,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   reset_period TEXT DEFAULT 'monthly',
   status TEXT NOT NULL DEFAULT 'active',
   expires_at INTEGER,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE SET NULL
 );
 
@@ -102,8 +102,8 @@ CREATE TABLE IF NOT EXISTS model_maps (
   alias TEXT NOT NULL,
   target_model TEXT NOT NULL,
   platform_id TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(alias, platform_id),
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE SET NULL
 );
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS platform_models (
   type TEXT NOT NULL DEFAULT 'chat',
   source TEXT NOT NULL DEFAULT 'auto',
   enabled INTEGER NOT NULL DEFAULT 1,
-  fetched_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  fetched_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(platform_id, model_id),
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE CASCADE
 );
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
   ip_address TEXT,
   user_agent TEXT,
   error_message TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE SET NULL,
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE SET NULL
 );
@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   avg_duration REAL NOT NULL DEFAULT 0,
   max_ttft INTEGER NOT NULL DEFAULT 0,
   max_duration INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(date, key_id, model)
 );
 
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS configs (
   id TEXT PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,
   value TEXT NOT NULL,
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 12. 系统事件
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS system_events (
   level TEXT NOT NULL,
   message TEXT NOT NULL,
   detail TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- 13. 审计日志
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   action TEXT NOT NULL,
   detail TEXT,
   ip TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  created_at INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
 );
 
@@ -209,8 +209,8 @@ CREATE TABLE IF NOT EXISTS request_templates (
   headers TEXT NOT NULL DEFAULT '{}',
   body_template TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- ================================================================
@@ -229,8 +229,8 @@ CREATE TABLE IF NOT EXISTS system_api_keys (
   name TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   last_used_at INTEGER,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_system_api_keys_key ON system_api_keys(key);
 
@@ -249,6 +249,5 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_system_events_level ON system_events(level);
 CREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events(created_at);
 
--- 迁移：platform_models 添加 enabled 列（已存在则跳过）
--- D1 不支持 IF NOT EXISTS，CI 中用 try-catch 忽略重复错误
-ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+-- 新增列由 Python 部署脚本逐条执行并捕获 "duplicate column" 错误
+-- 示例：ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
