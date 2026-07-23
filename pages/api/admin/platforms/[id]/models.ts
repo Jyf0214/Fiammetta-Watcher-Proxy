@@ -366,12 +366,15 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
 
   try {
     const body: { modelId?: string; enabled?: boolean } = req.body;
+    console.log("[PATCH models] body:", JSON.stringify(body), "platformId:", id);
     if (!body?.modelId || typeof body.enabled !== "boolean") {
+      console.error("[PATCH models] 参数校验失败:", body);
       return res.status(400).json({ success: false, error: "参数错误：需要 modelId 和 enabled" });
     }
 
     const db = await createDb();
-    await db
+    console.log("[PATCH models] db created, executing update...");
+    const result = await db
       .update(schema.platformModels)
       .set({ enabled: body.enabled })
       .where(
@@ -380,6 +383,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
           eq(schema.platformModels.modelId, body.modelId)
         )
       );
+    console.log("[PATCH models] update result:", JSON.stringify(result));
 
     return res.status(200).json({
       success: true,
@@ -387,6 +391,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     });
   } catch (err) {
     console.error("[PATCH /api/admin/platforms/[id]/models] 切换模型状态失败:", err);
+    console.error("[PATCH models] error stack:", err instanceof Error ? err.stack : "no stack");
     return res.status(500).json({ success: false, error: "操作失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
