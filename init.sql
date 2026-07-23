@@ -252,4 +252,3 @@ CREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events(created
 
 -- 新增列由 Python 部署脚本逐条执行并捕获 "duplicate column" 错误
 -- 示例：ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE model_maps ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
