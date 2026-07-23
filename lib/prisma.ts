@@ -54,12 +54,9 @@ async function loadAdapter(
       return { adapter: new PrismaD1(d1Binding as any) };
     }
     case "mysql": {
-      // Prisma 7 内建 mysql2 支持
-      // 但 runtime="cloudflare" 模式下仍需 adapter，当前仅支持 D1
-      // 切换到 MySQL 需修改 schema.prisma provider 并重新 generate
-      throw new Error(
-        "MySQL 支持需修改 schema.prisma provider 为 mysql 并重新 prisma generate"
-      );
+      // Prisma 7 内建 MySQL 支持，无需额外 adapter
+      // DATABASE_URL 已在 prisma.config.ts 中配置，PrismaClient 直接连接
+      return null;
     }
     case "postgresql": {
       // PostgreSQL 需要 @prisma/adapter-pg
