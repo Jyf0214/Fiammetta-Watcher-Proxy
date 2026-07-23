@@ -158,13 +158,84 @@ function MobileSpinner() {
 }
 
 /* ═══════════════════════════════════════════════
- * ResponsiveTable — 桌面端渲染 antd Table，移动端渲染卡片列表
+ * ResponsiveTable — 桌面端渲染 antd Table，移动端渲染卡片列表或时间线
  *
  * 接受与 antd Table 完全相同的 props，移动端自动将每行数据
  * 渲染为独立卡片，按 responsive 断点控制列的显隐。
+ *
+ * timeline 模式：移动端渲染紧凑时间线（圆点+竖线+消息+时间），
+ * 适用于事件日志等高密度列表。
  * ═══════════════════════════════════════════════ */
+
+/** 时间线模式专用字段映射 */
+interface TimelineFieldMap<T> {
+  level: keyof T & string;
+  message: keyof T & string;
+  time: keyof T & string;
+}
+
+const LEVEL_DOT: Record<string, string> = {
+  info: "bg-blue-500",
+  warning: "bg-amber-500",
+  error: "bg-red-500",
+  critical: "bg-red-600",
+};
+
+function TimelineView<T>({
+  data,
+  fields,
+  rowKey,
+}: {
+  data: readonly T[];
+  fields: TimelineFieldMap<T>;
+  rowKey: string | number | ((r: T) => string);
+}) {
+  const keyOf = useCallback(
+    (r: T) => {
+      if (typeof rowKey === "function") return rowKey(r);
+      return String((r as Record<string, unknown>)[String(rowKey)]);
+    },
+    [rowKey],
+  );
+
+  if (!data.length) {
+    return (
+      <div className="text-center py-8 text-sm text-zinc-400">暂无事件</div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div className="absolute left-[7px] top-1 bottom-1 w-px bg-zinc-200 dark:bg-zinc-700" />
+      <div className="space-y-3">
+        {data.map((r) => {
+          const level = String((r as Record<string, unknown>)[fields.level] ?? "");
+          const msg = String((r as Record<string, unknown>)[fields.message] ?? "");
+          const rawTime = (r as Record<string, unknown>)[fields.time];
+          const d = new Date(rawTime as string | number);
+          const timeStr = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
+          return (
+            <div key={keyOf(r)} className="relative flex items-start gap-3 pl-0">
+              <div className={`relative z-10 mt-1.5 h-[10px] w-[10px] rounded-full ${LEVEL_DOT[level] || "bg-zinc-400"} ring-2 ring-white dark:ring-zinc-900 shrink-0`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate">{msg}</span>
+                  <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{timeStr}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ResponsiveTable<T>(
-  props: TableProps<T>,
+  props: TableProps<T> & {
+    timeline?: boolean;
+    timelineFields?: TimelineFieldMap<T>;
+  },
 ) {
   const {
     columns = [],
@@ -173,10 +244,29 @@ export function ResponsiveTable<T>(
     pagination,
     loading,
     scroll,
+    timeline,
+    timelineFields,
     ...rest
   } = props;
 
   const isMobile = useIsMobile();
+
+  // ── 移动端：时间线模式 ──
+  if (isMobile && timeline && timelineFields) {
+    return (
+      <div>
+        {loading ? (
+          <MobileSpinner />
+        ) : (
+          <TimelineView
+            data={dataSource ?? []}
+            fields={timelineFields}
+            rowKey={rowKey as string | number | ((r: T) => string)}
+          />
+        )}
+      </div>
+    );
+  }
 
   // ── 移动端：卡片列表 ──
   if (isMobile) {
