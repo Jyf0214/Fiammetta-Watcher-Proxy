@@ -139,7 +139,7 @@ interface ModelItem {
 /** 模型管理抽屉 — LobeChat 风格列表 */
 function ModelDrawer({
   open, onClose, platform, models, loading, refreshing,
-  newModelId, onNewModelIdChange, onAddModel, onRefreshModels, onDeleteModel, onToggleModel,
+  newModelId, onNewModelIdChange, onAddModel, onRefreshModels, onDeleteModel, onToggleModel, onToggleAll, togglingAll,
 }: {
   open: boolean;
   onClose: () => void;
@@ -153,6 +153,8 @@ function ModelDrawer({
   onRefreshModels: () => void;
   onDeleteModel: (modelId: string) => void;
   onToggleModel: (modelId: string, enabled: boolean) => void;
+  onToggleAll: (enabled: boolean) => void;
+  togglingAll: boolean;
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
@@ -204,9 +206,23 @@ function ModelDrawer({
         </div>
       }
       extra={
-        <Button variant="default" size="sm" icon={<RefreshCw size={13} />} onClick={onRefreshModels} loading={refreshing}>
-          刷新
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
+              const allEnabled = models.length > 0 && models.every((m) => m.enabled);
+              onToggleAll(!allEnabled);
+            }}
+            disabled={loading || models.length === 0}
+            loading={togglingAll}
+          >
+            {models.length > 0 && models.every((m) => m.enabled) ? "全部禁用" : "全部启用"}
+          </Button>
+          <Button variant="default" size="sm" icon={<RefreshCw size={13} />} onClick={onRefreshModels} loading={refreshing}>
+            刷新
+          </Button>
+        </div>
       }
     >
       {/* 搜索 + 添加 */}
@@ -459,6 +475,7 @@ export default function PlatformsPage() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
+  const [togglingAll, setTogglingAll] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -658,6 +675,22 @@ export default function PlatformsPage() {
     } catch { message.error(t("common.error")); }
   };
 
+  const handleToggleAll = async (enabled: boolean) => {
+    if (!modelPlatform) return;
+    setTogglingAll(true);
+    try {
+      const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json() as Record<string, any>;
+      if (data.success) fetchModels(modelPlatform.id);
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
+    finally { setTogglingAll(false); }
+  };
+
   const columns: TableColumnsType<Platform> = [
     { title: t("platform.name"), dataIndex: "name", key: "name", width: 140, ellipsis: true },
     { title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true, responsive: ["md"] },
@@ -765,6 +798,8 @@ export default function PlatformsPage() {
           onRefreshModels={handleRefreshModels}
           onDeleteModel={handleDeleteModel}
           onToggleModel={handleToggleModel}
+          onToggleAll={handleToggleAll}
+          togglingAll={togglingAll}
         />
       </PageContainer>
     </AdminLayout>
