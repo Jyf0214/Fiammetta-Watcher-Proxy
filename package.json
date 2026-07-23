@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "prisma generate",
     "build": "next build",
     "build:cf": "opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\"",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
