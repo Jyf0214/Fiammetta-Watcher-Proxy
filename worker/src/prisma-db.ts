@@ -36,18 +36,18 @@ function createFromD1(d1: D1Database): PrismaClient {
 /** 通过连接 URL 创建 PrismaClient（MySQL / PostgreSQL） */
 function createFromUrl(url: string): PrismaClient {
   if (url.startsWith("mysql://") || url.startsWith("mysqls://")) {
-    // Prisma 7 + runtime="cloudflare" 要求 adapter，MySQL 适配器需额外安装
-    // 当前 D1-only 部署下不支持，切换时需修改 schema.prisma provider
-    throw new Error(
-      "Worker 层 MySQL 支持需修改 schema.prisma provider 为 mysql 并重新 generate"
-    );
+    // @prisma/adapter-mariadb 兼容 MySQL（MariaDB 是 MySQL 的超集）
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaMariaDb } = require("@prisma/adapter-mariadb");
+    const adapter = new PrismaMariaDb(url);
+    return new PrismaClient({ adapter });
   }
 
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
-    throw new Error(
-      "Worker 层 PostgreSQL 支持需修改 schema.prisma provider 为 postgresql、" +
-      "安装 @prisma/adapter-pg 并重新 generate"
-    );
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    const adapter = new PrismaPg({ connectionString: url });
+    return new PrismaClient({ adapter });
   }
 
   throw new Error(
