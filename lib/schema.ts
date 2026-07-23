@@ -144,6 +144,7 @@ export const platformModels = sqliteTable("platform_models", {
   modelName: text("model_name"),
   type: text("type").notNull().default("chat"),
   source: text("source").notNull().default("auto"),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   fetchedAt: integer("fetched_at", { mode: "number" }).notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
 }, (t) => [
   uniqueIndex("idx_platform_models_platform_model").on(t.platformId, t.modelId),

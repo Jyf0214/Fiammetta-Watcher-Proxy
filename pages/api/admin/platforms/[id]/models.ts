@@ -353,6 +353,44 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 /**
  * 路由分发
  */
+/**
+ * PATCH /api/admin/platforms/:id/models — 切换单个模型启禁用
+ *
+ * body: { modelId: string, enabled: boolean }
+ */
+async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
+    return res.status(401).json({ success: false, error: "未授权" });
+  }
+
+  try {
+    const body: { modelId?: string; enabled?: boolean } = req.body;
+    if (!body?.modelId || typeof body.enabled !== "boolean") {
+      return res.status(400).json({ success: false, error: "参数错误：需要 modelId 和 enabled" });
+    }
+
+    const db = await createDb();
+    await db
+      .update(schema.platformModels)
+      .set({ enabled: body.enabled })
+      .where(
+        and(
+          eq(schema.platformModels.platformId, id),
+          eq(schema.platformModels.modelId, body.modelId)
+        )
+      );
+
+    return res.status(200).json({
+      success: true,
+      message: body.enabled ? "模型已启用" : "模型已禁用",
+    });
+  } catch (err) {
+    console.error("[PATCH /api/admin/platforms/[id]/models] 切换模型状态失败:", err);
+    return res.status(500).json({ success: false, error: "操作失败", detail: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = String(req.query.id || "");
 
@@ -363,10 +401,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return handlePost(req, res, id);
     case "PUT":
       return handlePut(req, res, id);
+    case "PATCH":
+      return handlePatch(req, res, id);
     case "DELETE":
       return handleDelete(req, res, id);
     default:
-      res.setHeader("Allow", ["GET", "POST", "PUT", "DELETE"]);
+      res.setHeader("Allow", ["GET", "POST", "PUT", "PATCH", "DELETE"]);
       return res.status(405).json({ success: false, error: "方法不允许" });
   }
 }
