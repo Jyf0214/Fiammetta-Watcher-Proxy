@@ -417,7 +417,6 @@ function DashboardContent() {
         }
       >
         <ResponsiveTable
-          columns={eventColumns}
           dataSource={stats?.recentEvents || []}
           rowKey="id"
           pagination={false}
