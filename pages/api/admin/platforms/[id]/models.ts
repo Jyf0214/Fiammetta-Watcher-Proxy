@@ -318,12 +318,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 }
 
 /**
- * 路由分发
- */
-/**
- * PATCH /api/admin/platforms/:id/models — 切换单个模型启禁用
+ * PATCH /api/admin/platforms/:id/models — 切换模型启禁用
  *
- * body: { modelId: string, enabled: boolean }
+ * body: { modelId: string, enabled: boolean }        → 切换单个模型
+ * body: { enabled: boolean }                          → 批量切换所有模型
  */
 async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string) {
   const admin = await getAdminFromRequest(req);
@@ -333,27 +331,40 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
 
   try {
     const body: { modelId?: string; enabled?: boolean } = req.body;
-    console.log("[PATCH models] body:", JSON.stringify(body), "platformId:", id);
-    if (!body?.modelId || typeof body.enabled !== "boolean") {
-      console.error("[PATCH models] 参数校验失败:", body);
-      return res.status(400).json({ success: false, error: "参数错误：需要 modelId 和 enabled" });
+    if (typeof body?.enabled !== "boolean") {
+      return res.status(400).json({ success: false, error: "参数错误：需要 enabled 字段" });
     }
 
     const db = await createDb();
-    console.log("[PATCH models] db created, executing update...");
+    const now = Math.floor(Date.now() / 1000);
+
+    if (body.modelId) {
+      // 单个模型切换
+      await db.platformModels.updateMany({
+        where: { platformId: id, modelId: body.modelId },
+        data: { enabled: body.enabled },
+      });
+      return res.status(200).json({
+        success: true,
+        message: body.enabled ? "模型已启用" : "模型已禁用",
+      });
+    }
+
+    // 批量切换该平台所有模型
     const result = await db.platformModels.updateMany({
-      where: { platformId: id, modelId: body.modelId },
+      where: { platformId: id },
       data: { enabled: body.enabled },
     });
-    console.log("[PATCH models] update result:", JSON.stringify(result));
 
     return res.status(200).json({
       success: true,
-      message: body.enabled ? "模型已启用" : "模型已禁用",
+      message: body.enabled
+        ? `已启用 ${result.count} 个模型`
+        : `已禁用 ${result.count} 个模型`,
+      data: { affected: result.count },
     });
   } catch (err) {
     console.error("[PATCH /api/admin/platforms/[id]/models] 切换模型状态失败:", err);
-    console.error("[PATCH models] error stack:", err instanceof Error ? err.stack : "no stack");
     return res.status(500).json({ success: false, error: "操作失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
