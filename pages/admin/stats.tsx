@@ -25,6 +25,14 @@ import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 import dynamic from "next/dynamic";
 
+/** ≥1000ms 自动转换为秒，保留两位小数 */
+function formatDuration(ms: number): { value: string; suffix: string } {
+  if (ms >= 1000) {
+    return { value: (ms / 1000).toFixed(2), suffix: "s" };
+  }
+  return { value: String(ms), suffix: "ms" };
+}
+
 // 懒加载迷你趋势图组件
 const MiniTrendChart = dynamic(() => import("@/components/MiniTrendChart"), {
   ssr: false,
@@ -279,6 +287,7 @@ function StatsContent() {
       icon: <Clock />,
       color: "bg-orange-50",
       iconColor: "text-orange-500",
+      get display() { return formatDuration(this.value); },
     },
     {
       key: "avgDuration",
@@ -288,6 +297,7 @@ function StatsContent() {
       icon: <Clock />,
       color: "bg-cyan-50",
       iconColor: "text-cyan-500",
+      get display() { return formatDuration(this.value); },
     },
   ];
 
@@ -374,12 +384,12 @@ function StatsContent() {
                 <div>
                   <p className="text-zinc-500 text-xs">{card.title}</p>
                   <p className="text-xl font-bold text-zinc-900">
-                    {card.value.toLocaleString()}
-                    {card.suffix && (
-                      <span className="text-sm font-normal text-zinc-400 ml-1">
-                        {card.suffix}
-                      </span>
-                    )}
+                    {"display" in card && card.display
+                      ? card.display.value
+                      : card.value.toLocaleString()}
+                    <span className="text-sm font-normal text-zinc-400 ml-1">
+                      {"display" in card && card.display ? card.display.suffix : card.suffix}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -399,12 +409,12 @@ function StatsContent() {
                   <div>
                     <p className="text-zinc-500 text-xs">{card.title}</p>
                     <p className="text-2xl font-bold text-zinc-900">
-                      {card.value.toLocaleString()}
-                      {card.suffix && (
-                        <span className="text-sm font-normal text-zinc-400 ml-1">
-                          {card.suffix}
-                        </span>
-                      )}
+                      {"display" in card && card.display
+                        ? card.display.value
+                        : card.value.toLocaleString()}
+                      <span className="text-sm font-normal text-zinc-400 ml-1">
+                        {"display" in card && card.display ? card.display.suffix : card.suffix}
+                      </span>
                     </p>
                   </div>
                 </div>

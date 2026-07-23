@@ -199,7 +199,7 @@ function ModelDrawer({
             <Database size={16} />{platform?.name}
           </span>
           <span className="text-xs text-zinc-400 font-normal mt-0.5">
-            共 {models.length} 个可用模型
+            {loading ? "加载中…" : `共 ${models.length} 个可用模型`}
           </span>
         </div>
       }
@@ -248,7 +248,7 @@ function ModelDrawer({
             `}
           >
             {tab.label}
-            <span className="ml-1 text-[10px] text-zinc-400">{typeCounts[tab.key] || 0}</span>
+            <span className="ml-1 text-[10px] text-zinc-400">{loading ? "…" : (typeCounts[tab.key] || 0)}</span>
           </button>
         ))}
       </div>
