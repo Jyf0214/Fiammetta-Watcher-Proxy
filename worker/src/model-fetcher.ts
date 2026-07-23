@@ -118,7 +118,7 @@ function detectModelType(modelId: string): string {
  * 拉取所有平台的模型并更新数据库
  */
 export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
 
   try {
   const platforms = await prisma.platforms.findMany({

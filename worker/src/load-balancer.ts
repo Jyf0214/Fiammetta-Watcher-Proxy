@@ -186,7 +186,7 @@ async function updatePlatformStatus(
  * 启动时从数据库同步熔断器状态
  */
 export async function syncCircuitBreakersFromDatabase(db: D1Database): Promise<void> {
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
   try {
     const platforms = await prisma.platforms.findMany({
       select: {

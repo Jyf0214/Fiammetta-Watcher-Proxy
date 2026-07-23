@@ -18,12 +18,12 @@ import { PrismaD1 } from "@prisma/adapter-d1";
  * @param bindingOrUrl - D1Database binding 或数据库连接 URL
  * @returns 可直接使用的 PrismaClient 实例
  */
-export function createPrismaClient(bindingOrUrl: D1Database | string): PrismaClient {
+export async function createPrismaClient(bindingOrUrl: D1Database | string): Promise<PrismaClient> {
   // 字符串输入 → MySQL 或 PostgreSQL
   if (typeof bindingOrUrl === "string") {
     return createFromUrl(bindingOrUrl);
   }
-  // D1Database 输入 → Cloudflare D1（同步，保持调用方不变）
+  // D1Database 输入 → Cloudflare D1
   return createFromD1(bindingOrUrl);
 }
 
@@ -34,18 +34,16 @@ function createFromD1(d1: D1Database): PrismaClient {
 }
 
 /** 通过连接 URL 创建 PrismaClient（MySQL / PostgreSQL） */
-function createFromUrl(url: string): PrismaClient {
+async function createFromUrl(url: string): Promise<PrismaClient> {
   if (url.startsWith("mysql://") || url.startsWith("mysqls://")) {
     // @prisma/adapter-mariadb 兼容 MySQL（MariaDB 是 MySQL 的超集）
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PrismaMariaDb } = require("@prisma/adapter-mariadb");
+    const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
     const adapter = new PrismaMariaDb(url);
     return new PrismaClient({ adapter });
   }
 
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PrismaPg } = require("@prisma/adapter-pg");
+    const { PrismaPg } = await import("@prisma/adapter-pg");
     const adapter = new PrismaPg({ connectionString: url });
     return new PrismaClient({ adapter });
   }
