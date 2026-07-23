@@ -9,7 +9,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
+import { getAdminFromRequest } from "../_auth";
 import * as schema from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -23,15 +23,12 @@ function generateId(): string {
  * GET /api/admin/platforms/:id/models — 获取平台的模型列表
  */
 async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    await verifyToken(token, process.env.JWT_SECRET);
-
     const db = await createDb();
     const models = await db
       .select()
@@ -60,15 +57,12 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
  * modelName 为模型的显示名称，不传则默认与 modelId 相同
  */
 async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    await verifyToken(token, process.env.JWT_SECRET);
-
     const body: any = req.body;
     const { modelId, modelName, enabled } = body;
 
@@ -147,15 +141,12 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
  * DELETE /api/admin/platforms/:id/models?modelId=xxx — 删除模型
  */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    await verifyToken(token, process.env.JWT_SECRET);
-
     const modelId = req.query.modelId as string | undefined;
 
     if (!modelId) {
@@ -216,15 +207,12 @@ interface OpenAIModel {
  * 上游已删除的模型会从本地移除（手动添加的不会被删除）。
  */
 async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
   try {
-    const token = authHeader.slice(7);
-    await verifyToken(token, process.env.JWT_SECRET);
-
     const db = await createDb();
 
     // 获取平台信息
