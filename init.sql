@@ -36,32 +36,7 @@ CREATE TABLE IF NOT EXISTS platforms (
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 
--- 3. 代理池
-CREATE TABLE IF NOT EXISTS proxy_pools (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL DEFAULT 0
-);
-
--- 4. 代理
-CREATE TABLE IF NOT EXISTS proxies (
-  id TEXT PRIMARY KEY,
-  address TEXT NOT NULL,
-  pool_id TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  status TEXT NOT NULL DEFAULT 'healthy',
-  fail_count INTEGER NOT NULL DEFAULT 0,
-  ban_count INTEGER NOT NULL DEFAULT 0,
-  last_fail_at INTEGER,
-  cooldown_end INTEGER,
-  created_at INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL DEFAULT 0,
-  FOREIGN KEY (pool_id) REFERENCES proxy_pools(id) ON DELETE SET NULL
-);
-
--- 5. 套餐模板
+-- 3. 套餐模板
 CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -75,7 +50,7 @@ CREATE TABLE IF NOT EXISTS plans (
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 
--- 6. API 密钥
+-- 4. API 密钥
 CREATE TABLE IF NOT EXISTS api_keys (
   id TEXT PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,
@@ -96,7 +71,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE SET NULL
 );
 
--- 7. 模型映射
+-- 5. 模型映射
 CREATE TABLE IF NOT EXISTS model_maps (
   id TEXT PRIMARY KEY,
   alias TEXT NOT NULL,
@@ -108,7 +83,7 @@ CREATE TABLE IF NOT EXISTS model_maps (
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE SET NULL
 );
 
--- 8. 平台模型（自动发现）
+-- 6. 平台模型（自动发现）
 CREATE TABLE IF NOT EXISTS platform_models (
   id TEXT PRIMARY KEY,
   platform_id TEXT NOT NULL,
@@ -123,7 +98,7 @@ CREATE TABLE IF NOT EXISTS platform_models (
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE CASCADE
 );
 
--- 9. 请求日志
+-- 7. 请求日志
 CREATE TABLE IF NOT EXISTS request_logs (
   id TEXT PRIMARY KEY,
   key_id TEXT,
@@ -149,7 +124,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE SET NULL
 );
 
--- 10. 每日统计（30天前自动归档）
+-- 8. 每日统计（30天前自动归档）
 CREATE TABLE IF NOT EXISTS daily_stats (
   id TEXT PRIMARY KEY,
   date INTEGER NOT NULL,
@@ -171,7 +146,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   UNIQUE(date, key_id, model)
 );
 
--- 11. 系统配置
+-- 9. 系统配置
 CREATE TABLE IF NOT EXISTS configs (
   id TEXT PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,
@@ -179,7 +154,7 @@ CREATE TABLE IF NOT EXISTS configs (
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 
--- 12. 系统事件
+-- 10. 系统事件
 CREATE TABLE IF NOT EXISTS system_events (
   id TEXT PRIMARY KEY,
   level TEXT NOT NULL,
@@ -188,7 +163,7 @@ CREATE TABLE IF NOT EXISTS system_events (
   created_at INTEGER NOT NULL DEFAULT 0
 );
 
--- 13. 审计日志
+-- 11. 审计日志
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
   admin_id TEXT,
@@ -199,7 +174,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
 );
 
--- 14. 请求模板
+-- 12. 请求模板
 CREATE TABLE IF NOT EXISTS request_templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -218,11 +193,10 @@ CREATE TABLE IF NOT EXISTS request_templates (
 -- ================================================================
 
 CREATE INDEX IF NOT EXISTS idx_platforms_enabled_status ON platforms(enabled, status);
-CREATE INDEX IF NOT EXISTS idx_proxies_pool_enabled ON proxies(pool_id, enabled, status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
 CREATE INDEX IF NOT EXISTS idx_api_keys_status_expires ON api_keys(status, expires_at);
 
--- 11. 系统 API 密钥（管理后台专用，不可用于 v1 代理）
+-- 13. 系统 API 密钥（管理后台专用，不可用于 v1 代理）
 CREATE TABLE IF NOT EXISTS system_api_keys (
   id TEXT PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,

@@ -52,37 +52,6 @@ model platforms {
   @@map("platforms")
 }
 
-// ==================== 代理池 ====================
-
-model proxyPools {
-  id        String  @id
-  name      String  @unique
-  enabled   Boolean @default(true)
-  createdAt Int     @default(0) @map("created_at")
-  updatedAt Int     @default(0) @map("updated_at")
-
-  @@map("proxy_pools")
-}
-
-// ==================== 代理 ====================
-
-model proxies {
-  id          String  @id
-  address     String
-  poolId      String? @map("pool_id")
-  enabled     Boolean @default(true)
-  status      String  @default("healthy")
-  failCount   Int     @default(0) @map("fail_count")
-  banCount    Int     @default(0) @map("ban_count")
-  lastFailAt  Int?    @map("last_fail_at")
-  cooldownEnd Int?    @map("cooldown_end")
-  createdAt   Int     @default(0) @map("created_at")
-  updatedAt   Int     @default(0) @map("updated_at")
-
-  @@index([poolId, enabled, status])
-  @@map("proxies")
-}
-
 // ==================== 套餐模板 ====================
 
 model plans {
@@ -180,7 +149,6 @@ model requestLogs {
   keyId            String? @map("key_id")
   keyName          String? @map("key_name")
   platformId       String? @map("platform_id")
-  proxyId          String? @map("proxy_id")
   model            String
   endpoint         String?
   method           String?

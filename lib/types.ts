@@ -166,34 +166,6 @@ export interface RequestTemplate {
   enabled: boolean;
 }
 
-// ==================== 代理池类型 ====================
-
-export interface ProxyPoolConfig {
-  id: string;
-  name: string;
-  enabled: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-// ==================== 代理类型 ====================
-
-export type ProxyStatus = "healthy" | "degraded" | "down";
-
-export interface ProxyConfig {
-  id: string;
-  address: string;
-  poolId: string | null;
-  enabled: boolean;
-  status: ProxyStatus;
-  failCount: number;
-  banCount: number;
-  lastFailAt: number | null;
-  cooldownEnd: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
 // ==================== 路由决策类型 ====================
 
 export interface RouteDecision {
@@ -208,7 +180,6 @@ export interface RequestLogEntry {
   keyId: string | null;
   apiKeyName: string | null;
   platformId: string | null;
-  proxyId: string | null;
   model: string;
   endpoint: string | null;
   method: string | null;

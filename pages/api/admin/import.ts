@@ -11,7 +11,7 @@
  * - 脱敏值（含 ***）自动跳过
  * - 导入不会删除现有数据，只添加新数据
  * - 敏感配置（admin_reset_password）跳过
- * - 有依赖关系的数据按顺序导入（proxy_pools → proxies）
+ * - 有依赖关系的数据按顺序导入
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -31,8 +31,6 @@ interface FullImportResult {
   details: {
     platforms?: ImportResult;
     modelMaps?: ImportResult;
-    proxyPools?: ImportResult;
-    proxies?: ImportResult;
     plans?: ImportResult;
     apiKeys?: ImportResult;
     configs?: ImportResult;
@@ -130,10 +128,8 @@ export default async function handler(
       data: unknown;
       fn: (db: DbClient, data: Array<Record<string, unknown>>) => Promise<ImportResult & { error?: string }>;
     }> = [
-      { key: "proxyPools", data: body.proxyPools, fn: importProxyPools },
       { key: "platforms", data: body.platforms, fn: importPlatforms },
       { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
-      { key: "proxies", data: body.proxies, fn: importProxies },
       { key: "plans", data: body.plans, fn: importPlans },
       { key: "configs", data: body.configs, fn: importConfigs },
       { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
@@ -345,116 +341,6 @@ async function importModelMaps(
   } catch (err) {
     console.error("[import] 批量导入模型映射失败:", err);
     skipped += validMaps.length;
-  }
-
-  return { imported, skipped };
-}
-
-/**
- * 导入代理池
- *
- * 按名称去重，使用 $transaction 批量执行
- */
-async function importProxyPools(
-  db: DbClient,
-  pools: Array<Record<string, unknown>>
-): Promise<ImportResult> {
-  let imported = 0;
-  let skipped = 0;
-
-  // 预加载已有名称，用于去重
-  const existingNames = await db.proxyPools.findMany({ select: { name: true } });
-  const existingNameSet = new Set(existingNames.map((r) => r.name));
-
-  const validPools = pools.filter((p) => {
-    const name = p.name as string;
-    if (!name) return false;
-    if (existingNameSet.has(name)) return false;
-    return true;
-  });
-
-  skipped += pools.length - validPools.length;
-
-  if (validPools.length === 0) {
-    return { imported, skipped };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const stmts = validPools.map((p) =>
-    db.proxyPools.create({
-      data: {
-        id: generateId(),
-        name: p.name as string,
-        enabled: p.enabled !== false,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-  );
-
-  try {
-    await db.$transaction(stmts);
-    imported += validPools.length;
-  } catch (err) {
-    console.error("[import] 批量导入代理池失败:", err);
-    skipped += validPools.length;
-  }
-
-  return { imported, skipped };
-}
-
-/**
- * 导入代理
- *
- * 按地址去重，使用 $transaction 批量执行
- */
-async function importProxies(
-  db: DbClient,
-  proxies: Array<Record<string, unknown>>
-): Promise<ImportResult> {
-  let imported = 0;
-  let skipped = 0;
-
-  // 预加载已有地址，用于去重
-  const existingAddrs = await db.proxies.findMany({ select: { address: true } });
-  const existingAddrSet = new Set(existingAddrs.map((r) => r.address));
-
-  const validProxies = proxies.filter((p) => {
-    const address = p.address as string;
-    if (!address || address.includes("***")) return false;
-    if (existingAddrSet.has(address)) return false;
-    return true;
-  });
-
-  skipped += proxies.length - validProxies.length;
-
-  if (validProxies.length === 0) {
-    return { imported, skipped };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const stmts = validProxies.map((p) =>
-    db.proxies.create({
-      data: {
-        id: generateId(),
-        address: p.address as string,
-        poolId: (p.poolId as string) || null,
-        enabled: p.enabled !== false,
-        status: "healthy",
-        failCount: 0,
-        banCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-  );
-
-  try {
-    await db.$transaction(stmts);
-    imported += validProxies.length;
-  } catch (err) {
-    console.error("[import] 批量导入代理失败:", err);
-    skipped += validProxies.length;
   }
 
   return { imported, skipped };

@@ -58,10 +58,8 @@ interface ErrorEvent {
 // ==================== 导入步骤定义（用于显示名称） ====================
 
 const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
-  proxyPools: { labelKey: "dm_step_proxy_pools" },
   platforms: { labelKey: "dm_step_platforms" },
   modelMaps: { labelKey: "dm_step_model_maps" },
-  proxies: { labelKey: "dm_step_proxies" },
   plans: { labelKey: "dm_step_plans" },
   configs: { labelKey: "dm_step_configs" },
   apiKeys: { labelKey: "dm_step_api_keys" },
@@ -87,8 +85,6 @@ function formatImportKey(key: string): string {
   const map: Record<string, string> = {
     platforms: "platforms",
     modelMaps: "modelMaps",
-    proxies: "proxies",
-    proxyPools: "proxyPools",
     plans: "plans",
     apiKeys: "apiKeys",
     configs: "configs",
