@@ -60,17 +60,32 @@ def api_request(method: str, path: str, json_data=None) -> dict:
 
 def main():
     global JWT_SECRET
+
+    # 检测数据库类型：非 D1/SQLite 时跳过 Cloudflare 资源绑定
+    database_url = os.environ.get("DATABASE_URL", "")
+    is_cloudflare_db = not (
+        database_url.startswith("mysql://")
+        or database_url.startswith("mysqls://")
+        or database_url.startswith("postgresql://")
+        or database_url.startswith("postgres://")
+    )
+
     # 校验必需环境变量
     if not ACCOUNT_ID:
         fail("未设置 CLOUDFLARE_ACCOUNT_ID")
     if not API_TOKEN:
         fail("未设置 CLOUDFLARE_API_TOKEN")
-    if not D1_ID:
-        fail("未设置 D1_ID（请先运行 init_d1.py）")
-    if not KV_ID:
-        fail("未设置 KV_ID（请先运行 init_kv.py）")
     if not ADMIN_PASSWORD:
         fail("未设置 ADMIN_PASSWORD")
+
+    # D1/KV 绑定仅在 Cloudflare 数据库模式下必需
+    if is_cloudflare_db:
+        if not D1_ID:
+            fail("未设置 D1_ID（请先运行 init_d1.py）")
+        if not KV_ID:
+            fail("未设置 KV_ID（请先运行 init_kv.py）")
+    else:
+        print("ℹ️  非 Cloudflare 数据库模式，跳过 D1/KV 绑定检查")
 
     # 自动生成 JWT_SECRET（如果未提供）
     if not JWT_SECRET:
@@ -95,22 +110,25 @@ def main():
             msg = data.get("errors", [{}])[0].get("message", "未知")
             fail(f"Pages 项目创建失败: {msg}")
 
-    # ========== 2. 配置 D1 绑定 ==========
-    print(f"🔗 配置 D1 绑定: {D1_ID}")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "d1_databases": {
-                    "DB": {"id": D1_ID}
+    # ========== 2. 配置 D1 绑定（仅 Cloudflare 数据库模式） ==========
+    if is_cloudflare_db:
+        print(f"🔗 配置 D1 绑定: {D1_ID}")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "d1_databases": {
+                        "DB": {"id": D1_ID}
+                    }
                 }
             }
-        }
-    })
-    if data.get("success"):
-        print(f"  ✅ D1 绑定成功")
+        })
+        if data.get("success"):
+            print(f"  ✅ D1 绑定成功")
+        else:
+            msg = data.get("errors", [{}])[0].get("message", "未知")
+            fail(f"D1 绑定失败: {msg}")
     else:
-        msg = data.get("errors", [{}])[0].get("message", "未知")
-        fail(f"D1 绑定失败: {msg}")
+        print("⏭️  跳过 D1 绑定（非 Cloudflare 数据库模式）")
 
     # ========== 3. 配置兼容性标志（nodejs_compat） ==========
     print(f"⚙️ 配置兼容性标志: nodejs_compat")
@@ -127,22 +145,25 @@ def main():
         msg = data.get("errors", [{}])[0].get("message", "未知")
         print(f"  ⚠️ 兼容性标志设置失败（可能已存在）: {msg}")
 
-    # ========== 4. 配置 KV 绑定 ==========
-    print(f"🔗 配置 KV 绑定: {KV_ID}")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "kv_namespaces": {
-                    "KV": {"namespace_id": KV_ID}
+    # ========== 4. 配置 KV 绑定（仅 Cloudflare 数据库模式） ==========
+    if is_cloudflare_db:
+        print(f"🔗 配置 KV 绑定: {KV_ID}")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "kv_namespaces": {
+                        "KV": {"namespace_id": KV_ID}
+                    }
                 }
             }
-        }
-    })
-    if data.get("success"):
-        print(f"  ✅ KV 绑定成功")
+        })
+        if data.get("success"):
+            print(f"  ✅ KV 绑定成功")
+        else:
+            msg = data.get("errors", [{}])[0].get("message", "未知")
+            fail(f"KV 绑定失败: {msg}")
     else:
-        msg = data.get("errors", [{}])[0].get("message", "未知")
-        fail(f"KV 绑定失败: {msg}")
+        print("⏭️  跳过 KV 绑定（非 Cloudflare 数据库模式）")
 
     # ========== 5. 配置 Service Binding（Worker 内网调用） ==========
     print(f"🔗 配置 Service Binding: {WORKER_NAME}")
