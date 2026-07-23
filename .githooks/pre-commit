@@ -1,6 +1,18 @@
 #!/bin/sh
 # Pre-commit: ESLint + TypeScript 类型检查（零容忍：零 error 零 warning）
 
+# 0. schema.prisma 和 init.sql 必须同时提交
+STAGED_PRISMA=$(git diff --cached --name-only | grep "prisma/schema.prisma$")
+STAGED_INITSQL=$(git diff --cached --name-only | grep "init.sql$")
+if [ -n "$STAGED_PRISMA" ] && [ -z "$STAGED_INITSQL" ]; then
+  echo "❌ [pre-commit] prisma/schema.prisma 已修改但 init.sql 未同步提交"
+  exit 1
+fi
+if [ -z "$STAGED_PRISMA" ] && [ -n "$STAGED_INITSQL" ]; then
+  echo "❌ [pre-commit] init.sql 已修改但 prisma/schema.prisma 未同步提交"
+  exit 1
+fi
+
 echo "🔍 [pre-commit] 代码质量检查..."
 
 # 1. Worker TypeScript 类型检查

@@ -2,6 +2,19 @@
 set -o pipefail
 # Pre-push: ESLint + TypeScript + 测试 + 完整构建（零容忍）
 
+# 0. schema.prisma 和 init.sql 必须同时提交
+LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
+HAS_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep "prisma/schema.prisma$")
+HAS_INITSQL=$(echo "$LAST_COMMIT_FILES" | grep "init.sql$")
+if [ -n "$HAS_PRISMA" ] && [ -z "$HAS_INITSQL" ]; then
+  echo "❌ [pre-push] 最新提交修改了 prisma/schema.prisma 但未包含 init.sql"
+  exit 1
+fi
+if [ -z "$HAS_PRISMA" ] && [ -n "$HAS_INITSQL" ]; then
+  echo "❌ [pre-push] 最新提交修改了 init.sql 但未包含 prisma/schema.prisma"
+  exit 1
+fi
+
 echo "🚀 [pre-push] 完整构建验证..."
 
 # 1. Worker TypeScript 类型检查
