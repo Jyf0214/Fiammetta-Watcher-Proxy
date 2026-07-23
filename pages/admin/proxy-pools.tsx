@@ -122,10 +122,12 @@ export default function ProxyPoolsPage() {
       render: (v: number) => <Tag>{v}</Tag>,
     },
     {
-      title: t("common.status"), key: "enabled", width: 100, align: "center",
+      title: t("common.status"), key: "enabled", width: 120, align: "center",
       render: (_: unknown, record: PoolItem) => (
-        <Switch checked={record.enabled} onChange={() => handleToggle(record)}
-          checkedChildren={t("common.enable")} unCheckedChildren={t("common.disable")} />
+        <div className="flex items-center justify-center gap-2">
+          <span className="text-xs text-zinc-500">{record.enabled ? t("common.enable") : t("common.disable")}</span>
+          <Switch checked={record.enabled} onChange={() => handleToggle(record)} />
+        </div>
       ),
     },
     {

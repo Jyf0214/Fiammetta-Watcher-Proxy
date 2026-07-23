@@ -46,6 +46,92 @@ interface NamedApiKey {
   key: string;
 }
 
+/** 移动端平台卡片 */
+function PlatformCard({
+  platform,
+  togglingId,
+  onToggle,
+  onEdit,
+  onDelete,
+  onModels,
+}: {
+  platform: Platform;
+  togglingId: string | null;
+  onToggle: (p: Platform) => void;
+  onEdit: (p: Platform) => void;
+  onDelete: (id: string) => void;
+  onModels: (p: Platform) => void;
+}) {
+  const { t } = useTranslation();
+  const statusColor = platform.status === "healthy" ? "green" : platform.status === "degraded" ? "orange" : "red";
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+      {/* 卡片头部：名称 + 状态 */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{platform.name}</h3>
+          <Tag color={statusColor} className="!text-[10px] !px-1.5 !py-0 !m-0 shrink-0">{platform.status}</Tag>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-zinc-400">{platform.enabled ? t("common.enable") : t("common.disable")}</span>
+          <Switch
+            checked={platform.enabled}
+            loading={togglingId === platform.id}
+            onChange={() => onToggle(platform)}
+          />
+        </div>
+      </div>
+
+      {/* 详情行 */}
+      <div className="px-4 pb-2 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-400 w-12 shrink-0">类型</span>
+          <Tag className="!text-[10px] !px-1.5 !py-0 !m-0">{platform.type}</Tag>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-400 w-12 shrink-0">地址</span>
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate font-mono">{platform.baseUrl}</span>
+        </div>
+        {(platform.priority !== 0 || platform.weight !== 1) && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-zinc-400 w-12 shrink-0">权重</span>
+            <span className="text-[11px] text-zinc-600 dark:text-zinc-300">
+              优先级 {platform.priority} · 权重 {platform.weight}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 底部操作栏 */}
+      <div className="flex border-t border-zinc-100 dark:border-zinc-800">
+        <button
+          onClick={() => onModels(platform)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+        >
+          <Database size={13} />
+          模型
+        </button>
+        <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
+        <button
+          onClick={() => onEdit(platform)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <Pencil size={13} />
+          编辑
+        </button>
+        <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
+        <Popconfirm title={t("common.confirm_delete")} onConfirm={() => onDelete(platform.id)} okText={t("common.confirm")} cancelText={t("common.cancel")}>
+          <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+            <Trash2 size={13} />
+            删除
+          </button>
+        </Popconfirm>
+      </div>
+    </div>
+  );
+}
+
 export default function PlatformsPage() {
   const { t } = useTranslation();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -275,13 +361,15 @@ export default function PlatformsPage() {
       render: (v: number | null) => v ?? "-", responsive: ["xl"],
     },
     {
-      title: t("common.status"), key: "enabled", width: 100, align: "center",
+      title: t("common.status"), key: "enabled", width: 120, align: "center",
       render: (_: unknown, record: Platform) => (
-        <Switch
-          checked={record.enabled} loading={togglingId === record.id}
-          onChange={() => handleToggle(record)}
-          checkedChildren={t("common.enable")} unCheckedChildren={t("common.disable")}
-        />
+        <div className="flex items-center justify-center gap-2">
+          <span className="text-xs text-zinc-500">{record.enabled ? t("common.enable") : t("common.disable")}</span>
+          <Switch
+            checked={record.enabled} loading={togglingId === record.id}
+            onChange={() => handleToggle(record)}
+          />
+        </div>
       ),
     },
     {
@@ -307,15 +395,44 @@ export default function PlatformsPage() {
       <PageContainer>
         <PageHeader
           icon={<Cloud size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.platforms")} description={t("admin.platforms_desc")}
+          title={t("admin.platforms")}
+          description={t("admin.platforms_desc")}
           extra={<Button variant="primary" icon={<Plus size={14} />} onClick={openCreateForm}>{t("platform.create_platform")}</Button>}
         />
-        <ProCard>
-          <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
-            pagination={{ pageSize: 20, showTotal: (total) => t("common.pagination_total", { count: total }) }}
-            scroll={{ x: 900 }}
-          />
-        </ProCard>
+
+        {/* 移动端：卡片布局 */}
+        <div className="block lg:hidden space-y-3">
+          {platforms.map((p) => (
+            <PlatformCard
+              key={p.id}
+              platform={p}
+              togglingId={togglingId}
+              onToggle={handleToggle}
+              onEdit={openEditForm}
+              onDelete={handleDelete}
+              onModels={openModelDrawer}
+            />
+          ))}
+          {platforms.length === 0 && !loading && (
+            <div className="text-center py-12 text-zinc-400">
+              <Cloud size={48} className="mx-auto mb-4 opacity-30" />
+              <p className="text-sm">{t("platform.no_platforms") || "暂无平台"}</p>
+              <Button variant="primary" size="sm" className="mt-4" onClick={openCreateForm} icon={<Plus size={14} />}>
+                {t("platform.create_platform")}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* 桌面端：表格布局 */}
+        <div className="hidden lg:block">
+          <ProCard>
+            <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
+              pagination={{ pageSize: 20, showTotal: (total) => `${t("common.pagination_total", { count: total })}` }}
+              scroll={{ x: 900 }}
+            />
+          </ProCard>
+        </div>
 
         {formVisible && (
           <ProCard
