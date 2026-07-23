@@ -93,19 +93,51 @@ def main():
 
     print(f"  ✅ D1_ID: {d1_id}")
 
-    # ========== 3. 执行建表 SQL ==========
+    # ========== 3. 执行建表 SQL（逐条执行，迁移语句容错） ==========
     print(f"📝 执行建表 SQL")
-    resp = requests.post(
-        f"{API_BASE}/d1/database/{d1_id}/query",
-        headers=HEADERS,
-        json={"sql": init_sql},
-    )
-    data, _, msg = check_response(resp, "Schema 初始化")
 
-    if data.get("success"):
-        print(f"  ✅ Schema 初始化完成")
-    else:
-        fail(f"Schema 初始化失败: {msg}")
+    # 按分号拆分语句，跳过空语句和纯注释
+    statements = []
+    for stmt in init_sql.split(";"):
+        stripped = stmt.strip()
+        if not stripped or stripped.startswith("--"):
+            continue
+        # 去掉行内注释
+        lines = []
+        for line in stripped.split("\n"):
+            line_clean = line.split("--")[0].strip()
+            if line_clean:
+                lines.append(line_clean)
+        clean = "\n".join(lines)
+        if clean:
+            statements.append(clean)
+
+    created_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for i, stmt in enumerate(statements, 1):
+        is_migration = stmt.upper().startswith("ALTER TABLE")
+        resp = requests.post(
+            f"{API_BASE}/d1/database/{d1_id}/query",
+            headers=HEADERS,
+            json={"sql": stmt},
+        )
+        data, code, msg = check_response(resp, f"语句 #{i}")
+
+        if data.get("success"):
+            created_count += 1
+        elif is_migration:
+            # 迁移语句（ALTER TABLE）失败说明列已存在，跳过
+            skipped_count += 1
+            print(f"  ⏭️  迁移跳过（可能已执行）: {msg}")
+        else:
+            failed_count += 1
+            print(f"  ❌ 语句 #{i} 失败: {msg}")
+
+    if failed_count > 0:
+        fail(f"Schema 初始化失败：{failed_count} 条语句执行失败")
+    print(f"  ✅ Schema 初始化完成（{created_count} 条执行，{skipped_count} 条跳过）")
 
     # ========== 4. 输出 D1_ID ==========
     github_output = os.environ.get("GITHUB_OUTPUT")

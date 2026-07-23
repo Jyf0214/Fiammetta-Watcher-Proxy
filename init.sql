@@ -251,4 +251,4 @@ CREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events(created
 
 -- 迁移：platform_models 添加 enabled 列（已存在则跳过）
 -- D1 不支持 IF NOT EXISTS，CI 中用 try-catch 忽略重复错误
--- ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
