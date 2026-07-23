@@ -293,11 +293,7 @@
     "create_success": "模型映射创建成功",
     "create_failed": "创建模型映射失败",
     "fetch_failed": "获取模型映射失败",
-    "delete_success": "模型映射删除成功",
-    "enable_all": "一键启用",
-    "disable_all": "一键禁用",
-    "confirm_enable_all": "确定启用所有模型映射？",
-    "confirm_disable_all": "确定禁用所有模型映射？"
+    "delete_success": "模型映射删除成功"
   },
   "log": {
     "model": "模型",
