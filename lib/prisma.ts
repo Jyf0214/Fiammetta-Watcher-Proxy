@@ -92,30 +92,29 @@ export async function createDb(): Promise<PrismaClient> {
     return globalForPrisma.__prisma;
   }
 
-  const kind = resolveDbKind();
+  // 优先检测 D1 binding —— Cloudflare Pages 始终通过 binding 连接，
+  // 不管 DATABASE_URL 是什么，有 D1 binding 就用 D1。
   let d1Binding: unknown = null;
+  try {
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    const ctx = await getCloudflareContext({ async: true });
+    const env = ctx.env as Record<string, unknown>;
+    d1Binding = env.DB;
+  } catch {
+    // 非 Cloudflare 环境，继续尝试其他方式
+  }
 
-  // D1 模式：从 Cloudflare Context 或全局变量获取 binding
-  if (kind === "d1") {
+  if (!d1Binding) {
     try {
-      const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-      const ctx = await getCloudflareContext({ async: true });
-      const env = ctx.env as Record<string, unknown>;
-      d1Binding = env.DB;
+      // @ts-expect-error Cloudflare Workers 全局 env
+      d1Binding = globalThis.__DB__;
     } catch {
-      // 非 Cloudflare 环境，继续尝试其他方式
-    }
-
-    if (!d1Binding) {
-      try {
-        // @ts-expect-error Cloudflare Workers 全局 env
-        d1Binding = globalThis.__DB__;
-      } catch {
-        // 忽略
-      }
+      // 忽略
     }
   }
 
+  // 有 D1 binding → 用 D1；否则根据 DATABASE_URL 推断
+  const kind = d1Binding ? "d1" : resolveDbKind();
   const adapterResult = await loadAdapter(kind, d1Binding ?? undefined);
 
   const prismaOpts: ConstructorParameters<typeof PrismaClient>[0] = {
