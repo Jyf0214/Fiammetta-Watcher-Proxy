@@ -83,9 +83,16 @@ export default async function handler(
     const avgTtft = Math.round(perfStats?.avg_ttft || 0);
     const avgDuration = Math.round(perfStats?.avg_duration || 0);
 
+    // 查询管理员信息（能查到说明 D1 已连接）
+    const admin = await db.get<{ username: string }>(
+      `SELECT username FROM admins LIMIT 1`
+    );
+
     res.status(200).json({
       success: true,
       data: {
+        dbConnected: true,
+        adminUsername: admin?.username || "",
         totalPlatforms: totalPlatforms?.count ?? 0,
         activePlatforms: activePlatforms?.count ?? 0,
         totalKeys: totalKeys?.count ?? 0,
