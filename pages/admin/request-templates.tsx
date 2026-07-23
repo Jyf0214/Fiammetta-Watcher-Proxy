@@ -41,9 +41,7 @@ const EXAMPLE_BODIES = [
     name: "启用深度思考",
     endpoint: "chat/completions",
     body: {
-      extra_body: {
-        chat_template_kwargs: { enable_thinking: true },
-      },
+      chat_template_kwargs: { enable_thinking: true },
     },
   },
   {
