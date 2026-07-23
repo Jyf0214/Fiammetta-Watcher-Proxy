@@ -336,7 +336,6 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     }
 
     const db = await createDb();
-    const now = Math.floor(Date.now() / 1000);
 
     if (body.modelId) {
       // 单个模型切换
