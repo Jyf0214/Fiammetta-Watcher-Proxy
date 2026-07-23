@@ -93,6 +93,8 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Generate Prisma Client
+        env:
+          DATABASE_URL: "file:./placeholder.db"
         run: npx prisma generate
 
       - name: Build Pages
