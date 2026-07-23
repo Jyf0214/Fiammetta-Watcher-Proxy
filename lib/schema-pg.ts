@@ -130,6 +130,7 @@ export const platformModels = pgTable("platform_models", {
   modelName: text("model_name"),
   type: text("type").notNull().default("chat"),
   source: text("source").notNull().default("auto"),
+  enabled: boolean("enabled").notNull().default(true),
   fetchedAt: integer("fetched_at").notNull(),
 }, (t) => [
   uniqueIndex("idx_platform_models_platform_model").on(t.platformId, t.modelId),
