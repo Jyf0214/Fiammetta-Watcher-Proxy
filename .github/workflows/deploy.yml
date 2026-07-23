@@ -95,6 +95,8 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Generate Prisma Client
+        env:
+          CF_BUILD: "true"
         run: node scripts/prepare-db.mjs
 
       - name: Build Pages
