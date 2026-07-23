@@ -130,8 +130,6 @@ export default function KeysPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
-
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/admin/keys", { signal: controller.signal })
