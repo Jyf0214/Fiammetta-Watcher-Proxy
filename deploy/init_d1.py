@@ -100,9 +100,9 @@ def main():
     statements = []
     for stmt in init_sql.split(";"):
         stripped = stmt.strip()
-        if not stripped or stripped.startswith("--"):
+        if not stripped:
             continue
-        # 去掉行内注释
+        # 去掉行内注释（每行 -- 开头的整行注释，以及行尾注释）
         lines = []
         for line in stripped.split("\n"):
             line_clean = line.split("--")[0].strip()
