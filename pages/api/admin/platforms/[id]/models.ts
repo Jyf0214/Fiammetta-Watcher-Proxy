@@ -185,14 +185,18 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 }
 
 /**
- * 根据模型 ID 推断类型（chat / embedding / image / audio / moderation）
+ * 根据模型 ID 推断类型（chat / embedding / image / audio / video / moderation）
+ *
+ * 匹配优先级：embedding > image > audio > video > moderation > chat
+ * 嵌套关键词场景（如 video-embedding）会按优先级被更具体的类型捕获。
  */
 function detectModelType(modelId: string): string {
   const id = modelId.toLowerCase();
   if (/embed|embedding|vector|text-embedding/.test(id)) return "embedding";
-  if (/dall-e|stable-diffusion|midjourney|image/.test(id)) return "image";
+  if (/dall-e|stable-diffusion|midjourney|flux|image/.test(id)) return "image";
   if (/whisper|tts|speech|audio|voice/.test(id)) return "audio";
-  if (/moderation|safety|content/.test(id)) return "moderation";
+  if (/video|sora|runway|kling|pika|luma/.test(id)) return "video";
+  if (/moderation|safety|content-moderation|content-safety|content-filter/.test(id)) return "moderation";
   return "chat";
 }
 
