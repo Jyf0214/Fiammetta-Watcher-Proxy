@@ -105,13 +105,14 @@ async function doRefresh(db: D1Database): Promise<void> {
         .where(eq(schema.platforms.enabled, true)),
       // 查询所有模型映射
       orm.select().from(schema.modelMappings),
-      // 查询平台模型关联
+      // 查询平台模型关联（仅启用的模型）
       orm
         .select({
           platformId: schema.platformModels.platformId,
           modelId: schema.platformModels.modelId,
         })
-        .from(schema.platformModels),
+        .from(schema.platformModels)
+        .where(eq(schema.platformModels.enabled, true)),
       // 查询自动模型 ID
       getConfig(db, "system:auto_model_id"),
     ]);

@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Table,
   Popconfirm,
   Tag,
   Form,
@@ -17,7 +16,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { Plus, Pencil, Trash2, Database, RefreshCw, Cloud, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, Database, RefreshCw, Cloud, Copy, Cpu, MessageSquare, Image, Mic, Box, Layers, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -107,6 +106,216 @@ function PlatformCard({
         </Popconfirm>
       </div>
     </div>
+  );
+}
+
+/** 模型类型图标映射 */
+const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; label: string; color: string; bg: string }> = {
+  chat:       { icon: MessageSquare, label: "文字", color: "text-blue-500",   bg: "bg-blue-50 dark:bg-blue-900/30" },
+  embedding:  { icon: Layers,       label: "向量", color: "text-cyan-500",   bg: "bg-cyan-50 dark:bg-cyan-900/30" },
+  image:      { icon: Image,        label: "图片", color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30" },
+  audio:      { icon: Mic,          label: "音频", color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30" },
+  video:      { icon: Box,          label: "视频", color: "text-pink-500",   bg: "bg-pink-50 dark:bg-pink-900/30" },
+  moderation: { icon: Cpu,          label: "审核", color: "text-red-500",    bg: "bg-red-50 dark:bg-red-900/30" },
+};
+
+/** 根据模型 ID 猜测品牌首字母 */
+function getModelBrand(modelId: string): string {
+  const parts = modelId.split("/");
+  const brand = parts.length > 1 ? parts[0] : modelId.split("-")[0];
+  return brand.slice(0, 2).toUpperCase();
+}
+
+interface ModelItem {
+  id: string;
+  modelId: string;
+  ownedBy: string | null;
+  source: string;
+  type: string;
+  enabled: boolean;
+  fetchedAt: string;
+}
+
+/** 模型管理抽屉 — LobeChat 风格列表 */
+function ModelDrawer({
+  open, onClose, platform, models, loading, refreshing,
+  newModelId, onNewModelIdChange, onAddModel, onRefreshModels, onDeleteModel, onToggleModel,
+}: {
+  open: boolean;
+  onClose: () => void;
+  platform: Platform | null;
+  models: ModelItem[];
+  loading: boolean;
+  refreshing: boolean;
+  newModelId: string;
+  onNewModelIdChange: (v: string) => void;
+  onAddModel: () => void;
+  onRefreshModels: () => void;
+  onDeleteModel: (modelId: string) => void;
+  onToggleModel: (modelId: string, enabled: boolean) => void;
+}) {
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [searchText, setSearchText] = useState("");
+
+  // 关闭时重置筛选（通过 onClose 回调触发）
+  const handleClose = () => {
+    setTypeFilter("all");
+    setSearchText("");
+    onClose();
+  };
+
+  // 类型统计
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: models.length };
+    models.forEach((m) => { counts[m.type] = (counts[m.type] || 0) + 1; });
+    return counts;
+  }, [models]);
+
+  // 筛选后的模型列表
+  const filteredModels = useMemo(() => {
+    return models.filter((m) => {
+      if (typeFilter !== "all" && m.type !== typeFilter) return false;
+      if (searchText && !m.modelId.toLowerCase().includes(searchText.toLowerCase())) return false;
+      return true;
+    });
+  }, [models, typeFilter, searchText]);
+
+  const typeTabs = [
+    { key: "all", label: "全部" },
+    { key: "chat", label: "文字" },
+    { key: "embedding", label: "向量" },
+    { key: "image", label: "图片" },
+    { key: "audio", label: "音频" },
+  ].filter((tab) => tab.key === "all" || (typeCounts[tab.key] && typeCounts[tab.key] > 0));
+
+  return (
+    <Drawer
+      open={open}
+      onClose={handleClose}
+      width={480}
+      title={
+        <div className="flex flex-col">
+          <span className="flex items-center gap-2 text-base font-semibold">
+            <Database size={16} />{platform?.name}
+          </span>
+          <span className="text-xs text-zinc-400 font-normal mt-0.5">
+            共 {models.length} 个可用模型
+          </span>
+        </div>
+      }
+      extra={
+        <Button variant="default" size="sm" icon={<RefreshCw size={13} />} onClick={onRefreshModels} loading={refreshing}>
+          刷新
+        </Button>
+      }
+    >
+      {/* 搜索 + 添加 */}
+      <div className="flex gap-2 mb-3">
+        <Input
+          prefix={<Search size={14} className="text-zinc-400" />}
+          placeholder="搜索模型…"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          allowClear
+          className="flex-1"
+          size="small"
+        />
+      </div>
+      <div className="flex gap-2 mb-4">
+        <Input
+          placeholder="输入模型 ID 添加"
+          value={newModelId}
+          onChange={(e) => onNewModelIdChange(e.target.value)}
+          onPressEnter={onAddModel}
+          className="flex-1"
+          size="small"
+        />
+        <Button variant="primary" size="sm" onClick={onAddModel} disabled={!newModelId.trim()}>添加</Button>
+      </div>
+
+      {/* 类型 Tab 过滤 */}
+      <div className="flex gap-1 mb-4 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+        {typeTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setTypeFilter(tab.key)}
+            className={`
+              flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-all duration-200
+              ${typeFilter === tab.key
+                ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }
+            `}
+          >
+            {tab.label}
+            <span className="ml-1 text-[10px] text-zinc-400">{typeCounts[tab.key] || 0}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* 模型列表 */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-zinc-400">
+          <RefreshCw size={20} className="animate-spin mr-2" />加载中…
+        </div>
+      ) : filteredModels.length === 0 ? (
+        <div className="text-center py-12 text-zinc-400">
+          <Cpu size={40} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">{searchText ? "无匹配模型" : "暂无模型"}</p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {filteredModels.map((model) => {
+            const typeCfg = MODEL_TYPE_CONFIG[model.type] || MODEL_TYPE_CONFIG.chat;
+            const TypeIcon = typeCfg.icon;
+            const brand = getModelBrand(model.modelId);
+
+            return (
+              <div
+                key={model.id}
+                className="group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
+              >
+                {/* 品牌图标 */}
+                <div className={`shrink-0 w-8 h-8 rounded-lg ${typeCfg.bg} flex items-center justify-center`}>
+                  <span className={`text-[10px] font-bold ${typeCfg.color}`}>{brand}</span>
+                </div>
+
+                {/* 模型信息 */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate leading-tight">
+                    {model.modelId}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] ${typeCfg.color}`}>
+                      <TypeIcon size={10} />
+                      {typeCfg.label}
+                    </span>
+                    <span className="text-[10px] text-zinc-400">
+                      {model.source === "manual" ? "手动" : "自动"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 启禁用 */}
+                <div className="shrink-0">
+                  <Switch
+                    checked={model.enabled}
+                    onChange={(checked) => onToggleModel(model.modelId, checked)}
+                  />
+                </div>
+
+                {/* 删除 */}
+                <Popconfirm title="确认删除此模型？" onConfirm={() => onDeleteModel(model.modelId)} okText="确认" cancelText="取消">
+                  <button className="shrink-0 p-1.5 rounded-md text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all">
+                    <Trash2 size={14} />
+                  </button>
+                </Popconfirm>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Drawer>
   );
 }
 
@@ -246,7 +455,7 @@ export default function PlatformsPage() {
   const [namedKeys, setNamedKeys] = useState<NamedApiKey[]>([{ name: "密钥1", key: "" }]);
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [modelPlatform, setModelPlatform] = useState<Platform | null>(null);
-  const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; type: string; fetchedAt: string }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; modelId: string; ownedBy: string | null; source: string; type: string; enabled: boolean; fetchedAt: string }>>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
@@ -435,6 +644,20 @@ export default function PlatformsPage() {
     } catch { message.error(t("common.error")); }
   };
 
+  const handleToggleModel = async (modelId: string, enabled: boolean) => {
+    if (!modelPlatform) return;
+    try {
+      const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId, enabled }),
+      });
+      const data = await res.json() as Record<string, any>;
+      if (data.success) fetchModels(modelPlatform.id);
+      else message.error(data.error || t("common.error"));
+    } catch { message.error(t("common.error")); }
+  };
+
   const columns: TableColumnsType<Platform> = [
     { title: t("platform.name"), dataIndex: "name", key: "name", width: 140, ellipsis: true },
     { title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true, responsive: ["md"] },
@@ -529,45 +752,20 @@ export default function PlatformsPage() {
         </Drawer>
 
         {/* 模型管理抽屉 */}
-        <Drawer
-          title={<span className="flex items-center gap-2"><Database />{modelPlatform?.name} — {t("platform.models") || "模型管理"}</span>}
-          open={modelDrawerOpen} onClose={() => setModelDrawerOpen(false)} width={600}
-        >
-          <div className="mb-4 flex items-center gap-2">
-            <Input placeholder={t("platform.model_placeholder") || "输入模型 ID"} value={newModelId}
-              onChange={(e) => setNewModelId(e.target.value)} onPressEnter={handleAddModel} className="flex-1" />
-            <Button variant="primary" size="sm" onClick={handleAddModel} disabled={!newModelId.trim()}>{t("common.create")}</Button>
-            <Button variant="default" size="sm" icon={<RefreshCw size={14} />} onClick={handleRefreshModels} loading={refreshing}>{t("platform.refresh_models") || "刷新"}</Button>
-          </div>
-          <Table dataSource={models} loading={modelsLoading} rowKey="id" size="small" pagination={false}
-            columns={[
-              { title: t("platform.model_id") || "模型 ID", dataIndex: "modelId", key: "modelId", ellipsis: true },
-              {
-                title: "类型", dataIndex: "type", key: "type", width: 100,
-                render: (v: string) => {
-                  const typeMap: Record<string, { color: string; label: string }> = {
-                    chat: { color: "blue", label: "文字" }, image: { color: "purple", label: "图片" },
-                    audio: { color: "orange", label: "音频" }, embedding: { color: "cyan", label: "向量" },
-                  };
-                  const info = typeMap[v] || typeMap.chat;
-                  return <Tag color={info.color}>{info.label}</Tag>;
-                },
-              },
-              {
-                title: t("platform.model_source") || "来源", dataIndex: "source", key: "source", width: 80,
-                render: (v: string) => <Tag color={v === "manual" ? "green" : "blue"}>{v === "manual" ? "手动" : "自动"}</Tag>,
-              },
-              {
-                title: t("common.actions"), key: "actions", width: 60,
-                render: (_: unknown, record: { modelId: string }) => (
-                  <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDeleteModel(record.modelId)}>
-                    <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
-                  </Popconfirm>
-                ),
-              },
-            ]}
-          />
-        </Drawer>
+        <ModelDrawer
+          open={modelDrawerOpen}
+          onClose={() => setModelDrawerOpen(false)}
+          platform={modelPlatform}
+          models={models}
+          loading={modelsLoading}
+          refreshing={refreshing}
+          newModelId={newModelId}
+          onNewModelIdChange={setNewModelId}
+          onAddModel={handleAddModel}
+          onRefreshModels={handleRefreshModels}
+          onDeleteModel={handleDeleteModel}
+          onToggleModel={handleToggleModel}
+        />
       </PageContainer>
     </AdminLayout>
   );

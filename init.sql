@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS platform_models (
   model_name TEXT,
   type TEXT NOT NULL DEFAULT 'chat',
   source TEXT NOT NULL DEFAULT 'auto',
+  enabled INTEGER NOT NULL DEFAULT 1,
   fetched_at INTEGER NOT NULL DEFAULT (unixepoch()),
   UNIQUE(platform_id, model_id),
   FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE CASCADE
@@ -247,3 +248,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_id ON audit_logs(admin_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_system_events_level ON system_events(level);
 CREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events(created_at);
+
+-- 迁移：platform_models 添加 enabled 列（已存在则跳过）
+-- D1 不支持 IF NOT EXISTS，CI 中用 try-catch 忽略重复错误
+-- ALTER TABLE platform_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
