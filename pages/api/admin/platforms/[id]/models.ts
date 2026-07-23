@@ -245,11 +245,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       return res.status(400).json({ success: false, error: "平台未配置 API Key，无法刷新" });
     }
 
-    // 调用上游 /v1/models 接口（避免重复 /v1）
-    const base = platform.baseUrl.replace(/\/+$/, "");
-    const modelsUrl = base.endsWith("/v1")
-      ? `${base}/models`
-      : `${base}/v1/models`;
+    // 调用上游模型列表接口
+    const modelsUrl = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
     let upstreamModels: OpenAIModel[] = [];
 
     try {
