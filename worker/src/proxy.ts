@@ -20,6 +20,7 @@ import {
 } from "./rate-limiter";
 import { createUsageTransformer, recordRequestLog } from "./token";
 import { extractForwardableHeaders } from "./forward-headers";
+import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
 import type { ApiKeyRecord } from "./auth";
 
 // ==================== 上游错误脱敏 ====================
@@ -254,9 +255,21 @@ export async function proxyV1Request(
   }
 
   // ── 5. 构建上游请求 ──
-  const upstreamBody = config.buildUpstreamBody
+  let upstreamBody = config.buildUpstreamBody
     ? config.buildUpstreamBody(body)
     : { ...body, model: route.targetModel };
+
+  // ── 5a. 应用请求模板 ──
+  const requestModel = (body.model as string) || "unknown";
+  try {
+    const templates = await loadTemplates(env.DB);
+    const applicable = getApplicableTemplates(templates, requestModel);
+    if (applicable.length > 0) {
+      upstreamBody = applyTemplates(upstreamBody, applicable);
+    }
+  } catch (tplErr) {
+    console.error(`${logTag} 加载请求模板失败:`, tplErr);
+  }
 
   const isStream = config.supportsStreaming !== false && body.stream === true;
 
@@ -457,14 +470,17 @@ export async function proxyV1Request(
     const parsed = JSON.parse(responseBody);
     const usage = parsed?.usage;
     if (usage) {
-      const { promptTokens, completionTokens, totalTokens } = {
-        promptTokens: Number(usage.prompt_tokens) || 0,
-        completionTokens: Number(usage.completion_tokens) || 0,
-        totalTokens:
-          Number(usage.total_tokens) ||
-          (Number(usage.prompt_tokens) || 0) +
-            (Number(usage.completion_tokens) || 0),
-      };
+      let promptTokens = Number(usage.prompt_tokens) || 0;
+      let completionTokens = Number(usage.completion_tokens) || 0;
+      const totalTokens =
+        Number(usage.total_tokens) || promptTokens + completionTokens;
+
+      // 某些上游只返回 total_tokens，不返回 prompt/completion 分项
+      // 此时将 total_tokens 同时记入两个字段，确保日志不丢失信息
+      if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
+        promptTokens = totalTokens;
+        completionTokens = totalTokens;
+      }
 
       if (totalTokens > 0) {
         const { updateKeyUsage } = await import("./token");
@@ -479,7 +495,7 @@ export async function proxyV1Request(
         endpoint: config.upstreamPath,
         method: "POST",
         status: upstreamResponse.status,
-        tokens: usage.total_tokens || 0,
+        tokens: totalTokens,
         promptTokens,
         completionTokens,
         duration: Date.now() - startTime,

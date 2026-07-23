@@ -21,39 +21,29 @@ interface RequestTemplate {
   id: string;
   name: string;
   description: string;
-  endpoint: string;
+  models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
 }
 
-const ENDPOINT_OPTIONS = [
-  { value: "all", labelKey: "system.rt_endpoint_all" },
-  { value: "chat/completions", label: "chat/completions" },
-  { value: "completions", label: "completions" },
-  { value: "embeddings", label: "embeddings" },
-  { value: "images/generations", label: "images/generations" },
-  { value: "audio/speech", label: "audio/speech" },
-  { value: "audio/transcriptions", label: "audio/transcriptions" },
-];
-
 const EXAMPLE_BODIES = [
   {
     name: "启用深度思考",
-    endpoint: "chat/completions",
+    models: ["qwen-*", "deepseek-*"],
     body: {
       chat_template_kwargs: { enable_thinking: true },
     },
   },
   {
     name: "强制 JSON 输出",
-    endpoint: "chat/completions",
+    models: ["gpt-4o", "gpt-4o-mini"],
     body: {
       response_format: { type: "json_object" },
     },
   },
   {
     name: "温度控制",
-    endpoint: "chat/completions",
+    models: ["*"],
     body: {
       temperature: 0.7,
       top_p: 0.9,
@@ -111,7 +101,7 @@ export default function RequestTemplatesPage() {
     setEditingTemplate(null);
     form.resetFields();
     form.setFieldsValue({
-      endpoint: "all",
+      models: ["*"],
       enabled: true,
       mergeBody: JSON.stringify(EXAMPLE_BODIES[0].body, null, 2),
     });
@@ -124,7 +114,7 @@ export default function RequestTemplatesPage() {
     form.setFieldsValue({
       name: tpl.name,
       description: tpl.description,
-      endpoint: tpl.endpoint,
+      models: tpl.models,
       enabled: tpl.enabled,
       mergeBody: JSON.stringify(tpl.mergeBody, null, 2),
     });
@@ -158,7 +148,7 @@ export default function RequestTemplatesPage() {
             id: editingTemplate.id,
             name: values.name,
             description: values.description,
-            endpoint: values.endpoint,
+            models: values.models,
             mergeBody,
             enabled: values.enabled,
           }),
@@ -178,7 +168,7 @@ export default function RequestTemplatesPage() {
           body: JSON.stringify({
             name: values.name,
             description: values.description,
-            endpoint: values.endpoint,
+            models: values.models,
             mergeBody,
           }),
         });
@@ -248,7 +238,7 @@ export default function RequestTemplatesPage() {
   const applyExample = (example: (typeof EXAMPLE_BODIES)[0]) => {
     form.setFieldsValue({
       name: example.name,
-      endpoint: example.endpoint,
+      models: example.models,
       mergeBody: JSON.stringify(example.body, null, 2),
     });
     setBodyJsonError(false);
@@ -293,7 +283,7 @@ export default function RequestTemplatesPage() {
                         {tpl.name}
                       </h3>
                       <span className="text-[10px] font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
-                        {tpl.endpoint === "all" ? t("system.rt_endpoint_all") : tpl.endpoint}
+                        {tpl.models.length === 1 && tpl.models[0] === "*" ? "所有模型" : tpl.models.join(", ")}
                       </span>
                       {!tpl.enabled && (
                         <span className="text-[10px] font-bold text-zinc-300 dark:text-zinc-600">
@@ -359,7 +349,7 @@ export default function RequestTemplatesPage() {
           width={640}
           destroyOnClose
         >
-          <Form form={form} layout="vertical" initialValues={{ endpoint: "all", enabled: true }}>
+          <Form form={form} layout="vertical" initialValues={{ models: ["*"], enabled: true }}>
             <Form.Item
               name="name"
               label={t("system.rt_name")}
@@ -373,12 +363,11 @@ export default function RequestTemplatesPage() {
             </Form.Item>
 
             <div className="flex gap-4">
-              <Form.Item name="endpoint" label={t("system.rt_endpoint")} className="flex-1">
+              <Form.Item name="models" label="适用模型" className="flex-1" extra="输入模型 ID 后按回车添加，支持 * 通配符（如 gpt-*）">
                 <Select
-                  options={ENDPOINT_OPTIONS.map((o) => ({
-                    value: o.value,
-                    label: o.label || t(o.labelKey!),
-                  }))}
+                  mode="tags"
+                  placeholder="输入模型 ID，回车确认"
+                  tokenSeparators={[","]}
                 />
               </Form.Item>
 
