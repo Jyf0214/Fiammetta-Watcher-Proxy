@@ -136,7 +136,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
       id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "update_api_key",
       detail: JSON.stringify({ target: id, keyId: id, changes: sanitizedChanges }),
       ip, createdAt: currentTime,
-    } as any);
+    });
 
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key) }, message: "API Key 更新成功" });
   } catch (err) {
@@ -160,7 +160,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
       id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "delete_api_key",
       detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogs.length }),
       ip, createdAt: currentTime,
-    } as any);
+    });
 
     return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogs.length });
   } catch (err) {

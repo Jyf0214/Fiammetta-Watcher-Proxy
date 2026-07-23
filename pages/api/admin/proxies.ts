@@ -196,7 +196,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       banCount: 0,
       createdAt: now,
       updatedAt: now,
-    } as any);
+    });
 
     // 审计日志（脱敏：不记录完整代理地址）
     try {
@@ -207,7 +207,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         detail: JSON.stringify({ target: id, address: "***", poolId: poolId || null }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[POST /api/admin/proxies] 审计日志写入失败:", auditErr);
     }

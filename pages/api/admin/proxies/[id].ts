@@ -168,7 +168,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         detail: JSON.stringify({ target: id, changes: updateData }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[PUT /api/admin/proxies/:id] 审计日志写入失败:", auditErr);
     }
@@ -229,7 +229,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
         detail: JSON.stringify({ target: id }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[DELETE /api/admin/proxies/:id] 审计日志写入失败:", auditErr);
     }

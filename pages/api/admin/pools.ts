@@ -102,7 +102,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       enabled: true,
       createdAt: now,
       updatedAt: now,
-    } as any);
+    });
 
     // 审计日志
     try {
@@ -110,10 +110,10 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
         adminId: getAuditAdminId(admin),
         action: "create_proxy_pool",
-        target: JSON.stringify({ poolId: id, name: name.trim() }),
+        detail: JSON.stringify({ poolId: id, name: name.trim() }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[POST /api/admin/pools] 审计日志写入失败:", auditErr);
     }

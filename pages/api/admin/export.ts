@@ -241,7 +241,7 @@ export default async function handler(
       ip:
         (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
       createdAt: now,
-    } as any);
+    });
 
     // 返回 JSON 文件下载
     const filename = `fwp-export-${exportType}-${new Date(now * 1000).toISOString().slice(0, 10)}.json`;

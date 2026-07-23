@@ -166,7 +166,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         targetModel,
         platformId: platformId || "",
         createdAt: now,
-      } as any)
+        updatedAt: now,
+      })
       .returning();
 
     // 5. 记录审计日志
@@ -179,7 +180,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         detail: JSON.stringify({ modelId: model.id, sourceModel, targetModel }),
         ip,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       // 审计日志写入失败不影响主流程
       console.error("[POST /api/admin/models] 审计日志写入失败:", auditErr);

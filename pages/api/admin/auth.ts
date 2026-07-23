@@ -161,7 +161,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
         await db.insert(schema.auditLogs).values({
           id: crypto.randomUUID(), adminId: getAuditAdminId(admin as AuthResult), action: "logout",
           detail: JSON.stringify({ username: admin.username }), ip: clientIp, createdAt: Math.floor(Date.now() / 1000),
-        } as any);
+        });
       } catch { /* 审计日志写入失败不阻塞主流程 */ }
     }
 

@@ -58,17 +58,18 @@ async function saveTemplates(
   if (existing.length > 0) {
     await db
       .update(schema.configs)
-      .set({ value: JSON.stringify(templates), updatedAt: now } as any)
+      .set({ value: JSON.stringify(templates), updatedAt: now })
       .where(eq(schema.configs.key, CONFIG_KEY))
       .run();
   } else {
     await db
       .insert(schema.configs)
       .values({
+        id: crypto.randomUUID(),
         key: CONFIG_KEY,
         value: JSON.stringify(templates),
         updatedAt: now,
-      } as any)
+      })
       .run();
   }
 }

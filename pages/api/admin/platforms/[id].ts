@@ -186,21 +186,21 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 构建更新数据（仅包含传入的字段）
     const updateData: Record<string, unknown> = {};
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.baseUrl !== undefined) updateData.base_url = body.baseUrl;
+    if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
     if (body.enabled !== undefined)
       updateData.enabled = body.enabled ? 1 : 0;
     if (body.priority !== undefined) updateData.priority = body.priority;
     if (body.weight !== undefined) updateData.weight = body.weight;
     if (body.rpmLimit !== undefined)
-      updateData.rpm_limit = body.rpmLimit ?? null;
+      updateData.rpmLimit = body.rpmLimit ?? null;
     if (body.tpmLimit !== undefined)
-      updateData.tpm_limit = body.tpmLimit ?? null;
+      updateData.tpmLimit = body.tpmLimit ?? null;
 
     // forwardHeaders 校验并更新
     if (body.forwardHeaders !== undefined) {
       if (body.forwardHeaders === "" || body.forwardHeaders === null) {
-        updateData.forward_headers = "[]";
+        updateData.forwardHeaders = "[]";
       } else if (typeof body.forwardHeaders === "string") {
         try {
           const parsed = JSON.parse(body.forwardHeaders);
@@ -211,7 +211,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                   typeof h === "string" && h.trim().length > 0
               )
               .map((h: string) => h.trim());
-            updateData.forward_headers = JSON.stringify(validHeaders);
+            updateData.forwardHeaders = JSON.stringify(validHeaders);
           }
         } catch {
           // JSON 解析失败，保留原值
@@ -223,14 +223,14 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.apiKey === undefined || body.apiKey === null || body.apiKey === "") {
       // 不更新 apiKey
     } else {
-      updateData.api_key = body.apiKey;
+      updateData.apiKey = body.apiKey;
     }
 
     // apiKeys 在编辑时可选（不提供则保留原值）
     // 支持两种格式：字符串数组 ["key1", "key2"] 或对象数组 [{name, key}]
     if (body.apiKeys !== undefined && body.apiKeys !== null) {
       if (body.apiKeys === "") {
-        updateData.api_keys = "[]";
+        updateData.apiKeys = "[]";
       } else if (typeof body.apiKeys === "string") {
         try {
           const parsed = JSON.parse(body.apiKeys);
@@ -247,11 +247,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                 (k: unknown): k is { name: string; key: string } =>
                   typeof k === "object" &&
                   k !== null &&
-                  typeof (k as any).key === "string" &&
-                  (k as any).key.trim().length > 0 &&
-                  (k as any).key.length <= 500
+                  typeof (k as Record<string, unknown>).key === "string" &&
+                  ((k as Record<string, unknown>).key as string).trim().length > 0 &&
+                  ((k as Record<string, unknown>).key as string).length <= 500
               );
-              updateData.api_keys = JSON.stringify(validKeys);
+              updateData.apiKeys = JSON.stringify(validKeys);
             } else {
               // 旧格式：字符串数组
               const validKeys = parsed.filter(
@@ -260,7 +260,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                   k.trim().length > 0 &&
                   k.length <= 500
               );
-              updateData.api_keys = JSON.stringify(validKeys);
+              updateData.apiKeys = JSON.stringify(validKeys);
             }
           }
         } catch {
@@ -279,7 +279,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     }
 
     // 更新时间戳
-    updateData.updated_at = Math.floor(Date.now() / 1000);
+    updateData.updatedAt = Math.floor(Date.now() / 1000);
 
     await db
       .update(schema.platforms)
@@ -300,7 +300,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       ip:
         (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
       createdAt: now,
-    } as any);
+    });
 
     // 返回更新后的数据
     const updatedRows = await db
@@ -373,7 +373,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       ip:
         (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
       createdAt: now,
-    } as any);
+    });
 
     return res.status(200).json({
       success: true,

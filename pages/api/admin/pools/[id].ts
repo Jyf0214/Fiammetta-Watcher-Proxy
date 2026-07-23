@@ -136,7 +136,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         detail: JSON.stringify({ poolId: id, changes: updateData }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[PUT /api/admin/pools/:id] 审计日志写入失败:", auditErr);
     }
@@ -188,7 +188,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     // 将池内代理的 poolId 置空（不删除代理本身）
     await db
       .update(schema.proxies)
-      .set({ poolId: null, updatedAt: Math.floor(Date.now() / 1000) } as any)
+      .set({ poolId: null, updatedAt: Math.floor(Date.now() / 1000) })
       .where(eq(schema.proxies.poolId, id));
 
     // 删除代理池
@@ -204,7 +204,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
         detail: JSON.stringify({ poolId: id, name: existing.name }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[DELETE /api/admin/pools/:id] 审计日志写入失败:", auditErr);
     }

@@ -65,7 +65,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
         detail: JSON.stringify({ target: id, name: existing[0].name }),
         ip: null,
         createdAt: now(),
-      } as any);
+      });
     } catch {
       /* 审计日志失败不阻塞 */
     }
@@ -104,7 +104,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
 
     await db
       .update(schema.systemApiKeys)
-      .set({ enabled, updatedAt: now() } as any)
+      .set({ enabled, updatedAt: now() })
       .where(eq(schema.systemApiKeys.id, id));
 
     return res.status(200).json({ success: true, message: enabled ? "系统 Key 已启用" : "系统 Key 已禁用" });

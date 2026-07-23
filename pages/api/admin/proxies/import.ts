@@ -171,7 +171,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
             banCount: 0,
             cooldownEnd: null,
             updatedAt: now,
-          } as any)
+          })
           .where(eq(schema.proxies.id, existingId));
         updated++;
       } else {
@@ -186,7 +186,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
           banCount: 0,
           createdAt: now,
           updatedAt: now,
-        } as any);
+        });
         created++;
       }
     }
@@ -205,7 +205,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         }),
         ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       console.error("[POST /api/admin/proxies/import] 审计日志写入失败:", auditErr);
     }

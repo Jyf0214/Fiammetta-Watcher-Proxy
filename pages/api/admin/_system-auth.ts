@@ -52,7 +52,7 @@ export async function validateSystemApiKey(
     // 更新 last_used_at（异步，不阻塞请求）
     const now = Math.floor(Date.now() / 1000);
     db.update(schema.systemApiKeys)
-      .set({ lastUsedAt: now } as any)
+      .set({ lastUsedAt: now })
       .where(eq(schema.systemApiKeys.id, rows[0].id))
       .execute()
       .catch(() => {});

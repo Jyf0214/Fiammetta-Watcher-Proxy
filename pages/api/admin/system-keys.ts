@@ -110,7 +110,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         enabled: true,
         createdAt: currentTime,
         updatedAt: currentTime,
-      } as any)
+      })
       .returning()
       .get();
 
@@ -123,7 +123,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         detail: JSON.stringify({ target: keyId, name: name.trim() }),
         ip: null,
         createdAt: currentTime,
-      } as any);
+      });
     } catch {
       /* 审计日志失败不阻塞 */
     }

@@ -60,7 +60,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
         detail: JSON.stringify({ modelId: id, sourceModel: existing.sourceModel }),
         ip,
         createdAt: now,
-      } as any);
+      });
     } catch (auditErr) {
       // 审计日志写入失败不影响主流程
       console.error("[DELETE /api/admin/models/:id] 审计日志写入失败:", auditErr);

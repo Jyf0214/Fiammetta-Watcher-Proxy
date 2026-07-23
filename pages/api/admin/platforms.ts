@@ -243,7 +243,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         apiKey: apiKey.trim(),
         apiKeys: JSON.stringify(parsedApiKeys),
         type: platformType,
-        enabled: 1,
+        enabled: true,
         priority: priority ?? 0,
         weight: weight ?? 1,
         rpmLimit: rpmLimit ?? null,
@@ -264,7 +264,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ip:
           (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
         createdAt: now,
-      } as any);
+      });
 
       return res.status(200).json({
         success: true,

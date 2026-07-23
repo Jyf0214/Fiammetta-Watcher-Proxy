@@ -277,7 +277,7 @@ async function importPlatforms(
       failCount: 0,
       createdAt: now,
       updatedAt: now,
-    } as any)
+    })
   );
 
   try {
@@ -325,12 +325,11 @@ async function importModelMaps(
     db.insert(schema.modelMappings).values({
       id: generateId(),
       alias: m.alias as string,
-      targetModel: (m.targetModel as string) || null,
-      platformId: (m.platformId as string) || null,
-      enabled: true,
+      targetModel: (m.targetModel as string) || (m.alias as string),
+      platformId: (m.platformId as string) || undefined,
       createdAt: now,
       updatedAt: now,
-    } as any)
+    })
   );
 
   try {
@@ -381,7 +380,7 @@ async function importProxyPools(
       enabled: p.enabled !== false,
       createdAt: now,
       updatedAt: now,
-    } as any)
+    })
   );
 
   try {
@@ -436,7 +435,7 @@ async function importProxies(
       banCount: 0,
       createdAt: now,
       updatedAt: now,
-    } as any)
+    })
   );
 
   try {
@@ -492,7 +491,7 @@ async function importPlans(
       enabled: true,
       createdAt: now,
       updatedAt: now,
-    } as any)
+    })
   );
 
   try {
@@ -559,10 +558,9 @@ async function importApiKeys(
         expiresAt: k.expiresAt
           ? Math.floor(new Date(k.expiresAt as string).getTime() / 1000)
           : null,
-        enabled: true,
         createdAt: now,
         updatedAt: now,
-      } as any)
+      })
     );
 
     try {
@@ -624,10 +622,11 @@ async function importConfigs(
   if (toInsert.length > 0) {
     const stmts = toInsert.map((c) =>
       db.insert(schema.configs).values({
+        id: generateId(),
         key: c.key as string,
         value: c.value as string,
         updatedAt: c.updatedAt as number,
-      } as any)
+      })
     );
     try {
       await (db as any).batch(stmts);
@@ -642,7 +641,7 @@ async function importConfigs(
   if (toUpdate.length > 0) {
     const stmts = toUpdate.map((c) =>
       db.update(schema.configs)
-        .set({ value: c.value as string, updatedAt: c.updatedAt as number } as any)
+        .set({ value: c.value as string, updatedAt: c.updatedAt as number })
         .where(eq(schema.configs.key, c.key as string))
     );
     try {
@@ -704,7 +703,7 @@ async function importAuditLogs(
         detail: (log.detail as string) || null,
         ip: (log.ip as string) || null,
         createdAt: toUnixSeconds(log.createdAt),
-      } as any);
+      });
     });
 
     try {
@@ -746,7 +745,7 @@ async function importSystemEvents(
         message: e.message as string,
         detail: (e.detail as string) || null,
         createdAt: toUnixSeconds(e.createdAt),
-      } as any)
+      })
     );
 
     try {
@@ -825,7 +824,7 @@ async function importRequestLogs(
       userAgent: (log.userAgent as string) || null,
       errorMessage: (log.errorMessage as string) || null,
       createdAt: toUnixSeconds(log.createdAt),
-    } as any;
+    };
   };
 
   // 先尝试插入第一条，捕获错误原因

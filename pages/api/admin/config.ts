@@ -61,16 +61,17 @@ export default async function handler(
       await db
         .insert(schema.configs)
         .values({
+          id: crypto.randomUUID(),
           key: body.key,
           value: body.value,
           updatedAt: now,
-        } as any)
+        })
         .onConflictDoUpdate({
           target: schema.configs.key,
           set: {
             value: body.value,
             updatedAt: now,
-          } as any,
+          },
         });
 
       res.status(200).json({ success: true, message: "配置已更新" });

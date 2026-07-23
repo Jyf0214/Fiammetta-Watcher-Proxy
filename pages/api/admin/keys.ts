@@ -123,16 +123,16 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       quota: quota ?? null, usedTokens: 0, rpmLimit: rpmLimit ?? null,
       tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
       tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
-      status: "active", expiresAt: expiresAtTimestamp, enabled: true,
+      status: "active", expiresAt: expiresAtTimestamp,
       createdAt: currentTime, updatedAt: currentTime,
-    } as any).returning().get();
+    }).returning().get();
 
     const ip = getClientIp(req);
     await db.insert(schema.auditLogs).values({
       id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
       detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
       ip, createdAt: currentTime,
-    } as any);
+    });
 
     return res.status(200).json({ success: true, data: newKey, message: "API Key 创建成功" });
   } catch (err) {
