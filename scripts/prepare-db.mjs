@@ -3,25 +3,22 @@
  *
  * 功能：
  *   1. 读取 DATABASE_URL 环境变量，推断数据库类型
- *   2. Cloudflare Pages 构建时始终保留 provider=sqlite（D1 通过 binding 连接）
- *   3. 非 Cloudflare 环境下根据 DATABASE_URL 切换 provider
- *   4. 确保 runtime = "cloudflare" 始终存在（部署到 CF 必须）
- *   5. 安装缺失的依赖（如 @prisma/adapter-pg）
- *   6. 执行 prisma generate 生成客户端
- *   7. 非 CF 环境下 MySQL / PostgreSQL 自动执行 prisma db push 同步 schema
+ *   2. 修改 prisma/schema.prisma 的 datasource provider
+ *   3. 确保 runtime = "cloudflare" 始终存在（部署到 CF 必须）
+ *   4. 安装缺失的依赖（如 @prisma/adapter-pg）
+ *   5. 执行 prisma generate 生成客户端
+ *   6. MySQL / PostgreSQL 时自动执行 prisma db push 同步 schema
  *
  * 注意：
  *   - runtime = "cloudflare" 是 Cloudflare 部署必需，与数据库类型无关
- *   - Cloudflare Pages 始终通过 D1 binding 连接数据库，不使用 DATABASE_URL 连接
- *   - Prisma 7 的 provider 是编译时常量，构建时切换 provider 会导致运行时 adapter 不匹配
  *   - D1 初始化由 GitHub Actions 工作流中的 Python 脚本处理，不在此处重复执行
  *
  * 使用方式：
  *   node scripts/prepare-db.mjs
  *
  * 环境变量：
- *   DATABASE_URL=mysql://...      → 非 CF 环境: provider=mysql; CF 环境: 保持 sqlite
- *   DATABASE_URL=postgresql://... → 非 CF 环境: provider=postgresql; CF 环境: 保持 sqlite
+ *   DATABASE_URL=mysql://...      → provider=mysql
+ *   DATABASE_URL=postgresql://... → provider=postgresql
  *   无 DATABASE_URL 或 sqlite     → provider=sqlite
  */
 
@@ -39,29 +36,19 @@ const SCHEMA_PATH = resolve(ROOT, "prisma/schema.prisma");
 // ============================================================
 
 const url = process.env.DATABASE_URL || "";
-// Cloudflare Pages 构建时跳过 provider 切换 —— D1 通过 binding 连接，
-// 不依赖 DATABASE_URL，且 Prisma 7 的 provider 是编译时常量，
-// 构建时切换会导致运行时 adapter 不匹配。
-const isCfBuild = process.env.CF_BUILD === "true";
 
 let dbType = "sqlite";
 let provider = "sqlite";
 
-if (!isCfBuild) {
-  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) {
-    dbType = "mysql";
-    provider = "mysql";
-  } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
-    dbType = "postgresql";
-    provider = "postgresql";
-  }
+if (url.startsWith("mysql://") || url.startsWith("mysqls://")) {
+  dbType = "mysql";
+  provider = "mysql";
+} else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+  dbType = "postgresql";
+  provider = "postgresql";
 }
 
-if (isCfBuild) {
-  console.log("🔍 Cloudflare 构建模式 — 跳过 provider 切换，始终使用 sqlite（D1）");
-} else {
-  console.log(`🔍 检测到数据库类型: ${dbType}`);
-}
+console.log(`🔍 检测到数据库类型: ${dbType}`);
 
 // ============================================================
 // 2. 修改 schema.prisma（仅 datasource provider）
@@ -149,7 +136,7 @@ console.log("✅ prisma generate 完成");
 // 5. 数据库初始化（MySQL / PostgreSQL 自动同步 schema）
 // ============================================================
 
-if (dbType !== "sqlite" && !isCfBuild) {
+if (dbType !== "sqlite") {
   console.log("⚙️  执行 prisma db push（同步 schema 到数据库）...");
   execSync("npx prisma db push", {
     cwd: ROOT,
