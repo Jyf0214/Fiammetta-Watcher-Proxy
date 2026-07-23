@@ -39,7 +39,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@libsql/client": "^0.17.4",
     "@opennextjs/cloudflare": "^1.9.2",
+    "@prisma/adapter-libsql": "^7.9.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
