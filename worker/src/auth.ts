@@ -6,9 +6,7 @@
  * 同时处理 Key 用量重置周期检查。
  */
 
-import { eq, and, gte, sql } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 import {
   checkAndResetApiKey,
   getPeriodStart,
@@ -58,30 +56,30 @@ export async function validateApiKey(
     };
   }
 
-  const orm = await createDb(db);
+  const prisma = createPrismaClient(db);
 
+  try {
   // 查询 API Key（D1 无 plans 表，所有限额字段在 api_keys 中）
-  const rows = await orm
-    .select({
-      id: schema.apiKeys.id,
-      key: schema.apiKeys.key,
-      name: schema.apiKeys.name,
-      quota: schema.apiKeys.quota,
-      usedTokens: schema.apiKeys.usedTokens,
-      rpmLimit: schema.apiKeys.rpmLimit,
-      tpmLimit: schema.apiKeys.tpmLimit,
-      callLimit: schema.apiKeys.callLimit,
-      callUsed: schema.apiKeys.callUsed,
-      resetPeriod: schema.apiKeys.resetPeriod,
-      status: schema.apiKeys.status,
-      expiresAt: schema.apiKeys.expiresAt,
-      updatedAt: schema.apiKeys.updatedAt,
-    })
-    .from(schema.apiKeys)
-    .where(eq(schema.apiKeys.key, apiKeyStr))
-    .limit(1);
+  const apiKey = await prisma.apiKeys.findFirst({
+    where: { key: apiKeyStr },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      quota: true,
+      usedTokens: true,
+      rpmLimit: true,
+      tpmLimit: true,
+      callLimit: true,
+      callUsed: true,
+      resetPeriod: true,
+      status: true,
+      expiresAt: true,
+      updatedAt: true,
+    },
+  });
 
-  if (rows.length === 0 || rows[0].status !== "active") {
+  if (!apiKey || apiKey.status !== "active") {
     return {
       error: Response.json(
         { error: { message: "无效的 API Key", type: "invalid_request_error" } },
@@ -89,8 +87,6 @@ export async function validateApiKey(
       ),
     };
   }
-
-  const apiKey = rows[0];
 
   // 检查过期时间
   const nowSec = Math.floor(Date.now() / 1000);
@@ -112,17 +108,13 @@ export async function validateApiKey(
     const resetPeriod = apiKey.resetPeriod ?? "never";
     const periodStart = getPeriodStart(resetPeriod);
 
-    const callCountResult = await orm
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.requestLogs)
-      .where(
-        and(
-          eq(schema.requestLogs.keyId, apiKey.id),
-          gte(schema.requestLogs.createdAt, periodStart)
-        )
-      );
+    const callCount = await prisma.requestLogs.count({
+      where: {
+        keyId: apiKey.id,
+        createdAt: { gte: periodStart },
+      },
+    });
 
-    const callCount = callCountResult[0]?.count ?? 0;
     if (callCount >= effectiveCallLimit) {
       return {
         error: Response.json(
@@ -134,5 +126,9 @@ export async function validateApiKey(
   }
 
   return { apiKey };
+
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 

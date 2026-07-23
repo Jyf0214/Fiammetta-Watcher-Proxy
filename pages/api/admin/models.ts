@@ -6,9 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq, desc } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 
@@ -32,38 +30,31 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   try {
     const db = await createDb();
 
-    const models = await db
-      .select({
-        id: schema.modelMappings.id,
-        sourceModel: schema.modelMappings.alias,
-        targetModel: schema.modelMappings.targetModel,
-        platformId: schema.modelMappings.platformId,
-        createdAt: schema.modelMappings.createdAt,
-        // 关联平台信息
-        platform: {
-          id: schema.platforms.id,
-          name: schema.platforms.name,
-          baseUrl: schema.platforms.baseUrl,
-          type: schema.platforms.type,
-          enabled: schema.platforms.enabled,
-          priority: schema.platforms.priority,
-          weight: schema.platforms.weight,
-          status: schema.platforms.status,
-          failCount: schema.platforms.failCount,
-          lastFailAt: schema.platforms.lastFailAt,
-          cooldownEnd: schema.platforms.cooldownEnd,
-          createdAt: schema.platforms.createdAt,
-          updatedAt: schema.platforms.updatedAt,
+    const [models, platforms] = await Promise.all([
+      db.modelMappings.findMany({ orderBy: { createdAt: "desc" } }),
+      db.platforms.findMany({
+        select: {
+          id: true, name: true, baseUrl: true, type: true,
+          enabled: true, priority: true, weight: true,
+          status: true, failCount: true, lastFailAt: true,
+          cooldownEnd: true, createdAt: true, updatedAt: true,
         },
-      })
-      .from(schema.modelMappings)
-      .leftJoin(
-        schema.platforms,
-        eq(schema.modelMappings.platformId, schema.platforms.id),
-      )
-      .orderBy(desc(schema.modelMappings.createdAt));
+      }),
+    ]);
 
-    return res.status(200).json({ success: true, data: models });
+    const platformMap = new Map(platforms.map((p) => [p.id, p]));
+
+    // 转换为前端期望的格式
+    const formattedModels = models.map((m) => ({
+      id: m.id,
+      sourceModel: m.alias,
+      targetModel: m.targetModel,
+      platformId: m.platformId,
+      createdAt: m.createdAt,
+      platform: m.platformId ? platformMap.get(m.platformId) ?? null : null,
+    }));
+
+    return res.status(200).json({ success: true, data: formattedModels });
   } catch (err) {
     console.error("[GET /api/admin/models] 获取模型映射失败:", err);
     return res.status(500).json({ success: false, error: "获取模型映射失败", detail: err instanceof Error ? err.message : String(err) });
@@ -114,11 +105,10 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   if (platformId) {
     try {
       const db = await createDb();
-      const [platform] = await db
-        .select({ id: schema.platforms.id })
-        .from(schema.platforms)
-        .where(eq(schema.platforms.id, platformId))
-        .limit(1);
+      const platform = await db.platforms.findFirst({
+        where: { id: platformId },
+        select: { id: true },
+      });
 
       if (!platform) {
         return res.status(400).json({
@@ -158,28 +148,29 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const now = Math.floor(Date.now() / 1000);
     const id = crypto.randomUUID();
 
-    const [model] = await db
-      .insert(schema.modelMappings)
-      .values({
+    const model = await db.modelMappings.create({
+      data: {
         id,
         alias: sourceModel,
         targetModel,
         platformId: platformId || "",
         createdAt: now,
         updatedAt: now,
-      })
-      .returning();
+      },
+    });
 
     // 5. 记录审计日志
     try {
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
-      await db.insert(schema.auditLogs).values({
-        id: crypto.randomUUID(),
-        adminId: getAuditAdminId(admin),
-        action: "create_model_map",
-        detail: JSON.stringify({ modelId: model.id, sourceModel, targetModel }),
-        ip,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: getAuditAdminId(admin),
+          action: "create_model_map",
+          detail: JSON.stringify({ modelId: model.id, sourceModel, targetModel }),
+          ip,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       // 审计日志写入失败不影响主流程

@@ -7,9 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
@@ -34,17 +32,11 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
 
   try {
     const db = await createDb();
-    const rows = await db
-      .select()
-      .from(schema.platforms)
-      .where(eq(schema.platforms.id, id))
-      .limit(1);
+    const platform = await db.platforms.findFirst({ where: { id } });
 
-    if (rows.length === 0) {
+    if (!platform) {
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
-
-    const platform = rows[0];
 
     // 解析 JSON 字段为结构化数据，方便前端编辑
     const apiKeys = safeJsonParse<string[]>(platform.apiKeys, []);
@@ -172,16 +164,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const db = await createDb();
 
     // 获取现有平台数据，用于编辑时保留未修改的字段
-    const existingRows = await db
-      .select()
-      .from(schema.platforms)
-      .where(eq(schema.platforms.id, id))
-      .limit(1);
+    const existing = await db.platforms.findFirst({ where: { id } });
 
-    if (existingRows.length === 0) {
+    if (!existing) {
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
-    const existing = existingRows[0];
 
     // 构建更新数据（仅包含传入的字段）
     const updateData: Record<string, unknown> = {};
@@ -189,7 +176,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
     if (body.enabled !== undefined)
-      updateData.enabled = body.enabled ? 1 : 0;
+      updateData.enabled = body.enabled ? true : false;
     if (body.priority !== undefined) updateData.priority = body.priority;
     if (body.weight !== undefined) updateData.weight = body.weight;
     if (body.rpmLimit !== undefined)
@@ -281,10 +268,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 更新时间戳
     updateData.updatedAt = Math.floor(Date.now() / 1000);
 
-    await db
-      .update(schema.platforms)
-      .set(updateData)
-      .where(eq(schema.platforms.id, id));
+    await db.platforms.update({ where: { id }, data: updateData });
 
     // 审计日志（脱敏处理）
     const sanitized = { ...body };
@@ -292,26 +276,24 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       sanitized.apiKey = sanitized.apiKey.substring(0, 6) + "***";
 
     const now = Math.floor(Date.now() / 1000);
-    await db.insert(schema.auditLogs).values({
-      id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: getAuditAdminId(admin),
-      action: "update_platform",
-      detail: JSON.stringify({ platformId: id, changes: sanitized }),
-      ip:
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-      createdAt: now,
+    await db.auditLogs.create({
+      data: {
+        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        adminId: getAuditAdminId(admin),
+        action: "update_platform",
+        detail: JSON.stringify({ platformId: id, changes: sanitized }),
+        ip:
+          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        createdAt: now,
+      },
     });
 
     // 返回更新后的数据
-    const updatedRows = await db
-      .select()
-      .from(schema.platforms)
-      .where(eq(schema.platforms.id, id))
-      .limit(1);
+    const updatedPlatform = await db.platforms.findFirst({ where: { id } });
 
     return res.status(200).json({
       success: true,
-      data: updatedRows[0],
+      data: updatedPlatform,
       message: "平台更新成功",
     });
   } catch (err) {
@@ -337,10 +319,9 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 检查是否存在关联的 model_mappings 记录
-    const relatedMappings = await db
-      .select()
-      .from(schema.modelMappings)
-      .where(eq(schema.modelMappings.platformId, id));
+    const relatedMappings = await db.modelMappings.findMany({
+      where: { platformId: id },
+    });
 
     if (relatedMappings.length > 0) {
       return res.status(400).json({
@@ -351,28 +332,26 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 
     // 统计并清理关联数据
     // 删除关联的请求日志
-    await db
-      .delete(schema.requestLogs)
-      .where(eq(schema.requestLogs.platformId, id));
+    await db.requestLogs.deleteMany({ where: { platformId: id } });
 
     // 删除关联的平台模型
-    await db
-      .delete(schema.platformModels)
-      .where(eq(schema.platformModels.platformId, id));
+    await db.platformModels.deleteMany({ where: { platformId: id } });
 
     // 删除平台本身
-    await db.delete(schema.platforms).where(eq(schema.platforms.id, id));
+    await db.platforms.delete({ where: { id } });
 
     // 审计日志
     const now = Math.floor(Date.now() / 1000);
-    await db.insert(schema.auditLogs).values({
-      id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      adminId: getAuditAdminId(admin),
-      action: "delete_platform",
-      detail: JSON.stringify({ platformId: id }),
-      ip:
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-      createdAt: now,
+    await db.auditLogs.create({
+      data: {
+        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        adminId: getAuditAdminId(admin),
+        action: "delete_platform",
+        detail: JSON.stringify({ platformId: id }),
+        ip:
+          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        createdAt: now,
+      },
     });
 
     return res.status(200).json({

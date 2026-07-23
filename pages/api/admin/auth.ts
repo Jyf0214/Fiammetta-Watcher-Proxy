@@ -11,8 +11,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAuditAdminId, type AuthResult } from "./_auth";
 
 const COOKIE_NAME = "admin_token";
@@ -158,9 +157,15 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
     if (admin) {
       try {
         const db = await createDb();
-        await db.insert(schema.auditLogs).values({
-          id: crypto.randomUUID(), adminId: getAuditAdminId(admin as AuthResult), action: "logout",
-          detail: JSON.stringify({ username: admin.username }), ip: clientIp, createdAt: Math.floor(Date.now() / 1000),
+        await db.auditLogs.create({
+          data: {
+            id: crypto.randomUUID(),
+            adminId: getAuditAdminId(admin as AuthResult),
+            action: "logout",
+            detail: JSON.stringify({ username: admin.username }),
+            ip: clientIp,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
         });
       } catch { /* 审计日志写入失败不阻塞主流程 */ }
     }

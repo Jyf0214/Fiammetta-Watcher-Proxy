@@ -8,9 +8,7 @@
  * - 加权轮询选择平台
  */
 
-import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 import { parseApiKeys } from "./platform-keys";
 import { selectPlatform, cleanupStaleBreakers } from "./load-balancer";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
@@ -94,25 +92,25 @@ export async function refreshCache(db: D1Database): Promise<void> {
  * 执行实际的缓存刷新
  */
 async function doRefresh(db: D1Database): Promise<void> {
-  const orm = await createDb(db);
+  const prisma = createPrismaClient(db);
 
+  try {
   const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
     await Promise.all([
       // 查询启用的平台
-      orm
-        .select()
-        .from(schema.platforms)
-        .where(eq(schema.platforms.enabled, true)),
+      prisma.platforms.findMany({
+        where: { enabled: true },
+      }),
       // 查询所有模型映射
-      orm.select().from(schema.modelMappings),
+      prisma.modelMappings.findMany(),
       // 查询平台模型关联（仅启用的模型）
-      orm
-        .select({
-          platformId: schema.platformModels.platformId,
-          modelId: schema.platformModels.modelId,
-        })
-        .from(schema.platformModels)
-        .where(eq(schema.platformModels.enabled, true)),
+      prisma.platformModels.findMany({
+        where: { enabled: true },
+        select: {
+          platformId: true,
+          modelId: true,
+        },
+      }),
       // 查询自动模型 ID
       getConfig(db, "system:auto_model_id"),
     ]);
@@ -163,6 +161,10 @@ async function doRefresh(db: D1Database): Promise<void> {
 
   // 清理已删除平台的断路器条目
   cleanupStaleBreakers(platformRows.map((p) => p.id));
+
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**

@@ -8,9 +8,7 @@
  */
 
 import { SignJWT, jwtVerify } from "jose";
-import { eq } from "drizzle-orm";
-import { createDb, type Database } from "./db";
-import * as schema from "./schema";
+import { createDb } from "./prisma";
 
 // ==================== 常量 ====================
 
@@ -206,12 +204,11 @@ export async function getAdminFromRequest(
 
   // 验证管理员是否仍然存在于数据库中
   try {
-    const db = await createDb(env.DB);
-    const [admin] = await db
-      .select({ id: schema.admins.id })
-      .from(schema.admins)
-      .where(eq(schema.admins.id, payload.adminId))
-      .limit(1);
+    const prisma = await createDb();
+    const admin = await prisma.admins.findFirst({
+      where: { id: payload.adminId },
+      select: { id: true },
+    });
 
     if (!admin) return null;
   } catch {

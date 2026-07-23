@@ -10,9 +10,7 @@
  * - 使用事务替换每个平台的模型列表
  */
 
-import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 import { parseApiKeys, getNextKey } from "./platform-keys";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -120,18 +118,19 @@ function detectModelType(modelId: string): string {
  * 拉取所有平台的模型并更新数据库
  */
 export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
-  const orm = await createDb(db);
+  const prisma = createPrismaClient(db);
 
-  const platforms = await orm
-    .select({
-      id: schema.platforms.id,
-      name: schema.platforms.name,
-      baseUrl: schema.platforms.baseUrl,
-      apiKey: schema.platforms.apiKey,
-      apiKeys: schema.platforms.apiKeys,
-    })
-    .from(schema.platforms)
-    .where(eq(schema.platforms.enabled, true));
+  try {
+  const platforms = await prisma.platforms.findMany({
+    where: { enabled: true },
+    select: {
+      id: true,
+      name: true,
+      baseUrl: true,
+      apiKey: true,
+      apiKeys: true,
+    },
+  });
 
   if (platforms.length === 0) return;
 
@@ -152,9 +151,9 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
       const now = Math.floor(Date.now() / 1000);
 
       // 删除旧模型
-      await orm
-        .delete(schema.platformModels)
-        .where(eq(schema.platformModels.platformId, platform.id));
+      await prisma.platformModels.deleteMany({
+        where: { platformId: platform.id },
+      });
 
       // 批量插入新模型
       if (models.length > 0) {
@@ -171,7 +170,9 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
 
         // 分批插入（D1 限制每次最多 100 条）
         for (let i = 0; i < values.length; i += 100) {
-          await orm.insert(schema.platformModels).values(values.slice(i, i + 100));
+          await prisma.platformModels.createMany({
+            data: values.slice(i, i + 100),
+          });
         }
       }
 
@@ -190,4 +191,8 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
   console.log(
     `[model-fetcher] 完成: ${successCount} 个平台成功, ${failedCount} 个失败, 共发现 ${totalModels} 个模型`
   );
+
+  } finally {
+    await prisma.$disconnect();
+  }
 }

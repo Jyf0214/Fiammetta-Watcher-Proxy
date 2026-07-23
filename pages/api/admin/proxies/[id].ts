@@ -6,9 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
@@ -76,11 +74,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const db = await createDb();
 
     // 检查代理是否存在
-    const [existing] = await db
-      .select({ id: schema.proxies.id })
-      .from(schema.proxies)
-      .where(eq(schema.proxies.id, id))
-      .limit(1);
+    const existing = await db.proxies.findFirst({
+      where: { id },
+      select: { id: true },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "代理不存在" });
@@ -128,11 +125,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       if (body.poolId === null || body.poolId === "") {
         updateData.poolId = null;
       } else if (typeof body.poolId === "string") {
-        const [pool] = await db
-          .select({ id: schema.proxyPools.id })
-          .from(schema.proxyPools)
-          .where(eq(schema.proxyPools.id, body.poolId))
-          .limit(1);
+        const pool = await db.proxyPools.findFirst({
+          where: { id: body.poolId as string },
+          select: { id: true },
+        });
         if (!pool) {
           return res.status(400).json({ success: false, error: "关联代理池不存在" });
         }
@@ -153,32 +149,32 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     updateData.updatedAt = Math.floor(Date.now() / 1000);
 
     // 执行更新
-    await db
-      .update(schema.proxies)
-      .set(updateData)
-      .where(eq(schema.proxies.id, id));
+    await db.proxies.update({
+      where: { id },
+      data: updateData,
+    });
 
     // 审计日志
     try {
       const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "update_proxy",
-        detail: JSON.stringify({ target: id, changes: updateData }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "update_proxy",
+          detail: JSON.stringify({ target: id, changes: updateData }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       console.error("[PUT /api/admin/proxies/:id] 审计日志写入失败:", auditErr);
     }
 
     // 返回更新后的数据
-    const [proxy] = await db
-      .select()
-      .from(schema.proxies)
-      .where(eq(schema.proxies.id, id))
-      .limit(1);
+    const proxy = await db.proxies.findFirst({
+      where: { id },
+    });
 
     return res.status(200).json({
       success: true,
@@ -206,29 +202,30 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 检查代理是否存在
-    const [existing] = await db
-      .select({ id: schema.proxies.id })
-      .from(schema.proxies)
-      .where(eq(schema.proxies.id, id))
-      .limit(1);
+    const existing = await db.proxies.findFirst({
+      where: { id },
+      select: { id: true },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "代理不存在" });
     }
 
     // 删除代理
-    await db.delete(schema.proxies).where(eq(schema.proxies.id, id));
+    await db.proxies.delete({ where: { id } });
 
     // 审计日志
     try {
       const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "delete_proxy",
-        detail: JSON.stringify({ target: id }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "delete_proxy",
+          detail: JSON.stringify({ target: id }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       console.error("[DELETE /api/admin/proxies/:id] 审计日志写入失败:", auditErr);

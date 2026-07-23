@@ -6,10 +6,27 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import { requestLogs, platforms } from "@/lib/schema";
-import { eq, and, gte, desc, sql, count, sum } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
+
+/** 聚合统计结果类型 */
+interface AggRow {
+  platformId: string | null;
+  totalRequests: number;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  avgTtft: number;
+  avgDuration: number;
+  firstRequestAt: number | null;
+  lastRequestAt: number | null;
+}
+
+/** 错误统计结果类型 */
+interface ErrorRow {
+  platformId: string | null;
+  errorCount: number;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -47,67 +64,67 @@ export default async function handler(
     }
 
     // 构建时间过滤条件
-    const timeCondition = startTimestamp !== undefined
-      ? gte(requestLogs.createdAt, startTimestamp)
-      : undefined;
+    const timeConditions: string[] = [];
+    const timeParams: unknown[] = [];
+    if (startTimestamp !== undefined) {
+      timeConditions.push("created_at >= ?");
+      timeParams.push(startTimestamp);
+    }
 
     // 获取所有平台
-    const allPlatforms = await orm
-      .select({
-        id: platforms.id,
-        name: platforms.name,
-        type: platforms.type,
-        enabled: platforms.enabled,
-        status: platforms.status,
-        baseUrl: platforms.baseUrl,
-        createdAt: platforms.createdAt,
-      })
-      .from(platforms)
-      .orderBy(desc(platforms.createdAt));
+    const allPlatforms = await orm.platforms.findMany({
+      orderBy: { createdAt: "desc" },
+    });
 
     // 按 platformId 分组聚合统计
-    const stats = await orm
-      .select({
-        platformId: requestLogs.platformId,
-        totalRequests: count(),
-        totalTokens: sum(requestLogs.tokens),
-        promptTokens: sum(requestLogs.promptTokens),
-        completionTokens: sum(requestLogs.completionTokens),
-        avgTtft: sql<number>`round(coalesce(avg(${requestLogs.ttft}), 0))`,
-        avgDuration: sql<number>`round(coalesce(avg(${requestLogs.latency}), 0))`,
-        firstRequestAt: sql<number | null>`min(${requestLogs.createdAt})`,
-        lastRequestAt: sql<number | null>`max(${requestLogs.createdAt})`,
-      })
-      .from(requestLogs)
-      .where(timeCondition)
-      .groupBy(requestLogs.platformId);
+    const timeWhereClause = timeConditions.length > 0 ? `WHERE ${timeConditions.join(" AND ")}` : "";
+    const statsSql = `
+      SELECT
+        platform_id as platformId,
+        COUNT(*) as totalRequests,
+        COALESCE(SUM(tokens), 0) as totalTokens,
+        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
+        COALESCE(SUM(completion_tokens), 0) as completionTokens,
+        ROUND(COALESCE(AVG(ttft), 0)) as avgTtft,
+        ROUND(COALESCE(AVG(latency), 0)) as avgDuration,
+        MIN(created_at) as firstRequestAt,
+        MAX(created_at) as lastRequestAt
+      FROM request_logs
+      ${timeWhereClause}
+      GROUP BY platform_id
+    `;
+    const stats = await orm.$queryRawUnsafe<AggRow[]>(statsSql, ...timeParams);
 
     // 按 platformId 分组获取错误请求数
-    const errorStats = await orm
-      .select({
-        platformId: requestLogs.platformId,
-        errorCount: count(),
-      })
-      .from(requestLogs)
-      .where(timeCondition ? and(timeCondition, eq(requestLogs.isError, true)) : eq(requestLogs.isError, true))
-      .groupBy(requestLogs.platformId);
+    const errorWhereClause = timeConditions.length > 0
+      ? `WHERE ${timeConditions.join(" AND ")} AND is_error = 1`
+      : "WHERE is_error = 1";
+    const errorStatsSql = `
+      SELECT
+        platform_id as platformId,
+        COUNT(*) as errorCount
+      FROM request_logs
+      ${errorWhereClause}
+      GROUP BY platform_id
+    `;
+    const errorStats = await orm.$queryRawUnsafe<ErrorRow[]>(errorStatsSql, ...timeParams);
 
     // 构建错误计数 Map
     const errorCountMap = new Map<string, number>();
     for (const e of errorStats) {
       const key = e.platformId || "unknown";
-      errorCountMap.set(key, e.errorCount);
+      errorCountMap.set(key, Number(e.errorCount));
     }
 
     // 构建统计 Map
-    const statsMap = new Map<string, (typeof stats)[number]>();
+    const statsMap = new Map<string, AggRow>();
     for (const s of stats) {
       const statKey = s.platformId || "unknown";
       statsMap.set(statKey, s);
     }
 
     // 计算速率指标的辅助函数
-    function computeRates(s: (typeof stats)[number]) {
+    function computeRates(s: AggRow) {
       const totalTokens = Number(s.totalTokens || 0);
       const totalRequests = Number(s.totalRequests || 0);
 
@@ -169,7 +186,7 @@ export default async function handler(
 
     // 添加 "未知平台" 条目（platformId 为 null 的请求）
     const unknownStats = statsMap.get("unknown");
-    if (unknownStats && unknownStats.totalRequests > 0) {
+    if (unknownStats && Number(unknownStats.totalRequests) > 0) {
       const rates = computeRates(unknownStats);
       rates.errorRequests = errorCountMap.get("unknown") || 0;
       result.push({

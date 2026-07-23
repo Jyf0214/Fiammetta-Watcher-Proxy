@@ -8,8 +8,7 @@
  * - 权重轮询选择平台
  */
 
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 import type { PlatformConfig, CircuitBreakerState } from "@/lib/types";
 
 // ==================== 熔断器状态机 ====================
@@ -187,16 +186,16 @@ async function updatePlatformStatus(
  * 启动时从数据库同步熔断器状态
  */
 export async function syncCircuitBreakersFromDatabase(db: D1Database): Promise<void> {
+  const prisma = createPrismaClient(db);
   try {
-    const orm = await createDb(db);
-    const platforms = await orm
-      .select({
-        id: schema.platforms.id,
-        status: schema.platforms.status,
-        failCount: schema.platforms.failCount,
-        cooldownEnd: schema.platforms.cooldownEnd,
-      })
-      .from(schema.platforms);
+    const platforms = await prisma.platforms.findMany({
+      select: {
+        id: true,
+        status: true,
+        failCount: true,
+        cooldownEnd: true,
+      },
+    });
 
     const now = Date.now();
     let syncedCount = 0;
@@ -236,6 +235,8 @@ export async function syncCircuitBreakersFromDatabase(db: D1Database): Promise<v
       "[circuit-breaker] 从数据库同步状态失败:",
       err instanceof Error ? err.message : String(err)
     );
+  } finally {
+    await prisma.$disconnect();
   }
 }
 

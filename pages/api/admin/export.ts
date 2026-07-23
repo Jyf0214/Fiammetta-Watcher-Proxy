@@ -13,9 +13,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { desc } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 /** 导出类型 */
@@ -54,9 +52,7 @@ export default async function handler(
     // ==================== 系统级导出 ====================
     if (exportType === "system" || exportType === "all") {
       // 平台配置（保留 apiKey 明文，用于跨环境迁移）
-      const platforms = await db
-        .select()
-        .from(schema.platforms);
+      const platforms = await db.platforms.findMany();
 
       exportData.platforms = platforms.map((p) => ({
         id: p.id,
@@ -75,9 +71,7 @@ export default async function handler(
       }));
 
       // 模型映射
-      const modelMaps = await db
-        .select()
-        .from(schema.modelMappings);
+      const modelMaps = await db.modelMappings.findMany();
 
       exportData.modelMaps = modelMaps.map((m) => ({
         alias: m.alias,
@@ -86,9 +80,7 @@ export default async function handler(
       }));
 
       // 代理
-      const proxies = await db
-        .select()
-        .from(schema.proxies);
+      const proxies = await db.proxies.findMany();
 
       exportData.proxies = proxies.map((p) => ({
         id: p.id,
@@ -99,9 +91,7 @@ export default async function handler(
       }));
 
       // 代理池
-      const proxyPools = await db
-        .select()
-        .from(schema.proxyPools);
+      const proxyPools = await db.proxyPools.findMany();
 
       exportData.proxyPools = proxyPools.map((p) => ({
         id: p.id,
@@ -110,9 +100,7 @@ export default async function handler(
       }));
 
       // 套餐模板
-      const plans = await db
-        .select()
-        .from(schema.plans);
+      const plans = await db.plans.findMany();
 
       exportData.plans = plans.map((p) => ({
         name: p.name,
@@ -124,9 +112,7 @@ export default async function handler(
       }));
 
       // 系统配置（全部导出）
-      const configs = await db
-        .select()
-        .from(schema.configs);
+      const configs = await db.configs.findMany();
 
       exportData.configs = configs.map((c) => ({
         key: c.key,
@@ -137,9 +123,7 @@ export default async function handler(
     // ==================== 数据级导出 ====================
     if (exportType === "data" || exportType === "all") {
       // API Keys（保留明文，用于跨环境迁移）
-      const apiKeysData = await db
-        .select()
-        .from(schema.apiKeys);
+      const apiKeysData = await db.apiKeys.findMany();
 
       exportData.apiKeys = apiKeysData.map((k) => ({
         id: k.id,
@@ -161,11 +145,10 @@ export default async function handler(
 
       // 请求日志（最近 30 天，最多 10000 条）
       const thirtyDaysAgo = now - 30 * 24 * 60 * 60;
-      const requestLogsData = await db
-        .select()
-        .from(schema.requestLogs)
-        .orderBy(desc(schema.requestLogs.createdAt))
-        .limit(10000);
+      const requestLogsData = await db.requestLogs.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 10000,
+      });
 
       exportData.requestLogs = requestLogsData
         .filter((r) => r.createdAt >= thirtyDaysAgo)
@@ -190,20 +173,18 @@ export default async function handler(
         }));
 
       // 每日统计（最近 1000 条）
-      const dailyStatsData = await db
-        .select()
-        .from(schema.dailyStats)
-        .orderBy(desc(schema.dailyStats.date))
-        .limit(1000);
+      const dailyStatsData = await db.dailyStats.findMany({
+        orderBy: { date: "desc" },
+        take: 1000,
+      });
 
       exportData.dailyStats = dailyStatsData;
 
       // 审计日志（最近 30 天，最多 5000 条）
-      const auditLogsData = await db
-        .select()
-        .from(schema.auditLogs)
-        .orderBy(desc(schema.auditLogs.createdAt))
-        .limit(5000);
+      const auditLogsData = await db.auditLogs.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 5000,
+      });
 
       exportData.auditLogs = auditLogsData
         .filter((l) => l.createdAt >= thirtyDaysAgo)
@@ -216,11 +197,10 @@ export default async function handler(
         }));
 
       // 系统事件（最近 30 天，最多 2000 条）
-      const systemEventsData = await db
-        .select()
-        .from(schema.systemEvents)
-        .orderBy(desc(schema.systemEvents.createdAt))
-        .limit(2000);
+      const systemEventsData = await db.systemEvents.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 2000,
+      });
 
       exportData.systemEvents = systemEventsData
         .filter((e) => e.createdAt >= thirtyDaysAgo)
@@ -233,14 +213,16 @@ export default async function handler(
     }
 
     // 审计日志：记录导出操作
-    await db.insert(schema.auditLogs).values({
-      id: crypto.randomUUID(),
-      adminId: getAuditAdminId(admin),
-      action: "export_data",
-      detail: JSON.stringify({ exportType }),
-      ip:
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-      createdAt: now,
+    await db.auditLogs.create({
+      data: {
+        id: crypto.randomUUID(),
+        adminId: getAuditAdminId(admin),
+        action: "export_data",
+        detail: JSON.stringify({ exportType }),
+        ip:
+          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        createdAt: now,
+      },
     });
 
     // 返回 JSON 文件下载

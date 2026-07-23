@@ -9,9 +9,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 function maskKey(key: string): string {
@@ -51,7 +49,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const db = await createDb();
-    const keys = await db.select().from(schema.apiKeys).orderBy(desc(schema.apiKeys.createdAt));
+    const keys = await db.apiKeys.findMany({ orderBy: { createdAt: "desc" } });
     const maskedKeys = keys.map((k) => ({ ...k, key: maskKey(k.key) }));
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
@@ -98,7 +96,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     if (planId !== undefined && planId !== null) {
       const db = await createDb();
-      const planExists = await db.select({ id: schema.plans.id }).from(schema.plans).where(eq(schema.plans.id, planId)).get();
+      const planExists = await db.plans.findFirst({ where: { id: planId } });
       if (!planExists) {
         return res.status(400).json({ success: false, error: { message: "指定的 planId 对应的套餐不存在", type: "invalid_request_error" } });
       }
@@ -118,20 +116,24 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const keyValue = generateApiKey();
     const currentTime = now();
 
-    const newKey = await db.insert(schema.apiKeys).values({
-      id: keyId, key: keyValue, name: name.trim(), planId: planId ?? null,
-      quota: quota ?? null, usedTokens: 0, rpmLimit: rpmLimit ?? null,
-      tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
-      tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
-      status: "active", expiresAt: expiresAtTimestamp,
-      createdAt: currentTime, updatedAt: currentTime,
-    }).returning().get();
+    const newKey = await db.apiKeys.create({
+      data: {
+        id: keyId, key: keyValue, name: name.trim(), planId: planId ?? null,
+        quota: quota ?? null, usedTokens: 0, rpmLimit: rpmLimit ?? null,
+        tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
+        tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
+        status: "active", expiresAt: expiresAtTimestamp,
+        createdAt: currentTime, updatedAt: currentTime,
+      },
+    });
 
     const ip = getClientIp(req);
-    await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
-      detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
-      ip, createdAt: currentTime,
+    await db.auditLogs.create({
+      data: {
+        id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
+        detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
+        ip, createdAt: currentTime,
+      },
     });
 
     return res.status(200).json({ success: true, data: newKey, message: "API Key 创建成功" });

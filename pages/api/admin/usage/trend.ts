@@ -11,10 +11,17 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import { requestLogs } from "@/lib/schema";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
+
+/** 趋势数据行类型 */
+interface TrendRow {
+  date: string;
+  requests: number;
+  tokens: number;
+  promptTokens: number;
+  completionTokens: number;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -50,11 +57,11 @@ export default async function handler(
         break;
       default: {
         // all：取最早请求时间
-        const earliest = await orm
-          .select({ createdAt: requestLogs.createdAt })
-          .from(requestLogs)
-          .orderBy(requestLogs.createdAt)
-          .limit(1);
+        const earliest = await orm.requestLogs.findMany({
+          orderBy: { createdAt: "asc" },
+          take: 1,
+          select: { createdAt: true },
+        });
         startTimestamp = earliest[0]?.createdAt || (now - 30 * 24 * 60 * 60);
       }
     }
@@ -69,28 +76,31 @@ export default async function handler(
     const strftimeFormat = isHourly ? "%Y-%m-%d %H:00" : "%Y-%m-%d";
 
     // 构建查询条件
-    const conditions = [
-      gte(requestLogs.createdAt, startTimestamp),
-      eq(requestLogs.isError, false),
-    ];
-    if (keyId) {
-      conditions.push(eq(requestLogs.keyId, keyId));
-    }
-    const whereClause = and(...conditions);
+    const conditions: string[] = ["created_at >= ?", "is_error = 0"];
+    const params: unknown[] = [startTimestamp];
 
-    // 使用 Drizzle sql 模板进行 SQLite strftime 聚合
-    const rows = await orm
-      .select({
-        date: sql<string>`strftime(${strftimeFormat}, datetime(${requestLogs.createdAt}, 'unixepoch'))`,
-        requests: sql<number>`count(*)`,
-        tokens: sql<number>`coalesce(sum(${requestLogs.tokens}), 0)`,
-        promptTokens: sql<number>`coalesce(sum(${requestLogs.promptTokens}), 0)`,
-        completionTokens: sql<number>`coalesce(sum(${requestLogs.completionTokens}), 0)`,
-      })
-      .from(requestLogs)
-      .where(whereClause)
-      .groupBy(sql`strftime(${strftimeFormat}, datetime(${requestLogs.createdAt}, 'unixepoch'))`)
-      .orderBy(sql`date ASC`);
+    if (keyId) {
+      conditions.push("key_id = ?");
+      params.push(keyId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    // 使用原始 SQL 进行 SQLite strftime 聚合
+    const trendSql = `
+      SELECT
+        strftime('${strftimeFormat}', datetime(created_at, 'unixepoch')) as date,
+        COUNT(*) as requests,
+        COALESCE(SUM(tokens), 0) as tokens,
+        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
+        COALESCE(SUM(completion_tokens), 0) as completionTokens
+      FROM request_logs
+      ${whereClause}
+      GROUP BY strftime('${strftimeFormat}', datetime(created_at, 'unixepoch'))
+      ORDER BY date ASC
+    `;
+
+    const rows = await orm.$queryRawUnsafe<TrendRow[]>(trendSql, ...params);
 
     const trend = rows.map((row) => ({
       date: String(row.date),

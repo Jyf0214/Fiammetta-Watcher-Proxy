@@ -7,9 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 
 /**
  * FrontendConfig 类型定义（与前端 use-config hook 保持一致）
@@ -213,14 +211,12 @@ export default async function handler(
 
     try {
       const db = await createDb();
-      const rows = await db
-        .select()
-        .from(schema.configs)
-        .where(eq(schema.configs.key, "frontend_config"))
-        .limit(1);
+      const row = await db.configs.findFirst({
+        where: { key: "frontend_config" },
+      });
 
-      if (rows.length > 0 && rows[0].value) {
-        const parsed = JSON.parse(rows[0].value);
+      if (row && row.value) {
+        const parsed = JSON.parse(row.value);
         if (parsed && typeof parsed === "object") {
           config = parsed as FrontendConfig;
         } else {

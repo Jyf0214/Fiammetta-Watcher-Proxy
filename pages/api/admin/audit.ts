@@ -7,7 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
+import { createDb } from "@/lib/prisma";
 
 export default async function handler(
   req: NextApiRequest,
@@ -23,9 +23,9 @@ export default async function handler(
     );
     const offset = (page - 1) * pageSize;
 
-    // 关联 admins 表获取用户名
-    const [items, countResult] = await Promise.all([
-      db.all<{
+    // 关联 admins 表获取用户名（Prisma 不支持原生 LEFT JOIN，使用 $queryRaw）
+    const items = await db.$queryRaw<
+      {
         id: string;
         admin_id: string | null;
         action: string;
@@ -33,26 +33,23 @@ export default async function handler(
         ip: string | null;
         created_at: number;
         username: string | null;
-      }>(
-        `SELECT
-           a.id,
-           a.admin_id,
-           a.action,
-           a.detail,
-           a.ip,
-           a.created_at,
-           adm.username
-         FROM audit_logs a
-         LEFT JOIN admins adm ON a.admin_id = adm.id
-         ORDER BY a.created_at DESC
-         LIMIT ${pageSize} OFFSET ${offset}`
-      ),
-      db.get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM audit_logs`
-      ),
-    ]);
+      }[]
+    >`SELECT
+       a.id,
+       a.admin_id,
+       a.action,
+       a.detail,
+       a.ip,
+       a.created_at,
+       adm.username
+     FROM audit_logs a
+     LEFT JOIN admins adm ON a.admin_id = adm.id
+     ORDER BY a.created_at DESC
+     LIMIT ${pageSize} OFFSET ${offset}`;
 
-    const total = countResult?.count ?? 0;
+    const countResult = await db.$queryRaw<{ count: number }[]>`SELECT COUNT(*) as count FROM audit_logs`;
+
+    const total = countResult[0]?.count ?? 0;
 
     res.status(200).json({
       success: true,
@@ -64,7 +61,7 @@ export default async function handler(
           action: log.action,
           detail: log.detail,
           ip: log.ip,
-          createdAt: new Date(log.created_at * 1000).toISOString(),
+          createdAt: new Date(Number(log.created_at) * 1000).toISOString(),
         })),
         total,
         page,
