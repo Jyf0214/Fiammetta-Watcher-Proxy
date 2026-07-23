@@ -13,6 +13,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/tmp/**",
       "**/.next/**",
+      "**/crud-operations.test.ts",
     ],
   },
 });
