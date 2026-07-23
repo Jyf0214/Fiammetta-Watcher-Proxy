@@ -22,7 +22,8 @@ export interface RequestTemplate {
   id: string;
   name: string;
   description: string;
-  endpoint: string; // "all" | "chat/completions" | "embeddings" | ...
+  /** 适用的模型 ID 列表，支持通配符（如 "gpt-*"、"*"） */
+  models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
 }
@@ -83,7 +84,7 @@ export default async function handler(
       const body: {
         name?: string;
         description?: string;
-        endpoint?: string;
+        models?: string[];
         mergeBody?: Record<string, unknown>;
       } = req.body;
       if (!body || typeof body !== "object") {
@@ -91,7 +92,7 @@ export default async function handler(
         return;
       }
 
-      const { name, description, endpoint, mergeBody } = body;
+      const { name, description, models, mergeBody } = body;
 
       // 参数校验
       if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -112,7 +113,7 @@ export default async function handler(
         id: crypto.randomUUID(),
         name: name.trim(),
         description: description?.trim() || "",
-        endpoint: endpoint || "all",
+        models: Array.isArray(models) && models.length > 0 ? models : ["*"],
         mergeBody,
         enabled: true,
       };
@@ -134,7 +135,7 @@ export default async function handler(
         id?: string;
         name?: string;
         description?: string;
-        endpoint?: string;
+        models?: string[];
         mergeBody?: Record<string, unknown>;
         enabled?: boolean;
       } = req.body;
@@ -143,7 +144,7 @@ export default async function handler(
         return;
       }
 
-      const { id, name, description, endpoint, mergeBody, enabled } = body;
+      const { id, name, description, models, mergeBody, enabled } = body;
 
       // 校验必填字段
       if (!id) {
@@ -162,7 +163,7 @@ export default async function handler(
       // 更新字段（仅更新传入的字段）
       if (name !== undefined) templates[idx].name = name.trim();
       if (description !== undefined) templates[idx].description = description.trim();
-      if (endpoint !== undefined) templates[idx].endpoint = endpoint;
+      if (models !== undefined) templates[idx].models = models;
       if (mergeBody !== undefined) templates[idx].mergeBody = mergeBody;
       if (enabled !== undefined) templates[idx].enabled = enabled;
 
