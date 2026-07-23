@@ -19,10 +19,17 @@ export function extractUsage(usage: Record<string, unknown> | undefined): {
     return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   }
 
-  const promptTokens = Number(usage.prompt_tokens) || 0;
-  const completionTokens = Number(usage.completion_tokens) || 0;
+  let promptTokens = Number(usage.prompt_tokens) || 0;
+  let completionTokens = Number(usage.completion_tokens) || 0;
   const totalTokens =
     Number(usage.total_tokens) || promptTokens + completionTokens;
+
+  // 某些上游只返回 total_tokens，不返回 prompt/completion 分项
+  // 此时将 total_tokens 同时记入两个字段，确保日志不丢失信息
+  if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
+    promptTokens = totalTokens;
+    completionTokens = totalTokens;
+  }
 
   return { promptTokens, completionTokens, totalTokens };
 }
@@ -122,13 +129,21 @@ export function createUsageTransformer(params: {
       const text = new TextDecoder().decode(chunk);
       _buffer += text;
 
-      // 提取 usage（通常在最后一个 chunk）
-      const usageMatch = text.match(/"usage"\s*:\s*(\{[^}]+\})/);
-      if (usageMatch) {
+      // 逐行解析 SSE，寻找包含 usage 的 data 行
+      const lines = text.split("\n");
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (!data || data === "[DONE]") continue;
+
         try {
-          lastUsage = JSON.parse(usageMatch[1]);
+          const parsed = JSON.parse(data);
+          // usage 可能在顶层或 choices 外
+          if (parsed.usage) {
+            lastUsage = parsed.usage;
+          }
         } catch {
-          // 忽略解析错误
+          // 忽略解析错误（可能是不完整的 JSON 片段）
         }
       }
     },
