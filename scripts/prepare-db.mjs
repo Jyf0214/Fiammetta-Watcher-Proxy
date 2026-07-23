@@ -3,20 +3,23 @@
  *
  * 功能：
  *   1. 读取 DATABASE_URL 环境变量，推断数据库类型
- *   2. 修改 prisma/schema.prisma 的 provider 和 runtime
- *   3. 安装缺失的依赖（如 @prisma/adapter-pg）
- *   4. 执行 prisma generate 生成客户端
- *   5. MySQL / PostgreSQL 时自动执行 prisma db push 同步 schema
+ *   2. 修改 prisma/schema.prisma 的 datasource provider
+ *   3. 确保 runtime = "cloudflare" 始终存在（部署到 CF 必须）
+ *   4. 安装缺失的依赖（如 @prisma/adapter-pg）
+ *   5. 执行 prisma generate 生成客户端
+ *   6. MySQL / PostgreSQL 时自动执行 prisma db push 同步 schema
  *
- * 注意：D1 初始化由 GitHub Actions 工作流中的 Python 脚本处理，不在此处重复执行
+ * 注意：
+ *   - runtime = "cloudflare" 是 Cloudflare 部署必需，与数据库类型无关
+ *   - D1 初始化由 GitHub Actions 工作流中的 Python 脚本处理，不在此处重复执行
  *
  * 使用方式：
  *   node scripts/prepare-db.mjs
  *
  * 环境变量：
- *   DATABASE_URL=mysql://...      → provider=mysql, 移除 cloudflare runtime
- *   DATABASE_URL=postgresql://... → provider=postgresql, 移除 cloudflare runtime
- *   无 DATABASE_URL 或 sqlite     → provider=sqlite, 保留 cloudflare runtime
+ *   DATABASE_URL=mysql://...      → provider=mysql
+ *   DATABASE_URL=postgresql://... → provider=postgresql
+ *   无 DATABASE_URL 或 sqlite     → provider=sqlite
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -36,22 +39,19 @@ const url = process.env.DATABASE_URL || "";
 
 let dbType = "sqlite";
 let provider = "sqlite";
-let useCloudflareRuntime = true;
 
 if (url.startsWith("mysql://") || url.startsWith("mysqls://")) {
   dbType = "mysql";
   provider = "mysql";
-  useCloudflareRuntime = false;
 } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
   dbType = "postgresql";
   provider = "postgresql";
-  useCloudflareRuntime = false;
 }
 
 console.log(`🔍 检测到数据库类型: ${dbType}`);
 
 // ============================================================
-// 2. 修改 schema.prisma
+// 2. 修改 schema.prisma（仅 datasource provider）
 // ============================================================
 
 let schema = readFileSync(SCHEMA_PATH, "utf-8");
@@ -72,28 +72,16 @@ if (currentProvider !== newProvider) {
   console.log(`📝 provider: ${currentProvider} → ${newProvider}`);
 }
 
-// 处理 runtime
+// runtime = "cloudflare" 始终保留（Cloudflare 部署必须，与数据库类型无关）
 const runtimePattern = /^\s*runtime\s*=\s*"[^"]*"\s*$/m;
-if (useCloudflareRuntime) {
-  // D1/SQLite：确保 runtime = "cloudflare" 存在
-  if (!runtimePattern.test(schema)) {
-    // 在 generator 块内、output 行之后插入 runtime
-    schema = schema.replace(
-      /(generator\s+client\s*\{[^}]*?output\s*=\s*"[^"]*")/,
-      '$1\n  runtime  = "cloudflare"',
-    );
-    schemaChanged = true;
-    console.log("📝 已添加 runtime = \"cloudflare\"");
-  }
-} else {
-  // MySQL/PG：移除 runtime 行（使用默认 Node.js runtime）
-  if (runtimePattern.test(schema)) {
-    const currentRuntime = schema.match(runtimePattern)[0].trim();
-    // 移除 runtime 行及其后的空行，避免残留空行
-    schema = schema.replace(/\n?\s*runtime\s*=\s*"[^"]*"\s*\n?/, "\n");
-    schemaChanged = true;
-    console.log(`📝 已移除 ${currentRuntime}（非 Cloudflare 环境不需要）`);
-  }
+if (!runtimePattern.test(schema)) {
+  // generator 块内没有 runtime 行，插入
+  schema = schema.replace(
+    /(generator\s+client\s*\{[^}]*?output\s*=\s*"[^"]*")/,
+    '$1\n  runtime  = "cloudflare"',
+  );
+  schemaChanged = true;
+  console.log("📝 已添加 runtime = \"cloudflare\"");
 }
 
 if (schemaChanged) {
@@ -139,7 +127,6 @@ execSync("npx prisma generate", {
   stdio: "inherit",
   env: {
     ...process.env,
-    // 确保 prisma generate 能找到 schema
     DATABASE_URL: url || "file:./placeholder.db",
   },
 });
@@ -151,7 +138,7 @@ console.log("✅ prisma generate 完成");
 
 if (dbType !== "sqlite") {
   console.log("⚙️  执行 prisma db push（同步 schema 到数据库）...");
-  execSync("npx prisma db push --skip-generate", {
+  execSync("npx prisma db push", {
     cwd: ROOT,
     stdio: "inherit",
     env: { ...process.env, DATABASE_URL: url },
