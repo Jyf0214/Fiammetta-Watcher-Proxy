@@ -1,9 +1,8 @@
 /**
  * 模型映射管理 API
  *
- * GET    /api/admin/models — 获取模型映射列表
- * POST   /api/admin/models — 创建模型映射
- * PATCH  /api/admin/models — 批量启用/禁用模型映射
+ * GET  /api/admin/models — 获取模型映射列表（含关联平台信息）
+ * POST /api/admin/models — 创建模型映射
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -51,7 +50,6 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
       sourceModel: m.alias,
       targetModel: m.targetModel,
       platformId: m.platformId,
-      enabled: m.enabled,
       createdAt: m.createdAt,
       platform: m.platformId ? platformMap.get(m.platformId) ?? null : null,
     }));
@@ -191,63 +189,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 }
 
 /**
- * PATCH /api/admin/models — 批量启用/禁用所有模型映射
- *
- * 请求体：{ enabled: boolean }
- */
-async function handlePatch(req: NextApiRequest, res: NextApiResponse) {
-  const admin = await getAdminFromRequest(req);
-  if (!admin) {
-    return res.status(401).json({
-      success: false,
-      error: { message: "未授权", type: "invalid_request_error" },
-    });
-  }
-
-  const { enabled } = req.body as { enabled?: boolean };
-  if (typeof enabled !== "boolean") {
-    return res.status(400).json({ success: false, error: "enabled 字段必须为布尔值" });
-  }
-
-  try {
-    const db = await createDb();
-    const now = Math.floor(Date.now() / 1000);
-
-    const result = await db.modelMappings.updateMany({
-      data: { enabled, updatedAt: now },
-    });
-
-    // 审计日志
-    try {
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
-      await db.auditLogs.create({
-        data: {
-          id: crypto.randomUUID(),
-          adminId: getAuditAdminId(admin),
-          action: enabled ? "batch_enable_model_maps" : "batch_disable_model_maps",
-          detail: JSON.stringify({ affected: result.count, enabled }),
-          ip,
-          createdAt: now,
-        },
-      });
-    } catch {
-      // 审计日志失败不影响主流程
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: enabled
-        ? `已启用 ${result.count} 个模型映射`
-        : `已禁用 ${result.count} 个模型映射`,
-      data: { affected: result.count },
-    });
-  } catch (err) {
-    console.error("[PATCH /api/admin/models] 批量切换模型映射状态失败:", err);
-    return res.status(500).json({ success: false, error: "批量切换模型映射状态失败", detail: err instanceof Error ? err.message : String(err) });
-  }
-}
-
-/**
  * 路由分发
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -256,10 +197,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return handleGet(req, res);
     case "POST":
       return handlePost(req, res);
-    case "PATCH":
-      return handlePatch(req, res);
     default:
-      res.setHeader("Allow", ["GET", "POST", "PATCH"]);
+      res.setHeader("Allow", ["GET", "POST"]);
       return res.status(405).json({ success: false, error: "方法不允许" });
   }
 }

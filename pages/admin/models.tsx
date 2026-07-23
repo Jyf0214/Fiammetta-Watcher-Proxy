@@ -8,13 +8,12 @@ import {
   message,
   type TableColumnsType,
 } from "antd";
-import { Plus, Trash2, RefreshCw, Power, PowerOff } from "lucide-react";
+import { Plus, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import Switch from "@/components/ui/Switch";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -25,7 +24,6 @@ interface ModelMap {
   alias: string;
   targetModel: string;
   platformId: string | null;
-  enabled: boolean;
   platform: { name: string } | null;
 }
 
@@ -126,44 +124,6 @@ export default function ModelsPage() {
     }
   };
 
-  const handleToggle = async (id: string, enabled: boolean) => {
-    try {
-      const res = await fetch(`/api/admin/models/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data: Record<string, any> = await res.json();
-      if (data.success) {
-        message.success(data.message);
-        handleRefresh();
-      } else {
-        message.error(data.error);
-      }
-    } catch {
-      message.error(t("common.error"));
-    }
-  };
-
-  const handleBatchToggle = async (enabled: boolean) => {
-    try {
-      const res = await fetch("/api/admin/models", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data: Record<string, any> = await res.json();
-      if (data.success) {
-        message.success(data.message);
-        handleRefresh();
-      } else {
-        message.error(data.error);
-      }
-    } catch {
-      message.error(t("common.error"));
-    }
-  };
-
   const columns: TableColumnsType<ModelMap> = [
     {
       title: t("model_map.alias"),
@@ -183,18 +143,6 @@ export default function ModelsPage() {
       width: 160,
       render: (_: unknown, record: ModelMap) =>
         record.platform?.name || t("model_map.auto_route"),
-    },
-    {
-      title: t("common.status"),
-      key: "enabled",
-      width: 80,
-      align: "center",
-      render: (_: unknown, record: ModelMap) => (
-        <Switch
-          checked={record.enabled}
-          onChange={(checked) => handleToggle(record.id, checked)}
-        />
-      ),
     },
     {
       title: t("common.actions"),
@@ -225,34 +173,16 @@ export default function ModelsPage() {
           title={t("admin.models")}
           description={t("admin.models_desc")}
           extra={
-            <div className="flex gap-2">
-              <Popconfirm
-                title={t("model_map.confirm_disable_all") || "确定禁用所有模型映射？"}
-                onConfirm={() => handleBatchToggle(false)}
-              >
-                <Button variant="dangerGhost" icon={<PowerOff size={14} />}>
-                  {t("model_map.disable_all") || "一键禁用"}
-                </Button>
-              </Popconfirm>
-              <Popconfirm
-                title={t("model_map.confirm_enable_all") || "确定启用所有模型映射？"}
-                onConfirm={() => handleBatchToggle(true)}
-              >
-                <Button variant="primary" icon={<Power size={14} />}>
-                  {t("model_map.enable_all") || "一键启用"}
-                </Button>
-              </Popconfirm>
-              <Button
-                variant="primary"
-                icon={<Plus size={14} />}
-                onClick={() => {
-                  form.resetFields();
-                  setModalOpen(true);
-                }}
-              >
-                {t("model_map.create_mapping")}
-              </Button>
-            </div>
+            <Button
+              variant="primary"
+              icon={<Plus size={14} />}
+              onClick={() => {
+                form.resetFields();
+                setModalOpen(true);
+              }}
+            >
+              {t("model_map.create_mapping")}
+            </Button>
           }
         />
 
