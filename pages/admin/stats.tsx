@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
-import { Tag, Tooltip, message } from "antd";
+import { Tooltip, message } from "antd";
 import { Button } from "@/components/ui/Button";
-import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
@@ -10,7 +9,7 @@ import {
   Cloud,
   Key,
   Globe,
-  AlertTriangle,
+  Database,
   BarChart3,
   RefreshCw,
   Pause,
@@ -218,32 +217,6 @@ function StatsContent() {
     }
   }, [viewMode, stats, fetchTrendData]);
 
-  // ==================== 表格列 ====================
-
-  const eventColumns = [
-    {
-      title: t("common.status"),
-      dataIndex: "level",
-      key: "level",
-      render: (level: string) => {
-        const colorMap: Record<string, string> = {
-          info: "blue",
-          warning: "orange",
-          error: "red",
-          critical: "magenta",
-        };
-        return <Tag color={colorMap[level] || "default"}>{level}</Tag>;
-      },
-    },
-    { title: t("common.message"), dataIndex: "message", key: "message" },
-    {
-      title: t("common.created_at"),
-      dataIndex: "createdAt",
-      key: "createdAt",
-      render: (v: string) => new Date(v).toLocaleString(),
-    },
-  ];
-
   // ==================== 统计卡片 ====================
 
   const statCards = [
@@ -275,7 +248,7 @@ function StatsContent() {
       key: "tokens",
       title: t("dashboard.total_tokens"),
       value: stats?.totalTokens ?? 0,
-      icon: <AlertTriangle />,
+      icon: <Database />,
       color: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -326,12 +299,17 @@ function StatsContent() {
         icon={<BarChart3 size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("admin.usage") || "统计概览"}
         description={
-          lastRefreshed
-            ? `${t("dashboard.adminConsoleDesc")} · ${t("dashboard.last_refreshed") || "上次刷新"}: ${lastRefreshed.toLocaleTimeString()}`
-            : t("dashboard.adminConsoleDesc")
+          <div className="flex flex-col">
+            <span>{t("dashboard.adminConsoleDesc")}</span>
+            {lastRefreshed && (
+              <span className="text-xs text-zinc-400 mt-0.5">
+                {t("dashboard.last_refreshed") || "上次刷新"}: {lastRefreshed.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
         }
         extra={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Tooltip
               title={viewMode === "grid" ? "切换到详细视图" : "切换到网格视图"}
             >
@@ -359,14 +337,16 @@ function StatsContent() {
                 className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
               />
             </Tooltip>
-            <Button
-              variant="default"
-              icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
-              onClick={handleRefresh}
-              disabled={refreshing}
-            >
-              {t("common.refresh")}
-            </Button>
+            <Tooltip title={t("common.refresh")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+                onClick={handleRefresh}
+                disabled={refreshing}
+              />
+            </Tooltip>
           </div>
         }
       />
@@ -445,13 +425,39 @@ function StatsContent() {
           </span>
         }
       >
-        <ResponsiveTable
-          columns={eventColumns}
-          dataSource={stats?.recentEvents || []}
-          rowKey="id"
-          pagination={false}
-          size="small"
-        />
+        {(!stats?.recentEvents || stats.recentEvents.length === 0) ? (
+          <div className="text-center py-8 text-zinc-400 text-sm">暂无事件</div>
+        ) : (
+          <div className="relative">
+            {/* 时间线竖线 */}
+            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-zinc-200" />
+            <div className="space-y-3">
+              {stats.recentEvents.map((event) => {
+                const levelColor: Record<string, string> = {
+                  info: "bg-blue-500",
+                  warning: "bg-amber-500",
+                  error: "bg-red-500",
+                  critical: "bg-red-600",
+                };
+                const time = new Date(event.createdAt);
+                const timeStr = `${time.getHours().toString().padStart(2, "0")}:${time.getMinutes().toString().padStart(2, "0")}:${time.getSeconds().toString().padStart(2, "0")}`;
+                return (
+                  <div key={event.id} className="relative flex items-start gap-3 pl-0">
+                    {/* 圆点 */}
+                    <div className={`relative z-10 mt-1.5 h-[10px] w-[10px] rounded-full ${levelColor[event.level] || "bg-zinc-400"} ring-2 ring-white shrink-0`} />
+                    {/* 内容 */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm text-zinc-800 truncate">{event.message}</span>
+                        <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{timeStr}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </ProCard>
     </PageContainer>
   );
