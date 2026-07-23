@@ -54,9 +54,10 @@ async function loadAdapter(
       return { adapter: new PrismaD1(d1Binding as any) };
     }
     case "mysql": {
-      // Prisma 7 内建 MySQL 支持，无需额外 adapter
-      // DATABASE_URL 已在 prisma.config.ts 中配置，PrismaClient 直接连接
-      return null;
+      const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
+      const url = process.env.DATABASE_URL;
+      if (!url) throw new Error("DATABASE_URL 未配置");
+      return { adapter: new PrismaMariaDb(url) };
     }
     case "postgresql": {
       // PostgreSQL 需要 @prisma/adapter-pg
