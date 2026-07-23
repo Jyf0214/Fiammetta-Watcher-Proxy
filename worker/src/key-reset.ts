@@ -61,7 +61,7 @@ export async function checkAndResetApiKey(
   db: D1Database,
   apiKeyId: string
 ): Promise<boolean> {
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
   try {
     const apiKey = await prisma.apiKeys.findFirst({
       where: { id: apiKeyId },
@@ -119,7 +119,7 @@ export async function checkAndResetApiKey(
  * 执行一轮批量重置检查（Cron 调用）
  */
 export async function handleScheduledReset(db: D1Database): Promise<void> {
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
   try {
     const keysToCheck = await prisma.apiKeys.findMany({
       where: {

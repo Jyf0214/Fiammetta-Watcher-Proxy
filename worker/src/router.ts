@@ -92,7 +92,7 @@ export async function refreshCache(db: D1Database): Promise<void> {
  * 执行实际的缓存刷新
  */
 async function doRefresh(db: D1Database): Promise<void> {
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
 
   try {
   const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =

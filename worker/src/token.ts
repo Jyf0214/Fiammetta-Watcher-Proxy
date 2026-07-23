@@ -37,7 +37,7 @@ export async function updateKeyUsage(
 ): Promise<void> {
   if (tokenCount <= 0) return;
 
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
   try {
     await prisma.apiKeys.update({
       where: { id: apiKeyId },
@@ -71,7 +71,7 @@ export async function recordRequestLog(params: {
   errorMessage?: string;
   db: D1Database;
 }): Promise<void> {
-  const prisma = createPrismaClient(params.db);
+  const prisma = await createPrismaClient(params.db);
   try {
     await prisma.requestLogs.create({
       data: {

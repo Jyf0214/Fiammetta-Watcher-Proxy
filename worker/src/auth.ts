@@ -56,7 +56,7 @@ export async function validateApiKey(
     };
   }
 
-  const prisma = createPrismaClient(db);
+  const prisma = await createPrismaClient(db);
 
   try {
   // 查询 API Key（D1 无 plans 表，所有限额字段在 api_keys 中）
