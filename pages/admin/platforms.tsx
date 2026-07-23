@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Space,
   Table,
   Popconfirm,
   Tag,
@@ -18,7 +17,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { Plus, Pencil, Trash2, X, Database, RefreshCw, Cloud, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, Database, RefreshCw, Cloud, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -40,7 +39,6 @@ interface Platform {
   status: string;
 }
 
-/** 命名密钥格式 */
 interface NamedApiKey {
   name: string;
   key: string;
@@ -67,7 +65,6 @@ function PlatformCard({
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-      {/* 卡片头部：名称 + 状态 */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{platform.name}</h3>
@@ -75,15 +72,9 @@ function PlatformCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-zinc-400">{platform.enabled ? t("common.enable") : t("common.disable")}</span>
-          <Switch
-            checked={platform.enabled}
-            loading={togglingId === platform.id}
-            onChange={() => onToggle(platform)}
-          />
+          <Switch checked={platform.enabled} loading={togglingId === platform.id} onChange={() => onToggle(platform)} />
         </div>
       </div>
-
-      {/* 详情行 */}
       <div className="px-4 pb-2 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-12 shrink-0">类型</span>
@@ -96,39 +87,149 @@ function PlatformCard({
         {(platform.priority !== 0 || platform.weight !== 1) && (
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-zinc-400 w-12 shrink-0">权重</span>
-            <span className="text-[11px] text-zinc-600 dark:text-zinc-300">
-              优先级 {platform.priority} · 权重 {platform.weight}
-            </span>
+            <span className="text-[11px] text-zinc-600 dark:text-zinc-300">优先级 {platform.priority} · 权重 {platform.weight}</span>
           </div>
         )}
       </div>
-
-      {/* 底部操作栏 */}
       <div className="flex border-t border-zinc-100 dark:border-zinc-800">
-        <button
-          onClick={() => onModels(platform)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-        >
-          <Database size={13} />
-          模型
+        <button onClick={() => onModels(platform)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+          <Database size={13} /> 模型
         </button>
         <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
-        <button
-          onClick={() => onEdit(platform)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-        >
-          <Pencil size={13} />
-          编辑
+        <button onClick={() => onEdit(platform)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+          <Pencil size={13} /> 编辑
         </button>
         <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
         <Popconfirm title={t("common.confirm_delete")} onConfirm={() => onDelete(platform.id)} okText={t("common.confirm")} cancelText={t("common.cancel")}>
           <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-            <Trash2 size={13} />
-            删除
+            <Trash2 size={13} /> 删除
           </button>
         </Popconfirm>
       </div>
     </div>
+  );
+}
+
+/** 平台表单（Drawer 内使用） */
+function PlatformForm({
+  form,
+  editing,
+  namedKeys,
+  onAddKey,
+  onRemoveKey,
+  onUpdateKeyName,
+  onUpdateKeyValue,
+  onCopyKey,
+  onSubmit,
+  submitting,
+  onClose,
+}: {
+  form: ReturnType<typeof Form.useForm>[0];
+  editing: Platform | null;
+  namedKeys: NamedApiKey[];
+  onAddKey: () => void;
+  onRemoveKey: (i: number) => void;
+  onUpdateKeyName: (i: number, v: string) => void;
+  onUpdateKeyValue: (i: number, v: string) => void;
+  onCopyKey: (k: string) => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Form form={form} layout="vertical" onFinish={onSubmit} className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto px-1 space-y-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0">
+          <Form.Item name="name" label={t("platform.name")} rules={[{ required: true }]} className="!mb-3">
+            <Input />
+          </Form.Item>
+          <Form.Item name="baseUrl" label={t("platform.base_url")} rules={[{ required: true }]} className="!mb-3">
+            <Input placeholder="https://api.openai.com/v1" />
+          </Form.Item>
+        </div>
+
+        {/* API 密钥区域 */}
+        <Form.Item
+          label={t("platform.api_key") || "API 密钥"}
+          tooltip={t("platform.additional_keys_tip") || "支持多个密钥，自动轮询分摊调用量"}
+          rules={editing ? [] : [{ required: true }]}
+          className="!mb-3"
+        >
+          <div className="space-y-2">
+            {namedKeys.map((namedKey, index) => (
+              <div key={index} className="flex items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <Input
+                  value={namedKey.name}
+                  onChange={(e) => onUpdateKeyName(index, e.target.value)}
+                  placeholder="名称"
+                  className="!w-16 !min-w-0 shrink-0"
+                  size="small"
+                />
+                <Input.Password
+                  value={namedKey.key}
+                  onChange={(e) => onUpdateKeyValue(index, e.target.value)}
+                  placeholder={editing ? "留空保持原密钥" : "输入 API 密钥"}
+                  className="!flex-1 !min-w-0 font-mono text-xs"
+                  size="small"
+                />
+                <button
+                  type="button"
+                  onClick={() => onCopyKey(namedKey.key)}
+                  disabled={!namedKey.key}
+                  className="shrink-0 p-1.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title="复制"
+                >
+                  <Copy size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRemoveKey(index)}
+                  disabled={namedKeys.length <= 1}
+                  className="shrink-0 p-1.5 rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title="删除"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+            <Button variant="default" onClick={onAddKey} icon={<Plus size={14} />} block size="sm">添加密钥</Button>
+          </div>
+        </Form.Item>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0">
+          <Form.Item name="type" label={t("platform.type")} initialValue="openai" className="!mb-3">
+            <Select options={[{ value: "openai", label: "OpenAI" }, { value: "azure", label: "Azure" }, { value: "custom", label: "Custom" }]} />
+          </Form.Item>
+          <div /> {/* 占位 */}
+          <Form.Item name="priority" label={t("platform.priority")} initialValue={0} className="!mb-3">
+            <InputNumber min={0} className="!w-full" />
+          </Form.Item>
+          <Form.Item name="weight" label={t("platform.weight")} initialValue={1} className="!mb-3">
+            <InputNumber min={1} className="!w-full" />
+          </Form.Item>
+          <Form.Item name="rpmLimit" label={t("platform.rpm_limit")} className="!mb-3">
+            <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
+          </Form.Item>
+          <Form.Item name="tpmLimit" label={t("platform.tpm_limit")} className="!mb-3">
+            <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
+          </Form.Item>
+        </div>
+
+        <Form.Item name="forwardHeaders" label={t("platform.forward_headers")} className="!mb-3">
+          <Input.TextArea rows={2} placeholder={"每行一个 Header 名称\nX-Thinking-Mode\nX-Reasoning-Effort"} />
+        </Form.Item>
+      </div>
+
+      {/* 底部固定按钮 */}
+      <div className="shrink-0 flex gap-3 pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+        <Button variant="default" onClick={onClose} className="flex-1 sm:flex-none">{t("common.cancel")}</Button>
+        <Button variant="primary" type="submit" disabled={submitting} autoLoading={false} className="flex-1 sm:flex-none">
+          {submitting ? t("common.loading") : editing ? t("common.save") : t("common.create")}
+        </Button>
+      </div>
+    </Form>
   );
 }
 
@@ -169,9 +270,7 @@ export default function PlatformsPage() {
     return () => controller.abort();
   }, [t, refreshKey]);
 
-  const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+  const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const openCreateForm = () => {
     setEditing(null);
@@ -181,50 +280,17 @@ export default function PlatformsPage() {
     setFormVisible(true);
   };
 
-  const addNamedKey = () => {
-    const existingNames = namedKeys.map((k) => k.name);
-    let newIndex = 1;
-    while (existingNames.includes(`密钥${newIndex}`)) newIndex++;
-    setNamedKeys([...namedKeys, { name: `密钥${newIndex}`, key: "" }]);
-  };
-
-  const removeNamedKey = (index: number) => {
-    if (namedKeys.length <= 1) { message.warning("至少保留一个密钥"); return; }
-    setNamedKeys(namedKeys.filter((_, i) => i !== index));
-  };
-
-  const updateKeyName = (index: number, name: string) => {
-    const newKeys = [...namedKeys];
-    newKeys[index] = { ...newKeys[index], name };
-    setNamedKeys(newKeys);
-  };
-
-  const updateKeyValue = (index: number, key: string) => {
-    const newKeys = [...namedKeys];
-    newKeys[index] = { ...newKeys[index], key };
-    setNamedKeys(newKeys);
-  };
-
-  const copyKeyValue = (key: string) => {
-    navigator.clipboard.writeText(key);
-    message.success("已复制到剪贴板");
-  };
-
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
     const parsed: NamedApiKey[] = [];
-    if (platform.apiKey && platform.apiKey.trim()) {
-      parsed.push({ name: "主密钥", key: platform.apiKey });
-    }
+    if (platform.apiKey && platform.apiKey.trim()) parsed.push({ name: "主密钥", key: platform.apiKey });
     if (platform.apiKeys) {
       try {
         const arr = JSON.parse(platform.apiKeys);
         if (Array.isArray(arr)) {
           if (arr.length > 0 && typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
             arr.forEach((item: NamedApiKey) => {
-              if (item && typeof item.key === "string" && item.key.trim()) {
-                parsed.push({ name: item.name || `密钥${parsed.length + 1}`, key: item.key });
-              }
+              if (item && typeof item.key === "string" && item.key.trim()) parsed.push({ name: item.name || `密钥${parsed.length + 1}`, key: item.key });
             });
           } else {
             arr.forEach((key: string, idx: number) => {
@@ -232,7 +298,7 @@ export default function PlatformsPage() {
             });
           }
         }
-      } catch { /* JSON 解析失败 */ }
+      } catch { /* ignore */ }
     }
     if (parsed.length === 0) parsed.push({ name: "密钥1", key: "" });
     setNamedKeys(parsed);
@@ -242,6 +308,35 @@ export default function PlatformsPage() {
 
   const closeForm = () => { setFormVisible(false); setEditing(null); form.resetFields(); };
 
+  const addNamedKey = () => {
+    const names = namedKeys.map((k) => k.name);
+    let i = 1;
+    while (names.includes(`密钥${i}`)) i++;
+    setNamedKeys([...namedKeys, { name: `密钥${i}`, key: "" }]);
+  };
+
+  const removeNamedKey = (index: number) => {
+    if (namedKeys.length <= 1) { message.warning("至少保留一个密钥"); return; }
+    setNamedKeys(namedKeys.filter((_, i) => i !== index));
+  };
+
+  const updateKeyName = (index: number, name: string) => {
+    const keys = [...namedKeys];
+    keys[index] = { ...keys[index], name };
+    setNamedKeys(keys);
+  };
+
+  const updateKeyValue = (index: number, key: string) => {
+    const keys = [...namedKeys];
+    keys[index] = { ...keys[index], key };
+    setNamedKeys(keys);
+  };
+
+  const copyKeyValue = (key: string) => {
+    navigator.clipboard.writeText(key);
+    message.success("已复制到剪贴板");
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
@@ -250,6 +345,11 @@ export default function PlatformsPage() {
       if (validKeys.length > 0) {
         values.apiKey = validKeys[0].key;
         values.apiKeys = validKeys.length > 1 ? JSON.stringify(validKeys.slice(1)) : "[]";
+      }
+      // forwardHeaders: 按行分割为数组
+      if (typeof values.forwardHeaders === "string") {
+        const lines = values.forwardHeaders.split("\n").map((l: string) => l.trim()).filter(Boolean);
+        values.forwardHeaders = lines.length > 0 ? JSON.stringify(lines) : "";
       }
       const url = editing ? `/api/admin/platforms/${editing.id}` : "/api/admin/platforms";
       const method = editing ? "PUT" : "POST";
@@ -336,52 +436,32 @@ export default function PlatformsPage() {
   };
 
   const columns: TableColumnsType<Platform> = [
-    {
-      title: t("platform.name"), dataIndex: "name", key: "name", width: 140, ellipsis: true,
-    },
-    {
-      title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true, responsive: ["md"],
-    },
-    {
-      title: t("platform.type"), dataIndex: "type", key: "type", width: 100,
-      render: (v: string) => <Tag>{v}</Tag>, responsive: ["sm"],
-    },
-    {
-      title: t("platform.priority"), dataIndex: "priority", key: "priority", width: 80, align: "center", responsive: ["lg"],
-    },
-    {
-      title: t("platform.weight"), dataIndex: "weight", key: "weight", width: 80, align: "center", responsive: ["lg"],
-    },
-    {
-      title: t("platform.rpm_limit"), dataIndex: "rpmLimit", key: "rpmLimit", width: 100, align: "center",
-      render: (v: number | null) => v ?? "-", responsive: ["xl"],
-    },
-    {
-      title: t("platform.tpm_limit"), dataIndex: "tpmLimit", key: "tpmLimit", width: 100, align: "center",
-      render: (v: number | null) => v ?? "-", responsive: ["xl"],
-    },
+    { title: t("platform.name"), dataIndex: "name", key: "name", width: 140, ellipsis: true },
+    { title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true, responsive: ["md"] },
+    { title: t("platform.type"), dataIndex: "type", key: "type", width: 100, render: (v: string) => <Tag>{v}</Tag>, responsive: ["sm"] },
+    { title: t("platform.priority"), dataIndex: "priority", key: "priority", width: 80, align: "center", responsive: ["lg"] },
+    { title: t("platform.weight"), dataIndex: "weight", key: "weight", width: 80, align: "center", responsive: ["lg"] },
+    { title: t("platform.rpm_limit"), dataIndex: "rpmLimit", key: "rpmLimit", width: 100, align: "center", render: (v: number | null) => v ?? "-", responsive: ["xl"] },
+    { title: t("platform.tpm_limit"), dataIndex: "tpmLimit", key: "tpmLimit", width: 100, align: "center", render: (v: number | null) => v ?? "-", responsive: ["xl"] },
     {
       title: t("common.status"), key: "enabled", width: 120, align: "center",
       render: (_: unknown, record: Platform) => (
         <div className="flex items-center justify-center gap-2">
           <span className="text-xs text-zinc-500">{record.enabled ? t("common.enable") : t("common.disable")}</span>
-          <Switch
-            checked={record.enabled} loading={togglingId === record.id}
-            onChange={() => handleToggle(record)}
-          />
+          <Switch checked={record.enabled} loading={togglingId === record.id} onChange={() => handleToggle(record)} />
         </div>
       ),
     },
     {
       title: t("common.actions"), key: "actions", fixed: "right", width: 150, align: "center",
       render: (_: unknown, record: Platform) => (
-        <Space size="small">
+        <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="sm" iconOnly icon={<Database size={14} />} onClick={() => openModelDrawer(record)} />
           <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} onClick={() => openEditForm(record)} />
           <Popconfirm title={t("common.confirm_delete")} onConfirm={() => handleDelete(record.id)}>
             <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} />
           </Popconfirm>
-        </Space>
+        </div>
       ),
     },
   ];
@@ -400,31 +480,21 @@ export default function PlatformsPage() {
           extra={<Button variant="primary" icon={<Plus size={14} />} onClick={openCreateForm}>{t("platform.create_platform")}</Button>}
         />
 
-        {/* 移动端：卡片布局 */}
+        {/* 移动端卡片 */}
         <div className="block lg:hidden space-y-3">
           {platforms.map((p) => (
-            <PlatformCard
-              key={p.id}
-              platform={p}
-              togglingId={togglingId}
-              onToggle={handleToggle}
-              onEdit={openEditForm}
-              onDelete={handleDelete}
-              onModels={openModelDrawer}
-            />
+            <PlatformCard key={p.id} platform={p} togglingId={togglingId} onToggle={handleToggle} onEdit={openEditForm} onDelete={handleDelete} onModels={openModelDrawer} />
           ))}
           {platforms.length === 0 && !loading && (
             <div className="text-center py-12 text-zinc-400">
               <Cloud size={48} className="mx-auto mb-4 opacity-30" />
               <p className="text-sm">{t("platform.no_platforms") || "暂无平台"}</p>
-              <Button variant="primary" size="sm" className="mt-4" onClick={openCreateForm} icon={<Plus size={14} />}>
-                {t("platform.create_platform")}
-              </Button>
+              <Button variant="primary" size="sm" className="mt-4" onClick={openCreateForm} icon={<Plus size={14} />}>{t("platform.create_platform")}</Button>
             </div>
           )}
         </div>
 
-        {/* 桌面端：表格布局 */}
+        {/* 桌面端表格 */}
         <div className="hidden lg:block">
           <ProCard>
             <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
@@ -434,77 +504,31 @@ export default function PlatformsPage() {
           </ProCard>
         </div>
 
-        {formVisible && (
-          <ProCard
-            title={
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                  {editing ? t("platform.edit_platform") : t("platform.create_platform")}
-                </span>
-                <Button variant="ghost" size="sm" iconOnly icon={<X size={14} />} onClick={closeForm} />
-              </div>
-            }
-            className="mt-4"
-          >
-            <Form form={form} layout="vertical" onFinish={handleSubmit} onFinishFailed={({ errorFields }) => {
-              if (errorFields && errorFields.length > 0) {
-                message.error(errorFields[0].errors[0] || t("validation.field_required"));
-              }
-            }}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <Form.Item name="name" label={t("platform.name")} rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-                <Form.Item name="baseUrl" label={t("platform.base_url")} rules={[{ required: true }]}>
-                  <Input placeholder="https://api.openai.com/v1" />
-                </Form.Item>
-                <Form.Item
-                  label={t("platform.api_key") || "API 密钥"}
-                  tooltip={t("platform.additional_keys_tip") || "支持多个密钥，自动轮询分摊调用量"}
-                  rules={editing ? [] : [{ required: true }]}
-                  className="sm:col-span-2 lg:col-span-3"
-                >
-                  <div className="space-y-3">
-                    {namedKeys.map((namedKey, index) => (
-                      <div key={index} className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                        <Input value={namedKey.name} onChange={(e) => updateKeyName(index, e.target.value)} placeholder="密钥名称" className="w-24 flex-shrink-0" size="small" />
-                        <Input.Password value={namedKey.key} onChange={(e) => updateKeyValue(index, e.target.value)} placeholder={editing ? "留空则保持原有密钥不变" : "输入 API 密钥"} className="flex-1 font-mono text-xs" size="small" />
-                        <Button variant="ghost" size="sm" iconOnly icon={<Copy size={14} />} onClick={() => copyKeyValue(namedKey.key)} disabled={!namedKey.key} title="复制密钥" />
-                        <Button variant="dangerGhost" size="sm" iconOnly icon={<Trash2 size={14} />} onClick={() => removeNamedKey(index)} disabled={namedKeys.length <= 1} title="删除密钥" />
-                      </div>
-                    ))}
-                    <Button variant="default" onClick={addNamedKey} icon={<Plus size={14} />} block size="sm">添加密钥</Button>
-                  </div>
-                </Form.Item>
-                <Form.Item name="type" label={t("platform.type")} initialValue="openai">
-                  <Select options={[{ value: "openai", label: "OpenAI" }, { value: "azure", label: "Azure" }, { value: "custom", label: "Custom" }]} />
-                </Form.Item>
-                <Form.Item name="priority" label={t("platform.priority")} initialValue={0}>
-                  <InputNumber min={0} className="w-full" />
-                </Form.Item>
-                <Form.Item name="weight" label={t("platform.weight")} initialValue={1}>
-                  <InputNumber min={1} className="w-full" />
-                </Form.Item>
-                <Form.Item name="rpmLimit" label={t("platform.rpm_limit")}>
-                  <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
-                </Form.Item>
-                <Form.Item name="tpmLimit" label={t("platform.tpm_limit")}>
-                  <InputNumber min={0} placeholder={t("common.unlimited")} className="w-full" />
-                </Form.Item>
-                <Form.Item name="forwardHeaders" label={t("platform.forward_headers")}>
-                  <Input.TextArea rows={2} placeholder='["X-Thinking-Mode", "X-Reasoning-Effort"]' />
-                </Form.Item>
-              </div>
-              <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                <Button variant="default" onClick={closeForm}>{t("common.cancel")}</Button>
-                <Button variant="primary" type="submit" disabled={submitting} autoLoading={false}>
-                  {submitting ? t("common.loading") : editing ? t("common.save") : t("common.create")}
-                </Button>
-              </div>
-            </Form>
-          </ProCard>
-        )}
+        {/* 编辑/新增抽屉 */}
+        <Drawer
+          title={editing ? t("platform.edit_platform") : t("platform.create_platform")}
+          open={formVisible}
+          onClose={closeForm}
+          width={520}
+          destroyOnClose
+          styles={{ body: { padding: "16px", display: "flex", flexDirection: "column", height: "calc(100vh - 56px)" } }}
+        >
+          <PlatformForm
+            form={form}
+            editing={editing}
+            namedKeys={namedKeys}
+            onAddKey={addNamedKey}
+            onRemoveKey={removeNamedKey}
+            onUpdateKeyName={updateKeyName}
+            onUpdateKeyValue={updateKeyValue}
+            onCopyKey={copyKeyValue}
+            onSubmit={handleSubmit}
+            submitting={submitting}
+            onClose={closeForm}
+          />
+        </Drawer>
 
+        {/* 模型管理抽屉 */}
         <Drawer
           title={<span className="flex items-center gap-2"><Database />{modelPlatform?.name} — {t("platform.models") || "模型管理"}</span>}
           open={modelDrawerOpen} onClose={() => setModelDrawerOpen(false)} width={600}
