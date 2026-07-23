@@ -293,7 +293,11 @@
     "create_success": "Model mapping created successfully",
     "create_failed": "Failed to create model mapping",
     "fetch_failed": "Failed to fetch model mappings",
-    "delete_success": "Model mapping deleted successfully"
+    "delete_success": "Model mapping deleted successfully",
+    "enable_all": "Enable All",
+    "disable_all": "Disable All",
+    "confirm_enable_all": "Enable all model mappings?",
+    "confirm_disable_all": "Disable all model mappings?"
   },
   "log": {
     "model": "Model",

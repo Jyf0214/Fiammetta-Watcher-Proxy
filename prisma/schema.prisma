@@ -147,6 +147,7 @@ model modelMappings {
   alias       String
   targetModel String  @map("target_model")
   platformId  String? @map("platform_id")
+  enabled     Boolean @default(true)
   createdAt   Int     @default(0) @map("created_at")
   updatedAt   Int     @default(0) @map("updated_at")
 

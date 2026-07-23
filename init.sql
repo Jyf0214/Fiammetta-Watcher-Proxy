@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS model_maps (
   alias TEXT NOT NULL,
   target_model TEXT NOT NULL,
   platform_id TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(alias, platform_id),
