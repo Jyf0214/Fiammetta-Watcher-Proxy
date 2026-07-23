@@ -1,0 +1,290 @@
+// ================================================================
+// Fiammetta Watcher Proxy — Prisma 7 Schema (SQLite / D1)
+// 从 Drizzle ORM schema.ts 迁移，保留 D1 整数时间戳 + 无关系约束
+// ================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "sqlite"
+  // url 由 prisma.config.ts 提供
+}
+
+// ==================== 管理员账户 ====================
+
+model admins {
+  id           String @id
+  username     String @unique
+  passwordHash String @map("password_hash")
+  createdAt    Int    @default(0) @map("created_at")
+  updatedAt    Int    @default(0) @map("updated_at")
+
+  @@map("admins")
+}
+
+// ==================== 上游平台 ====================
+
+model platforms {
+  id             String  @id
+  name           String
+  baseUrl        String  @map("base_url")
+  apiKey         String  @map("api_key")
+  apiKeys        String  @default("[]") @map("api_keys")
+  type           String  @default("openai")
+  enabled        Boolean @default(true)
+  priority       Int     @default(0)
+  weight         Int     @default(1)
+  rpmLimit       Int?    @map("rpm_limit")
+  tpmLimit       Int?    @map("tpm_limit")
+  status         String  @default("healthy")
+  failCount      Int     @default(0) @map("fail_count")
+  lastFailAt     Int?    @map("last_fail_at")
+  cooldownEnd    Int?    @map("cooldown_end")
+  forwardHeaders String  @default("[]") @map("forward_headers")
+  createdAt      Int     @default(0) @map("created_at")
+  updatedAt      Int     @default(0) @map("updated_at")
+
+  @@index([enabled, status])
+  @@map("platforms")
+}
+
+// ==================== 代理池 ====================
+
+model proxyPools {
+  id        String  @id
+  name      String  @unique
+  enabled   Boolean @default(true)
+  createdAt Int     @default(0) @map("created_at")
+  updatedAt Int     @default(0) @map("updated_at")
+
+  @@map("proxy_pools")
+}
+
+// ==================== 代理 ====================
+
+model proxies {
+  id          String  @id
+  address     String
+  poolId      String? @map("pool_id")
+  enabled     Boolean @default(true)
+  status      String  @default("healthy")
+  failCount   Int     @default(0) @map("fail_count")
+  banCount    Int     @default(0) @map("ban_count")
+  lastFailAt  Int?    @map("last_fail_at")
+  cooldownEnd Int?    @map("cooldown_end")
+  createdAt   Int     @default(0) @map("created_at")
+  updatedAt   Int     @default(0) @map("updated_at")
+
+  @@index([poolId, enabled, status])
+  @@map("proxies")
+}
+
+// ==================== 套餐模板 ====================
+
+model plans {
+  id          String  @id
+  name        String  @unique
+  tokenQuota  Int     @default(0) @map("token_quota")
+  callLimit   Int     @default(0) @map("call_limit")
+  rpmLimit    Int     @default(0) @map("rpm_limit")
+  tpmLimit    Int     @default(0) @map("tpm_limit")
+  resetPeriod String  @default("monthly") @map("reset_period")
+  enabled     Boolean @default(true)
+  createdAt   Int     @default(0) @map("created_at")
+  updatedAt   Int     @default(0) @map("updated_at")
+
+  @@map("plans")
+}
+
+// ==================== API 密钥 ====================
+
+model apiKeys {
+  id              String   @id
+  key             String   @unique
+  name            String
+  planId          String?  @map("plan_id")
+  quota           Float?
+  usedTokens      Int      @default(0) @map("used_tokens")
+  tokenLimit      Int?     @map("token_limit")
+  rpmLimit        Int?     @map("rpm_limit")
+  tpmLimit        Int?     @map("tpm_limit")
+  callLimit       Int?     @map("call_limit")
+  callUsed        Int      @default(0) @map("call_used")
+  resetPeriod     String?  @default("monthly") @map("reset_period")
+  status          String   @default("active")
+  expiresAt       Int?     @map("expires_at")
+  createdAt       Int      @default(0) @map("created_at")
+  updatedAt       Int      @default(0) @map("updated_at")
+
+  @@index([key])
+  @@index([status, expiresAt])
+  @@map("api_keys")
+}
+
+// ==================== 系统 API 密钥 ====================
+
+model systemApiKeys {
+  id         String  @id
+  key        String  @unique
+  name       String
+  enabled    Boolean @default(true)
+  lastUsedAt Int?    @map("last_used_at")
+  createdAt  Int     @default(0) @map("created_at")
+  updatedAt  Int     @default(0) @map("updated_at")
+
+  @@index([key])
+  @@map("system_api_keys")
+}
+
+// ==================== 模型映射 ====================
+
+model modelMappings {
+  id          String  @id
+  alias       String
+  targetModel String  @map("target_model")
+  platformId  String? @map("platform_id")
+  createdAt   Int     @default(0) @map("created_at")
+  updatedAt   Int     @default(0) @map("updated_at")
+
+  @@unique([alias, platformId])
+  @@map("model_maps")
+}
+
+// ==================== 平台模型（自动发现） ====================
+
+model platformModels {
+  id         String  @id
+  platformId String  @map("platform_id")
+  modelId    String  @map("model_id")
+  ownedBy    String? @map("owned_by")
+  modelName  String? @map("model_name")
+  type       String  @default("chat")
+  source     String  @default("auto")
+  enabled    Boolean @default(true)
+  fetchedAt  Int     @default(0) @map("fetched_at")
+
+  @@unique([platformId, modelId])
+  @@index([platformId])
+  @@index([modelId])
+  @@map("platform_models")
+}
+
+// ==================== 请求日志 ====================
+
+model requestLogs {
+  id               String  @id
+  keyId            String? @map("key_id")
+  keyName          String? @map("key_name")
+  platformId       String? @map("platform_id")
+  proxyId          String? @map("proxy_id")
+  model            String
+  endpoint         String?
+  method           String?
+  status           Int
+  latency          Int     @default(0)
+  tokens           Int     @default(0)
+  promptTokens     Int     @default(0) @map("prompt_tokens")
+  completionTokens Int     @default(0) @map("completion_tokens")
+  ttft             Int     @default(0)
+  cost             Float   @default(0)
+  isError          Boolean @default(false) @map("is_error")
+  ipAddress        String? @map("ip_address")
+  userAgent        String? @map("user_agent")
+  errorMessage     String? @map("error_message")
+  createdAt        Int     @default(0) @map("created_at")
+
+  @@index([keyId])
+  @@index([platformId])
+  @@index([createdAt])
+  @@index([keyId, createdAt])
+  @@index([platformId, createdAt])
+  @@map("request_logs")
+}
+
+// ==================== 每日统计 ====================
+
+model dailyStats {
+  id                    String @id
+  date                  Int
+  keyId                 String? @map("key_id")
+  keyName               String? @map("key_name")
+  platformId            String? @map("platform_id")
+  platformName          String? @map("platform_name")
+  model                 String
+  totalRequests         Int    @default(0) @map("total_requests")
+  errorRequests         Int    @default(0) @map("error_requests")
+  totalTokens           Int    @default(0) @map("total_tokens")
+  totalPromptTokens     Int    @default(0) @map("total_prompt_tokens")
+  totalCompletionTokens Int    @default(0) @map("total_completion_tokens")
+  avgTtft               Float  @default(0) @map("avg_ttft")
+  avgDuration           Float  @default(0) @map("avg_duration")
+  maxTtft               Int    @default(0) @map("max_ttft")
+  maxDuration           Int    @default(0) @map("max_duration")
+  createdAt             Int    @default(0) @map("created_at")
+
+  @@unique([date, keyId, model])
+  @@index([date])
+  @@index([keyId, date])
+  @@index([platformId, date])
+  @@map("daily_stats")
+}
+
+// ==================== 系统配置 ====================
+
+model configs {
+  id        String @id
+  key       String @unique
+  value     String
+  updatedAt Int    @default(0) @map("updated_at")
+
+  @@map("configs")
+}
+
+// ==================== 系统事件 ====================
+
+model systemEvents {
+  id        String @id
+  level     String
+  message   String
+  detail    String?
+  createdAt Int    @default(0) @map("created_at")
+
+  @@index([level])
+  @@index([createdAt])
+  @@map("system_events")
+}
+
+// ==================== 审计日志 ====================
+
+model auditLogs {
+  id        String @id
+  adminId   String? @map("admin_id")
+  action    String
+  detail    String?
+  ip        String?
+  createdAt Int    @default(0) @map("created_at")
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==================== 请求模板 ====================
+
+model requestTemplates {
+  id           String  @id
+  name         String
+  description  String?
+  method       String  @default("POST")
+  endpoint     String  @default("all")
+  headers      String  @default("{}")
+  bodyTemplate String? @map("body_template")
+  enabled      Boolean @default(true)
+  createdAt    Int     @default(0) @map("created_at")
+  updatedAt    Int     @default(0) @map("updated_at")
+
+  @@map("request_templates")
+}
