@@ -63,8 +63,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
   }
 
   try {
-    const body: any = req.body;
-    const { modelId, modelName, enabled } = body;
+    const body: { modelId?: string; modelName?: string } = req.body;
+    const { modelId, modelName } = body;
 
     if (
       !modelId ||
