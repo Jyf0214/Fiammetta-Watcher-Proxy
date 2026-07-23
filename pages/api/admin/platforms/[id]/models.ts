@@ -114,14 +114,15 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
     const now = Math.floor(Date.now() / 1000);
     const newModelId = generateId();
 
-    await db.insert(schema.platform_models).values({
+    await db.insert(schema.platformModels).values({
       id: newModelId,
-      platform_id: id,
-      model_id: modelId.trim(),
-      model_name: modelName?.trim() || modelId.trim(),
-      enabled: enabled !== undefined ? (enabled ? 1 : 0) : 1,
-      created_at: now,
-    } as any);
+      platformId: id,
+      modelId: modelId.trim(),
+      modelName: modelName?.trim() || modelId.trim(),
+      type: "chat",
+      source: "manual",
+      fetchedAt: now,
+    });
 
     // 查询刚插入的记录返回
     const inserted = await db
