@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: "file:./placeholder.db"
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -95,8 +95,6 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Generate Prisma Client
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
         run: node scripts/prepare-db.mjs
 
       - name: Build Pages
