@@ -9,7 +9,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/db";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest } from "../../_auth";
 import * as schema from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
