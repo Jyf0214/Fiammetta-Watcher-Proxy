@@ -92,6 +92,9 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
       - name: Build Pages
         run: |
           npx opennextjs-cloudflare build
