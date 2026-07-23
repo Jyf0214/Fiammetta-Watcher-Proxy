@@ -55,7 +55,8 @@ data/
 .qwen/
 
 # 原 Next.js 项目文件（本地保留，不提交到 Cloudflare 分支）
-prisma/
+prisma/db.sqlite
+prisma/migrations/
 tests/
 next-env.d.ts
 middleware.ts
