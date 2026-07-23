@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: "file:./placeholder.db"
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,8 +59,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-          D1_NAME: fiammetta_d1
-          INIT_SQL_PATH: init.sql
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
+          D1_NAME: ${{ vars.D1_NAME || 'fiammetta_d1' }}
+          INIT_SQL_PATH: ${{ vars.INIT_SQL_PATH || 'init.sql' }}
         run: python3 deploy/init_d1.py
 
       # ==================== KV 命名空间初始化 ====================
@@ -70,16 +71,26 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-          KV_NAME: fiammetta-proxy
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
+          KV_NAME: ${{ vars.KV_NAME || 'fiammetta-proxy' }}
         run: python3 deploy/init_kv.py
 
       # ==================== 替换 wrangler 配置占位符 ====================
 
       - name: Update Wrangler Configs
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
           D1_ID: ${{ steps.d1.outputs.D1_ID }}
           KV_ID: ${{ steps.kv.outputs.KV_ID }}
+          PAGES_PROJECT: ${{ vars.PAGES_PROJECT || 'fiammetta-watcher' }}
+          WORKER_NAME: ${{ vars.WORKER_NAME || 'fiammetta_worker' }}
         run: |
+          # 非 Cloudflare 数据库模式下跳过 wrangler 配置替换
+          if [[ "$DATABASE_URL" == mysql://* ]] || [[ "$DATABASE_URL" == postgresql://* ]] || [[ "$DATABASE_URL" == postgres://* ]]; then
+            echo "⏭️  非 Cloudflare 数据库模式，跳过 wrangler 配置替换"
+            exit 0
+          fi
+
           # Worker wrangler.toml
           sed -i "s|placeholder-d1-id|$D1_ID|g" worker/wrangler.toml
           sed -i "s|placeholder-kv-id|$KV_ID|g" worker/wrangler.toml
@@ -94,8 +105,8 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
+      - name: Prepare Database & Generate Prisma Client
+        run: node scripts/prepare-db.mjs
 
       - name: Build Pages
         run: |
@@ -121,8 +132,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
           D1_ID: ${{ steps.d1.outputs.D1_ID }}
           KV_ID: ${{ steps.kv.outputs.KV_ID }}
+          PAGES_PROJECT: ${{ vars.PAGES_PROJECT || 'fiammetta-watcher' }}
+          WORKER_NAME: ${{ vars.WORKER_NAME || 'fiammetta_worker' }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: python3 deploy/init_pages.py

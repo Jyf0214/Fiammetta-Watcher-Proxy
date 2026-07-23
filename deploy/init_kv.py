@@ -33,6 +33,15 @@ def fail(msg: str):
 
 
 def main():
+    # 检测数据库类型：非 D1/SQLite 时跳过 KV 初始化
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url.startswith("mysql://") or database_url.startswith("mysqls://"):
+        print("⏭️  检测到 MySQL 数据库，跳过 KV 初始化")
+        return
+    if database_url.startswith("postgresql://") or database_url.startswith("postgres://"):
+        print("⏭️  检测到 PostgreSQL 数据库，跳过 KV 初始化")
+        return
+
     if not ACCOUNT_ID:
         fail("未设置 CLOUDFLARE_ACCOUNT_ID")
     if not API_TOKEN:
