@@ -235,25 +235,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const db = await createDb();
 
-      // 写入数据库
+      // 写入数据库（使用 Drizzle schema camelCase 属性名）
       await db.insert(schema.platforms).values({
         id,
         name: name.trim(),
-        base_url: baseUrl.trim(),
-        api_key: apiKey.trim(),
-        api_keys: JSON.stringify(parsedApiKeys),
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+        apiKeys: JSON.stringify(parsedApiKeys),
         type: platformType,
         enabled: 1,
         priority: priority ?? 0,
         weight: weight ?? 1,
-        rpm_limit: rpmLimit ?? null,
-        tpm_limit: tpmLimit ?? null,
+        rpmLimit: rpmLimit ?? null,
+        tpmLimit: tpmLimit ?? null,
         status: "healthy",
-        fail_count: 0,
-        forward_headers: normalizedForwardHeaders,
-        created_at: now,
-        updated_at: now,
-      } as any);
+        failCount: 0,
+        forwardHeaders: normalizedForwardHeaders,
+        createdAt: now,
+        updatedAt: now,
+      });
 
       // 审计日志
       await db.insert(schema.auditLogs).values({
