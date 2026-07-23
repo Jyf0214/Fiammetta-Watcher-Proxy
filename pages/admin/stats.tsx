@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
 import { Tooltip, message } from "antd";
 import { Button } from "@/components/ui/Button";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
@@ -425,39 +426,15 @@ function StatsContent() {
           </span>
         }
       >
-        {(!stats?.recentEvents || stats.recentEvents.length === 0) ? (
-          <div className="text-center py-8 text-zinc-400 text-sm">暂无事件</div>
-        ) : (
-          <div className="relative">
-            {/* 时间线竖线 */}
-            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-zinc-200" />
-            <div className="space-y-3">
-              {stats.recentEvents.map((event) => {
-                const levelColor: Record<string, string> = {
-                  info: "bg-blue-500",
-                  warning: "bg-amber-500",
-                  error: "bg-red-500",
-                  critical: "bg-red-600",
-                };
-                const time = new Date(event.createdAt);
-                const timeStr = `${time.getHours().toString().padStart(2, "0")}:${time.getMinutes().toString().padStart(2, "0")}:${time.getSeconds().toString().padStart(2, "0")}`;
-                return (
-                  <div key={event.id} className="relative flex items-start gap-3 pl-0">
-                    {/* 圆点 */}
-                    <div className={`relative z-10 mt-1.5 h-[10px] w-[10px] rounded-full ${levelColor[event.level] || "bg-zinc-400"} ring-2 ring-white shrink-0`} />
-                    {/* 内容 */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-sm text-zinc-800 truncate">{event.message}</span>
-                        <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{timeStr}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <ResponsiveTable
+          columns={[]}
+          dataSource={stats?.recentEvents || []}
+          rowKey="id"
+          pagination={false}
+          size="small"
+          timeline
+          timelineFields={{ level: "level", message: "message", time: "createdAt" }}
+        />
       </ProCard>
     </PageContainer>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Tag, Tooltip, message } from "antd";
+import { Tooltip, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -11,7 +11,7 @@ import {
   Cloud,
   Key,
   Globe,
-  AlertTriangle,
+  Database,
   LayoutDashboard,
   RefreshCw,
   Pause,
@@ -31,6 +31,14 @@ const MiniTrendChart = dynamic(() => import("@/components/MiniTrendChart"), {
   ssr: false,
   loading: () => <div className="w-20 h-8 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />,
 });
+
+/** ≥1000ms 自动转换为秒，保留两位小数 */
+function formatDuration(ms: number): { value: string; suffix: string } {
+  if (ms >= 1000) {
+    return { value: (ms / 1000).toFixed(2), suffix: "s" };
+  }
+  return { value: String(ms), suffix: "ms" };
+}
 
 // ==================== 类型定义 ====================
 
@@ -200,32 +208,6 @@ function DashboardContent() {
     }
   }, [viewMode, stats, fetchTrendData]);
 
-  // ==================== 表格列 ====================
-
-  const eventColumns = [
-    {
-      title: t("common.status"),
-      dataIndex: "level",
-      key: "level",
-      render: (level: string) => {
-        const colorMap: Record<string, string> = {
-          info: "blue",
-          warning: "orange",
-          error: "red",
-          critical: "magenta",
-        };
-        return <Tag color={colorMap[level] || "default"}>{level}</Tag>;
-      },
-    },
-    { title: t("common.message"), dataIndex: "message", key: "message" },
-    {
-      title: t("common.created_at"),
-      dataIndex: "createdAt",
-      key: "createdAt",
-      render: (v: string) => new Date(v).toLocaleString(),
-    },
-  ];
-
   // ==================== 统计卡片 ====================
 
   const statCards = [
@@ -257,7 +239,7 @@ function DashboardContent() {
       key: "tokens",
       title: t("dashboard.total_tokens"),
       value: stats?.totalTokens ?? 0,
-      icon: <AlertTriangle />,
+      icon: <Database />,
       color: "bg-purple-50",
       iconColor: "text-purple-500",
     },
@@ -269,6 +251,7 @@ function DashboardContent() {
       icon: <Clock />,
       color: "bg-orange-50",
       iconColor: "text-orange-500",
+      get display() { return formatDuration(this.value); },
     },
     {
       key: "avgDuration",
@@ -278,6 +261,7 @@ function DashboardContent() {
       icon: <Clock />,
       color: "bg-cyan-50",
       iconColor: "text-cyan-500",
+      get display() { return formatDuration(this.value); },
     },
   ];
 
@@ -306,12 +290,17 @@ function DashboardContent() {
         icon={<LayoutDashboard size={20} className="text-zinc-500 dark:text-zinc-400" />}
         title={t("dashboard.adminConsole")}
         description={
-          lastRefreshed
-            ? `${t("dashboard.adminConsoleDesc")} · ${t("dashboard.last_refreshed") || "上次刷新"}: ${lastRefreshed.toLocaleTimeString()}`
-            : t("dashboard.adminConsoleDesc")
+          <div className="flex flex-col">
+            <span>{t("dashboard.adminConsoleDesc")}</span>
+            {lastRefreshed && (
+              <span className="text-xs text-zinc-400 mt-0.5">
+                {t("dashboard.last_refreshed") || "上次刷新"}: {lastRefreshed.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
         }
         extra={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Tooltip
               title={viewMode === "grid" ? "切换到详细视图" : "切换到网格视图"}
             >
@@ -339,14 +328,16 @@ function DashboardContent() {
                 className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
               />
             </Tooltip>
-            <Button
-              variant="default"
-              icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
-              onClick={handleRefresh}
-              disabled={refreshing}
-            >
-              {t("common.refresh")}
-            </Button>
+            <Tooltip title={t("common.refresh")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+                onClick={handleRefresh}
+                disabled={refreshing}
+              />
+            </Tooltip>
           </div>
         }
       />
@@ -431,6 +422,8 @@ function DashboardContent() {
           rowKey="id"
           pagination={false}
           size="small"
+          timeline
+          timelineFields={{ level: "level", message: "message", time: "createdAt" }}
         />
       </ProCard>
     </PageContainer>
