@@ -79,26 +79,6 @@ export default async function handler(
         platformId: m.platformId,
       }));
 
-      // 代理
-      const proxies = await db.proxies.findMany();
-
-      exportData.proxies = proxies.map((p) => ({
-        id: p.id,
-        address: p.address,
-        poolId: p.poolId,
-        enabled: p.enabled,
-        status: p.status,
-      }));
-
-      // 代理池
-      const proxyPools = await db.proxyPools.findMany();
-
-      exportData.proxyPools = proxyPools.map((p) => ({
-        id: p.id,
-        name: p.name,
-        enabled: p.enabled,
-      }));
-
       // 套餐模板
       const plans = await db.plans.findMany();
 
