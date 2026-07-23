@@ -1,12 +1,10 @@
 /**
  * 平台模型管理 API
  *
- * GET  /api/admin/platforms/:id/models  — 获取平台的模型列表
- * POST /api/admin/platforms/:id/models  — 手动添加模型
+ * GET    /api/admin/platforms/:id/models  — 获取平台的模型列表
+ * POST   /api/admin/platforms/:id/models  — 手动添加模型
+ * PUT    /api/admin/platforms/:id/models  — 从远端平台刷新模型列表
  * DELETE /api/admin/platforms/:id/models?modelId=xxx — 删除模型
- *
- * 注意：远端自动刷新（PUT）和批量校正（PATCH）需要 fetchPlatformModels 和 detectModelType
- * 工具函数，待后续 Agent 实现后补充。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -187,6 +185,180 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 }
 
 /**
+ * 根据模型 ID 推断类型（chat / embedding / image / audio / moderation）
+ */
+function detectModelType(modelId: string): string {
+  const id = modelId.toLowerCase();
+  if (/embed|embedding|vector|text-embedding/.test(id)) return "embedding";
+  if (/dall-e|stable-diffusion|midjourney|image/.test(id)) return "image";
+  if (/whisper|tts|speech|audio|voice/.test(id)) return "audio";
+  if (/moderation|safety|content/.test(id)) return "moderation";
+  return "chat";
+}
+
+/** OpenAI 兼容的 /v1/models 响应格式 */
+interface OpenAIModel {
+  id: string;
+  object?: string;
+  owned_by?: string;
+  created?: number;
+}
+
+/**
+ * PUT /api/admin/platforms/:id/models — 从远端平台刷新模型列表
+ *
+ * 调用上游平台的 /v1/models 接口，自动同步模型到本地数据库。
+ * 新增的模型会被插入，已存在的模型会更新 fetchedAt，
+ * 上游已删除的模型会从本地移除（手动添加的不会被删除）。
+ */
+async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, error: "未授权" });
+  }
+
+  try {
+    const token = authHeader.slice(7);
+    await verifyToken(token, process.env.JWT_SECRET);
+
+    const db = await createDb();
+
+    // 获取平台信息
+    const platformRows = await db
+      .select()
+      .from(schema.platforms)
+      .where(eq(schema.platforms.id, id))
+      .limit(1);
+
+    if (platformRows.length === 0) {
+      return res.status(404).json({ success: false, error: "平台不存在" });
+    }
+
+    const platform = platformRows[0];
+    if (!platform.enabled) {
+      return res.status(400).json({ success: false, error: "平台已禁用，无法刷新模型" });
+    }
+
+    // 获取 API Key（优先使用 apiKey 字段）
+    const apiKey = platform.apiKey;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: "平台未配置 API Key，无法刷新" });
+    }
+
+    // 调用上游 /v1/models 接口
+    const modelsUrl = `${platform.baseUrl.replace(/\/+$/, "")}/v1/models`;
+    let upstreamModels: OpenAIModel[] = [];
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(modelsUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        return res.status(502).json({
+          success: false,
+          error: `上游平台返回错误 (${response.status})`,
+          detail: errorText.slice(0, 500),
+        });
+      }
+
+      const data = await response.json() as { data?: OpenAIModel[] };
+      upstreamModels = Array.isArray(data.data) ? data.data : [];
+    } catch (fetchErr) {
+      const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      if (message.includes("abort")) {
+        return res.status(504).json({ success: false, error: "上游平台响应超时（15秒）" });
+      }
+      return res.status(502).json({ success: false, error: "无法连接到上游平台", detail: message });
+    }
+
+    if (upstreamModels.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: { added: 0, updated: 0, removed: 0, total: 0 },
+        message: "上游平台未返回任何模型",
+      });
+    }
+
+    // 获取当前本地已有的模型
+    const existingModels = await db
+      .select()
+      .from(schema.platform_models)
+      .where(eq(schema.platformModels.platformId, id));
+
+    const existingMap = new Map(existingModels.map((m) => [m.modelId, m]));
+    const upstreamIds = new Set(upstreamModels.map((m) => m.id));
+
+    const now = Math.floor(Date.now() / 1000);
+    let added = 0;
+    let updated = 0;
+    let removed = 0;
+
+    // 1. 新增上游有但本地没有的模型
+    for (const upstream of upstreamModels) {
+      if (!existingMap.has(upstream.id)) {
+        await db.insert(schema.platformModels).values({
+          id: generateId(),
+          platformId: id,
+          modelId: upstream.id,
+          ownedBy: upstream.owned_by || null,
+          modelName: upstream.id,
+          type: detectModelType(upstream.id),
+          source: "auto",
+          fetchedAt: now,
+        });
+        added++;
+      }
+    }
+
+    // 2. 更新已存在的模型的 fetchedAt（标记为仍然存在）
+    for (const upstream of upstreamModels) {
+      const existing = existingMap.get(upstream.id);
+      if (existing) {
+        await db
+          .update(schema.platformModels)
+          .set({ fetchedAt: now, ownedBy: upstream.owned_by || existing.ownedBy })
+          .where(eq(schema.platformModels.id, existing.id));
+        updated++;
+      }
+    }
+
+    // 3. 删除上游已不存在且来源为 auto 的模型（保留手动添加的）
+    for (const existing of existingModels) {
+      if (!upstreamIds.has(existing.modelId) && existing.source === "auto") {
+        await db
+          .delete(schema.platform_models)
+          .where(eq(schema.platformModels.id, existing.id));
+        removed++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { added, updated, removed, total: upstreamModels.length },
+      message: `刷新完成：新增 ${added}，更新 ${updated}，移除 ${removed}`,
+    });
+  } catch (err) {
+    console.error(
+      "[PUT /api/admin/platforms/[id]/models] 刷新模型失败:",
+      err
+    );
+    return res.status(500).json({ success: false, error: "刷新模型失败", detail: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
  * 路由分发
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -197,10 +369,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return handleGet(req, res, id);
     case "POST":
       return handlePost(req, res, id);
+    case "PUT":
+      return handlePut(req, res, id);
     case "DELETE":
       return handleDelete(req, res, id);
     default:
-      res.setHeader("Allow", ["GET", "POST", "DELETE"]);
+      res.setHeader("Allow", ["GET", "POST", "PUT", "DELETE"]);
       return res.status(405).json({ success: false, error: "方法不允许" });
   }
 }
