@@ -130,6 +130,7 @@ export const platformModels = mysqlTable("platform_models", {
   modelName: varchar("model_name", { length: 255 }),
   type: varchar("type", { length: 20 }).notNull().default("chat"),
   source: varchar("source", { length: 20 }).notNull().default("auto"),
+  enabled: boolean("enabled").notNull().default(true),
   fetchedAt: int("fetched_at").notNull(),
 }, (t) => [
   uniqueIndex("idx_platform_models_platform_model").on(t.platformId, t.modelId),
