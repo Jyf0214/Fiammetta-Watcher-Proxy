@@ -115,6 +115,14 @@ jobs:
           npx wrangler deploy --config wrangler.toml 2>&1 | grep -v "https://"
           echo "✅ Worker 部署完成"
 
+      - name: Set Worker Secrets (PG/MySQL only)
+        if: startsWith(env.DATABASE_URL, 'postgresql://') || startsWith(env.DATABASE_URL, 'postgres://') || startsWith(env.DATABASE_URL, 'mysql://') || startsWith(env.DATABASE_URL, 'mysqls://')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          printf '%s' "${{ env.DATABASE_URL }}" | npx wrangler secret put DATABASE_URL --config worker/wrangler.toml --name fiammetta_worker
+          echo "✅ Worker DATABASE_URL Secret 已设置"
+
       # ==================== Pages 项目 + 绑定 + Secrets ====================
 
       - name: Init Pages Project
@@ -125,6 +133,7 @@ jobs:
           KV_ID: ${{ steps.kv.outputs.KV_ID }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
         run: python3 deploy/init_pages.py
 
       # ==================== 部署 Pages ====================

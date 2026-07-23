@@ -11,12 +11,14 @@ Pages 项目创建 + 绑定配置 + Secrets 设置
   ADMIN_USERNAME         — 管理员用户名（默认 admin）
   ADMIN_PASSWORD         — 管理员密码（必需）
   JWT_SECRET             — JWT 密钥（留空则自动生成）
+  DATABASE_URL           — 数据库连接 URL（仅 PG/MySQL 时自动设置为 Pages Secret）
 
 此脚本执行以下操作：
   1. 创建 Pages 项目（已存在则跳过）
   2. 配置 D1 绑定
   3. 配置 KV 绑定
   4. 设置 Pages Secrets（ADMIN_USERNAME、ADMIN_PASSWORD、JWT_SECRET）
+  5. 当 DATABASE_URL 为 PostgreSQL/MySQL 时，自动设置为 Pages Secret
 """
 import os
 import sys
@@ -33,6 +35,7 @@ KV_ID = os.environ.get("KV_ID", "")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 WORKER_NAME = os.environ.get("WORKER_NAME", "fiammetta_worker")
 
 API_BASE = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
@@ -45,6 +48,16 @@ HEADERS = {
 def fail(msg: str):
     print(f"❌ {msg}")
     sys.exit(1)
+
+
+def is_pg_or_mysql(url: str) -> bool:
+    """检查 DATABASE_URL 是否为 PostgreSQL 或 MySQL"""
+    return (
+        url.startswith("postgresql://")
+        or url.startswith("postgres://")
+        or url.startswith("mysql://")
+        or url.startswith("mysqls://")
+    )
 
 
 def api_request(method: str, path: str, json_data=None) -> dict:
@@ -171,10 +184,19 @@ def main():
         "JWT_SECRET": JWT_SECRET,
     }
 
+    # 仅当 DATABASE_URL 为 PostgreSQL 或 MySQL 时才设置为 Secret（D1 不需要）
+    if DATABASE_URL and is_pg_or_mysql(DATABASE_URL):
+        secrets_to_set["DATABASE_URL"] = DATABASE_URL
+        print(f"📦 检测到外部数据库，将设置 DATABASE_URL Secret")
+    elif DATABASE_URL:
+        print(f"📦 DATABASE_URL 为 D1/SQLite 格式，跳过 Secret 设置（D1 通过 binding 连接）")
+    else:
+        print(f"📦 未设置 DATABASE_URL，使用默认 D1 数据库")
+
+    import subprocess
     for key, value in secrets_to_set.items():
         print(f"🔐 设置 Secret: {key}")
         # 使用 wrangler CLI 设置 secret（通过 stdin 传递值）
-        import subprocess
         result = subprocess.run(
             [
                 "npx", "wrangler", "pages", "secret", "put", key,
