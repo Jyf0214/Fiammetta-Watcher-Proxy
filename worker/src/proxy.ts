@@ -273,6 +273,11 @@ export async function proxyV1Request(
 
   const isStream = config.supportsStreaming !== false && body.stream === true;
 
+  // 流式请求时注入 stream_options 以获取 usage 统计
+  if (isStream) {
+    upstreamBody.stream_options = { include_usage: true };
+  }
+
   // 获取上游 API Key
   const upstreamKey = getNextKey(route.platform);
   if (!upstreamKey) {
@@ -466,6 +471,10 @@ export async function proxyV1Request(
   }
 
   // 提取 usage 并更新统计
+  let responseTokens = 0;
+  let responsePromptTokens = 0;
+  let responseCompletionTokens = 0;
+
   try {
     const parsed = JSON.parse(responseBody);
     const usage = parsed?.usage;
@@ -482,29 +491,38 @@ export async function proxyV1Request(
         completionTokens = totalTokens;
       }
 
+      responseTokens = totalTokens;
+      responsePromptTokens = promptTokens;
+      responseCompletionTokens = completionTokens;
+
       if (totalTokens > 0) {
         const { updateKeyUsage } = await import("./token");
         await updateKeyUsage(apiKey.id, totalTokens, env.DB);
       }
-
-      await recordRequestLog({
-        keyId: apiKey.id,
-        keyName: apiKey.name,
-        platformId: route.platform.id,
-        model: modelName || "unknown",
-        endpoint: config.upstreamPath,
-        method: "POST",
-        status: upstreamResponse.status,
-        tokens: totalTokens,
-        promptTokens,
-        completionTokens,
-        duration: Date.now() - startTime,
-        isError: false,
-        db: env.DB,
-      });
     }
   } catch {
-    // JSON 解析或日志记录失败不影响响应
+    // JSON 解析失败不影响响应
+  }
+
+  // 始终记录请求日志（即使上游未返回 usage）
+  try {
+    await recordRequestLog({
+      keyId: apiKey.id,
+      keyName: apiKey.name,
+      platformId: route.platform.id,
+      model: modelName || "unknown",
+      endpoint: config.upstreamPath,
+      method: "POST",
+      status: upstreamResponse.status,
+      tokens: responseTokens,
+      promptTokens: responsePromptTokens,
+      completionTokens: responseCompletionTokens,
+      duration: Date.now() - startTime,
+      isError: false,
+      db: env.DB,
+    });
+  } catch (logError) {
+    console.error(`${logTag} 日志写入失败:`, logError);
   }
 
   _upstreamSucceeded = true;
