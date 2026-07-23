@@ -1,310 +1,229 @@
 /**
- * CRUD 操作集成测试
+ * Prisma Client 操作测试
  *
- * 通过 mock D1 验证 Drizzle ORM 的增删改查操作
- * 能否正常通过统一的 createDb() 接口工作。
+ * 验证 Prisma 生成的客户端可以正常执行增删改查操作。
+ * 使用 Prisma D1 adapter + sql.js 内存数据库。
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { eq, sql } from "drizzle-orm";
-import * as schema from "../schema";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
+import { PrismaClient } from "../../src/generated/client";
+import { PrismaD1 } from "@prisma/adapter-d1";
 
-// ==================== Mock D1 ====================
+let SQL: any;
+let testDb: SqlJsDatabase;
+let prisma: PrismaClient;
 
-function createRecordingD1() {
-  const calls: Array<{ sql: string; params: any[] }> = [];
+beforeAll(async () => {
+  SQL = await initSqlJs();
+  testDb = new SQL.Database();
 
-  return {
-    calls,
+  // 创建测试表（与 Prisma schema 一致）
+  testDb.run(`
+    CREATE TABLE IF NOT EXISTS admins (
+      id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      plan_id TEXT, quota REAL, used_tokens INTEGER NOT NULL DEFAULT 0,
+      token_limit INTEGER, rpm_limit INTEGER, tpm_limit INTEGER,
+      call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
+      reset_period TEXT DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
+      expires_at INTEGER, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS request_logs (
+      id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT, proxy_id TEXT,
+      model TEXT NOT NULL, endpoint TEXT, method TEXT, status INTEGER NOT NULL,
+      latency INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
+      ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error INTEGER NOT NULL DEFAULT 0,
+      ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS platforms (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL,
+      api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai',
+      enabled INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
+      weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
+      forward_headers TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'healthy',
+      fail_count INTEGER NOT NULL DEFAULT 0, last_fail_at INTEGER, cooldown_end INTEGER,
+      created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  // 通过 sql.js D1 兼容层创建 PrismaClient
+  const d1Compat = {
     prepare(sql: string) {
-      const stmt = {
-        sql,
-        params: [] as any[],
+      return {
         bind(...params: any[]) {
-          stmt.params = params;
-          return stmt;
+          return {
+            async first() {
+              const s = testDb.prepare(sql);
+              try { s.bind(params); return s.step() ? s.getAsObject() : null; } finally { s.free(); }
+            },
+            async all() {
+              const s = testDb.prepare(sql);
+              try { s.bind(params); const rows: any[] = []; while (s.step()) rows.push(s.getAsObject()); return { results: rows }; } finally { s.free(); }
+            },
+            async run() {
+              const s = testDb.prepare(sql);
+              try { s.bind(params); s.run(); return { success: true, meta: { changes: 0 } }; } finally { s.free(); }
+            },
+            async raw() {
+              const s = testDb.prepare(sql);
+              try { s.bind(params); const rows: any[] = []; while (s.step()) rows.push(s.get()); return rows; } finally { s.free(); }
+            },
+            finalize() {},
+          };
         },
-        async first() {
-          calls.push({ sql, params: stmt.params });
-          return null;
-        },
-        async all() {
-          calls.push({ sql, params: stmt.params });
-          return { results: [], success: true };
-        },
-        async run() {
-          calls.push({ sql, params: stmt.params });
-          return { success: true, meta: { changes: 1 } };
-        },
-        async raw() {
-          calls.push({ sql, params: stmt.params });
-          return [];
-        },
+        finalize() {},
       };
-      return stmt;
     },
-    async exec(sql: string) {
-      calls.push({ sql, params: [] });
-      return { success: true, results: [] };
-    },
-    async batch(stmts: any[]) {
-      for (const _s of stmts) {
-        calls.push({ sql: "batch", params: [] });
-      }
-      return stmts.map(() => ({ success: true, meta: { changes: 0 } }));
-    },
-    async dump() {
-      return new ArrayBuffer(0);
-    },
-  };
-}
+    exec(sql: string) { testDb.run(sql); return { success: true, results: [] }; },
+    batch(stmts: any[]) { return stmts.map(() => ({ success: true, meta: { changes: 0 } })); },
+    dump() { return new ArrayBuffer(0); },
+  } as any;
+
+  const adapter = new PrismaD1(d1Compat);
+  prisma = new PrismaClient({ adapter });
+});
+
+afterAll(async () => {
+  if (prisma) await prisma.$disconnect();
+  if (testDb) testDb.close();
+});
 
 // ==================== 测试 ====================
 
-describe("CRUD: 管理员表 (admins)", () => {
-  let d1: ReturnType<typeof createRecordingD1>;
-
-  beforeEach(() => {
-    d1 = createRecordingD1();
-  });
-
-  it("可以构建 SELECT 查询", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const query = db
-      .select({
-        id: schema.admins.id,
-        username: schema.admins.username,
-      })
-      .from(schema.admins);
-
-    expect(query).toBeDefined();
-    expect(query.where).toBeDefined();
-    expect(query.limit).toBeDefined();
-  });
-
-  it("可以构建 INSERT 语句", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const insertStmt = db.insert(schema.admins).values({
-      id: "test-id",
-      username: "testuser",
-      passwordHash: "hash123",
-      createdAt: Math.floor(Date.now() / 1000),
-      updatedAt: Math.floor(Date.now() / 1000),
+describe("CRUD: admins 表", () => {
+  it("可以创建管理员", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const admin = await prisma.admins.create({
+      data: { id: "test-1", username: "testuser", passwordHash: "hash123", createdAt: now, updatedAt: now },
     });
-
-    expect(insertStmt).toBeDefined();
+    expect(admin.id).toBe("test-1");
+    expect(admin.username).toBe("testuser");
   });
 
-  it("可以构建 UPDATE 语句", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const updateStmt = db
-      .update(schema.admins)
-      .set({ username: "newname" })
-      .where(eq(schema.admins.id, "test-id"));
-
-    expect(updateStmt).toBeDefined();
+  it("可以查询管理员", async () => {
+    const admin = await prisma.admins.findFirst({ where: { username: "testuser" } });
+    expect(admin).not.toBeNull();
+    expect(admin!.id).toBe("test-1");
   });
 
-  it("可以构建 DELETE 语句", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
+  it("可以更新管理员", async () => {
+    const updated = await prisma.admins.update({
+      where: { id: "test-1" },
+      data: { username: "newname" },
+    });
+    expect(updated.username).toBe("newname");
+  });
 
-    const deleteStmt = db
-      .delete(schema.admins)
-      .where(eq(schema.admins.id, "test-id"));
-
-    expect(deleteStmt).toBeDefined();
+  it("可以删除管理员", async () => {
+    await prisma.admins.delete({ where: { id: "test-1" } });
+    const admin = await prisma.admins.findFirst({ where: { id: "test-1" } });
+    expect(admin).toBeNull();
   });
 });
 
-describe("CRUD: API 密钥表 (api_keys)", () => {
-  let d1: ReturnType<typeof createRecordingD1>;
-
-  beforeEach(() => {
-    d1 = createRecordingD1();
-  });
-
-  it("可以构建带条件的 SELECT 查询", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const query = db
-      .select({
-        id: schema.apiKeys.id,
-        key: schema.apiKeys.key,
-        name: schema.apiKeys.name,
-        status: schema.apiKeys.status,
-      })
-      .from(schema.apiKeys)
-      .where(eq(schema.apiKeys.key, "test-key"))
-      .limit(1);
-
-    expect(query).toBeDefined();
-  });
-
-  it("可以构建批量 INSERT", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
+describe("CRUD: api_keys 表", () => {
+  it("可以创建 API Key", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const insertStmt = db.insert(schema.apiKeys).values([
-      {
-        id: "key-1",
-        key: "sk-test-1",
-        name: "Key 1",
-        usedTokens: 0,
-        callUsed: 0,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
+    const key = await prisma.apiKeys.create({
+      data: {
+        id: "key-1", key: "sk-test-1", name: "Key 1",
+        usedTokens: 0, callUsed: 0, status: "active",
+        createdAt: now, updatedAt: now,
       },
-      {
-        id: "key-2",
-        key: "sk-test-2",
-        name: "Key 2",
-        usedTokens: 0,
-        callUsed: 0,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
+    });
+    expect(key.key).toBe("sk-test-1");
+  });
+
+  it("可以批量查询", async () => {
+    const keys = await prisma.apiKeys.findMany();
+    expect(keys.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("可以条件查询", async () => {
+    const key = await prisma.apiKeys.findFirst({ where: { key: "sk-test-1" } });
+    expect(key).not.toBeNull();
+    expect(key!.name).toBe("Key 1");
+  });
+
+  it("可以更新字段", async () => {
+    const updated = await prisma.apiKeys.update({
+      where: { id: "key-1" },
+      data: { usedTokens: { increment: 100 } },
+    });
+    expect(updated.usedTokens).toBe(100);
+  });
+
+  it("可以删除", async () => {
+    await prisma.apiKeys.delete({ where: { id: "key-1" } });
+    const key = await prisma.apiKeys.findFirst({ where: { id: "key-1" } });
+    expect(key).toBeNull();
+  });
+});
+
+describe("CRUD: request_logs 表", () => {
+  it("可以创建请求日志（宽表 21 列）", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const log = await prisma.requestLogs.create({
+      data: {
+        id: "log-1", keyId: "key-1", keyName: "Test Key", platformId: "platform-1",
+        model: "gpt-4", endpoint: "/v1/chat/completions", method: "POST",
+        status: 200, latency: 1500, tokens: 100, promptTokens: 50, completionTokens: 50,
+        ttft: 200, cost: 0.001, isError: false, createdAt: now,
       },
-    ]);
-
-    expect(insertStmt).toBeDefined();
-  });
-});
-
-describe("CRUD: 请求日志表 (request_logs)", () => {
-  let d1: ReturnType<typeof createRecordingD1>;
-
-  beforeEach(() => {
-    d1 = createRecordingD1();
-  });
-
-  it("可以构建复杂的 SELECT + WHERE + ORDER BY", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const query = db
-      .select({
-        id: schema.requestLogs.id,
-        model: schema.requestLogs.model,
-        status: schema.requestLogs.status,
-        latency: schema.requestLogs.latency,
-      })
-      .from(schema.requestLogs)
-      .where(eq(schema.requestLogs.keyId, "key-1"))
-      .orderBy(schema.requestLogs.createdAt);
-
-    expect(query).toBeDefined();
-  });
-
-  it("可以构建 INSERT（21 列的宽表）", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const now = Math.floor(Date.now() / 1000);
-    const insertStmt = db.insert(schema.requestLogs).values({
-      id: "log-1",
-      keyId: "key-1",
-      keyName: "Test Key",
-      platformId: "platform-1",
-      model: "gpt-4",
-      endpoint: "/v1/chat/completions",
-      method: "POST",
-      status: 200,
-      latency: 1500,
-      tokens: 100,
-      promptTokens: 50,
-      completionTokens: 50,
-      ttft: 200,
-      cost: 0.001,
-      isError: false,
-      createdAt: now,
     });
-
-    expect(insertStmt).toBeDefined();
-  });
-});
-
-describe("CRUD: 平台表 (platforms)", () => {
-  let d1: ReturnType<typeof createRecordingD1>;
-
-  beforeEach(() => {
-    d1 = createRecordingD1();
+    expect(log.model).toBe("gpt-4");
+    expect(log.tokens).toBe(100);
   });
 
-  it("可以构建 INSERT + JSON 字段", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
-
-    const now = Math.floor(Date.now() / 1000);
-    const insertStmt = db.insert(schema.platforms).values({
-      id: "platform-1",
-      name: "OpenAI",
-      baseUrl: "https://api.openai.com",
-      apiKey: "sk-xxx",
-      apiKeys: JSON.stringify([{ name: "default", key: "sk-xxx" }]),
-      type: "openai",
-      enabled: true,
-      priority: 0,
-      weight: 1,
-      status: "healthy",
-      failCount: 0,
-      forwardHeaders: "[]",
-      createdAt: now,
-      updatedAt: now,
+  it("可以条件查询 + 排序", async () => {
+    const logs = await prisma.requestLogs.findMany({
+      where: { keyId: "key-1" },
+      orderBy: { createdAt: "desc" },
     });
-
-    expect(insertStmt).toBeDefined();
+    expect(logs.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("可以构建带 SQL 模板的 UPDATE（递增 failCount）", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
+  it("可以 count 查询", async () => {
+    const count = await prisma.requestLogs.count({ where: { keyId: "key-1" } });
+    expect(count).toBeGreaterThanOrEqual(1);
+  });
 
-    const updateStmt = db
-      .update(schema.platforms)
-      .set({
-        failCount: sql`${schema.platforms.failCount} + 1`,
-        updatedAt: Math.floor(Date.now() / 1000),
-      })
-      .where(eq(schema.platforms.id, "platform-1"));
-
-    expect(updateStmt).toBeDefined();
+  it("可以清理测试数据", async () => {
+    await prisma.requestLogs.deleteMany({});
+    const count = await prisma.requestLogs.count();
+    expect(count).toBe(0);
   });
 });
 
-describe("CRUD: 多表关联查询", () => {
-  let d1: ReturnType<typeof createRecordingD1>;
-
-  beforeEach(() => {
-    d1 = createRecordingD1();
+describe("CRUD: platforms 表", () => {
+  it("可以创建平台（含 JSON 字段）", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const platform = await prisma.platforms.create({
+      data: {
+        id: "platform-1", name: "OpenAI", baseUrl: "https://api.openai.com",
+        apiKey: "sk-xxx", apiKeys: JSON.stringify([{ name: "default", key: "sk-xxx" }]),
+        type: "openai", enabled: true, priority: 0, weight: 1,
+        status: "healthy", failCount: 0, forwardHeaders: "[]",
+        createdAt: now, updatedAt: now,
+      },
+    });
+    expect(platform.name).toBe("OpenAI");
   });
 
-  it("可以构建 LEFT JOIN 查询（代理池 + 代理）", async () => {
-    const { createDb } = await import("../database");
-    const db = await createDb(d1 as any);
+  it("可以原子递增 failCount", async () => {
+    const updated = await prisma.platforms.update({
+      where: { id: "platform-1" },
+      data: { failCount: { increment: 1 } },
+    });
+    expect(updated.failCount).toBe(1);
+  });
 
-    const query = db
-      .select({
-        poolId: schema.proxyPools.id,
-        poolName: schema.proxyPools.name,
-        proxyId: schema.proxies.id,
-        proxyAddress: schema.proxies.address,
-      })
-      .from(schema.proxyPools)
-      .leftJoin(
-        schema.proxies,
-        eq(schema.proxyPools.id, schema.proxies.poolId)
-      );
-
-    expect(query).toBeDefined();
+  it("可以清理测试数据", async () => {
+    await prisma.platforms.deleteMany({});
   });
 });

@@ -5,9 +5,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
@@ -31,35 +29,31 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 2. 检查模型映射是否存在
-    const [existing] = await db
-      .select({
-        id: schema.modelMappings.id,
-        sourceModel: schema.modelMappings.alias,
-      })
-      .from(schema.modelMappings)
-      .where(eq(schema.modelMappings.id, id))
-      .limit(1);
+    const existing = await db.modelMappings.findFirst({
+      where: { id },
+      select: { id: true, alias: true },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "模型映射不存在" });
     }
 
     // 3. 删除模型映射
-    await db
-      .delete(schema.modelMappings)
-      .where(eq(schema.modelMappings.id, id));
+    await db.modelMappings.delete({ where: { id } });
 
     // 4. 记录审计日志
     try {
       const now = Math.floor(Date.now() / 1000);
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
-      await db.insert(schema.auditLogs).values({
-        id: crypto.randomUUID(),
-        adminId: getAuditAdminId(admin),
-        action: "delete_model_map",
-        detail: JSON.stringify({ modelId: id, sourceModel: existing.sourceModel }),
-        ip,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: getAuditAdminId(admin),
+          action: "delete_model_map",
+          detail: JSON.stringify({ modelId: id, sourceModel: existing.alias }),
+          ip,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       // 审计日志写入失败不影响主流程

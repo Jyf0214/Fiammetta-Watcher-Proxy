@@ -12,9 +12,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 
@@ -71,11 +69,10 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     // 校验代理池（可选）
     if (poolId && typeof poolId === "string") {
-      const [pool] = await db
-        .select({ id: schema.proxyPools.id })
-        .from(schema.proxyPools)
-        .where(eq(schema.proxyPools.id, poolId))
-        .limit(1);
+      const pool = await db.proxyPools.findFirst({
+        where: { id: poolId },
+        select: { id: true },
+      });
       if (!pool) {
         return res.status(400).json({ success: false, error: "关联代理池不存在" });
       }
@@ -148,9 +145,9 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     }
 
     // 查询已有代理（按 address 去重，全局范围）
-    const existingProxies = await db
-      .select({ id: schema.proxies.id, address: schema.proxies.address })
-      .from(schema.proxies);
+    const existingProxies = await db.proxies.findMany({
+      select: { id: true, address: true },
+    });
     const existingMap = new Map(existingProxies.map((p) => [p.address, p.id]));
 
     let created = 0;
@@ -162,30 +159,32 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       const existingId = existingMap.get(item.address);
       if (existingId) {
         // 覆盖：重置状态为可用
-        await db
-          .update(schema.proxies)
-          .set({
+        await db.proxies.update({
+          where: { id: existingId },
+          data: {
             enabled: true,
             status: "healthy",
             failCount: 0,
             banCount: 0,
             cooldownEnd: null,
             updatedAt: now,
-          })
-          .where(eq(schema.proxies.id, existingId));
+          },
+        });
         updated++;
       } else {
         const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-        await db.insert(schema.proxies).values({
-          id,
-          address: item.address,
-          poolId: poolId && typeof poolId === "string" ? poolId : null,
-          enabled: true,
-          status: "healthy",
-          failCount: 0,
-          banCount: 0,
-          createdAt: now,
-          updatedAt: now,
+        await db.proxies.create({
+          data: {
+            id,
+            address: item.address,
+            poolId: poolId && typeof poolId === "string" ? poolId : null,
+            enabled: true,
+            status: "healthy",
+            failCount: 0,
+            banCount: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
         });
         created++;
       }
@@ -193,18 +192,20 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     // 审计日志
     try {
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "import_proxies",
-        detail: JSON.stringify({
-          target: poolId || null,
-          created,
-          updated,
-          parseErrors: parseErrors.length,
-        }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "import_proxies",
+          detail: JSON.stringify({
+            target: poolId || null,
+            created,
+            updated,
+            parseErrors: parseErrors.length,
+          }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       console.error("[POST /api/admin/proxies/import] 审计日志写入失败:", auditErr);

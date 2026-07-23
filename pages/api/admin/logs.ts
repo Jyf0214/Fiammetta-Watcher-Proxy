@@ -13,7 +13,43 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
+import { createDb } from "@/lib/prisma";
+
+/** 系统事件行类型 */
+interface EventRow {
+  id: string;
+  level: string;
+  message: string;
+  detail: string | null;
+  created_at: number;
+}
+
+/** 请求日志行类型 */
+interface RequestLogRow {
+  id: string;
+  key_id: string | null;
+  key_name: string | null;
+  platform_id: string | null;
+  model: string;
+  endpoint: string | null;
+  method: string | null;
+  status: number;
+  latency: number;
+  tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost: number;
+  is_error: number;
+  ip_address: string | null;
+  user_agent: string | null;
+  error_message: string | null;
+  created_at: number;
+}
+
+/** 计数结果类型 */
+interface CountRow {
+  count: number;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -39,6 +75,7 @@ export default async function handler(
     // ---------- 系统事件查询 ----------
     if (type === "events") {
       const conditions: string[] = [];
+      const params: unknown[] = [];
 
       // 错误筛选
       if (isError === "true") {
@@ -50,19 +87,21 @@ export default async function handler(
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [items, countResult] = await Promise.all([
-        (db as any).all(
+        db.$queryRawUnsafe<EventRow[]>(
           `SELECT id, level, message, detail, created_at
            FROM system_events
            ${whereClause}
            ORDER BY created_at DESC
-           LIMIT ${pageSize} OFFSET ${offset}`
-        ) as Promise<Array<{ id: string; level: string; message: string; detail: string | null; created_at: number }>>,
-        (db as any).get(
-          `SELECT COUNT(*) as count FROM system_events ${whereClause}`
-        ) as Promise<{ count: number } | null>,
+           LIMIT ${pageSize} OFFSET ${offset}`,
+          ...params
+        ),
+        db.$queryRawUnsafe<CountRow[]>(
+          `SELECT COUNT(*) as count FROM system_events ${whereClause}`,
+          ...params
+        ),
       ]);
 
-      const total = countResult?.count ?? 0;
+      const total = countResult[0]?.count ?? 0;
 
       res.status(200).json({
         success: true,
@@ -84,28 +123,8 @@ export default async function handler(
     }
 
     // ---------- 请求日志查询 ----------
-    interface RequestLogRow {
-      id: string;
-      key_id: string | null;
-      key_name: string | null;
-      platform_id: string | null;
-      model: string;
-      endpoint: string | null;
-      method: string | null;
-      status: number;
-      latency: number;
-      tokens: number;
-      prompt_tokens: number;
-      completion_tokens: number;
-      cost: number;
-      is_error: number;
-      ip_address: string | null;
-      user_agent: string | null;
-      error_message: string | null;
-      created_at: number;
-    }
     const conditions: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     // 状态码筛选
     if (status) {
@@ -151,11 +170,11 @@ export default async function handler(
     const itemsSql = `SELECT * FROM request_logs ${whereClause} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
 
     const [items, countResult] = await Promise.all([
-      (db as any).all(itemsSql, ...params) as Promise<RequestLogRow[]>,
-      (db as any).get(countSql, ...params) as Promise<{ count: number } | null>,
+      db.$queryRawUnsafe<RequestLogRow[]>(itemsSql, ...params),
+      db.$queryRawUnsafe<CountRow[]>(countSql, ...params),
     ]);
 
-    const total = countResult?.count ?? 0;
+    const total = countResult[0]?.count ?? 0;
 
     res.status(200).json({
       success: true,

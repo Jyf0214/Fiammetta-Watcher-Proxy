@@ -7,9 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq, sql } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 /**
@@ -26,25 +24,30 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
   try {
     const db = await createDb();
 
-    const rows = await db
-      .select({
-        id: schema.proxyPools.id,
-        name: schema.proxyPools.name,
-        enabled: schema.proxyPools.enabled,
-        createdAt: schema.proxyPools.createdAt,
-        updatedAt: schema.proxyPools.updatedAt,
-        proxyCount: sql<number>`cast(count(${schema.proxies.id}) as integer)`,
-      })
-      .from(schema.proxyPools)
-      .leftJoin(schema.proxies, eq(schema.proxyPools.id, schema.proxies.poolId))
-      .where(eq(schema.proxyPools.id, id))
-      .groupBy(schema.proxyPools.id);
+    const pool = await db.proxyPools.findFirst({
+      where: { id },
+    });
 
-    if (rows.length === 0) {
+    if (!pool) {
       return res.status(404).json({ success: false, error: "代理池不存在" });
     }
 
-    return res.status(200).json({ success: true, data: rows[0] });
+    // 统计该池的代理数量
+    const proxyCount = await db.proxies.count({
+      where: { poolId: id },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: pool.id,
+        name: pool.name,
+        enabled: pool.enabled,
+        createdAt: pool.createdAt,
+        updatedAt: pool.updatedAt,
+        proxyCount,
+      },
+    });
   } catch (err) {
     console.error("[GET /api/admin/pools/[id]] 获取代理池详情失败:", err);
     return res.status(500).json({ success: false, error: "获取代理池详情失败", detail: err instanceof Error ? err.message : String(err) });
@@ -71,11 +74,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const db = await createDb();
 
     // 检查代理池是否存在
-    const [existing] = await db
-      .select({ id: schema.proxyPools.id })
-      .from(schema.proxyPools)
-      .where(eq(schema.proxyPools.id, id))
-      .limit(1);
+    const existing = await db.proxyPools.findFirst({
+      where: { id },
+      select: { id: true },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "代理池不存在" });
@@ -92,11 +94,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         return res.status(400).json({ success: false, error: "代理池名称不能超过 100 个字符" });
       }
       // 检查名称唯一性（排除自身）
-      const [duplicate] = await db
-        .select({ id: schema.proxyPools.id })
-        .from(schema.proxyPools)
-        .where(eq(schema.proxyPools.name, (body.name as string).trim()))
-        .limit(1);
+      const duplicate = await db.proxyPools.findFirst({
+        where: { name: (body.name as string).trim() },
+        select: { id: true },
+      });
 
       if (duplicate && duplicate.id !== id) {
         return res.status(400).json({ success: false, error: "代理池名称已存在" });
@@ -121,32 +122,32 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     updateData.updatedAt = Math.floor(Date.now() / 1000);
 
     // 执行更新
-    await db
-      .update(schema.proxyPools)
-      .set(updateData)
-      .where(eq(schema.proxyPools.id, id));
+    await db.proxyPools.update({
+      where: { id },
+      data: updateData,
+    });
 
     // 审计日志
     try {
       const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "update_proxy_pool",
-        detail: JSON.stringify({ poolId: id, changes: updateData }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "update_proxy_pool",
+          detail: JSON.stringify({ poolId: id, changes: updateData }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       console.error("[PUT /api/admin/pools/:id] 审计日志写入失败:", auditErr);
     }
 
     // 返回更新后的数据
-    const [pool] = await db
-      .select()
-      .from(schema.proxyPools)
-      .where(eq(schema.proxyPools.id, id))
-      .limit(1);
+    const pool = await db.proxyPools.findFirst({
+      where: { id },
+    });
 
     return res.status(200).json({
       success: true,
@@ -175,35 +176,36 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 检查代理池是否存在
-    const [existing] = await db
-      .select({ id: schema.proxyPools.id, name: schema.proxyPools.name })
-      .from(schema.proxyPools)
-      .where(eq(schema.proxyPools.id, id))
-      .limit(1);
+    const existing = await db.proxyPools.findFirst({
+      where: { id },
+      select: { id: true, name: true },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "代理池不存在" });
     }
 
     // 将池内代理的 poolId 置空（不删除代理本身）
-    await db
-      .update(schema.proxies)
-      .set({ poolId: null, updatedAt: Math.floor(Date.now() / 1000) })
-      .where(eq(schema.proxies.poolId, id));
+    const now = Math.floor(Date.now() / 1000);
+    await db.proxies.updateMany({
+      where: { poolId: id },
+      data: { poolId: null, updatedAt: now },
+    });
 
     // 删除代理池
-    await db.delete(schema.proxyPools).where(eq(schema.proxyPools.id, id));
+    await db.proxyPools.delete({ where: { id } });
 
     // 审计日志
     try {
-      const now = Math.floor(Date.now() / 1000);
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "delete_proxy_pool",
-        detail: JSON.stringify({ poolId: id, name: existing.name }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "delete_proxy_pool",
+          detail: JSON.stringify({ poolId: id, name: existing.name }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
     } catch (auditErr) {
       console.error("[DELETE /api/admin/pools/:id] 审计日志写入失败:", auditErr);

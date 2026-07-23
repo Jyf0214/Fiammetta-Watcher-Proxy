@@ -8,10 +8,8 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../../_auth";
-import * as schema from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 
 
 /** 生成唯一 ID（cuid 风格） */
@@ -30,13 +28,10 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
 
   try {
     const db = await createDb();
-    const models = await db
-      .select()
-      .from(schema.platform_models)
-      .where(eq(schema.platformModels.platformId, id));
-
-    // 按 modelId 排序（SQLite 不支持在 select 中直接 orderBy 字段别名）
-    models.sort((a, b) => a.modelId.localeCompare(b.modelId));
+    const models = await db.platformModels.findMany({
+      where: { platformId: id },
+      orderBy: { modelId: "asc" },
+    });
 
     return res.status(200).json({ success: true, data: models });
   } catch (err) {
@@ -77,55 +72,39 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
     const db = await createDb();
 
     // 检查平台是否存在
-    const platformRows = await db
-      .select()
-      .from(schema.platforms)
-      .where(eq(schema.platforms.id, id))
-      .limit(1);
+    const platform = await db.platforms.findFirst({ where: { id } });
 
-    if (platformRows.length === 0) {
+    if (!platform) {
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
 
     // 检查是否已存在相同 modelId
-    const existing = await db
-      .select()
-      .from(schema.platform_models)
-      .where(
-        and(
-          eq(schema.platformModels.platformId, id),
-          eq(schema.platformModels.modelId, modelId.trim())
-        )
-      )
-      .limit(1);
+    const existing = await db.platformModels.findFirst({
+      where: { platformId: id, modelId: modelId.trim() },
+    });
 
-    if (existing.length > 0) {
+    if (existing) {
       return res.status(400).json({ success: false, error: "该模型已存在" });
     }
 
     const now = Math.floor(Date.now() / 1000);
     const newModelId = generateId();
 
-    await db.insert(schema.platformModels).values({
-      id: newModelId,
-      platformId: id,
-      modelId: modelId.trim(),
-      modelName: modelName?.trim() || modelId.trim(),
-      type: "chat",
-      source: "manual",
-      fetchedAt: now,
+    const newModel = await db.platformModels.create({
+      data: {
+        id: newModelId,
+        platformId: id,
+        modelId: modelId.trim(),
+        modelName: modelName?.trim() || modelId.trim(),
+        type: "chat",
+        source: "manual",
+        fetchedAt: now,
+      },
     });
-
-    // 查询刚插入的记录返回
-    const inserted = await db
-      .select()
-      .from(schema.platform_models)
-      .where(eq(schema.platform_models.id, newModelId))
-      .limit(1);
 
     return res.status(200).json({
       success: true,
-      data: inserted[0],
+      data: newModel,
       message: "模型添加成功",
     });
   } catch (err) {
@@ -156,14 +135,9 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 删除匹配的记录
-    await db
-      .delete(schema.platform_models)
-      .where(
-        and(
-          eq(schema.platformModels.platformId, id),
-          eq(schema.platformModels.modelId, modelId)
-        )
-      );
+    await db.platformModels.deleteMany({
+      where: { platformId: id, modelId: modelId },
+    });
 
     return res.status(200).json({ success: true, message: "模型已删除" });
   } catch (err) {
@@ -216,17 +190,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const db = await createDb();
 
     // 获取平台信息
-    const platformRows = await db
-      .select()
-      .from(schema.platforms)
-      .where(eq(schema.platforms.id, id))
-      .limit(1);
+    const platform = await db.platforms.findFirst({ where: { id } });
 
-    if (platformRows.length === 0) {
+    if (!platform) {
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
-
-    const platform = platformRows[0];
     if (!platform.enabled) {
       return res.status(400).json({ success: false, error: "平台已禁用，无法刷新模型" });
     }
@@ -284,10 +252,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     }
 
     // 获取当前本地已有的模型
-    const existingModels = await db
-      .select()
-      .from(schema.platform_models)
-      .where(eq(schema.platformModels.platformId, id));
+    const existingModels = await db.platformModels.findMany({
+      where: { platformId: id },
+    });
 
     const existingMap = new Map(existingModels.map((m) => [m.modelId, m]));
     const upstreamIds = new Set(upstreamModels.map((m) => m.id));
@@ -300,15 +267,17 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 1. 新增上游有但本地没有的模型
     for (const upstream of upstreamModels) {
       if (!existingMap.has(upstream.id)) {
-        await db.insert(schema.platformModels).values({
-          id: generateId(),
-          platformId: id,
-          modelId: upstream.id,
-          ownedBy: upstream.owned_by || null,
-          modelName: upstream.id,
-          type: detectModelType(upstream.id),
-          source: "auto",
-          fetchedAt: now,
+        await db.platformModels.create({
+          data: {
+            id: generateId(),
+            platformId: id,
+            modelId: upstream.id,
+            ownedBy: upstream.owned_by || null,
+            modelName: upstream.id,
+            type: detectModelType(upstream.id),
+            source: "auto",
+            fetchedAt: now,
+          },
         });
         added++;
       }
@@ -318,10 +287,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     for (const upstream of upstreamModels) {
       const existing = existingMap.get(upstream.id);
       if (existing) {
-        await db
-          .update(schema.platformModels)
-          .set({ fetchedAt: now, ownedBy: upstream.owned_by || existing.ownedBy })
-          .where(eq(schema.platformModels.id, existing.id));
+        await db.platformModels.update({
+          where: { id: existing.id },
+          data: { fetchedAt: now, ownedBy: upstream.owned_by || existing.ownedBy },
+        });
         updated++;
       }
     }
@@ -329,9 +298,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 3. 删除上游已不存在且来源为 auto 的模型（保留手动添加的）
     for (const existing of existingModels) {
       if (!upstreamIds.has(existing.modelId) && existing.source === "auto") {
-        await db
-          .delete(schema.platform_models)
-          .where(eq(schema.platformModels.id, existing.id));
+        await db.platformModels.delete({ where: { id: existing.id } });
         removed++;
       }
     }
@@ -374,15 +341,10 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
 
     const db = await createDb();
     console.log("[PATCH models] db created, executing update...");
-    const result = await db
-      .update(schema.platformModels)
-      .set({ enabled: body.enabled })
-      .where(
-        and(
-          eq(schema.platformModels.platformId, id),
-          eq(schema.platformModels.modelId, body.modelId)
-        )
-      );
+    const result = await db.platformModels.updateMany({
+      where: { platformId: id, modelId: body.modelId },
+      data: { enabled: body.enabled },
+    });
     console.log("[PATCH models] update result:", JSON.stringify(result));
 
     return res.status(200).json({

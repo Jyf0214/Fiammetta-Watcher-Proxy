@@ -10,9 +10,7 @@
  */
 
 import type { NextApiRequest } from "next";
-import { eq } from "drizzle-orm";
-import { createDb, type Database } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 
 /** 系统 Key 认证结果 */
 export interface SystemAuthResult {
@@ -36,28 +34,22 @@ export async function validateSystemApiKey(
   if (!key) return null;
 
   try {
-    const db: Database = await createDb();
-    const rows = await db
-      .select({
-        id: schema.systemApiKeys.id,
-        name: schema.systemApiKeys.name,
-        enabled: schema.systemApiKeys.enabled,
-      })
-      .from(schema.systemApiKeys)
-      .where(eq(schema.systemApiKeys.key, key))
-      .limit(1);
+    const db = await createDb();
+    const row = await db.systemApiKeys.findFirst({
+      where: { key },
+      select: { id: true, name: true, enabled: true },
+    });
 
-    if (rows.length === 0 || !rows[0].enabled) return null;
+    if (!row || !row.enabled) return null;
 
     // 更新 last_used_at（异步，不阻塞请求）
     const now = Math.floor(Date.now() / 1000);
-    db.update(schema.systemApiKeys)
-      .set({ lastUsedAt: now })
-      .where(eq(schema.systemApiKeys.id, rows[0].id))
-      .execute()
-      .catch(() => {});
+    db.systemApiKeys.update({
+      where: { id: row.id },
+      data: { lastUsedAt: now },
+    }).catch(() => {});
 
-    return { systemKeyId: rows[0].id, name: rows[0].name };
+    return { systemKeyId: row.id, name: row.name };
   } catch {
     return null;
   }

@@ -12,9 +12,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { eq } from "drizzle-orm";
-import { createDb, type Database } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createDb } from "@/lib/prisma";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -29,48 +27,40 @@ export interface RequestTemplate {
   enabled: boolean;
 }
 
-/** 从 globalThis 获取 db 实例 */
-
 /** 从 configs 表读取所有模板 */
 async function loadTemplates(
-  db: Database
+  db: Awaited<ReturnType<typeof createDb>>
 ): Promise<RequestTemplate[]> {
-  const config = await db
-    .select()
-    .from(schema.configs)
-    .where(eq(schema.configs.key, CONFIG_KEY))
-    .limit(1);
-  return config.length > 0 && config[0].value ? JSON.parse(config[0].value) : [];
+  const config = await db.configs.findFirst({
+    where: { key: CONFIG_KEY },
+  });
+  return config && config.value ? JSON.parse(config.value) : [];
 }
 
 /** 将模板列表写回 configs 表 */
 async function saveTemplates(
-  db: Database,
+  db: Awaited<ReturnType<typeof createDb>>,
   templates: RequestTemplate[]
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  const existing = await db
-    .select()
-    .from(schema.configs)
-    .where(eq(schema.configs.key, CONFIG_KEY))
-    .limit(1);
+  const existing = await db.configs.findFirst({
+    where: { key: CONFIG_KEY },
+  });
 
-  if (existing.length > 0) {
-    await db
-      .update(schema.configs)
-      .set({ value: JSON.stringify(templates), updatedAt: now })
-      .where(eq(schema.configs.key, CONFIG_KEY))
-      .run();
+  if (existing) {
+    await db.configs.update({
+      where: { key: CONFIG_KEY },
+      data: { value: JSON.stringify(templates), updatedAt: now },
+    });
   } else {
-    await db
-      .insert(schema.configs)
-      .values({
+    await db.configs.create({
+      data: {
         id: crypto.randomUUID(),
         key: CONFIG_KEY,
         value: JSON.stringify(templates),
         updatedAt: now,
-      })
-      .run();
+      },
+    });
   }
 }
 

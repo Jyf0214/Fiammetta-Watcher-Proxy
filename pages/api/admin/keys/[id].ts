@@ -10,9 +10,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "../_auth";
 
 function maskKey(key: string): string {
@@ -49,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
     const db = await createDb();
-    const key = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
+    const key = await db.apiKeys.findFirst({ where: { id } });
     if (!key) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
     return res.status(200).json({ success: true, data: { ...key, key: maskKey(key.key) } });
   } catch (err) {
@@ -61,7 +59,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adm
 async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
     const db = await createDb();
-    const existing = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
+    const existing = await db.apiKeys.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
     const body = req.body as any;
@@ -97,7 +95,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
       }
     }
     if (body.planId !== undefined && body.planId !== null) {
-      const planExists = await db.select({ id: schema.plans.id }).from(schema.plans).where(eq(schema.plans.id, body.planId)).get();
+      const planExists = await db.plans.findFirst({ where: { id: body.planId } });
       if (!planExists) return res.status(400).json({ success: false, error: { message: "指定的 planId 对应的套餐不存在", type: "invalid_request_error" } });
     }
 
@@ -123,19 +121,21 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (body.tokenLimit !== undefined) updateData.tokenLimit = body.tokenLimit ?? null;
     if (body.resetPeriod !== undefined) updateData.resetPeriod = body.resetPeriod;
     if (body.status !== undefined) updateData.status = body.status;
-    if (body.enabled !== undefined) updateData.enabled = body.enabled ? 1 : 0;
+    if (body.enabled !== undefined) updateData.enabled = body.enabled ? true : false;
     if (expiresAtTimestamp !== undefined) updateData.expiresAt = expiresAtTimestamp;
 
-    const updated = await db.update(schema.apiKeys).set(updateData).where(eq(schema.apiKeys.id, id)).returning().get();
+    const updated = await db.apiKeys.update({ where: { id }, data: updateData });
 
     const sanitizedChanges = { ...body };
     if (sanitizedChanges.key) sanitizedChanges.key = String(sanitizedChanges.key).substring(0, 8) + "***";
 
     const ip = getClientIp(req);
-    await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "update_api_key",
-      detail: JSON.stringify({ target: id, keyId: id, changes: sanitizedChanges }),
-      ip, createdAt: currentTime,
+    await db.auditLogs.create({
+      data: {
+        id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "update_api_key",
+        detail: JSON.stringify({ target: id, keyId: id, changes: sanitizedChanges }),
+        ip, createdAt: currentTime,
+      },
     });
 
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key) }, message: "API Key 更新成功" });
@@ -148,21 +148,23 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
   try {
     const db = await createDb();
-    const existing = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id)).get();
+    const existing = await db.apiKeys.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
-    const deletedLogs = await db.delete(schema.requestLogs).where(eq(schema.requestLogs.keyId, id)).returning();
-    await db.delete(schema.apiKeys).where(eq(schema.apiKeys.id, id));
+    const deletedLogsResult = await db.requestLogs.deleteMany({ where: { keyId: id } });
+    await db.apiKeys.delete({ where: { id } });
 
     const currentTime = now();
     const ip = getClientIp(req);
-    await db.insert(schema.auditLogs).values({
-      id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "delete_api_key",
-      detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogs.length }),
-      ip, createdAt: currentTime,
+    await db.auditLogs.create({
+      data: {
+        id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "delete_api_key",
+        detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogsResult.count }),
+        ip, createdAt: currentTime,
+      },
     });
 
-    return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogs.length });
+    return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogsResult.count });
   } catch (err) {
     console.error("[DELETE /api/admin/keys/[id]] 删除失败:", err instanceof Error ? err.message : String(err));
     return res.status(500).json({ success: false, error: { message: "删除 API Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });

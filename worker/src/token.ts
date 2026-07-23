@@ -5,9 +5,7 @@
  * 更新 API Key 已用 token 数，记录请求日志。
  */
 
-import { eq, sql } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 
 /**
  * 从 OpenAI 格式的 usage 对象中提取 token 数
@@ -39,15 +37,19 @@ export async function updateKeyUsage(
 ): Promise<void> {
   if (tokenCount <= 0) return;
 
-  const orm = await createDb(db);
-  await orm
-    .update(schema.apiKeys)
-    .set({
-      usedTokens: sql`${schema.apiKeys.usedTokens} + ${tokenCount}`,
-      callUsed: sql`${schema.apiKeys.callUsed} + 1`,
-      updatedAt: Math.floor(Date.now() / 1000),
-    })
-    .where(eq(schema.apiKeys.id, apiKeyId));
+  const prisma = createPrismaClient(db);
+  try {
+    await prisma.apiKeys.update({
+      where: { id: apiKeyId },
+      data: {
+        usedTokens: { increment: tokenCount },
+        callUsed: { increment: 1 },
+        updatedAt: Math.floor(Date.now() / 1000),
+      },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**
@@ -69,25 +71,29 @@ export async function recordRequestLog(params: {
   errorMessage?: string;
   db: D1Database;
 }): Promise<void> {
-  const orm = await createDb(params.db);
-  const id = crypto.randomUUID();
-
-  await orm.insert(schema.requestLogs).values({
-    id,
-    keyId: params.keyId,
-    keyName: params.keyName,
-    platformId: params.platformId,
-    model: params.model,
-    endpoint: params.endpoint,
-    method: params.method,
-    status: params.status,
-    latency: params.duration,
-    tokens: params.tokens,
-    tokensPrompt: params.promptTokens,
-    tokensCompletion: params.completionTokens,
-    isError: params.isError,
-    errorMessage: params.errorMessage ?? null,
-  } as any);
+  const prisma = createPrismaClient(params.db);
+  try {
+    await prisma.requestLogs.create({
+      data: {
+        id: crypto.randomUUID(),
+        keyId: params.keyId,
+        keyName: params.keyName,
+        platformId: params.platformId,
+        model: params.model,
+        endpoint: params.endpoint,
+        method: params.method,
+        status: params.status,
+        latency: params.duration,
+        tokens: params.tokens,
+        promptTokens: params.promptTokens,
+        completionTokens: params.completionTokens,
+        isError: params.isError,
+        errorMessage: params.errorMessage ?? null,
+      },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**

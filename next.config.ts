@@ -39,7 +39,15 @@ const nextConfig: NextConfig = {
     ];
   },
   // MySQL/PG 驱动仅在切换数据库时需要，标记为外部避免 Turbopack 打包
-  serverExternalPackages: ["mysql2", "pg", "pg-cloudflare"],
+  // Prisma 7 WASM 引擎必须排除在 Next.js 打包之外，否则报 fs.readdir is not implemented
+  serverExternalPackages: [
+    "mysql2",
+    "pg",
+    "pg-cloudflare",
+    "@prisma/client",
+    ".prisma/client",
+    "@prisma/adapter-d1",
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: "2mb",

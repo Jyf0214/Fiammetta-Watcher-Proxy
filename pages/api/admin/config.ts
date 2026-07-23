@@ -6,9 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { like } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
 
 export default async function handler(
@@ -26,10 +24,9 @@ export default async function handler(
 
     if (req.method === "GET") {
       // 查询所有 system: 前缀的配置
-      const configs = await db
-        .select()
-        .from(schema.configs)
-        .where(like(schema.configs.key, "system:%"));
+      const configs = await db.configs.findMany({
+        where: { key: { startsWith: "system:" } },
+      });
 
       const data: Record<string, string> = {};
       for (const c of configs) {
@@ -57,22 +54,20 @@ export default async function handler(
 
       const now = Math.floor(Date.now() / 1000);
 
-      // 使用 Drizzle 的 onConflictDoUpdate 实现 upsert
-      await db
-        .insert(schema.configs)
-        .values({
+      // 使用 Prisma upsert 实现 upsert（configs.key 是唯一约束）
+      await db.configs.upsert({
+        where: { key: body.key },
+        create: {
           id: crypto.randomUUID(),
           key: body.key,
           value: body.value,
           updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: schema.configs.key,
-          set: {
-            value: body.value,
-            updatedAt: now,
-          },
-        });
+        },
+        update: {
+          value: body.value,
+          updatedAt: now,
+        },
+      });
 
       res.status(200).json({ success: true, message: "配置已更新" });
       return;

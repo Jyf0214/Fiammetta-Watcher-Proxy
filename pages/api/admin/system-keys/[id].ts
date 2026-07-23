@@ -6,9 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
 
 function generateId(): string {
@@ -44,27 +42,28 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 
   try {
     const db = await createDb();
-    const existing = await db
-      .select({ id: schema.systemApiKeys.id, name: schema.systemApiKeys.name })
-      .from(schema.systemApiKeys)
-      .where(eq(schema.systemApiKeys.id, id))
-      .limit(1);
+    const existing = await db.systemApiKeys.findFirst({
+      where: { id },
+      select: { id: true, name: true },
+    });
 
-    if (existing.length === 0) {
+    if (!existing) {
       return res.status(404).json({ success: false, error: "系统 Key 不存在" });
     }
 
-    await db.delete(schema.systemApiKeys).where(eq(schema.systemApiKeys.id, id));
+    await db.systemApiKeys.delete({ where: { id } });
 
     // 审计日志
     try {
-      await db.insert(schema.auditLogs).values({
-        id: generateId(),
-        adminId: getAuditAdminId(admin),
-        action: "delete_system_key",
-        detail: JSON.stringify({ target: id, name: existing[0].name }),
-        ip: null,
-        createdAt: now(),
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: getAuditAdminId(admin),
+          action: "delete_system_key",
+          detail: JSON.stringify({ target: id, name: existing.name }),
+          ip: null,
+          createdAt: now(),
+        },
       });
     } catch {
       /* 审计日志失败不阻塞 */
@@ -92,20 +91,19 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     }
 
     const db = await createDb();
-    const existing = await db
-      .select({ id: schema.systemApiKeys.id, name: schema.systemApiKeys.name })
-      .from(schema.systemApiKeys)
-      .where(eq(schema.systemApiKeys.id, id))
-      .limit(1);
+    const existing = await db.systemApiKeys.findFirst({
+      where: { id },
+      select: { id: true, name: true },
+    });
 
-    if (existing.length === 0) {
+    if (!existing) {
       return res.status(404).json({ success: false, error: "系统 Key 不存在" });
     }
 
-    await db
-      .update(schema.systemApiKeys)
-      .set({ enabled, updatedAt: now() })
-      .where(eq(schema.systemApiKeys.id, id));
+    await db.systemApiKeys.update({
+      where: { id },
+      data: { enabled, updatedAt: now() },
+    });
 
     return res.status(200).json({ success: true, message: enabled ? "系统 Key 已启用" : "系统 Key 已禁用" });
   } catch (err) {

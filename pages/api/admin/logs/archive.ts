@@ -12,9 +12,8 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import { dailyStats } from "@/lib/schema";
-import { eq, and, gte, lte, like, desc, count } from "drizzle-orm";
+import { Prisma } from "@/generated/client";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
 
 /**
@@ -55,49 +54,43 @@ export default async function handler(
     const orm = await createDb();
 
     // 构建查询条件
-    const conditions = [];
+    const conditions: Prisma.dailyStatsWhereInput[] = [];
 
     // 日期范围过滤（dailyStats.date 为 Unix 时间戳秒）
     if (startDateStr) {
-      conditions.push(gte(dailyStats.date, dateToStartOfDay(startDateStr)));
+      conditions.push({ date: { gte: dateToStartOfDay(startDateStr) } });
     }
     if (endDateStr) {
-      conditions.push(lte(dailyStats.date, dateToEndOfDay(endDateStr)));
+      conditions.push({ date: { lte: dateToEndOfDay(endDateStr) } });
     }
 
     // Key 筛选
     if (keyId) {
-      conditions.push(eq(dailyStats.keyId, keyId));
+      conditions.push({ keyId });
     }
 
     // 平台筛选
     if (platformId) {
-      conditions.push(eq(dailyStats.platformId, platformId));
+      conditions.push({ platformId });
     }
 
     // 模型筛选（模糊匹配）
     if (model) {
-      conditions.push(like(dailyStats.model, `%${model}%`));
+      conditions.push({ model: { contains: model } });
     }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const where = conditions.length > 0 ? { AND: conditions } : undefined;
 
     // 并行查询数据和总数
-    const [items, totalResult] = await Promise.all([
-      orm
-        .select()
-        .from(dailyStats)
-        .where(whereClause)
-        .orderBy(desc(dailyStats.date))
-        .limit(pageSize)
-        .offset((page - 1) * pageSize),
-      orm
-        .select({ total: count() })
-        .from(dailyStats)
-        .where(whereClause),
+    const [items, total] = await Promise.all([
+      orm.dailyStats.findMany({
+        where,
+        orderBy: { date: "desc" },
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+      }),
+      orm.dailyStats.count({ where }),
     ]);
-
-    const total = totalResult[0]?.total || 0;
 
     res.status(200).json({
       success: true,

@@ -9,9 +9,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { desc } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 // ==================== 工具函数 ====================
@@ -60,10 +58,9 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const db = await createDb();
-    const keys = await db
-      .select()
-      .from(schema.systemApiKeys)
-      .orderBy(desc(schema.systemApiKeys.createdAt));
+    const keys = await db.systemApiKeys.findMany({
+      orderBy: { createdAt: "desc" },
+    });
 
     const maskedKeys = keys.map((k) => ({
       ...k,
@@ -101,28 +98,28 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const keyValue = generateSystemKey();
     const currentTime = now();
 
-    const newKey = await db
-      .insert(schema.systemApiKeys)
-      .values({
+    const newKey = await db.systemApiKeys.create({
+      data: {
         id: keyId,
         key: keyValue,
         name: name.trim(),
         enabled: true,
         createdAt: currentTime,
         updatedAt: currentTime,
-      })
-      .returning()
-      .get();
+      },
+    });
 
     // 审计日志
     try {
-      await db.insert(schema.auditLogs).values({
-        id: generateId(),
-        adminId: getAuditAdminId(admin),
-        action: "create_system_key",
-        detail: JSON.stringify({ target: keyId, name: name.trim() }),
-        ip: null,
-        createdAt: currentTime,
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: getAuditAdminId(admin),
+          action: "create_system_key",
+          detail: JSON.stringify({ target: keyId, name: name.trim() }),
+          ip: null,
+          createdAt: currentTime,
+        },
       });
     } catch {
       /* 审计日志失败不阻塞 */

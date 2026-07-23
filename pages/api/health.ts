@@ -15,7 +15,7 @@ export default async function handler(
   try {
     const db = await createDb();
     // 执行简单查询验证数据库连接
-    await db.all<{ ok: number }>("SELECT 1 as ok");
+    await db.$queryRaw`SELECT 1 as ok`;
     res.status(200).json({ status: "ok", database: "connected" });
   } catch {
     // 数据库连接失败时返回降级状态，不记录详细错误避免信息泄露

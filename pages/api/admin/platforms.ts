@@ -6,9 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
-import { desc } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 
 /**
@@ -23,29 +21,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       const db = await createDb();
-      const platforms = await db
-        .select({
-          id: schema.platforms.id,
-          name: schema.platforms.name,
-          baseUrl: schema.platforms.baseUrl,
-          apiKey: schema.platforms.apiKey,
-          apiKeys: schema.platforms.apiKeys,
-          type: schema.platforms.type,
-          enabled: schema.platforms.enabled,
-          priority: schema.platforms.priority,
-          weight: schema.platforms.weight,
-          rpmLimit: schema.platforms.rpmLimit,
-          tpmLimit: schema.platforms.tpmLimit,
-          forwardHeaders: schema.platforms.forwardHeaders,
-          status: schema.platforms.status,
-          failCount: schema.platforms.failCount,
-          lastFailAt: schema.platforms.lastFailAt,
-          cooldownEnd: schema.platforms.cooldownEnd,
-          createdAt: schema.platforms.createdAt,
-          updatedAt: schema.platforms.updatedAt,
-        })
-        .from(schema.platforms)
-        .orderBy(desc(schema.platforms.priority), desc(schema.platforms.createdAt));
+      const platforms = await db.platforms.findMany({
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true, name: true, baseUrl: true, apiKey: true, apiKeys: true,
+          type: true, enabled: true, priority: true, weight: true,
+          rpmLimit: true, tpmLimit: true, forwardHeaders: true,
+          status: true, failCount: true, lastFailAt: true, cooldownEnd: true,
+          createdAt: true, updatedAt: true,
+        },
+      });
 
       return res.status(200).json({
         success: true,
@@ -238,35 +223,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const db = await createDb();
 
-      // 写入数据库（使用 Drizzle schema camelCase 属性名）
-      await db.insert(schema.platforms).values({
-        id,
-        name: name.trim(),
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        apiKeys: JSON.stringify(parsedApiKeys),
-        type: platformType,
-        enabled: true,
-        priority: priority ?? 0,
-        weight: weight ?? 1,
-        rpmLimit: rpmLimit ?? null,
-        tpmLimit: tpmLimit ?? null,
-        status: "healthy",
-        failCount: 0,
-        forwardHeaders: normalizedForwardHeaders,
-        createdAt: now,
-        updatedAt: now,
+      // 写入数据库（Prisma camelCase 属性名）
+      await db.platforms.create({
+        data: {
+          id,
+          name: name.trim(),
+          baseUrl: baseUrl.trim(),
+          apiKey: apiKey.trim(),
+          apiKeys: JSON.stringify(parsedApiKeys),
+          type: platformType,
+          enabled: true,
+          priority: priority ?? 0,
+          weight: weight ?? 1,
+          rpmLimit: rpmLimit ?? null,
+          tpmLimit: tpmLimit ?? null,
+          status: "healthy",
+          failCount: 0,
+          forwardHeaders: normalizedForwardHeaders,
+          createdAt: now,
+          updatedAt: now,
+        },
       });
 
       // 审计日志
-      await db.insert(schema.auditLogs).values({
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        adminId: getAuditAdminId(admin),
-        action: "create_platform",
-        detail: JSON.stringify({ platformId: id, name }),
-        ip:
-          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
+      await db.auditLogs.create({
+        data: {
+          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          adminId: getAuditAdminId(admin),
+          action: "create_platform",
+          detail: JSON.stringify({ platformId: id, name }),
+          ip:
+            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
       });
 
       return res.status(200).json({

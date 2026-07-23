@@ -15,9 +15,7 @@
  * 2. checkAndResetApiKey — 请求处理时调用（检查单个 Key）
  */
 
-import { eq, and, lt, not } from "drizzle-orm";
-import { createDb } from "@/lib/db";
-import * as schema from "@/lib/schema";
+import { createPrismaClient } from "./prisma-db";
 
 /**
  * 判断指定 API Key 是否需要在当前周期重置
@@ -63,21 +61,19 @@ export async function checkAndResetApiKey(
   db: D1Database,
   apiKeyId: string
 ): Promise<boolean> {
+  const prisma = createPrismaClient(db);
   try {
-    const orm = await createDb(db);
-    const rows = await orm
-      .select({
-        id: schema.apiKeys.id,
-        resetPeriod: schema.apiKeys.resetPeriod,
-        usedTokens: schema.apiKeys.usedTokens,
-        status: schema.apiKeys.status,
-        updatedAt: schema.apiKeys.updatedAt,
-      })
-      .from(schema.apiKeys)
-      .where(eq(schema.apiKeys.id, apiKeyId))
-      .limit(1);
+    const apiKey = await prisma.apiKeys.findFirst({
+      where: { id: apiKeyId },
+      select: {
+        id: true,
+        resetPeriod: true,
+        usedTokens: true,
+        status: true,
+        updatedAt: true,
+      },
+    });
 
-    const apiKey = rows[0];
     if (!apiKey || !needsReset(apiKey)) {
       return false;
     }
@@ -85,24 +81,22 @@ export async function checkAndResetApiKey(
     const periodStart = getPeriodStart(apiKey.resetPeriod!);
     const currentTime = Math.floor(Date.now() / 1000);
 
-    await orm
-      .update(schema.apiKeys)
-      .set({
+    await prisma.apiKeys.update({
+      where: { id: apiKeyId },
+      data: {
         usedTokens: 0,
         ...(apiKey.status === "disabled" ? { status: "active" } : {}),
         updatedAt: currentTime,
-      })
-      .where(eq(schema.apiKeys.id, apiKeyId));
+      },
+    });
 
     // 删除当前周期之前的请求日志
-    await orm
-      .delete(schema.requestLogs)
-      .where(
-        and(
-          eq(schema.requestLogs.keyId, apiKeyId),
-          lt(schema.requestLogs.createdAt, periodStart)
-        )
-      );
+    await prisma.requestLogs.deleteMany({
+      where: {
+        keyId: apiKeyId,
+        createdAt: { lt: periodStart },
+      },
+    });
 
     console.log(
       `[key-reset] 请求时重置 Key ${apiKeyId.slice(0, 8)}... ` +
@@ -116,6 +110,8 @@ export async function checkAndResetApiKey(
       error instanceof Error ? error.message : String(error)
     );
     return false;
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
@@ -123,19 +119,21 @@ export async function checkAndResetApiKey(
  * 执行一轮批量重置检查（Cron 调用）
  */
 export async function handleScheduledReset(db: D1Database): Promise<void> {
+  const prisma = createPrismaClient(db);
   try {
-    const orm = await createDb(db);
-    const keysToCheck = await orm
-      .select({
-        id: schema.apiKeys.id,
-        name: schema.apiKeys.name,
-        resetPeriod: schema.apiKeys.resetPeriod,
-        usedTokens: schema.apiKeys.usedTokens,
-        status: schema.apiKeys.status,
-        updatedAt: schema.apiKeys.updatedAt,
-      })
-      .from(schema.apiKeys)
-      .where(not(eq(schema.apiKeys.resetPeriod, "never")));
+    const keysToCheck = await prisma.apiKeys.findMany({
+      where: {
+        resetPeriod: { not: "never" },
+      },
+      select: {
+        id: true,
+        name: true,
+        resetPeriod: true,
+        usedTokens: true,
+        status: true,
+        updatedAt: true,
+      },
+    });
 
     let resetCount = 0;
     const currentTime = Math.floor(Date.now() / 1000);
@@ -145,23 +143,21 @@ export async function handleScheduledReset(db: D1Database): Promise<void> {
 
       const periodStart = getPeriodStart(key.resetPeriod!);
 
-      await orm
-        .update(schema.apiKeys)
-        .set({
+      await prisma.apiKeys.update({
+        where: { id: key.id },
+        data: {
           usedTokens: 0,
           ...(key.status === "disabled" ? { status: "active" } : {}),
           updatedAt: currentTime,
-        })
-        .where(eq(schema.apiKeys.id, key.id));
+        },
+      });
 
-      await orm
-        .delete(schema.requestLogs)
-        .where(
-          and(
-            eq(schema.requestLogs.keyId, key.id),
-            lt(schema.requestLogs.createdAt, periodStart)
-          )
-        );
+      await prisma.requestLogs.deleteMany({
+        where: {
+          keyId: key.id,
+          createdAt: { lt: periodStart },
+        },
+      });
 
       resetCount++;
       console.log(
@@ -178,5 +174,7 @@ export async function handleScheduledReset(db: D1Database): Promise<void> {
       "[key-reset] 重置异常:",
       err instanceof Error ? err.message : String(err)
     );
+  } finally {
+    await prisma.$disconnect();
   }
 }

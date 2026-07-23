@@ -7,9 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
-import { requestLogs, apiKeys } from "@/lib/schema";
-import { eq, and, gte, desc, sql, count, sum } from "drizzle-orm";
+import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
 
 /**
@@ -20,6 +18,19 @@ function maskKey(key: string): string {
     return key.substring(0, 8) + "..." + key.substring(key.length - 4);
   }
   return "***";
+}
+
+/** 聚合统计结果类型 */
+interface AggRow {
+  keyId: string | null;
+  totalRequests: number;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  avgTtft: number;
+  avgDuration: number;
+  firstRequestAt: number | null;
+  lastRequestAt: number | null;
 }
 
 export default async function handler(
@@ -58,49 +69,47 @@ export default async function handler(
         startTimestamp = undefined;
     }
 
-    // 构建请求日志的查询条件
-    const conditions = [];
+    // 获取所有 API Key（按创建时间倒序）
+    const keys = await orm.apiKeys.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+
+    // 构建请求日志的查询条件（动态 SQL）
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
     if (startTimestamp !== undefined) {
-      conditions.push(gte(requestLogs.createdAt, startTimestamp));
+      conditions.push("created_at >= ?");
+      params.push(startTimestamp);
     }
     if (keyId) {
-      conditions.push(eq(requestLogs.keyId, keyId));
+      conditions.push("key_id = ?");
+      params.push(keyId);
     }
 
-    // 获取所有 API Key（按创建时间倒序）
-    const keys = await orm
-      .select({
-        id: apiKeys.id,
-        name: apiKeys.name,
-        key: apiKeys.key,
-        status: apiKeys.status,
-        tokenLimit: apiKeys.tokenLimit,
-        usedTokens: apiKeys.usedTokens,
-        createdAt: apiKeys.createdAt,
-      })
-      .from(apiKeys)
-      .orderBy(desc(apiKeys.createdAt));
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    // 按 keyId 分组聚合统计
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const stats = await orm
-      .select({
-        keyId: requestLogs.keyId,
-        totalRequests: count(),
-        totalTokens: sum(requestLogs.tokens),
-        promptTokens: sum(requestLogs.promptTokens),
-        completionTokens: sum(requestLogs.completionTokens),
-        avgTtft: sql<number>`round(coalesce(avg(${requestLogs.ttft}), 0))`,
-        avgDuration: sql<number>`round(coalesce(avg(${requestLogs.latency}), 0))`,
-        firstRequestAt: sql<number | null>`min(${requestLogs.createdAt})`,
-        lastRequestAt: sql<number | null>`max(${requestLogs.createdAt})`,
-      })
-      .from(requestLogs)
-      .where(whereClause)
-      .groupBy(requestLogs.keyId);
+    // 按 keyId 分组聚合统计（使用原始 SQL）
+    const statsSql = `
+      SELECT
+        key_id as keyId,
+        COUNT(*) as totalRequests,
+        COALESCE(SUM(tokens), 0) as totalTokens,
+        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
+        COALESCE(SUM(completion_tokens), 0) as completionTokens,
+        ROUND(COALESCE(AVG(ttft), 0)) as avgTtft,
+        ROUND(COALESCE(AVG(latency), 0)) as avgDuration,
+        MIN(created_at) as firstRequestAt,
+        MAX(created_at) as lastRequestAt
+      FROM request_logs
+      ${whereClause}
+      GROUP BY key_id
+    `;
+
+    const stats = await orm.$queryRawUnsafe<AggRow[]>(statsSql, ...params);
 
     // 构建统计 Map（keyId → stats）
-    const statsMap = new Map<string, (typeof stats)[number]>();
+    const statsMap = new Map<string, AggRow>();
     for (const s of stats) {
       if (s.keyId === null) continue;
       statsMap.set(s.keyId, s);
