@@ -56,7 +56,7 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
 export async function handleV1Route(
   request: Request,
   env: { DB: D1Database; KV: KVNamespace },
-  _ctx: ExecutionContext
+  ctx: ExecutionContext
 ): Promise<Response> {
   const url = new URL(request.url);
 
