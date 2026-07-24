@@ -23,45 +23,34 @@ export default async function handler(
     );
     const offset = (page - 1) * pageSize;
 
-    // 关联 admins 表获取用户名（Prisma 不支持原生 LEFT JOIN，使用 $queryRaw）
-    const items = await db.$queryRaw<
-      {
-        id: string;
-        admin_id: string | null;
-        action: string;
-        detail: string | null;
-        ip: string | null;
-        created_at: number;
-        username: string | null;
-      }[]
-    >`SELECT
-       a.id,
-       a.admin_id,
-       a.action,
-       a.detail,
-       a.ip,
-       a.created_at,
-       adm.username
-     FROM audit_logs a
-     LEFT JOIN admins adm ON a.admin_id = adm.id
-     ORDER BY a.created_at DESC
-     LIMIT ${pageSize} OFFSET ${offset}`;
+    // 先查审计日志列表
+    const [items, total] = await Promise.all([
+      db.auditLogs.findMany({
+        orderBy: { createdAt: "desc" },
+        skip: offset,
+        take: pageSize,
+      }),
+      db.auditLogs.count(),
+    ]);
 
-    const countResult = await db.$queryRaw<{ count: number }[]>`SELECT COUNT(*) as count FROM audit_logs`;
-
-    const total = countResult[0]?.count ?? 0;
+    // 批量查询关联的管理员用户名
+    const adminIds = Array.from(new Set(items.map((log) => log.adminId).filter((id): id is string => id !== null)));
+    const admins = adminIds.length > 0
+      ? await db.admins.findMany({ where: { id: { in: adminIds } } })
+      : [];
+    const adminMap = new Map(admins.map((a) => [a.id, a.username]));
 
     res.status(200).json({
       success: true,
       data: {
         items: items.map((log) => ({
           id: log.id,
-          adminId: log.admin_id,
-          username: log.username,
+          adminId: log.adminId,
+          username: log.adminId ? adminMap.get(log.adminId) ?? null : null,
           action: log.action,
           detail: log.detail,
           ip: log.ip,
-          createdAt: new Date(Number(log.created_at) * 1000).toISOString(),
+          createdAt: new Date(log.createdAt * 1000).toISOString(),
         })),
         total,
         page,

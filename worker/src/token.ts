@@ -98,6 +98,7 @@ export async function recordRequestLog(params: {
         ttft: params.ttft,
         isError: params.isError,
         errorMessage: params.errorMessage ?? null,
+        createdAt: Math.floor(Date.now() / 1000),
       },
     });
   } finally {

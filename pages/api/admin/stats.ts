@@ -12,36 +12,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 
-/** 单行聚合结果类型 */
-interface CountRow {
-  count: number;
-}
-
-/** 请求聚合结果类型 */
-interface RequestAggRow {
-  count: number;
-  sum_tokens: number;
-}
-
-/** 性能统计结果类型 */
-interface PerfRow {
-  avg_ttft: number | null;
-  avg_duration: number | null;
-}
-
-/** 系统事件行类型 */
-interface EventRow {
-  id: string;
-  level: string;
-  message: string;
-  created_at: number;
-}
-
-/** 管理员行类型 */
-interface AdminRow {
-  username: string;
-}
-
 export default async function handler(
   _req: NextApiRequest,
   res: NextApiResponse
@@ -57,73 +27,73 @@ export default async function handler(
       activeKeys,
       requestAgg,
       errorCount,
-      perfStats,
+      perfRows,
       recentEvents,
     ] = await Promise.all([
       // 平台总数
-      db.$queryRaw<CountRow[]>`SELECT COUNT(*) as count FROM platforms`,
+      db.platforms.count(),
       // 启用的平台数
-      db.$queryRaw<CountRow[]>`SELECT COUNT(*) as count FROM platforms WHERE enabled = 1`,
+      db.platforms.count({ where: { enabled: true } }),
       // API Key 总数
-      db.$queryRaw<CountRow[]>`SELECT COUNT(*) as count FROM api_keys`,
+      db.apiKeys.count(),
       // 活跃 API Key 数
-      db.$queryRaw<CountRow[]>`SELECT COUNT(*) as count FROM api_keys WHERE status = 'active'`,
-      // 请求聚合：总数 + 总 token
-      db.$queryRaw<RequestAggRow[]>`SELECT
-        COUNT(*) as count,
-        COALESCE(SUM(tokens), 0) as sum_tokens
-      FROM request_logs`,
-      // 错误请求数（is_error = 1）
-      db.$queryRaw<CountRow[]>`SELECT COUNT(*) as count FROM request_logs WHERE is_error = 1`,
-      // 性能统计：仅非错误请求中 ttft > 0 的记录
-      db.$queryRaw<PerfRow[]>`SELECT
-        AVG(CASE WHEN ttft > 0 THEN ttft ELSE NULL END) as avg_ttft,
-        AVG(CASE WHEN latency > 0 THEN latency ELSE NULL END) as avg_duration
-      FROM request_logs
-      WHERE is_error = 0`,
+      db.apiKeys.count({ where: { status: "active" } }),
+      // 请求总数 + 总 token
+      Promise.all([
+        db.requestLogs.count(),
+        db.requestLogs.aggregate({ _sum: { tokens: true } }),
+      ]),
+      // 错误请求数
+      db.requestLogs.count({ where: { isError: true } }),
+      // 性能统计：非错误请求的 ttft 和 latency，JS 侧计算平均值
+      db.requestLogs.findMany({
+        where: { isError: false },
+        select: { ttft: true, latency: true },
+      }),
       // 最近 10 条系统事件
-      db.$queryRaw<EventRow[]>`SELECT id, level, message, created_at
-        FROM system_events
-        ORDER BY created_at DESC
-        LIMIT 10`,
+      db.systemEvents.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      }),
     ]);
 
-    // 提取查询结果（$queryRaw 返回数组，取第一个元素）
-    const totalPlatformsCount = totalPlatforms[0]?.count ?? 0;
-    const activePlatformsCount = activePlatforms[0]?.count ?? 0;
-    const totalKeysCount = totalKeys[0]?.count ?? 0;
-    const activeKeysCount = activeKeys[0]?.count ?? 0;
-    const requestAggResult = requestAgg[0];
-    const errorCountResult = errorCount[0];
-    const perfStatsResult = perfStats[0];
+    const totalRequests = requestAgg[0];
+    const sumTokens = requestAgg[1]._sum.tokens ?? 0;
 
-    // 计算全局平均 TTFT 和平均耗时
-    const avgTtft = Math.round(perfStatsResult?.avg_ttft || 0);
-    const avgDuration = Math.round(perfStatsResult?.avg_duration || 0);
+    // JS 侧计算平均 TTFT 和平均耗时（仅统计 ttft > 0 / latency > 0 的记录）
+    const validTtftRows = perfRows.filter((r) => r.ttft > 0);
+    const validLatencyRows = perfRows.filter((r) => r.latency > 0);
+    const avgTtft =
+      validTtftRows.length > 0
+        ? Math.round(validTtftRows.reduce((s, r) => s + r.ttft, 0) / validTtftRows.length)
+        : 0;
+    const avgDuration =
+      validLatencyRows.length > 0
+        ? Math.round(validLatencyRows.reduce((s, r) => s + r.latency, 0) / validLatencyRows.length)
+        : 0;
 
     // 查询管理员信息（能查到说明 D1 已连接）
-    const adminResult = await db.$queryRaw<AdminRow[]>`SELECT username FROM admins LIMIT 1`;
-    const admin = adminResult[0];
+    const admin = await db.admins.findMany({ take: 1, select: { username: true } });
 
     res.status(200).json({
       success: true,
       data: {
         dbConnected: true,
-        adminUsername: admin?.username || "",
-        totalPlatforms: totalPlatformsCount,
-        activePlatforms: activePlatformsCount,
-        totalKeys: totalKeysCount,
-        activeKeys: activeKeysCount,
-        totalRequests: requestAggResult?.count ?? 0,
-        errorRequests: errorCountResult?.count ?? 0,
-        totalTokens: requestAggResult?.sum_tokens ?? 0,
+        adminUsername: admin[0]?.username || "",
+        totalPlatforms,
+        activePlatforms,
+        totalKeys,
+        activeKeys,
+        totalRequests,
+        errorRequests: errorCount,
+        totalTokens: sumTokens,
         avgTtft,
         avgDuration,
         recentEvents: recentEvents.map((e) => ({
           id: e.id,
           level: e.level,
           message: e.message,
-          createdAt: new Date(e.created_at * 1000).toISOString(),
+          createdAt: new Date(e.createdAt * 1000).toISOString(),
         })),
       },
     });

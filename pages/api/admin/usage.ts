@@ -20,9 +20,8 @@ function maskKey(key: string): string {
   return "***";
 }
 
-/** 聚合统计结果类型 */
-interface AggRow {
-  keyId: string | null;
+/** 单个 Key 的聚合统计结果 */
+interface KeyAgg {
   totalRequests: number;
   totalTokens: number;
   promptTokens: number;
@@ -74,61 +73,89 @@ export default async function handler(
       orderBy: { createdAt: "desc" },
     });
 
-    // 构建请求日志的查询条件（动态 SQL）
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-
+    // 构建 Prisma where 条件（createdAt 是 Int Unix 时间戳）
+    const where: Record<string, unknown> = {};
     if (startTimestamp !== undefined) {
-      conditions.push("created_at >= ?");
-      params.push(startTimestamp);
+      where.createdAt = { gte: startTimestamp };
     }
     if (keyId) {
-      conditions.push("key_id = ?");
-      params.push(keyId);
+      where.keyId = keyId;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    // 通过 ORM 获取所有匹配的请求日志
+    const logs = await orm.requestLogs.findMany({
+      where,
+      select: {
+        keyId: true,
+        tokens: true,
+        promptTokens: true,
+        completionTokens: true,
+        ttft: true,
+        latency: true,
+        createdAt: true,
+      },
+    });
 
-    // 按 keyId 分组聚合统计（使用原始 SQL）
-    const statsSql = `
-      SELECT
-        key_id as keyId,
-        COUNT(*) as totalRequests,
-        COALESCE(SUM(tokens), 0) as totalTokens,
-        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
-        COALESCE(SUM(completion_tokens), 0) as completionTokens,
-        ROUND(COALESCE(AVG(ttft), 0)) as avgTtft,
-        ROUND(COALESCE(AVG(latency), 0)) as avgDuration,
-        MIN(created_at) as firstRequestAt,
-        MAX(created_at) as lastRequestAt
-      FROM request_logs
-      ${whereClause}
-      GROUP BY key_id
-    `;
+    // 按 keyId 分组，手动计算聚合值
+    const statsMap = new Map<string, KeyAgg>();
 
-    const stats = await orm.$queryRawUnsafe<AggRow[]>(statsSql, ...params);
+    for (const log of logs) {
+      if (!log.keyId) continue;
 
-    // 构建统计 Map（keyId → stats）
-    const statsMap = new Map<string, AggRow>();
-    for (const s of stats) {
-      if (s.keyId === null) continue;
-      statsMap.set(s.keyId, s);
+      let agg = statsMap.get(log.keyId);
+      if (!agg) {
+        agg = {
+          totalRequests: 0,
+          totalTokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          avgTtft: 0,
+          avgDuration: 0,
+          firstRequestAt: null,
+          lastRequestAt: null,
+        };
+        statsMap.set(log.keyId, agg);
+      }
+
+      agg.totalRequests += 1;
+      agg.totalTokens += log.tokens ?? 0;
+      agg.promptTokens += log.promptTokens ?? 0;
+      agg.completionTokens += log.completionTokens ?? 0;
+
+      // 累加用于计算平均值
+      agg.avgTtft += log.ttft ?? 0;
+      agg.avgDuration += log.latency ?? 0;
+
+      // 记录最早和最晚请求时间（createdAt 已是 Unix 秒）
+      const ts = log.createdAt;
+      if (agg.firstRequestAt === null || ts < agg.firstRequestAt) {
+        agg.firstRequestAt = ts;
+      }
+      if (agg.lastRequestAt === null || ts > agg.lastRequestAt) {
+        agg.lastRequestAt = ts;
+      }
+    }
+
+    // 计算平均值
+    for (const agg of statsMap.values()) {
+      if (agg.totalRequests > 0) {
+        agg.avgTtft = Math.round(agg.avgTtft / agg.totalRequests);
+        agg.avgDuration = Math.round(agg.avgDuration / agg.totalRequests);
+      }
     }
 
     // 合并 Key 信息和统计数据
     const result = keys.map((k) => {
       const keyStats = statsMap.get(k.id);
-      const totalTokens = Number(keyStats?.totalTokens || 0);
-      const totalRequests = Number(keyStats?.totalRequests || 0);
+      const totalTokens = keyStats?.totalTokens ?? 0;
+      const totalRequests = keyStats?.totalRequests ?? 0;
 
       // 计算实际活动时间跨度
       let timeSpanSeconds = 0;
       if (keyStats?.firstRequestAt != null && keyStats?.lastRequestAt != null) {
-        const first = keyStats.firstRequestAt as number;
-        const last = keyStats.lastRequestAt as number;
-        timeSpanSeconds = Math.max(1, last - first);
+        timeSpanSeconds = Math.max(1, keyStats.lastRequestAt - keyStats.firstRequestAt);
       } else if (keyStats?.firstRequestAt != null) {
-        timeSpanSeconds = Math.max(1, now - (keyStats.firstRequestAt as number));
+        timeSpanSeconds = Math.max(1, now - keyStats.firstRequestAt);
       }
 
       return {
@@ -142,17 +169,17 @@ export default async function handler(
         stats: {
           totalRequests,
           totalTokens,
-          promptTokens: keyStats?.promptTokens || 0,
-          completionTokens: keyStats?.completionTokens || 0,
-          avgTtft: keyStats?.avgTtft || 0,
-          avgDuration: keyStats?.avgDuration || 0,
+          promptTokens: keyStats?.promptTokens ?? 0,
+          completionTokens: keyStats?.completionTokens ?? 0,
+          avgTtft: keyStats?.avgTtft ?? 0,
+          avgDuration: keyStats?.avgDuration ?? 0,
           avgTokensPerSecond: timeSpanSeconds > 0
             ? Math.round((totalTokens / timeSpanSeconds) * 100) / 100
             : 0,
           avgRequestsPerMinute: timeSpanSeconds > 0
             ? Math.round(((totalRequests / timeSpanSeconds) * 60) * 100) / 100
             : 0,
-          firstRequestAt: keyStats?.firstRequestAt || null,
+          firstRequestAt: keyStats?.firstRequestAt ?? null,
         },
       };
     });
