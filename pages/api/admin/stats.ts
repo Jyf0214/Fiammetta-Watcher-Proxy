@@ -11,11 +11,18 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
+import { getAdminFromRequest } from "./_auth";
 
 export default async function handler(
-  _req: NextApiRequest,
+  req: NextApiRequest,
   res: NextApiResponse
 ) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
+    res.status(401).json({ success: false, error: "未授权" });
+    return;
+  }
+
   try {
     const db = await createDb();
 
