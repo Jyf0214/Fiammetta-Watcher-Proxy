@@ -6,7 +6,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/db";
+import { createDb } from "@/lib/prisma";
 
 export default async function handler(
   _req: NextApiRequest,

@@ -1,13 +1,14 @@
 /**
  * Worker 配置读取工具
- * 直接使用 D1 Prepared Statement 操作 configs 表
- * 不依赖 Drizzle ORM（Worker 独立部署，保持轻量）
+ * 使用 Prisma ORM 操作 configs 表
  *
  * 配置键约定：
  * - system:* 前缀：系统级配置（由管理后台设置）
  * - frontend_config：前端配置（JSON 格式）
  * - 其他键：由各模块自行定义
  */
+
+import { createPrismaClient } from "./prisma-db";
 
 /**
  * 获取配置值
@@ -19,12 +20,16 @@ export async function getConfig(
   db: D1Database,
   key: string
 ): Promise<string | null> {
-  const row = await db
-    .prepare("SELECT value FROM configs WHERE key = ?")
-    .bind(key)
-    .first<{ value: string }>();
-
-  return row?.value ?? null;
+  const prisma = await createPrismaClient(db);
+  try {
+    const row = await prisma.configs.findFirst({
+      where: { key },
+      select: { value: true },
+    });
+    return row?.value ?? null;
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**
@@ -76,13 +81,16 @@ export async function setConfig(
   value: string
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .prepare(
-      "INSERT INTO configs (key, value, updated_at) VALUES (?, ?, ?) " +
-        "ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?"
-    )
-    .bind(key, value, now, value, now)
-    .run();
+  const prisma = await createPrismaClient(db);
+  try {
+    await prisma.configs.upsert({
+      where: { key },
+      create: { id: crypto.randomUUID(), key, value, updatedAt: now },
+      update: { value, updatedAt: now },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**
@@ -109,12 +117,13 @@ export async function deleteConfig(
   db: D1Database,
   key: string
 ): Promise<boolean> {
-  const result = await db
-    .prepare("DELETE FROM configs WHERE key = ?")
-    .bind(key)
-    .run();
-
-  return result.meta.changes > 0;
+  const prisma = await createPrismaClient(db);
+  try {
+    const result = await prisma.configs.deleteMany({ where: { key } });
+    return result.count > 0;
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 /**
@@ -125,13 +134,19 @@ export async function deleteConfig(
 export async function getAllSystemConfigs(
   db: D1Database
 ): Promise<Record<string, string>> {
-  const rows = await db
-    .prepare('SELECT key, value FROM configs WHERE key LIKE "system:%"')
-    .all<{ key: string; value: string }>();
+  const prisma = await createPrismaClient(db);
+  try {
+    const rows = await prisma.configs.findMany({
+      where: { key: { startsWith: "system:" } },
+      select: { key: true, value: true },
+    });
 
-  const data: Record<string, string> = {};
-  for (const row of rows.results) {
-    data[row.key] = row.value;
+    const data: Record<string, string> = {};
+    for (const row of rows) {
+      data[row.key] = row.value;
+    }
+    return data;
+  } finally {
+    await prisma.$disconnect();
   }
-  return data;
 }
