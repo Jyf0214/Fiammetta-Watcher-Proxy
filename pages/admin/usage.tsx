@@ -3,7 +3,6 @@ import { Select, Tabs, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ProCard } from "@/components/ui/ProCard";
 import {
   RefreshCw,
   BarChart3,
@@ -146,14 +145,10 @@ export default function UsagePage() {
         />
 
         {/* 趋势折线图 — 全局共享 */}
-        <ProCard
-          title={
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-              {t("usage.trend_title")}
-            </span>
-          }
-          className="mb-4"
-        >
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3 px-1">
+            {t("usage.trend_title")}
+          </h3>
           {trendLoading ? (
             <div className="h-[320px] flex items-center justify-center">
               <GlobalLoading size="small" />
@@ -213,17 +208,17 @@ export default function UsagePage() {
               </div>
             </div>
           )}
-        </ProCard>
+        </div>
 
         {/* Tab 切换：Key 用量 / 平台用量 */}
-        <ProCard padding="p-0">
+        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700">
           <Tabs
             activeKey={activeTab}
             onChange={setActiveTab}
             className="px-5 pt-2"
             items={tabItems}
           />
-        </ProCard>
+        </div>
       </PageContainer>
     </AdminLayout>
   );
