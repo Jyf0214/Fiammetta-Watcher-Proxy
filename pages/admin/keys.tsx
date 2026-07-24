@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Tag, Popconfirm, Tooltip, Modal, Form, Input, InputNumber, Select, message } from "antd";
+import { Tag, Popconfirm, Tooltip, Modal, Form, Input, InputNumber, Select, Alert, message } from "antd";
 import { Plus, Trash2, Copy, Key, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -326,6 +326,13 @@ export default function KeysPage() {
               {t("api_key.create_key")}
             </Button>
           }
+        />
+
+        <Alert
+          type="info"
+          showIcon
+          message="使用此密钥时，Base URL 请填写系统配套的 Cloudflare Workers 地址（如 https://your-worker.workers.dev），而非上游平台地址。"
+          className="mb-3"
         />
 
         {/* 移动端：卡片列表 */}
