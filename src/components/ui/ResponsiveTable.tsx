@@ -181,6 +181,18 @@ const LEVEL_DOT: Record<string, string> = {
   critical: "bg-red-600",
 };
 
+/** 将 ISO 时间格式化为 HH:MM:SS */
+function formatTimeOnly(raw: string | number): string {
+  const d = new Date(raw);
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
+}
+
+/** 将 ISO 时间格式化为 MM-DD */
+function formatDateOnly(raw: string | number): string {
+  const d = new Date(raw);
+  return `${(d.getMonth() + 1).toString().padStart(2, "0")}-${d.getDate().toString().padStart(2, "0")}`;
+}
+
 function TimelineView<T>({
   data,
   fields,
@@ -204,29 +216,64 @@ function TimelineView<T>({
     );
   }
 
+  // 按日期分组 + 连续重复事件折叠
+  const groups: Record<string, Array<{ id: string; level: string; message: string; time: string; count: number }>> = {};
+  let lastKey = "";
+  for (const r of data) {
+    const rawTime = (r as Record<string, unknown>)[fields.time];
+    const date = formatDateOnly(rawTime as string | number);
+    const time = formatTimeOnly(rawTime as string | number);
+    const msg = String((r as Record<string, unknown>)[fields.message] ?? "");
+    const level = String((r as Record<string, unknown>)[fields.level] ?? "");
+    const id = keyOf(r);
+    const dedupKey = `${date}|||${msg}`;
+    if (dedupKey === lastKey) {
+      const g = groups[date];
+      if (g.length > 0) g[g.length - 1].count++;
+    } else {
+      if (!groups[date]) groups[date] = [];
+      groups[date].push({ id, level, message: msg, time, count: 1 });
+      lastKey = dedupKey;
+    }
+  }
+
+  const dateEntries = Object.entries(groups);
+
   return (
-    <div className="relative">
-      <div className="absolute left-[7px] top-1 bottom-1 w-px bg-zinc-200 dark:bg-zinc-700" />
-      <div className="space-y-3">
-        {data.map((r) => {
-          const level = String((r as Record<string, unknown>)[fields.level] ?? "");
-          const msg = String((r as Record<string, unknown>)[fields.message] ?? "");
-          const rawTime = (r as Record<string, unknown>)[fields.time];
-          const d = new Date(rawTime as string | number);
-          const timeStr = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
-          return (
-            <div key={keyOf(r)} className="relative flex items-start gap-3 pl-0">
-              <div className={`relative z-10 mt-1.5 h-[10px] w-[10px] rounded-full ${LEVEL_DOT[level] || "bg-zinc-400"} ring-2 ring-white dark:ring-zinc-900 shrink-0`} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate">{msg}</span>
-                  <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{timeStr}</span>
+    <div>
+      {dateEntries.map(([date, items]) => (
+        <div key={date}>
+          {/* 日期分隔线 */}
+          <div className="flex items-center gap-2 my-3 first:mt-0">
+            <span className="text-[11px] font-medium text-zinc-400 bg-white dark:bg-zinc-900 px-1.5 relative z-10">
+              {date}
+            </span>
+            <div className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
+          </div>
+          {/* 事件列表 + 竖线 */}
+          <div className="relative pl-3">
+            <div className="absolute left-[5px] top-1 bottom-1 w-px bg-zinc-200 dark:bg-zinc-700" />
+            <div className="space-y-2.5">
+              {items.map((item) => (
+                <div key={item.id} className="relative flex items-start gap-2.5">
+                  <div className={`relative z-10 mt-[5px] h-[8px] w-[8px] rounded-full ${LEVEL_DOT[item.level] || "bg-zinc-400"} ring-2 ring-white dark:ring-zinc-900 shrink-0`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate">
+                        {item.message}
+                        {item.count > 1 && (
+                          <span className="text-xs text-zinc-400 ml-1">({item.count}次)</span>
+                        )}
+                      </span>
+                      <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{item.time}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

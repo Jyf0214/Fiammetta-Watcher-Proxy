@@ -7,7 +7,7 @@
     "predev": "node scripts/prepare-db.mjs",
     "prebuild": "node scripts/prepare-db.mjs",
     "build": "next build",
-    "build:cf": "node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\"",
+    "build:cf": "node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\"",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "npm run build:cf && wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",

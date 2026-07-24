@@ -40,6 +40,22 @@ function formatDuration(ms: number): { value: string; suffix: string } {
   return { value: String(ms), suffix: "ms" };
 }
 
+/** 大数字紧凑格式化：≥1亿 → 1.23亿，≥1万 → 1.23万，≥1000 → 1.23K */
+function formatCompactNumber(n: number): string {
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + "亿";
+  if (n >= 1e4) return (n / 1e4).toFixed(2) + "万";
+  if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
+  return n.toLocaleString();
+}
+
+/** 根据数值长度动态调整字号 */
+function valueFontSize(v: string): string {
+  const len = v.length;
+  if (len <= 6) return "text-xl";
+  if (len <= 10) return "text-lg";
+  return "text-base";
+}
+
 // ==================== 类型定义 ====================
 
 interface Stats {
@@ -216,8 +232,8 @@ function DashboardContent() {
       title: t("dashboard.active_platforms"),
       value: stats?.activePlatforms ?? 0,
       icon: <Cloud />,
-      color: "bg-emerald-50",
-      iconColor: "text-emerald-500",
+      color: "bg-blue-50",
+      iconColor: "text-blue-500",
     },
     {
       key: "keys",
@@ -232,22 +248,21 @@ function DashboardContent() {
       title: t("dashboard.total_requests"),
       value: stats?.totalRequests ?? 0,
       icon: <Globe />,
-      color: "bg-amber-50",
-      iconColor: "text-amber-500",
+      color: "bg-blue-50",
+      iconColor: "text-blue-500",
     },
     {
       key: "tokens",
       title: t("dashboard.total_tokens"),
       value: stats?.totalTokens ?? 0,
       icon: <Database />,
-      color: "bg-purple-50",
-      iconColor: "text-purple-500",
+      color: "bg-blue-50",
+      iconColor: "text-blue-500",
     },
     {
       key: "avgTtft",
-      title: t("usage.avg_ttft"),
+      title: `${t("usage.avg_ttft")} (ms)`,
       value: stats?.avgTtft ?? 0,
-      suffix: "ms",
       icon: <Clock />,
       color: "bg-orange-50",
       iconColor: "text-orange-500",
@@ -255,25 +270,24 @@ function DashboardContent() {
     },
     {
       key: "avgDuration",
-      title: t("usage.avg_duration"),
+      title: `${t("usage.avg_duration")} (ms)`,
       value: stats?.avgDuration ?? 0,
-      suffix: "ms",
       icon: <Clock />,
-      color: "bg-cyan-50",
-      iconColor: "text-cyan-500",
+      color: "bg-orange-50",
+      iconColor: "text-orange-500",
       get display() { return formatDuration(this.value); },
     },
   ];
 
-  // 获取图表颜色
+  // 获取图表颜色（与卡片配色统一）
   const getChartColor = (key: string): string => {
     const colorMap: Record<string, string> = {
-      platforms: "#10b981",
+      platforms: "#3b82f6",
       keys: "#3b82f6",
-      requests: "#f59e0b",
-      tokens: "#a855f7",
+      requests: "#3b82f6",
+      tokens: "#3b82f6",
       avgTtft: "#f97316",
-      avgDuration: "#06b6d4",
+      avgDuration: "#f97316",
     };
     return colorMap[key] || "#6b7280";
   };
@@ -325,7 +339,7 @@ function DashboardContent() {
                 iconOnly
                 icon={autoRefresh ? <Pause size={14} /> : <Play size={14} />}
                 onClick={toggleAutoRefresh}
-                className={autoRefresh ? "text-emerald-500" : "text-zinc-400"}
+                className="text-zinc-500"
               />
             </Tooltip>
             <Tooltip title={t("common.refresh")}>
@@ -346,65 +360,64 @@ function DashboardContent() {
       {viewMode === "grid" ? (
         // 网格视图：一行多个
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-          {statCards.map((card) => (
-            <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center`}>
-                  <span className={`${card.iconColor}`}>{card.icon}</span>
+          {statCards.map((card) => {
+            const displayVal = "display" in card && card.display
+              ? card.display.value
+              : formatCompactNumber(card.value);
+            return (
+              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
+                    <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-zinc-500 text-[11px] leading-tight truncate">{card.title}</p>
+                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums`}>
+                      {displayVal}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-zinc-500 text-xs">{card.title}</p>
-                  <p className="text-xl font-bold text-zinc-900">
-                    {card.value.toLocaleString()}
-                    {card.suffix && (
-                      <span className="text-sm font-normal text-zinc-400 ml-1">
-                        {card.suffix}
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-            </ProCard>
-          ))}
+              </ProCard>
+            );
+          })}
         </div>
       ) : (
         // 详细视图：一行一个，带趋势图
         <div className="space-y-3 mb-6">
-          {statCards.map((card) => (
-            <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`h-10 w-10 ${card.color} rounded-lg flex items-center justify-center`}>
-                    <span className={`${card.iconColor} text-lg`}>{card.icon}</span>
-                  </div>
-                  <div>
-                    <p className="text-zinc-500 text-xs">{card.title}</p>
-                    <p className="text-2xl font-bold text-zinc-900">
-                      {card.value.toLocaleString()}
-                      {card.suffix && (
-                        <span className="text-sm font-normal text-zinc-400 ml-1">
-                          {card.suffix}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                {/* 趋势图 */}
-                <div className="w-24 h-10">
-                  {trendData[card.key] && trendData[card.key].length > 0 ? (
-                    <MiniTrendChart
-                      data={trendData[card.key]}
-                      color={getChartColor(card.key)}
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-zinc-50 dark:bg-zinc-800 rounded flex items-center justify-center">
-                      <span className="text-xs text-zinc-300">--</span>
+          {statCards.map((card) => {
+            const displayVal = "display" in card && card.display
+              ? card.display.value
+              : formatCompactNumber(card.value);
+            return (
+              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
+                      <span className={`${card.iconColor}`}>{card.icon}</span>
                     </div>
-                  )}
+                    <div>
+                      <p className="text-zinc-500 text-xs">{card.title}</p>
+                      <p className="text-2xl font-bold text-zinc-900 tabular-nums">
+                        {displayVal}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-24 h-10">
+                    {trendData[card.key] && trendData[card.key].length > 0 ? (
+                      <MiniTrendChart
+                        data={trendData[card.key]}
+                        color={getChartColor(card.key)}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-zinc-50 dark:bg-zinc-800 rounded flex items-center justify-center">
+                        <span className="text-xs text-zinc-300">--</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </ProCard>
-          ))}
+              </ProCard>
+            );
+          })}
         </div>
       )}
 
