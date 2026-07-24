@@ -663,6 +663,8 @@ export default function PlatformsPage() {
 
   const handleToggleModel = async (modelId: string, enabled: boolean) => {
     if (!modelPlatform) return;
+    // 乐观更新：立刻在本地翻转状态
+    setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled } : m));
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
         method: "PATCH",
@@ -670,13 +672,21 @@ export default function PlatformsPage() {
         body: JSON.stringify({ modelId, enabled }),
       });
       const data = await res.json() as Record<string, any>;
-      if (data.success) fetchModels(modelPlatform.id);
-      else message.error(data.error || t("common.error"));
-    } catch { message.error(t("common.error")); }
+      if (!data.success) {
+        // 失败则回滚
+        setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled: !enabled } : m));
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled: !enabled } : m));
+      message.error(t("common.error"));
+    }
   };
 
   const handleToggleAll = async (enabled: boolean) => {
     if (!modelPlatform) return;
+    // 乐观更新：立刻全部翻转
+    setModels((prev) => prev.map((m) => ({ ...m, enabled })));
     setTogglingAll(true);
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
@@ -685,10 +695,14 @@ export default function PlatformsPage() {
         body: JSON.stringify({ enabled }),
       });
       const data = await res.json() as Record<string, any>;
-      if (data.success) fetchModels(modelPlatform.id);
-      else message.error(data.error || t("common.error"));
-    } catch { message.error(t("common.error")); }
-    finally { setTogglingAll(false); }
+      if (!data.success) {
+        setModels((prev) => prev.map((m) => ({ ...m, enabled: !enabled })));
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      setModels((prev) => prev.map((m) => ({ ...m, enabled: !enabled })));
+      message.error(t("common.error"));
+    } finally { setTogglingAll(false); }
   };
 
   const columns: TableColumnsType<Platform> = [
