@@ -1,232 +1,112 @@
 # Fiammetta Watcher Proxy
 
-OpenAI 兼容 API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络，无需自有服务器。
+OpenAI 兼容 API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络。
 
 ## 功能特性
 
-- **多平台负载均衡** — 支持多个上游 API 平台，按优先级、权重、健康状态自动路由
-- **熔断恢复** — 平台故障自动熔断，恢复后自动切回，避免请求堆积
+- **多平台负载均衡** — 多上游 API 平台，按优先级、权重、健康状态自动路由
+- **熔断恢复** — 平台故障自动熔断，恢复后自动切回
 - **SSE 流式响应** — 完整支持 OpenAI Streaming API
-- **管理后台** — 可视化管理平台、密钥、模型映射、代理、日志、审计
-- **定时任务** — API Key 用量自动重置、平台模型自动发现、日志自动归档
-- **零服务器** — 全部运行在 Cloudflare 边缘，无需维护任何服务器
+- **管理后台** — 平台、密钥、模型映射、日志、审计的可视化管理
+- **定时任务** — Key 用量自动重置、平台模型自动发现、日志自动归档
 
 ## 架构
 
 ```
-用户请求 → Cloudflare Worker（代理 + 定时任务）
-         → Cloudflare Pages（管理后台 + API）
-         → D1 数据库（SQLite）
-         → KV 命名空间（缓存 + 熔断状态）
+用户请求 → Cloudflare Worker（代理 v1/* + Cron 任务）
+         → Cloudflare Pages（管理后台 + API 路由）
+         → D1 数据库
+         → KV 命名空间（速率限制 + 熔断状态）
 ```
-
-| 组件 | 职责 |
-|------|------|
-| **Worker** | 代理 OpenAI API 请求（`v1/*`），处理定时任务（Cron Triggers） |
-| **Pages** | 管理后台前端 + 管理 API（平台/密钥/模型/日志等 CRUD） |
-| **D1** | 存储所有业务数据（平台、密钥、模型映射、日志等） |
-| **KV** | 存储速率限制、熔断器状态、路由缓存 |
 
 ## 部署
 
-### 前置条件
+### 方式一：GitHub Actions 自动部署（推荐）
 
-- Node.js 24+
-- 一个 Cloudflare 账号
-- 一个 GitHub 账号（用于克隆代码）
+推送到 `feat/cloudflare-workers` 分支自动触发部署。工作流步骤：
 
-### 第一步：获取 Cloudflare API Token
+1. **初始化 D1** — `deploy/init_d1.py` 创建数据库并执行 `init.sql`
+2. **初始化 KV** — `deploy/init_kv.py` 创建命名空间
+3. **替换配置** — 将 D1/KV ID 写入 `wrangler.jsonc` 和 `worker/wrangler.toml`
+4. **构建** — `npm run build:cf`（OpenNext 构建 + 产物整理）
+5. **部署 Worker** — `wrangler deploy`（API 代理 + Cron）
+6. **初始化 Pages** — `deploy/init_pages.py` 配置绑定和 Secrets
+7. **部署 Pages** — `wrangler pages deploy .open-next`
 
-1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
-2. 进入 **My Profile → API Tokens**
-3. 点击 **Create Token**
-4. 选择 **Edit Cloudflare Workers** 模板（或自定义权限）
-5. 确保 Token 拥有以下权限：
-   - `Account → Workers Scripts: Edit`
-   - `Account → D1: Edit`
-   - `Account → KV Storage: Edit`
-   - `Account → Pages: Edit`
-6. 创建后**立即复制 Token**（只显示一次）
+需要在 GitHub 仓库 Settings → Secrets 中配置：
 
-### 第二步：克隆项目并安装依赖
+| Secret | 说明 |
+|--------|------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（Edit 权限） |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID |
+| `ADMIN_USERNAME` | 管理员用户名 |
+| `ADMIN_PASSWORD` | 管理员密码 |
 
-```bash
-git clone https://github.com/你的用户名/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
+### 方式二：手动部署
 
-# 安装 Worker 依赖
-cd worker && npm install
+#### 前置条件
 
-# 安装前端依赖
-cd ../frontend && npm install
-cd ..
-```
+- Node.js 22+
+- Cloudflare 账号 + API Token
 
-### 第三步：登录 Wrangler
+#### 步骤
 
 ```bash
+# 1. 安装依赖
+npm install
+
+# 2. 登录 Wrangler（或设置 CLOUDFLARE_API_TOKEN 环境变量）
 npx wrangler login
+
+# 3. 初始化 D1 和 KV
+python3 deploy/init_d1.py
+python3 deploy/init_kv.py
+
+# 4. 将输出的 ID 写入配置文件
+#    D1_ID → wrangler.jsonc + worker/wrangler.toml（替换 placeholder-d1-id）
+#    KV_ID → worker/wrangler.toml（替换 placeholder-kv-id）
+
+# 5. 构建
+npm run build:cf
+
+# 6. 部署 Worker
+cd worker && npx wrangler deploy && cd ..
+
+# 7. 配置 Pages 绑定和 Secrets
+python3 deploy/init_pages.py
+
+# 8. 部署 Pages
+npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main
 ```
 
-浏览器会弹出 Cloudflare 授权页面，登录后授权即可。也可以直接设置环境变量：
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `ADMIN_USERNAME` | 管理员用户名 |
+| `ADMIN_PASSWORD` | 管理员密码 |
+| `JWT_SECRET` | JWT 签名密钥（留空自动生成） |
+| `DATABASE_URL` | 外部数据库 URL（PostgreSQL/MySQL，D1 通过 binding 连接无需设置） |
+
+## 开发
 
 ```bash
-export CLOUDFLARE_API_TOKEN=你的API_Token
+npm run dev          # 本地开发
+npm run build        # Next.js 构建
+npm run build:cf     # Cloudflare 构建
+npm run preview      # Cloudflare 本地预览
+npm run test         # 运行测试
 ```
-
-### 第四步：创建 Cloudflare 资源
-
-#### 创建 D1 数据库
-
-```bash
-cd worker
-npx wrangler d1 create fiammetta-proxy
-```
-
-命令输出类似：
-
-```
-✅ Created database 'fiammetta-proxy'
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-```
-
-**复制 `database_id` 的值**，打开 `worker/wrangler.toml`，将 `<YOUR_D1_DATABASE_ID>` 替换为该值。同样打开 `frontend/wrangler.toml` 做相同替换。
-
-#### 创建 KV 命名空间
-
-```bash
-npx wrangler kv namespace create fiammetta-proxy
-```
-
-命令输出类似：
-
-```
-✅ Created namespace 'fiammetta-proxy'
-id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-**复制 `id` 的值**，打开 `worker/wrangler.toml`，将 `<YOUR_KV_NAMESPACE_ID>` 替换为该值。同样打开 `frontend/wrangler.toml` 做相同替换。
-
-### 第五步：初始化数据库
-
-```bash
-cd worker
-npx wrangler d1 execute fiammetta-proxy --remote --file=drizzle/0000_init.sql
-```
-
-该命令将 SQL 文件中的建表语句执行到远程 D1 数据库。`CREATE TABLE IF NOT EXISTS` 确保重复执行不会报错。
-
-### 第六步：部署 Worker
-
-```bash
-npx wrangler deploy
-```
-
-部署成功后会输出 Worker 的访问地址，格式为：
-
-```
-https://fiammetta-watcher.你的子域名.workers.dev
-```
-
-### 第七步：部署 Pages（管理后台）
-
-```bash
-cd ../frontend
-npm run build
-npx wrangler pages deploy dist --project-name=fiammetta-watcher
-```
-
-部署成功后会输出 Pages 的访问地址，格式为：
-
-```
-https://fiammetta-watcher.pages.dev
-```
-
-### 第八步：配置 Pages 绑定
-
-Pages 需要访问 D1 和 KV 才能正常工作。在 Cloudflare Dashboard 中操作：
-
-1. 进入 **Workers & Pages → fiammetta-watcher → Settings → Functions**
-2. 滚动到 **Bindings** 部分
-3. 点击 **Add binding**，添加以下两个绑定：
-
-| 绑定类型 | 绑定名称 | 选择资源 |
-|----------|----------|----------|
-| D1 Database | `DB` | 第四步创建的 `fiammetta-proxy` 数据库 |
-| KV Namespace | `KV` | 第四步创建的 `fiammetta-proxy` 命名空间 |
-
-### 第九步：配置环境变量
-
-1. 在 Cloudflare Dashboard 中进入 **Workers & Pages → fiammetta-watcher → Settings → Environment variables**
-2. 展开 **Production** 环境
-3. 添加以下变量：
-
-| 变量名 | 值 | 说明 |
-|--------|-----|------|
-| `ENVIRONMENT` | `production` | 运行环境标识，影响 Cookie 安全标志和调试端点访问控制 |
-| `ADMIN_USERNAME` | `admin`（或自定义） | 管理员用户名 |
-| `ADMIN_PASSWORD` | 你的密码 | 管理员登录密码 |
-| `JWT_SECRET` | 运行 `openssl rand -base64 32` 生成 | JWT 签名密钥 |
-
-> ⚠️ 所有变量添加后，点击 **Encrypt** 加密保存。
-
-### 第十步：验证部署
-
-1. 打开 Pages 地址（如 `https://fiammetta-watcher.pages.dev`）
-2. 使用第九步配置的管理员账号密码登录
-3. 登录成功后，在「平台管理」中添加一个上游 API 平台
-4. 在「密钥管理」中创建一个 API Key
-5. 使用创建的 Key 测试代理请求：
-
-```bash
-curl https://fiammetta-watcher.你的子域名.workers.dev/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer fwp-xxxxxxxx" \
-  -d '{"model":"gpt-4","messages":[{"role":"user","content":"你好"}]}'
-```
-
-## 常见问题
-
-### 部署时报错 " Unauthorized"
-
-Cloudflare API Token 权限不足或已过期。重新创建 Token 并确保包含 Workers/D1/KV/Pages 的 Edit 权限。
-
-### 管理后台无法登录
-
-确认 `ADMIN_PASSWORD` 已在 Pages 环境变量中设置。如果忘记了密码，在环境变量中重新设置后等待 1-2 分钟生效。
-
-### Worker 返回 404
-
-确认 Worker 和 Pages 都已部署成功。API 请求走 Worker（`v1/*` 路径），管理后台走 Pages。
-
-### 数据库表不存在
-
-确保执行了第五步的 `wrangler d1 execute` 命令。如果命令报错，检查 `database_id` 是否正确替换到了 `wrangler.toml` 中。
-
-### Pages 绑定后 Functions 报错
-
-在 Cloudflare Dashboard 的 Pages 项目中，进入 **Settings → Functions → Bindings**，确认 D1 和 KV 绑定名称分别为 `DB` 和 `KV`（区分大小写）。
-
-## 定时任务
-
-Worker 自动运行以下定时任务，无需手动触发：
-
-| 任务 | 周期 | 说明 |
-|------|------|------|
-| API Key 用量重置 | 每小时 | 检查并重置到期的 Key 用量 |
-| 平台模型发现 | 每 10 分钟 | 自动获取各平台可用模型列表 |
-| 日志归档 | 每天凌晨 3 点 | 将请求日志聚合为统计数据 |
 
 ## 技术栈
 
-- **运行时**: Cloudflare Workers + Pages Functions
-- **数据库**: Cloudflare D1（SQLite）
+- **运行时**: Cloudflare Workers + Pages（OpenNext）
+- **框架**: Next.js 16 + React 19
+- **数据库**: Cloudflare D1（Prisma 7 ORM）
 - **缓存**: Cloudflare KV
-- **后端框架**: Hono
-- **前端框架**: React + Vite + Tailwind CSS
-- **ORM**: Drizzle ORM
-- **UI 组件**: Lobe UI
-- **认证**: JWT（jose）+ PBKDF2 密码哈希
+- **UI**: Ant Design 6 + Tailwind CSS
+- **图表**: Recharts
+- **认证**: JWT（jose）
 
 ## 许可证
 
