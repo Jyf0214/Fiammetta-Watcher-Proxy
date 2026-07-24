@@ -15,19 +15,10 @@ import {
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime, formatDate } from "@/lib/timezone";
+import { formatDuration } from "@/lib/format";
 import AdminLayout from "@/components/AdminLayout";
 
 const { RangePicker } = DatePicker;
-
-// ==================== 工具函数 ====================
-
-/** ≥1000ms 自动换算为秒，保留两位小数 */
-function formatDuration(ms: number): { value: string; suffix: string } {
-  if (ms >= 1000) {
-    return { value: (ms / 1000).toFixed(2), suffix: "s" };
-  }
-  return { value: String(Math.round(ms)), suffix: "ms" };
-}
 
 // ==================== 类型定义 ====================
 

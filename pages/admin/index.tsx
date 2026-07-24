@@ -7,6 +7,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
+import { StatCard } from "@/components/ui/StatCard";
 import {
   Cloud,
   Key,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
 import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import AdminLayout from "@/components/AdminLayout";
@@ -31,30 +33,6 @@ const MiniTrendChart = dynamic(() => import("@/components/MiniTrendChart"), {
   ssr: false,
   loading: () => <div className="w-20 h-8 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />,
 });
-
-/** ≥1000ms 自动转换为秒，保留两位小数 */
-function formatDuration(ms: number): { value: string; suffix: string } {
-  if (ms >= 1000) {
-    return { value: (ms / 1000).toFixed(2), suffix: "s" };
-  }
-  return { value: String(Math.round(ms)), suffix: "ms" };
-}
-
-/** 大数字紧凑格式化：≥10亿 → 1.00B，≥100万 → 1.00M，≥1000 → 1.00K */
-function formatCompactNumber(n: number): string {
-  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
-  return n.toLocaleString();
-}
-
-/** 根据数值长度动态调整字号 */
-function valueFontSize(v: string): string {
-  const len = v.length;
-  if (len <= 5) return "text-lg";
-  if (len <= 8) return "text-base";
-  return "text-sm";
-}
 
 // ==================== 类型定义 ====================
 
@@ -334,64 +312,34 @@ function DashboardContent() {
       />
 
       {/* 统计卡片 */}
-      {viewMode === "grid" ? (
-        // 网格视图：一行多个
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {statCards.map((card) => {
-            const displayVal = "display" in card && card.display
-              ? card.display.value
-              : formatCompactNumber(card.value);
-            return (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
-                <div className="flex items-center gap-2.5">
-                  <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
-                    <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
-                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
-                      {displayVal}
-                    </p>
-                  </div>
-                </div>
-              </ProCard>
-            );
-          })}
-        </div>
-      ) : (
-        // 详细视图：一行一个，带趋势图
-        <div className="space-y-3 mb-6">
-          {statCards.map((card) => {
-            const displayVal = "display" in card && card.display
-              ? card.display.value
-              : formatCompactNumber(card.value);
-            const hasTrend = trendData[card.key] && trendData[card.key].length > 0;
-            return (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
-                    <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight mb-0.5">{card.title}</p>
-                    <p className="text-xl font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap">
-                      {displayVal}
-                    </p>
-                  </div>
-                  {hasTrend && (
-                    <div className="w-20 h-9 shrink-0">
-                      <MiniTrendChart
-                        data={trendData[card.key]}
-                        color={getChartColor(card.key)}
-                      />
-                    </div>
-                  )}
-                </div>
-              </ProCard>
-            );
-          })}
-        </div>
-      )}
+      <div className={viewMode === "grid"
+        ? "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6"
+        : "space-y-3 mb-6"
+      }>
+        {statCards.map((card) => {
+          const displayVal = "display" in card && card.display
+            ? card.display.value
+            : formatCompactNumber(card.value);
+          const hasTrend = viewMode === "detail" && trendData[card.key]?.length > 0;
+          return (
+            <StatCard
+              key={card.key}
+              title={card.title}
+              displayValue={displayVal}
+              icon={card.icon}
+              iconBg={card.color}
+              iconColor={card.iconColor}
+              detail={viewMode === "detail"}
+              extra={hasTrend ? (
+                <MiniTrendChart
+                  data={trendData[card.key]}
+                  color={getChartColor(card.key)}
+                />
+              ) : undefined}
+            />
+          );
+        })}
+      </div>
 
       {/* 最近事件 */}
       <ProCard

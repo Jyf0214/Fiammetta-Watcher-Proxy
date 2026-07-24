@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatCompact } from "@/lib/format";
 
 interface TrendPoint {
   date: string;
@@ -24,14 +25,6 @@ interface UsageChartProps {
   data: TrendPoint[];
   /** 聚合粒度：hourly = 按小时，daily = 按天 */
   granularity?: "hourly" | "daily";
-}
-
-/** 数字紧凑格式化：≥10亿 → B，≥100万 → M，≥1000 → K */
-function formatCompact(v: number): string {
-  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-  if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
-  return String(v);
 }
 
 /**
