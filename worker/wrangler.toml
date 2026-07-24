@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-04-02"
 compatibility_flags = ["nodejs_compat"]
 
+[placement]
+mode = "smart"
+
 # D1 数据库绑定（Worker 和 Pages 共享同一个 D1）
 [[d1_databases]]
 binding = "DB"
