@@ -17,9 +17,9 @@ const maxWidthMap: Record<string, string> = {
 };
 
 const paddingMap: Record<string, string> = {
-  compact: "px-4 sm:px-6 py-6 sm:py-10",
-  default: "p-6 md:p-10",
-  wide: "px-6 py-12 md:py-20",
+  compact: "px-3 sm:px-6 py-6 sm:py-10",
+  default: "px-3 sm:px-6 py-6 md:p-10",
+  wide: "px-3 sm:px-6 py-12 md:py-20",
 };
 
 /**
