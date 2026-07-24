@@ -116,9 +116,10 @@ def replace_placeholders(path: str, label: str, d1_id: str, kv_id: str):
 
 
 def set_secret(key: str, value: str, extra_args: list):
+    """通过 wrangler CLI 设置 Secret，extra_args 需包含完整的子命令路径"""
     print(f"🔐 设置 Secret: {key}")
     result = subprocess.run(
-        ["npx", "wrangler"] + extra_args + ["secret", "put", key],
+        ["npx", "wrangler"] + extra_args + [key],
         input=value.encode(),
         capture_output=True,
         timeout=60,
