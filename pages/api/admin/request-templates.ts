@@ -13,6 +13,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
+import { getAdminFromRequest } from "./_auth";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -69,6 +70,12 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
+    res.status(401).json({ success: false, error: "未授权" });
+    return;
+  }
+
   try {
     const db = await createDb();
 
