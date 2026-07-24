@@ -136,10 +136,10 @@ interface ModelItem {
   fetchedAt: string;
 }
 
-/** 模型管理抽屉 — LobeChat 风格列表 */
+/** 模型管理抽屉 */
 function ModelDrawer({
   open, onClose, platform, models, loading, refreshing,
-  newModelId, onNewModelIdChange, onAddModel, onRefreshModels, onDeleteModel, onToggleModel, onToggleAll, togglingAll,
+  newModelId, onNewModelIdChange, onAddModel, onRefreshModels, onDeleteModel, onToggleModel, onToggleAll, togglingAll, togglingModelId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -155,6 +155,7 @@ function ModelDrawer({
   onToggleModel: (modelId: string, enabled: boolean) => void;
   onToggleAll: (enabled: boolean) => void;
   togglingAll: boolean;
+  togglingModelId: string | null;
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
@@ -316,6 +317,7 @@ function ModelDrawer({
                 <div className="shrink-0">
                   <Switch
                     checked={model.enabled}
+                    loading={togglingModelId === model.modelId}
                     onChange={(checked) => onToggleModel(model.modelId, checked)}
                   />
                 </div>
@@ -661,10 +663,11 @@ export default function PlatformsPage() {
     } catch { message.error(t("common.error")); }
   };
 
+  const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
+
   const handleToggleModel = async (modelId: string, enabled: boolean) => {
     if (!modelPlatform) return;
-    // 乐观更新：立刻在本地翻转状态
-    setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled } : m));
+    setTogglingModelId(modelId);
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
         method: "PATCH",
@@ -672,21 +675,20 @@ export default function PlatformsPage() {
         body: JSON.stringify({ modelId, enabled }),
       });
       const data = await res.json() as Record<string, any>;
-      if (!data.success) {
-        // 失败则回滚
-        setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled: !enabled } : m));
+      if (data.success) {
+        setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled } : m));
+      } else {
         message.error(data.error || t("common.error"));
       }
     } catch {
-      setModels((prev) => prev.map((m) => m.modelId === modelId ? { ...m, enabled: !enabled } : m));
       message.error(t("common.error"));
+    } finally {
+      setTogglingModelId(null);
     }
   };
 
   const handleToggleAll = async (enabled: boolean) => {
     if (!modelPlatform) return;
-    // 乐观更新：立刻全部翻转
-    setModels((prev) => prev.map((m) => ({ ...m, enabled })));
     setTogglingAll(true);
     try {
       const res = await fetch(`/api/admin/platforms/${modelPlatform.id}/models`, {
@@ -695,12 +697,12 @@ export default function PlatformsPage() {
         body: JSON.stringify({ enabled }),
       });
       const data = await res.json() as Record<string, any>;
-      if (!data.success) {
-        setModels((prev) => prev.map((m) => ({ ...m, enabled: !enabled })));
+      if (data.success) {
+        setModels((prev) => prev.map((m) => ({ ...m, enabled })));
+      } else {
         message.error(data.error || t("common.error"));
       }
     } catch {
-      setModels((prev) => prev.map((m) => ({ ...m, enabled: !enabled })));
       message.error(t("common.error"));
     } finally { setTogglingAll(false); }
   };
@@ -814,6 +816,7 @@ export default function PlatformsPage() {
           onToggleModel={handleToggleModel}
           onToggleAll={handleToggleAll}
           togglingAll={togglingAll}
+          togglingModelId={togglingModelId}
         />
       </PageContainer>
     </AdminLayout>
