@@ -362,7 +362,7 @@ export default function RequestTemplatesPage() {
               <Input.TextArea rows={2} placeholder={t("system.rt_desc_placeholder")} />
             </Form.Item>
 
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-4">
               <Form.Item name="models" label="适用模型" className="flex-1" extra="输入模型 ID 后按回车添加，支持 * 通配符（如 gpt-*）">
                 <Select
                   mode="tags"

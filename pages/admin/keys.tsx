@@ -311,7 +311,7 @@ export default function KeysPage() {
   ];
 
   if (loading && keys.length === 0) {
-    return <GlobalLoading size="large" />;
+    return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
   }
 
   return (

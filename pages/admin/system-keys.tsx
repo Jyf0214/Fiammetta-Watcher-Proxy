@@ -228,7 +228,7 @@ export default function SystemKeysPage() {
               <Input placeholder="例如：本地开发、CI/CD 脚本" />
             </Form.Item>
           </Form>
-          <div className="mt-2 text-xs text-neutral-500">
+          <div className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
             <Shield size={12} className="inline mr-1" />
             系统 Key 仅用于管理后台 API 认证，不可用于 v1 代理转发。
           </div>

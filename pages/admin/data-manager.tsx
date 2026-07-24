@@ -437,7 +437,7 @@ export default function DataManagerPage() {
                       className={cn(
                         "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all duration-200",
                         exportType === opt.value
-                          ? "border-zinc-900 dark:border-zinc-100 bg-zinc-50 dark:bg-zinc-800/50 shadow-sm"
+                          ? "border-zinc-900 dark:border-zinc-100 bg-zinc-50 dark:bg-zinc-800/50"
                           : "border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30"
                       )}
                     >

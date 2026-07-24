@@ -258,7 +258,7 @@ function ModelDrawer({
             className={`
               flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-all duration-200
               ${typeFilter === tab.key
-                ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-600"
                 : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
               }
             `}
@@ -754,7 +754,7 @@ export default function PlatformsPage() {
         <div className="hidden lg:block">
           <ProCard>
             <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
-              pagination={{ pageSize: 20, showTotal: (total) => `${t("common.pagination_total", { count: total })}` }}
+              pagination={{ pageSize: 20, showTotal: (total) => t("common.pagination_total", { count: total }) }}
               scroll={{ x: 900 }}
             />
           </ProCard>

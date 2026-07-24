@@ -148,7 +148,7 @@ export default function UsagePage() {
         {/* 趋势折线图 — 全局共享 */}
         <ProCard
           title={
-            <span className="font-semibold text-zinc-900">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
               {t("usage.trend_title")}
             </span>
           }
@@ -194,12 +194,12 @@ export default function UsagePage() {
             />
           )}
           {trendData.length > 0 && (
-            <div className="flex items-center justify-center gap-8 pt-3 border-t border-zinc-50">
+            <div className="flex items-center justify-center gap-8 pt-3 border-t border-zinc-50 dark:border-zinc-700">
               <div className="text-center">
                 <p className="text-xs text-zinc-400">
                   {t("usage.requests")}
                 </p>
-                <p className="text-sm font-semibold text-zinc-700">
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                   {trendSummary.totalRequests.toLocaleString()}
                 </p>
               </div>
@@ -207,7 +207,7 @@ export default function UsagePage() {
                 <p className="text-xs text-zinc-400">
                   {t("usage.total_tokens")}
                 </p>
-                <p className="text-sm font-semibold text-zinc-700">
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                   {trendSummary.totalTokens.toLocaleString()}
                 </p>
               </div>
