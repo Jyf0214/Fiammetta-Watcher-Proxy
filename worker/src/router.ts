@@ -300,6 +300,23 @@ export async function routeRequest(
 }
 
 /**
+ * 获取支持指定模型的平台列表（429 重试用）
+ *
+ * 返回所有启用且拥有该模型的平台，排除已尝试过的平台。
+ */
+export function getPlatformsForModel(
+  modelId: string,
+  excludePlatformIds: Set<string>
+): PlatformConfig[] {
+  return platformCache.filter((p) => {
+    if (excludePlatformIds.has(p.id)) return false;
+    if (!p.enabled) return false;
+    const models = platformModelCache.get(p.id);
+    return models !== undefined && models.has(modelId);
+  });
+}
+
+/**
  * 获取当前平台缓存（用于模型列表 API）
  */
 export function getPlatformCache(): PlatformConfig[] {

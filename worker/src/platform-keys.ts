@@ -43,6 +43,22 @@ export function getNextKey(platform: PlatformConfig): string | null {
 }
 
 /**
+ * 随机获取一个未尝试过的密钥（429 重试用）
+ *
+ * 从平台的所有密钥中，排除已尝试过的密钥，随机选择一个返回。
+ * 如果没有可用密钥，返回 null。
+ */
+export function getRandomKeyExcept(
+  platform: PlatformConfig,
+  excludeKeys: Set<string>
+): string | null {
+  const allKeys = getAllKeys(platform);
+  const available = allKeys.filter((k) => !excludeKeys.has(k));
+  if (available.length === 0) return null;
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+/**
  * 解析 apiKeys JSON 字符串为字符串数组（容错处理，兼容新旧格式）
  */
 export function parseApiKeys(raw: string | null | undefined): string[] {

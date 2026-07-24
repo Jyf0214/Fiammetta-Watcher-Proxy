@@ -9,8 +9,8 @@
  * - 请求日志和 token 统计
  */
 
-import { routeRequest, freezeAutoModel, isAutoModelRequest } from "./router";
-import { getNextKey } from "./platform-keys";
+import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
+import { getNextKey, getRandomKeyExcept } from "./platform-keys";
 import { recordSuccess, recordFailure } from "./load-balancer";
 import {
   checkPlatformRpm,
@@ -163,6 +163,7 @@ export async function proxyV1Request(
 
   // ── 3. 路由选择 ──
   const modelName = body.model as string | undefined;
+  const requestedModel = modelName || "unknown";
   const route = modelName
     ? await routeRequest(modelName, env.DB)
     : await routeRequest("__any__", env.DB);
@@ -174,7 +175,7 @@ export async function proxyV1Request(
     );
   }
 
-  // ── 4. 速率限制检查 ──
+  // ── 4. 速率限制检查（本地限制，不重试）──
   const platformRpm = await checkPlatformRpm(
     route.platform.id,
     route.platform.rpmLimit,
@@ -255,94 +256,149 @@ export async function proxyV1Request(
     );
   }
 
-  // ── 5. 构建上游请求 ──
-  let upstreamBody = config.buildUpstreamBody
-    ? config.buildUpstreamBody(body)
-    : { ...body, model: route.targetModel };
-
-  // ── 5a. 应用请求模板 ──
-  const requestModel = (body.model as string) || "unknown";
-  try {
-    const templates = await loadTemplates(env.DB);
-    const applicable = getApplicableTemplates(templates, requestModel);
-    if (applicable.length > 0) {
-      upstreamBody = applyTemplates(upstreamBody, applicable);
-    }
-  } catch (tplErr) {
-    console.error(`${logTag} 加载请求模板失败:`, tplErr);
-  }
-
+  // ── 5. 429 自动重试（同平台换 Key → 换平台，最多 3 次）──
+  const MAX_429_RETRIES = 3;
   const isStream = config.supportsStreaming !== false && body.stream === true;
+  const requestModel = requestedModel;
 
-  // 流式请求时注入 stream_options 以获取 usage 统计
-  if (isStream) {
-    upstreamBody.stream_options = { include_usage: true };
-  }
+  let currentPlatform = route.platform;
+  const currentTargetModel = route.targetModel;
+  let currentKey = getNextKey(currentPlatform);
+  const triedKeys = new Set<string>();
+  const triedPlatforms = new Set<string>();
 
-  // 获取上游 API Key
-  const upstreamKey = getNextKey(route.platform);
-  if (!upstreamKey) {
-    return Response.json(
-      { error: { message: "平台无可用 API Key", type: "server_error" } },
-      { status: 500 }
-    );
-  }
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    // 记录本次尝试的 Key 和平台
+    if (currentKey) triedKeys.add(currentKey);
+    triedPlatforms.add(currentPlatform.id);
 
-  // 解析透传头
-  const forwardHeaders = extractForwardableHeaders(
-    request.headers,
-    route.platform.forwardHeaders
-  );
-
-  const upstreamUrl = `${route.platform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
-
-  // ── 6. 发送上游请求 ──
-  let upstreamResponse: Response;
-  let _upstreamSucceeded = false;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120_000);
-
-    upstreamResponse = await fetch(upstreamUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${upstreamKey}`,
-        ...forwardHeaders,
-      },
-      body: JSON.stringify(upstreamBody),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-  } catch (fetchError) {
-    if (
-      fetchError instanceof DOMException &&
-      fetchError.name === "AbortError"
-    ) {
+    // 无可用 Key
+    if (!currentKey) {
       return Response.json(
-        {
-          error: {
-            message: "上游请求超时（2 分钟），请稍后重试",
-            type: "timeout_error",
-          },
-        },
-        { status: 504 }
+        { error: { message: "平台无可用 API Key", type: "server_error" } },
+        { status: 500 }
       );
     }
-    throw fetchError;
-  }
 
-  // ── 7. 处理上游响应 ──
+    // 构建上游请求体
+    let upstreamBody = config.buildUpstreamBody
+      ? config.buildUpstreamBody(body)
+      : { ...body, model: currentTargetModel };
 
-  // 7a. 上游返回错误
-  if (!upstreamResponse.ok) {
+    // 应用请求模板
+    try {
+      const templates = await loadTemplates(env.DB);
+      const applicable = getApplicableTemplates(templates, requestModel);
+      if (applicable.length > 0) {
+        upstreamBody = applyTemplates(upstreamBody, applicable);
+      }
+    } catch (tplErr) {
+      console.error(`${logTag} 加载请求模板失败:`, tplErr);
+    }
+
+    // 流式请求注入 stream_options
+    if (isStream) {
+      upstreamBody.stream_options = { include_usage: true };
+    }
+
+    // 解析透传头
+    const forwardHeaders = extractForwardableHeaders(
+      request.headers,
+      currentPlatform.forwardHeaders
+    );
+
+    const upstreamUrl = `${currentPlatform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
+
+    // 发送上游请求
+    let upstreamResponse: Response;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+      upstreamResponse = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${currentKey}`,
+          ...forwardHeaders,
+        },
+        body: JSON.stringify(upstreamBody),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError) {
+      if (
+        fetchError instanceof DOMException &&
+        fetchError.name === "AbortError"
+      ) {
+        return Response.json(
+          {
+            error: {
+              message: "上游请求超时（2 分钟），请稍后重试",
+              type: "timeout_error",
+            },
+          },
+          { status: 504 }
+        );
+      }
+      throw fetchError;
+    }
+
+    // ── 非 429 响应：直接返回 ──
+    if (upstreamResponse.status !== 429) {
+      return await handleUpstreamResponse(
+        upstreamResponse,
+        currentPlatform,
+        currentKey,
+        apiKey,
+        requestModel,
+        config,
+        isStream,
+        startTime,
+        env,
+        ctx,
+        logTag
+      );
+    }
+
+    // ── 429 响应：尝试切换 ──
+    if (attempt < MAX_429_RETRIES) {
+      console.log(
+        `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: ${currentKey.slice(0, 8)}..., attempt: ${attempt + 1}/${MAX_429_RETRIES})，尝试切换`
+      );
+
+      // 策略 1：同平台换 Key
+      const nextKey = getRandomKeyExcept(currentPlatform, triedKeys);
+      if (nextKey) {
+        currentKey = nextKey;
+        continue;
+      }
+
+      // 策略 2：换平台（支持同一模型）
+      const otherPlatforms = getPlatformsForModel(
+        currentTargetModel,
+        triedPlatforms
+      );
+      if (otherPlatforms.length > 0) {
+        const idx = Math.floor(Math.random() * otherPlatforms.length);
+        currentPlatform = otherPlatforms[idx];
+        currentKey = getNextKey(currentPlatform);
+        continue;
+      }
+
+      // 无更多可切换的目标
+      console.log(
+        `${logTag} 已无更多可切换的平台/Key，返回最后的 429 响应`
+      );
+    }
+
+    // 最后一次尝试或无处可切换：返回 429
     const errorText = await upstreamResponse.text();
     try {
-      await recordFailure(route.platform.id);
+      await recordFailure(currentPlatform.id);
     } catch (recordError) {
       console.error(
-        `${logTag} 上游错误路径熔断器记录失败:`,
+        `${logTag} 熔断器记录失败:`,
         recordError instanceof Error ? recordError.message : String(recordError)
       );
     }
@@ -351,11 +407,11 @@ export async function proxyV1Request(
       await recordRequestLog({
         keyId: apiKey.id,
         keyName: apiKey.name,
-        platformId: route.platform.id,
-        model: modelName || "unknown",
+        platformId: currentPlatform.id,
+        model: requestedModel,
         endpoint: config.upstreamPath,
         method: "POST",
-        status: upstreamResponse.status,
+        status: 429,
         tokens: 0,
         promptTokens: 0,
         completionTokens: 0,
@@ -366,30 +422,52 @@ export async function proxyV1Request(
         db: env.DB,
       });
     } catch (logError) {
-      console.error(
-        `${logTag} 记录上游错误日志失败:`,
-        logError instanceof Error ? logError.message : String(logError)
-      );
+      console.error(`${logTag} 日志写入失败:`, logError);
     }
 
     // 自动模型冻结
-    if (isAutoModelRequest(modelName || "") && upstreamResponse.status === 429) {
-      freezeAutoModel(modelName || "");
+    if (isAutoModelRequest(requestedModel)) {
+      freezeAutoModel(requestedModel);
     }
 
-    const errorBody = sanitizeUpstreamError(errorText, upstreamResponse.status);
+    const errorBody = sanitizeUpstreamError(errorText, 429);
     return new Response(errorBody, {
-      status: upstreamResponse.status,
+      status: 429,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // 7b. 流式响应（SSE）
+  // 不应到达此处，兜底返回
+  return Response.json(
+    { error: { message: "重试耗尽", type: "server_error" } },
+    { status: 503 }
+  );
+}
+
+// ==================== 上游响应处理 ====================
+
+/**
+ * 处理上游成功响应（流式/非流式），记录日志和统计
+ */
+async function handleUpstreamResponse(
+  upstreamResponse: Response,
+  platform: { id: string; name: string },
+  upstreamKey: string,
+  apiKey: ApiKeyRecord,
+  requestedModel: string,
+  config: ProxyConfig,
+  isStream: boolean,
+  startTime: number,
+  env: { DB: D1Database; KV: KVNamespace },
+  ctx: ExecutionContext,
+  logTag: string
+): Promise<Response> {
+  // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;
     if (!stream) {
       try {
-        await recordFailure(route.platform.id);
+        await recordFailure(platform.id);
       } catch {
         console.error(`${logTag} 流式响应缺失时熔断器记录失败`);
       }
@@ -402,8 +480,8 @@ export async function proxyV1Request(
     const transformer = createUsageTransformer({
       keyId: apiKey.id,
       keyName: apiKey.name,
-      platformId: route.platform.id,
-      model: modelName || "unknown",
+      platformId: platform.id,
+      model: requestedModel,
       startTime,
       kv: env.KV,
       db: env.DB,
@@ -411,8 +489,7 @@ export async function proxyV1Request(
     });
 
     const pipedStream = stream.pipeThrough(transformer);
-    _upstreamSucceeded = true;
-    await recordSuccess(route.platform.id);
+    await recordSuccess(platform.id);
 
     return new Response(pipedStream, {
       status: 200,
@@ -424,21 +501,20 @@ export async function proxyV1Request(
     });
   }
 
-  // 7c. 非流式响应
+  // 非流式响应
   const responseContentType =
     upstreamResponse.headers.get("content-type") || "";
 
   // multipart 响应（audio/images）直接透传
   if (responseContentType.includes("multipart/")) {
-    _upstreamSucceeded = true;
-    await recordSuccess(route.platform.id);
+    await recordSuccess(platform.id);
 
     try {
       await recordRequestLog({
         keyId: apiKey.id,
         keyName: apiKey.name,
-        platformId: route.platform.id,
-        model: modelName || "unknown",
+        platformId: platform.id,
+        model: requestedModel,
         endpoint: config.upstreamPath,
         method: "POST",
         status: 200,
@@ -456,9 +532,7 @@ export async function proxyV1Request(
 
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
-      headers: {
-        "Content-Type": responseContentType,
-      },
+      headers: { "Content-Type": responseContentType },
     });
   }
 
@@ -467,7 +541,7 @@ export async function proxyV1Request(
   try {
     responseBody = await upstreamResponse.text();
   } catch {
-    await recordFailure(route.platform.id);
+    await recordFailure(platform.id);
     return Response.json(
       { error: { message: "读取上游响应失败", type: "server_error" } },
       { status: 500 }
@@ -488,8 +562,6 @@ export async function proxyV1Request(
       const totalTokens =
         Number(usage.total_tokens) || promptTokens + completionTokens;
 
-      // 某些上游只返回 total_tokens，不返回 prompt/completion 分项
-      // 此时将 total_tokens 同时记入两个字段，确保日志不丢失信息
       if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
         promptTokens = totalTokens;
         completionTokens = totalTokens;
@@ -508,13 +580,12 @@ export async function proxyV1Request(
     // JSON 解析失败不影响响应
   }
 
-  // 始终记录请求日志（即使上游未返回 usage）
   try {
     await recordRequestLog({
       keyId: apiKey.id,
       keyName: apiKey.name,
-      platformId: route.platform.id,
-      model: modelName || "unknown",
+      platformId: platform.id,
+      model: requestedModel,
       endpoint: config.upstreamPath,
       method: "POST",
       status: upstreamResponse.status,
@@ -530,13 +601,10 @@ export async function proxyV1Request(
     console.error(`${logTag} 日志写入失败:`, logError);
   }
 
-  _upstreamSucceeded = true;
-  await recordSuccess(route.platform.id);
+  await recordSuccess(platform.id);
 
   return new Response(responseBody, {
     status: upstreamResponse.status,
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
   });
 }
