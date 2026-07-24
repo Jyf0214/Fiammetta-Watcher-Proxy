@@ -38,6 +38,7 @@ interface RequestLogRow {
   tokens: number;
   prompt_tokens: number;
   completion_tokens: number;
+  ttft: number | null;
   cost: number;
   is_error: number;
   ip_address: string | null;
@@ -180,7 +181,27 @@ export default async function handler(
       success: true,
       data: {
         items: items.map((log) => ({
-          ...log,
+          id: log.id,
+          model: log.model,
+          status: log.status,
+          tokens: log.tokens,
+          promptTokens: log.prompt_tokens,
+          completionTokens: log.completion_tokens,
+          ttft: log.ttft ?? 0,
+          duration: log.latency,
+          isError: Boolean(log.is_error),
+          errorMessage: log.error_message,
+          ipAddress: log.ip_address,
+          userAgent: log.user_agent,
+          endpoint: log.endpoint,
+          method: log.method,
+          keyId: log.key_id,
+          keyName: log.key_name,
+          key: log.key_name ? { name: log.key_name } : null,
+          platformId: log.platform_id,
+          platformName: null,
+          platform: null,
+          cost: log.cost,
           createdAt: new Date(log.created_at * 1000).toISOString(),
         })),
         total,
