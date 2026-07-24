@@ -46,7 +46,7 @@ export function StatCard({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-zinc-500 text-[11px] leading-tight mb-0.5">{title}</p>
-            <p className="text-xl font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap">
+            <p className={`${valueFontSize(displayValue)} font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap`}>
               {displayValue}
             </p>
           </div>

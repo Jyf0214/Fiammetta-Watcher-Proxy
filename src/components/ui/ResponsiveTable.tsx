@@ -102,10 +102,10 @@ function MobileCards<T>({
       {data.map((r, i) => (
         <div
           key={keyOf(r)}
-          className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm"
+          className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4"
         >
           {/* 卡片头部：标题 + 操作按钮 */}
-          <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-50 dark:border-zinc-800/50">
+          <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-700/50">
             <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate flex-1 mr-2">
               {titleCol ? cellOf(titleCol, r, i) : keyOf(r)}
             </div>

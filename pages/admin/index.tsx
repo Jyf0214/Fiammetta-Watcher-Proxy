@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
-import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
+import { formatDuration, formatCompactNumber } from "@/lib/format";
 import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import AdminLayout from "@/components/AdminLayout";
