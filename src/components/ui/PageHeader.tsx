@@ -7,7 +7,7 @@ interface PageHeaderProps {
   /** 标题文本 */
   title: string;
   /** 描述文本 */
-  description?: string;
+  description?: React.ReactNode;
   /** 右侧操作区 */
   extra?: React.ReactNode;
   /** 底部间距，默认 mb-6 */

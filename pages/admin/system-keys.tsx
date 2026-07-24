@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Space, Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
-import { Plus, Trash2, Copy, Shield } from "lucide-react";
+import { Plus, Trash2, Copy, Shield, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -143,7 +143,7 @@ export default function SystemKeysPage() {
       render: (key: string) => (
         <Space size={4}>
           <code className="text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">{key}</code>
-          <Button type="link" size="small" onClick={() => copyToClipboard(key)}>
+          <Button variant="link" size="sm" onClick={() => copyToClipboard(key)}>
             <Copy size={14} />
           </Button>
         </Space>
@@ -170,7 +170,7 @@ export default function SystemKeysPage() {
       width: 80,
       render: (_, record) => (
         <Popconfirm title="确认删除此系统 Key？" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
-          <Button type="link" danger size="small">
+          <Button variant="dangerGhost" size="sm">
             <Trash2 size={14} />
           </Button>
         </Popconfirm>
@@ -190,8 +190,9 @@ export default function SystemKeysPage() {
     <AdminLayout>
       <PageContainer>
         <PageHeader
+          icon={<Key size={20} className="text-zinc-500 dark:text-zinc-400" />}
           title="系统 API Key"
-          subtitle="用于后台 API 认证（Authorization: Bearer），不可用于 v1 代理"
+          description="用于后台 API 认证（Authorization: Bearer），不可用于 v1 代理"
           extra={
             <Button onClick={() => setModalOpen(true)}>
               <Plus size={16} className="mr-1" /> 创建系统 Key

@@ -117,9 +117,9 @@ export async function createDb(): Promise<PrismaClient> {
   const kind = d1Binding ? "d1" : resolveDbKind();
   const adapterResult = await loadAdapter(kind, d1Binding ?? undefined);
 
-  const prismaOpts: ConstructorParameters<typeof PrismaClient>[0] = {
+  const prismaOpts = {
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  };
+  } as ConstructorParameters<typeof PrismaClient>[0];
 
   if (adapterResult) {
     (prismaOpts as { adapter: unknown }).adapter = adapterResult.adapter;
