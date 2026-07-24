@@ -28,7 +28,7 @@ const paddingMap: Record<string, string> = {
  * - 支持 compact/default/wide 三档内边距
  */
 export function PageContainer({
-  maxWidth = "4xl",
+  maxWidth = "6xl",
   padding = "default",
   children,
   className = "",

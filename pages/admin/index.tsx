@@ -336,7 +336,7 @@ function DashboardContent() {
       {/* 统计卡片 */}
       {viewMode === "grid" ? (
         // 网格视图：一行多个
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
           {statCards.map((card) => {
             const displayVal = "display" in card && card.display
               ? card.display.value
@@ -348,7 +348,7 @@ function DashboardContent() {
                     <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight truncate">{card.title}</p>
+                    <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
                     <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
                       {displayVal}
                     </p>
@@ -373,7 +373,7 @@ function DashboardContent() {
                     <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight">{card.title}</p>
+                    <p className="text-zinc-500 text-[11px] leading-tight mb-0.5">{card.title}</p>
                     <p className="text-xl font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap">
                       {displayVal}
                     </p>
