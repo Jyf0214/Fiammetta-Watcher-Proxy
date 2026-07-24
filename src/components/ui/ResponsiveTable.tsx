@@ -332,7 +332,7 @@ export function ResponsiveTable<T>(
           <div className="mt-4 flex justify-center items-center gap-4">
             {typeof pagination === 'object' && pagination.showTotal && (
               <span className="text-xs text-zinc-500 tabular-nums">
-                {pagination.showTotal(pagination.total ?? 0, [0, 0])}
+                {pagination.showTotal(pagination.total ?? dataSource?.length ?? 0, [0, 0])}
               </span>
             )}
             <Pagination
