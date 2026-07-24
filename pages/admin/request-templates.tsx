@@ -35,6 +35,15 @@ const EXAMPLE_BODIES = [
     },
   },
   {
+    name: "模型思考强度",
+    models: ["deepseek-*"],
+    body: {
+      thinking: {
+        reasoning_effort: "max",
+      },
+    },
+  },
+  {
     name: "强制 JSON 输出",
     models: ["gpt-4o", "gpt-4o-mini"],
     body: {
