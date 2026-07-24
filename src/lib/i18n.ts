@@ -16,6 +16,8 @@ i18n
     fallbackLng: "zh",
     interpolation: {
       escapeValue: false,
+      prefix: "{",
+      suffix: "}",
     },
     detection: {
       order: ["localStorage", "navigator"],
