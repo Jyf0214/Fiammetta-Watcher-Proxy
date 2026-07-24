@@ -16,33 +16,41 @@ import { getAuditAdminId, type AuthResult } from "./_auth";
 
 const COOKIE_NAME = "admin_token";
 
-// ==================== 速率限制（登录失败防暴力） ====================
+// ==================== 速率限制（KV 持久化滑动窗口） ====================
 
-interface LoginAttemptEntry { count: number; windowStart: number; }
-const loginAttempts = new Map<string, LoginAttemptEntry>();
 const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_WINDOW_MS = 30 * 60 * 1000;
+const KV_KEY_PREFIX = "login:fail:";
 
-function cleanupLoginAttempts() {
+/**
+ * KV 存储的失败记录结构
+ * failures: 每次失败的时间戳（毫秒），用于滑动窗口
+ * 每次失败追加新时间戳，检查时过滤掉超过 30 分钟的旧记录
+ */
+interface KVFails { failures: number[]; }
+
+function kvKey(ip: string): string { return `${KV_KEY_PREFIX}${ip}`; }
+
+/** 从 KV 读取失败记录，自动过滤过期 */
+async function getRecentFails(kv: KVNamespace, ip: string): Promise<number[]> {
+  const raw = await kv.get(kvKey(ip));
+  if (!raw) return [];
+  const data = JSON.parse(raw) as KVFails;
   const now = Date.now();
-  for (const [ip, entry] of loginAttempts.entries()) {
-    if (now - entry.windowStart >= LOGIN_WINDOW_MS) loginAttempts.delete(ip);
-  }
+  return (data.failures || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
 }
 
-function checkAndRecordLoginAttempt(ip: string): boolean {
-  const now = Date.now();
-  cleanupLoginAttempts();
-  let entry = loginAttempts.get(ip);
-  if (!entry || now - entry.windowStart >= LOGIN_WINDOW_MS) {
-    entry = { count: 0, windowStart: now };
-    loginAttempts.set(ip, entry);
+/** 写入失败记录到 KV */
+async function saveFails(kv: KVNamespace, ip: string, failures: number[]): Promise<void> {
+  if (failures.length === 0) {
+    await kv.delete(kvKey(ip));
+  } else {
+    // KV TTL 设为窗口时间，到期自动清除
+    await kv.put(kvKey(ip), JSON.stringify({ failures }), {
+      expirationTtl: Math.ceil(LOGIN_WINDOW_MS / 1000) + 60,
+    });
   }
-  entry.count += 1;
-  return entry.count > LOGIN_MAX_ATTEMPTS;
 }
-
-function clearLoginFailures(ip: string): void { loginAttempts.delete(ip); }
 
 // ==================== 工具函数 ====================
 
@@ -83,9 +91,13 @@ async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string }): Prom
 
 // ==================== Handler ====================
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse,
+  ctx?: { env?: { KV?: KVNamespace } }
+) {
   switch (req.method) {
-    case "POST": return handleLogin(req, res);
+    case "POST": return handleLogin(req, res, ctx?.env?.KV);
     case "DELETE": return handleLogout(req, res);
     case "GET": return handleGetAdmin(req, res);
     default:
@@ -96,7 +108,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 // ==================== POST — 管理员登录 ====================
 
-async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
+async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNamespace) {
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
@@ -110,10 +122,19 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const clientIp = getClientIp(req);
-    if (checkAndRecordLoginAttempt(clientIp)) {
-      const entry = loginAttempts.get(clientIp);
-      const resetAt = entry ? new Date(entry.windowStart + LOGIN_WINDOW_MS).toISOString() : new Date().toISOString();
-      return res.status(429).json({ success: false, error: "登录尝试次数过多，请稍后再试", resetAt });
+
+    // KV 持久化限流检查
+    if (kv) {
+      const recentFails = await getRecentFails(kv, clientIp);
+      if (recentFails.length >= LOGIN_MAX_ATTEMPTS) {
+        const lastFail = recentFails[recentFails.length - 1];
+        const resetAt = new Date(lastFail + LOGIN_WINDOW_MS).toISOString();
+        return res.status(429).json({
+          success: false,
+          error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+          resetAt,
+        });
+      }
     }
 
     const body = req.body as { username?: string; password?: string } | undefined;
@@ -124,10 +145,20 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
 
     // 直接比对环境变量中的用户名和密码
     if (username !== env.ADMIN_USERNAME || password !== env.ADMIN_PASSWORD) {
+      // 密码错误 → KV 记录失败
+      if (kv) {
+        const fails = await getRecentFails(kv, clientIp);
+        fails.push(Date.now());
+        await saveFails(kv, clientIp, fails);
+      }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
 
-    clearLoginFailures(clientIp);
+    // 登录成功 → 清除该 IP 全部失败记录
+    if (kv) {
+      await kv.delete(kvKey(clientIp));
+    }
+
     const isProd = env.ENVIRONMENT === "production";
     const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME! }, env);
     setAuthCookie(res, token, isProd);
