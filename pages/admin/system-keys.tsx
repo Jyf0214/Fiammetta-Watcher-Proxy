@@ -200,6 +200,13 @@ export default function SystemKeysPage() {
           }
         />
 
+        <Alert
+          type="warning"
+          showIcon
+          message="本页密钥仅用于管理后台 API 认证。调用 v1 代理请前往「API 密钥管理」页面创建。"
+          className="mb-3"
+        />
+
         <ProCard>
           <ResponsiveTable
             columns={columns}
