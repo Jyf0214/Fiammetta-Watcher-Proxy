@@ -277,18 +277,19 @@ export async function routeRequest(
         (p) => p.id === targetPlatformId && p.enabled
       ) ?? null;
   } else {
-    // 自由选择
-    // 先检查模型是否被某个平台直接支持
+    // 收集所有支持该模型的平台，做负载均衡
+    const candidatePlatforms: PlatformConfig[] = [];
     for (const platform of platformCache) {
       const models = platformModelCache.get(platform.id);
       if (models && models.has(requestedModel)) {
-        selectedPlatform = platform;
-        break;
+        candidatePlatforms.push(platform);
       }
     }
 
-    // 没有直接支持的平台，使用加权轮询
-    if (!selectedPlatform) {
+    if (candidatePlatforms.length > 0) {
+      selectedPlatform = selectPlatform(candidatePlatforms);
+    } else {
+      // 没有平台直接支持，使用加权轮询（可能触发上游报错）
       selectedPlatform = selectPlatform(platformCache);
     }
   }
