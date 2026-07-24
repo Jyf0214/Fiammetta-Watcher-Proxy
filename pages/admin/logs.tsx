@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
 import { Tag, Select, Tabs, DatePicker, message, type TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ProCard } from "@/components/ui/ProCard";
 import {
   RefreshCw,
   FileText,
@@ -19,6 +18,16 @@ import { formatDateTime, formatDate } from "@/lib/timezone";
 import AdminLayout from "@/components/AdminLayout";
 
 const { RangePicker } = DatePicker;
+
+// ==================== 工具函数 ====================
+
+/** ≥1000ms 自动换算为秒，保留两位小数 */
+function formatDuration(ms: number): { value: string; suffix: string } {
+  if (ms >= 1000) {
+    return { value: (ms / 1000).toFixed(2), suffix: "s" };
+  }
+  return { value: String(Math.round(ms)), suffix: "ms" };
+}
 
 // ==================== 类型定义 ====================
 
@@ -64,12 +73,9 @@ interface KeyOption {
 
 // ==================== 详细日志 Tab ====================
 
-function DetailedLogsTab({
-  router,
-}: {
-  router: ReturnType<typeof useRouter>;
-}) {
+function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
   const { t } = useTranslation();
+  const router = useRouter();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -163,6 +169,10 @@ function DetailedLogsTab({
     setRefreshKey((k) => k + 1);
   }, []);
 
+  useEffect(() => {
+    onRefreshRef(handleRefresh);
+  }, [onRefreshRef, handleRefresh]);
+
   const handleResetFilters = useCallback(() => {
     setStatusFilter(undefined);
     setErrorFilter("");
@@ -170,6 +180,8 @@ function DetailedLogsTab({
     setDateRange(null);
     setPage(1);
   }, []);
+
+  const hasFilters = !!(statusFilter || errorFilter || keyFilter || dateRange);
 
   const columns: TableColumnsType<LogEntry> = [
     {
@@ -252,7 +264,13 @@ function DetailedLogsTab({
       key: "ttft",
       width: 90,
       align: "right",
-      render: (v: number) => (v > 0 ? `${v}ms` : "-"),
+      render: (v: number) => {
+        if (v > 0) {
+          const d = formatDuration(v);
+          return `${d.value} ${d.suffix}`;
+        }
+        return "N/A";
+      },
     },
     {
       title: t("log.duration"),
@@ -260,7 +278,13 @@ function DetailedLogsTab({
       key: "duration",
       width: 90,
       align: "right",
-      render: (v: number) => (v > 0 ? `${v}ms` : "-"),
+      render: (v: number) => {
+        if (v > 0) {
+          const d = formatDuration(v);
+          return `${d.value} ${d.suffix}`;
+        }
+        return "-";
+      },
     },
     {
       title: t("log.is_error"),
@@ -281,7 +305,7 @@ function DetailedLogsTab({
   return (
     <>
       {/* 筛选栏 */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
         <RangePicker
           value={dateRange}
           onChange={(dates) => {
@@ -292,14 +316,14 @@ function DetailedLogsTab({
             t("log.start_date") || "开始日期",
             t("log.end_date") || "结束日期",
           ]}
-          className="w-[260px]"
+          className="w-full sm:w-[260px]"
         />
         <Select
           placeholder={t("log.filter_by_key") || "按 Key 筛选"}
           allowClear
           showSearch
           optionFilterProp="label"
-          className="w-44"
+          className="w-full sm:w-44"
           value={keyFilter}
           onChange={(v) => {
             setKeyFilter(v);
@@ -313,7 +337,7 @@ function DetailedLogsTab({
         <Select
           placeholder={t("log.status_filter_placeholder")}
           allowClear
-          className="w-32"
+          className="w-full sm:w-32"
           value={statusFilter}
           onChange={(v) => {
             setStatusFilter(v);
@@ -331,7 +355,7 @@ function DetailedLogsTab({
         <Select
           placeholder={t("log.error_filter_placeholder")}
           allowClear
-          className="w-32"
+          className="w-full sm:w-32"
           value={errorFilter || undefined}
           onChange={(v) => {
             setErrorFilter(v || "");
@@ -342,7 +366,7 @@ function DetailedLogsTab({
             { value: "false", label: t("log.filter_normal_only") },
           ]}
         />
-        {(statusFilter || errorFilter || keyFilter || dateRange) && (
+        {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
@@ -352,15 +376,6 @@ function DetailedLogsTab({
             {t("common.reset") || "重置"}
           </Button>
         )}
-        <Button
-          variant="default"
-          size="sm"
-          icon={<RefreshCw size={14} />}
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          {t("common.refresh")}
-        </Button>
       </div>
 
       <ResponsiveTable
@@ -373,8 +388,7 @@ function DetailedLogsTab({
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) =>
-            t("common.pagination_total", { count }),
+          showTotal: (count) => t("common.pagination_total", { count }),
         }}
         scroll={{ x: 1300 }}
       />
@@ -384,12 +398,9 @@ function DetailedLogsTab({
 
 // ==================== 归档统计 Tab ====================
 
-function ArchivedStatsTab({
-  router,
-}: {
-  router: ReturnType<typeof useRouter>;
-}) {
+function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
   const { t } = useTranslation();
+  const router = useRouter();
   const [stats, setStats] = useState<ArchiveEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -470,6 +481,10 @@ function ArchivedStatsTab({
   const handleRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
+
+  useEffect(() => {
+    onRefreshRef(handleRefresh);
+  }, [onRefreshRef, handleRefresh]);
 
   const handleManualArchive = useCallback(async () => {
     setArchiving(true);
@@ -571,7 +586,13 @@ function ArchivedStatsTab({
       key: "avgTtft",
       width: 100,
       align: "right",
-      render: (v: number) => (v > 0 ? `${Math.round(v)}ms` : "-"),
+      render: (v: number) => {
+        if (v > 0) {
+          const d = formatDuration(Math.round(v));
+          return `${d.value} ${d.suffix}`;
+        }
+        return "-";
+      },
     },
     {
       title: t("log.avg_duration"),
@@ -579,14 +600,20 @@ function ArchivedStatsTab({
       key: "avgDuration",
       width: 100,
       align: "right",
-      render: (v: number) => (v > 0 ? `${Math.round(v)}ms` : "-"),
+      render: (v: number) => {
+        if (v > 0) {
+          const d = formatDuration(Math.round(v));
+          return `${d.value} ${d.suffix}`;
+        }
+        return "-";
+      },
     },
   ];
 
   return (
     <>
       {/* 筛选栏 */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
         <RangePicker
           value={dateRange}
           onChange={(dates) => {
@@ -597,14 +624,14 @@ function ArchivedStatsTab({
             t("log.start_date") || "开始日期",
             t("log.end_date") || "结束日期",
           ]}
-          className="w-[260px]"
+          className="w-full sm:w-[260px]"
         />
         <Select
           placeholder={t("log.filter_by_key") || "按 Key 筛选"}
           allowClear
           showSearch
           optionFilterProp="label"
-          className="w-44"
+          className="w-full sm:w-44"
           value={keyFilter}
           onChange={(v) => {
             setKeyFilter(v);
@@ -632,15 +659,6 @@ function ArchivedStatsTab({
         <Button
           variant="default"
           size="sm"
-          icon={<RefreshCw size={14} />}
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          {t("common.refresh")}
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
           icon={<Cloud size={14} />}
           onClick={handleManualArchive}
           disabled={archiving}
@@ -661,8 +679,7 @@ function ArchivedStatsTab({
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) =>
-            t("common.pagination_total", { count }),
+          showTotal: (count) => t("common.pagination_total", { count }),
         }}
         scroll={{ x: 1300 }}
       />
@@ -674,18 +691,36 @@ function ArchivedStatsTab({
 
 function LogsContent() {
   const { t } = useTranslation();
-  const router = useRouter();
+  const detailRefreshRef = useRef<(() => void) | null>(null);
+  const archiveRefreshRef = useRef<(() => void) | null>(null);
+  const [activeTab, setActiveTab] = useState("detailed");
+
+  const handleRefresh = useCallback(() => {
+    if (activeTab === "detailed") {
+      detailRefreshRef.current?.();
+    } else {
+      archiveRefreshRef.current?.();
+    }
+  }, [activeTab]);
 
   const tabItems = [
     {
       key: "detailed",
       label: t("log.tab_detailed") || "详细日志",
-      children: <DetailedLogsTab router={router} />,
+      children: (
+        <DetailedLogsTab
+          onRefreshRef={(fn) => { detailRefreshRef.current = fn; }}
+        />
+      ),
     },
     {
       key: "archived",
       label: t("log.tab_archived") || "归档统计",
-      children: <ArchivedStatsTab router={router} />,
+      children: (
+        <ArchivedStatsTab
+          onRefreshRef={(fn) => { archiveRefreshRef.current = fn; }}
+        />
+      ),
     },
   ];
 
@@ -700,15 +735,23 @@ function LogsContent() {
         }
         title={t("admin.logs")}
         description={t("admin.logs_desc")}
+        extra={
+          <Button
+            variant="default"
+            onClick={handleRefresh}
+            icon={<RefreshCw size={14} />}
+          >
+            {t("common.refresh")}
+          </Button>
+        }
       />
 
-      <ProCard>
-        <Tabs
-          defaultActiveKey="detailed"
-          items={tabItems}
-          size="large"
-        />
-      </ProCard>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={tabItems}
+        size="large"
+      />
     </PageContainer>
   );
 }

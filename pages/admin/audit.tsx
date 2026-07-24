@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ProCard } from "@/components/ui/ProCard";
 import { RefreshCw, History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -13,14 +12,58 @@ import { formatDateTime } from "@/lib/timezone";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
+// ==================== 类型 ====================
+
 interface AuditEntry {
   id: string;
   action: string;
   detail: string | null;
   ip: string | null;
   createdAt: string;
-  admin: { username: string } | null;
+  username: string | null;
 }
+
+// ==================== 操作名称中英双语翻译 ====================
+
+const ACTION_LABELS: Record<string, { zh: string; en: string }> = {
+  login: { zh: "管理员登录", en: "Admin Login" },
+  logout: { zh: "管理员登出", en: "Admin Logout" },
+  create_platform: { zh: "创建平台", en: "Create Platform" },
+  update_platform: { zh: "更新平台", en: "Update Platform" },
+  delete_platform: { zh: "删除平台", en: "Delete Platform" },
+  create_api_key: { zh: "创建 API Key", en: "Create API Key" },
+  delete_api_key: { zh: "删除 API Key", en: "Delete API Key" },
+  create_model_map: { zh: "创建模型映射", en: "Create Model Map" },
+  update_model_map: { zh: "更新模型映射", en: "Update Model Map" },
+  delete_model_map: { zh: "删除模型映射", en: "Delete Model Map" },
+  enable_model_map: { zh: "启用模型映射", en: "Enable Model Map" },
+  disable_model_map: { zh: "禁用模型映射", en: "Disable Model Map" },
+  batch_enable_model_maps: { zh: "批量启用模型映射", en: "Batch Enable Model Maps" },
+  batch_disable_model_maps: { zh: "批量禁用模型映射", en: "Batch Disable Model Maps" },
+  batch_delete_model_maps: { zh: "批量删除模型映射", en: "Batch Delete Model Maps" },
+};
+
+// ==================== 语义颜色映射 ====================
+
+const ACTION_COLOR: Record<string, string> = {
+  login: "blue",
+  logout: "default",
+  create_platform: "green",
+  update_platform: "orange",
+  delete_platform: "red",
+  create_api_key: "green",
+  delete_api_key: "red",
+  create_model_map: "green",
+  update_model_map: "orange",
+  delete_model_map: "red",
+  enable_model_map: "green",
+  disable_model_map: "gold",
+  batch_enable_model_maps: "green",
+  batch_disable_model_maps: "gold",
+  batch_delete_model_maps: "red",
+};
+
+// ==================== 页面组件 ====================
 
 function AuditContent() {
   const { t } = useTranslation();
@@ -63,43 +106,35 @@ function AuditContent() {
   }, [page, router, t, refreshKey]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey(k => k + 1);
+    setRefreshKey((k) => k + 1);
   }, []);
 
-  const actionColorMap: Record<string, string> = {
-    login: "blue",
-    logout: "default",
-    create_platform: "green",
-    update_platform: "orange",
-    delete_platform: "red",
-    create_api_key: "green",
-    delete_api_key: "red",
-    create_model_map: "green",
+  /** 获取操作的中英双语标签 */
+  const getActionLabel = (action: string): string => {
+    const label = ACTION_LABELS[action];
+    if (!label) return action;
+    const isZh = t("audit.admin") === "管理员";
+    return isZh ? label.zh : label.en;
   };
 
   const columns: TableColumnsType<AuditEntry> = [
-    {
-      title: t("common.created_at"),
-      dataIndex: "createdAt",
-      key: "createdAt",
-      width: 170,
-      render: (v: string) => formatDateTime(v),
-    },
-    {
-      title: t("audit.admin"),
-      key: "admin",
-      width: 120,
-      render: (_: unknown, record: AuditEntry) =>
-        record.admin?.username || "-",
-    },
     {
       title: t("common.action"),
       dataIndex: "action",
       key: "action",
       width: 180,
       render: (v: string) => (
-        <Tag color={actionColorMap[v] || "default"}>{v}</Tag>
+        <Tag color={ACTION_COLOR[v] || "default"}>
+          {getActionLabel(v)}
+        </Tag>
       ),
+    },
+    {
+      title: t("audit.admin"),
+      dataIndex: "username",
+      key: "username",
+      width: 120,
+      render: (v: string | null) => v || "-",
     },
     {
       title: t("common.detail"),
@@ -114,6 +149,13 @@ function AuditContent() {
       key: "ip",
       width: 140,
       responsive: ["lg"],
+    },
+    {
+      title: t("common.created_at"),
+      dataIndex: "createdAt",
+      key: "createdAt",
+      width: 170,
+      render: (v: string) => formatDateTime(v),
     },
   ];
 
@@ -134,21 +176,19 @@ function AuditContent() {
         }
       />
 
-      <ProCard>
-        <ResponsiveTable
-          columns={columns}
-          dataSource={logs}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: page,
-            total,
-            pageSize: 20,
-            onChange: setPage,
-            showTotal: (count) => t("common.pagination_total", { count }),
-          }}
-        />
-      </ProCard>
+      <ResponsiveTable
+        columns={columns}
+        dataSource={logs}
+        rowKey="id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: setPage,
+          showTotal: (count) => t("common.pagination_total", { count }),
+        }}
+      />
     </PageContainer>
   );
 }
