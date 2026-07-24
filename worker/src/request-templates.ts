@@ -5,6 +5,8 @@
  * 缓存 30 秒，按模型 ID（支持通配符）匹配后深度合并到上游请求体。
  */
 
+import { createPrismaClient } from "./prisma-db";
+
 // ==================== 类型 ====================
 
 export interface RequestTemplate {
@@ -94,20 +96,25 @@ export async function loadTemplates(
   }
 
   try {
-    const row = await db
-      .prepare(`SELECT value FROM configs WHERE key = ?`)
-      .bind(CONFIG_KEY)
-      .first<{ value: string }>();
+    const prisma = await createPrismaClient(db);
+    try {
+      const row = await prisma.configs.findFirst({
+        where: { key: CONFIG_KEY },
+        select: { value: true },
+      });
 
-    if (!row || !row.value) {
-      templateCache = [];
+      if (!row || !row.value) {
+        templateCache = [];
+        lastRefresh = now;
+        return templateCache;
+      }
+
+      const parsed = JSON.parse(row.value);
+      templateCache = Array.isArray(parsed) ? parsed : [];
       lastRefresh = now;
-      return templateCache;
+    } finally {
+      await prisma.$disconnect();
     }
-
-    const parsed = JSON.parse(row.value);
-    templateCache = Array.isArray(parsed) ? parsed : [];
-    lastRefresh = now;
   } catch (err) {
     console.error("[request-templates] 加载模板失败:", err);
     templateCache = [];

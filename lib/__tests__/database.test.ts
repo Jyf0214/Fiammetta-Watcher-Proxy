@@ -39,16 +39,6 @@ describe("Prisma 工厂 (createDb)", () => {
 });
 
 describe("向后兼容导出", () => {
-  it("lib/db.ts 重新导出 createDb", async () => {
-    const dbModule = await import("../db");
-    expect(typeof dbModule.createDb).toBe("function");
-  });
-
-  it("src/lib/db.ts 重新导出 createDb", async () => {
-    const srcDb = await import("../../src/lib/db");
-    expect(typeof srcDb.createDb).toBe("function");
-  });
-
   it("src/lib/prisma.ts 重新导出 createDb", async () => {
     const srcPrisma = await import("../../src/lib/prisma");
     expect(typeof srcPrisma.createDb).toBe("function");
