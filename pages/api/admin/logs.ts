@@ -14,44 +14,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-
-/** 系统事件行类型 */
-interface EventRow {
-  id: string;
-  level: string;
-  message: string;
-  detail: string | null;
-  created_at: number;
-}
-
-/** 请求日志行类型 */
-interface RequestLogRow {
-  id: string;
-  key_id: string | null;
-  key_name: string | null;
-  platform_id: string | null;
-  platform_name: string | null;
-  model: string;
-  endpoint: string | null;
-  method: string | null;
-  status: number;
-  latency: number;
-  tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  ttft: number | null;
-  cost: number;
-  is_error: number;
-  ip_address: string | null;
-  user_agent: string | null;
-  error_message: string | null;
-  created_at: number;
-}
-
-/** 计数结果类型 */
-interface CountRow {
-  count: number;
-}
+import type { Prisma } from "@/generated/client";
 
 export default async function handler(
   req: NextApiRequest,
@@ -76,34 +39,30 @@ export default async function handler(
 
     // ---------- 系统事件查询 ----------
     if (type === "events") {
-      const conditions: string[] = [];
-      const params: unknown[] = [];
+      const where: Prisma.systemEventsWhereInput = {};
 
-      // 错误筛选
       if (isError === "true") {
-        conditions.push("level IN ('error', 'critical')");
+        where.level = { in: ["error", "critical"] };
       } else if (isError === "false") {
-        conditions.push("level IN ('info', 'warning')");
+        where.level = { in: ["info", "warning"] };
       }
 
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-      const [items, countResult] = await Promise.all([
-        db.$queryRawUnsafe<EventRow[]>(
-          `SELECT id, level, message, detail, created_at
-           FROM system_events
-           ${whereClause}
-           ORDER BY created_at DESC
-           LIMIT ${pageSize} OFFSET ${offset}`,
-          ...params
-        ),
-        db.$queryRawUnsafe<CountRow[]>(
-          `SELECT COUNT(*) as count FROM system_events ${whereClause}`,
-          ...params
-        ),
+      const [items, total] = await Promise.all([
+        db.systemEvents.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          take: pageSize,
+          skip: offset,
+          select: {
+            id: true,
+            level: true,
+            message: true,
+            detail: true,
+            createdAt: true,
+          },
+        }),
+        db.systemEvents.count({ where }),
       ]);
-
-      const total = countResult[0]?.count ?? 0;
 
       res.status(200).json({
         success: true,
@@ -113,7 +72,7 @@ export default async function handler(
             level: e.level,
             message: e.message,
             detail: e.detail,
-            createdAt: new Date(e.created_at * 1000).toISOString(),
+            createdAt: new Date(e.createdAt * 1000).toISOString(),
           })),
           total,
           page,
@@ -125,62 +84,59 @@ export default async function handler(
     }
 
     // ---------- 请求日志查询 ----------
-    const conditions: string[] = [];
-    const params: unknown[] = [];
+    const where: Prisma.requestLogsWhereInput = {};
 
-    // 状态码筛选
     if (status) {
       const n = parseInt(status, 10);
       if (!isNaN(n)) {
-        conditions.push("status = ?");
-        params.push(n);
+        where.status = n;
       }
     }
 
-    // 错误筛选（is_error 为 INTEGER 0/1）
     if (isError === "true") {
-      conditions.push("is_error = 1");
+      where.isError = true;
     } else if (isError === "false") {
-      conditions.push("is_error = 0");
+      where.isError = false;
     }
 
-    // API Key 筛选
     if (keyId) {
-      conditions.push("key_id = ?");
-      params.push(keyId);
+      where.keyId = keyId;
     }
 
-    // 日期范围筛选（SQLite 存储 Unix 时间戳）
-    if (startDateStr) {
-      const startTs = Math.floor(new Date(startDateStr).getTime() / 1000);
-      conditions.push("created_at >= ?");
-      params.push(startTs);
+    // 日期范围筛选（Unix 时间戳）
+    if (startDateStr || endDateStr) {
+      const createdAt: Prisma.IntFilter = {};
+      if (startDateStr) {
+        createdAt.gte = Math.floor(new Date(startDateStr).getTime() / 1000);
+      }
+      if (endDateStr) {
+        const end = new Date(endDateStr);
+        end.setHours(23, 59, 59, 999);
+        createdAt.lte = Math.floor(end.getTime() / 1000);
+      }
+      where.createdAt = createdAt;
     }
-    if (endDateStr) {
-      // 结束日期含当天全部：取当天 23:59:59
-      const end = new Date(endDateStr);
-      end.setHours(23, 59, 59, 999);
-      const endTs = Math.floor(end.getTime() / 1000);
-      conditions.push("created_at <= ?");
-      params.push(endTs);
-    }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    // 构建带参数的 SQL（LEFT JOIN platforms 获取平台名称）
-    const countSql = `SELECT COUNT(*) as count FROM request_logs ${whereClause}`;
-    const itemsSql = `SELECT r.*, p.name as platform_name
-      FROM request_logs r
-      LEFT JOIN platforms p ON r.platform_id = p.id
-      ${whereClause}
-      ORDER BY r.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
-
-    const [items, countResult] = await Promise.all([
-      db.$queryRawUnsafe<RequestLogRow[]>(itemsSql, ...params),
-      db.$queryRawUnsafe<CountRow[]>(countSql, ...params),
+    const [items, total] = await Promise.all([
+      db.requestLogs.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: pageSize,
+        skip: offset,
+      }),
+      db.requestLogs.count({ where }),
     ]);
 
-    const total = countResult[0]?.count ?? 0;
+    // 批量查询关联平台名称（Prisma 无 relation，手动 JOIN）
+    const platformIds = [...new Set(items.map((r) => r.platformId).filter(Boolean))] as string[];
+    let platformMap = new Map<string, string>();
+    if (platformIds.length > 0) {
+      const platforms = await db.platforms.findMany({
+        where: { id: { in: platformIds } },
+        select: { id: true, name: true },
+      });
+      platformMap = new Map(platforms.map((p) => [p.id, p.name]));
+    }
 
     res.status(200).json({
       success: true,
@@ -190,24 +146,26 @@ export default async function handler(
           model: log.model,
           status: log.status,
           tokens: log.tokens,
-          promptTokens: log.prompt_tokens,
-          completionTokens: log.completion_tokens,
+          promptTokens: log.promptTokens,
+          completionTokens: log.completionTokens,
           ttft: log.ttft ?? 0,
           duration: log.latency,
-          isError: Boolean(log.is_error),
-          errorMessage: log.error_message,
-          ipAddress: log.ip_address,
-          userAgent: log.user_agent,
+          isError: Boolean(log.isError),
+          errorMessage: log.errorMessage,
+          ipAddress: log.ipAddress,
+          userAgent: log.userAgent,
           endpoint: log.endpoint,
           method: log.method,
-          keyId: log.key_id,
-          keyName: log.key_name,
-          key: log.key_name ? { name: log.key_name } : null,
-          platformId: log.platform_id,
-          platformName: log.platform_name,
-          platform: log.platform_name ? { name: log.platform_name } : null,
+          keyId: log.keyId,
+          keyName: log.keyName,
+          key: log.keyName ? { name: log.keyName } : null,
+          platformId: log.platformId,
+          platformName: log.platformId ? platformMap.get(log.platformId) ?? null : null,
+          platform: log.platformId
+            ? { name: platformMap.get(log.platformId) ?? null }
+            : null,
           cost: log.cost,
-          createdAt: new Date(log.created_at * 1000).toISOString(),
+          createdAt: new Date(log.createdAt * 1000).toISOString(),
         })),
         total,
         page,

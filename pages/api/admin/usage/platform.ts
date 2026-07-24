@@ -9,25 +9,6 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
 
-/** 聚合统计结果类型 */
-interface AggRow {
-  platformId: string | null;
-  totalRequests: number;
-  totalTokens: number;
-  promptTokens: number;
-  completionTokens: number;
-  avgTtft: number;
-  avgDuration: number;
-  firstRequestAt: number | null;
-  lastRequestAt: number | null;
-}
-
-/** 错误统计结果类型 */
-interface ErrorRow {
-  platformId: string | null;
-  errorCount: number;
-}
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -63,102 +44,108 @@ export default async function handler(
         startTimestamp = undefined;
     }
 
-    // 构建时间过滤条件
-    const timeConditions: string[] = [];
-    const timeParams: unknown[] = [];
-    if (startTimestamp !== undefined) {
-      timeConditions.push("created_at >= ?");
-      timeParams.push(startTimestamp);
-    }
+    // 构建 Prisma where 条件（仅在指定了时间范围时添加 createdAt 过滤）
+    const where = Object.fromEntries(
+      Object.entries({
+        createdAt: startTimestamp !== undefined ? { gte: startTimestamp } : undefined,
+      }).filter(([, v]) => v !== undefined)
+    );
 
     // 获取所有平台
     const allPlatforms = await orm.platforms.findMany({
       orderBy: { createdAt: "desc" },
     });
 
-    // 按 platformId 分组聚合统计
-    const timeWhereClause = timeConditions.length > 0 ? `WHERE ${timeConditions.join(" AND ")}` : "";
-    const statsSql = `
-      SELECT
-        platform_id as platformId,
-        COUNT(*) as totalRequests,
-        COALESCE(SUM(tokens), 0) as totalTokens,
-        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
-        COALESCE(SUM(completion_tokens), 0) as completionTokens,
-        ROUND(COALESCE(AVG(ttft), 0)) as avgTtft,
-        ROUND(COALESCE(AVG(latency), 0)) as avgDuration,
-        MIN(created_at) as firstRequestAt,
-        MAX(created_at) as lastRequestAt
-      FROM request_logs
-      ${timeWhereClause}
-      GROUP BY platform_id
-    `;
-    const stats = await orm.$queryRawUnsafe<AggRow[]>(statsSql, ...timeParams);
+    // 通过 Prisma ORM 获取所有匹配的日志记录
+    const logs = await orm.requestLogs.findMany({
+      where,
+      select: {
+        platformId: true,
+        tokens: true,
+        promptTokens: true,
+        completionTokens: true,
+        ttft: true,
+        latency: true,
+        createdAt: true,
+        isError: true,
+      },
+    });
 
-    // 按 platformId 分组获取错误请求数
-    const errorWhereClause = timeConditions.length > 0
-      ? `WHERE ${timeConditions.join(" AND ")} AND is_error = 1`
-      : "WHERE is_error = 1";
-    const errorStatsSql = `
-      SELECT
-        platform_id as platformId,
-        COUNT(*) as errorCount
-      FROM request_logs
-      ${errorWhereClause}
-      GROUP BY platform_id
-    `;
-    const errorStats = await orm.$queryRawUnsafe<ErrorRow[]>(errorStatsSql, ...timeParams);
-
-    // 构建错误计数 Map
-    const errorCountMap = new Map<string, number>();
-    for (const e of errorStats) {
-      const key = e.platformId || "unknown";
-      errorCountMap.set(key, Number(e.errorCount));
-    }
-
-    // 构建统计 Map
-    const statsMap = new Map<string, AggRow>();
-    for (const s of stats) {
-      const statKey = s.platformId || "unknown";
-      statsMap.set(statKey, s);
+    // 按 platformId 分组，手动计算聚合值
+    const grouped = new Map<string, typeof logs>();
+    for (const log of logs) {
+      const key = log.platformId || "unknown";
+      const arr = grouped.get(key);
+      if (arr) {
+        arr.push(log);
+      } else {
+        grouped.set(key, [log]);
+      }
     }
 
     // 计算速率指标的辅助函数
-    function computeRates(s: AggRow) {
-      const totalTokens = Number(s.totalTokens || 0);
-      const totalRequests = Number(s.totalRequests || 0);
+    function computeRates(logGroup: { tokens: number; promptTokens: number; completionTokens: number; ttft: number; latency: number; createdAt: number; isError: boolean }[]) {
+      const totalRequests = logGroup.length;
+      let totalTokens = 0;
+      let sumPromptTokens = 0;
+      let sumCompletionTokens = 0;
+      let sumTtft = 0;
+      let sumLatency = 0;
+      let errorCount = 0;
+      let minTtft = Infinity;
+      let maxTtft = 0;
+      let minLatency = Infinity;
+      let maxLatency = 0;
+      let firstRequestAt: number | null = null;
+      let lastRequestAt: number | null = null;
+
+      for (const log of logGroup) {
+        totalTokens += log.tokens;
+        sumPromptTokens += log.promptTokens;
+        sumCompletionTokens += log.completionTokens;
+        sumTtft += log.ttft;
+        sumLatency += log.latency;
+        if (log.isError) errorCount++;
+        if (log.ttft < minTtft) minTtft = log.ttft;
+        if (log.ttft > maxTtft) maxTtft = log.ttft;
+        if (log.latency < minLatency) minLatency = log.latency;
+        if (log.latency > maxLatency) maxLatency = log.latency;
+        if (firstRequestAt === null || log.createdAt < firstRequestAt) firstRequestAt = log.createdAt;
+        if (lastRequestAt === null || log.createdAt > lastRequestAt) lastRequestAt = log.createdAt;
+      }
+
+      const avgTtft = totalRequests > 0 ? Math.round(sumTtft / totalRequests) : 0;
+      const avgDuration = totalRequests > 0 ? Math.round(sumLatency / totalRequests) : 0;
 
       let timeSpanSeconds = 0;
-      if (s.firstRequestAt != null && s.lastRequestAt != null) {
-        const first = s.firstRequestAt as number;
-        const last = s.lastRequestAt as number;
-        timeSpanSeconds = Math.max(1, last - first);
-      } else if (s.firstRequestAt != null) {
-        timeSpanSeconds = Math.max(1, now - (s.firstRequestAt as number));
+      if (firstRequestAt != null && lastRequestAt != null) {
+        timeSpanSeconds = Math.max(1, lastRequestAt - firstRequestAt);
+      } else if (firstRequestAt != null) {
+        timeSpanSeconds = Math.max(1, now - firstRequestAt);
       }
 
       return {
         totalRequests,
         totalTokens,
-        promptTokens: s.promptTokens || 0,
-        completionTokens: s.completionTokens || 0,
-        avgTtft: s.avgTtft || 0,
-        avgDuration: s.avgDuration || 0,
+        promptTokens: sumPromptTokens,
+        completionTokens: sumCompletionTokens,
+        avgTtft,
+        avgDuration,
         avgTokensPerSecond: timeSpanSeconds > 0
           ? Math.round((totalTokens / timeSpanSeconds) * 100) / 100
           : 0,
         avgRequestsPerMinute: timeSpanSeconds > 0
           ? Math.round(((totalRequests / timeSpanSeconds) * 60) * 100) / 100
           : 0,
-        errorRequests: 0,
-        firstRequestAt: s.firstRequestAt || null,
+        errorRequests: errorCount,
+        firstRequestAt,
       };
     }
 
     // 合并平台信息和统计数据
     const result = allPlatforms.map((p) => {
-      const pStats = statsMap.get(p.id);
-      const rates = pStats ? computeRates(pStats) : {
+      const logGroup = grouped.get(p.id);
+      const rates = logGroup ? computeRates(logGroup) : {
         totalRequests: 0,
         totalTokens: 0,
         promptTokens: 0,
@@ -170,7 +157,6 @@ export default async function handler(
         errorRequests: 0,
         firstRequestAt: null,
       };
-      rates.errorRequests = errorCountMap.get(p.id) || 0;
 
       return {
         id: p.id,
@@ -185,10 +171,9 @@ export default async function handler(
     });
 
     // 添加 "未知平台" 条目（platformId 为 null 的请求）
-    const unknownStats = statsMap.get("unknown");
-    if (unknownStats && Number(unknownStats.totalRequests) > 0) {
-      const rates = computeRates(unknownStats);
-      rates.errorRequests = errorCountMap.get("unknown") || 0;
+    const unknownGroup = grouped.get("unknown");
+    if (unknownGroup && unknownGroup.length > 0) {
+      const rates = computeRates(unknownGroup);
       result.push({
         id: "unknown",
         name: "未知平台",

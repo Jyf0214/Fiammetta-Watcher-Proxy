@@ -14,15 +14,6 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
 
-/** 趋势数据行类型 */
-interface TrendRow {
-  date: string;
-  requests: number;
-  tokens: number;
-  promptTokens: number;
-  completionTokens: number;
-}
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -69,46 +60,72 @@ export default async function handler(
     // 根据 period 决定聚合粒度：today 按小时，其他按天
     const isHourly = period === "today";
 
-    // SQLite strftime 格式化：
-    // createdAt 是 Unix 时间戳（秒），用 datetime(createdAt, 'unixepoch') 转为日期时间
-    // 按小时：'%Y-%m-%d %H:00'
-    // 按天：'%Y-%m-%d'
-    const strftimeFormat = isHourly ? "%Y-%m-%d %H:00" : "%Y-%m-%d";
+    // 使用 Prisma ORM 查询所有匹配记录，只 select 聚合所需字段
+    const logs = await orm.requestLogs.findMany({
+      where: {
+        createdAt: { gte: startTimestamp },
+        isError: false,
+        ...(keyId ? { keyId } : {}),
+      },
+      select: {
+        tokens: true,
+        promptTokens: true,
+        completionTokens: true,
+        createdAt: true,
+      },
+    });
 
-    // 构建查询条件
-    const conditions: string[] = ["created_at >= ?", "is_error = 0"];
-    const params: unknown[] = [startTimestamp];
+    // 在 JS 中按日期分组并聚合
+    const groups = new Map<
+      string,
+      { requests: number; tokens: number; promptTokens: number; completionTokens: number }
+    >();
 
-    if (keyId) {
-      conditions.push("key_id = ?");
-      params.push(keyId);
+    for (const log of logs) {
+      // createdAt 是 Unix 秒时间戳，转为 JS Date
+      const d = new Date(log.createdAt * 1000);
+
+      // 按 strftime 格式生成日期键：today 用 'YYYY-MM-DD HH:00'，其他用 'YYYY-MM-DD'
+      let dateKey: string;
+      if (isHourly) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        const hour = String(d.getHours()).padStart(2, "0");
+        dateKey = `${year}-${month}-${day} ${hour}:00`;
+      } else {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        dateKey = `${year}-${month}-${day}`;
+      }
+
+      const existing = groups.get(dateKey);
+      if (existing) {
+        existing.requests += 1;
+        existing.tokens += log.tokens ?? 0;
+        existing.promptTokens += log.promptTokens ?? 0;
+        existing.completionTokens += log.completionTokens ?? 0;
+      } else {
+        groups.set(dateKey, {
+          requests: 1,
+          tokens: log.tokens ?? 0,
+          promptTokens: log.promptTokens ?? 0,
+          completionTokens: log.completionTokens ?? 0,
+        });
+      }
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    // 使用原始 SQL 进行 SQLite strftime 聚合
-    const trendSql = `
-      SELECT
-        strftime('${strftimeFormat}', datetime(created_at, 'unixepoch')) as date,
-        COUNT(*) as requests,
-        COALESCE(SUM(tokens), 0) as tokens,
-        COALESCE(SUM(prompt_tokens), 0) as promptTokens,
-        COALESCE(SUM(completion_tokens), 0) as completionTokens
-      FROM request_logs
-      ${whereClause}
-      GROUP BY strftime('${strftimeFormat}', datetime(created_at, 'unixepoch'))
-      ORDER BY date ASC
-    `;
-
-    const rows = await orm.$queryRawUnsafe<TrendRow[]>(trendSql, ...params);
-
-    const trend = rows.map((row) => ({
-      date: String(row.date),
-      requests: Number(row.requests),
-      tokens: Number(row.tokens),
-      promptTokens: Number(row.promptTokens),
-      completionTokens: Number(row.completionTokens),
-    }));
+    // 转为数组并按日期排序（与原 SQL ORDER BY date ASC 一致）
+    const trend = Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, data]) => ({
+        date,
+        requests: data.requests,
+        tokens: data.tokens,
+        promptTokens: data.promptTokens,
+        completionTokens: data.completionTokens,
+      }));
 
     res.status(200).json({ success: true, data: trend });
   } catch (err) {
