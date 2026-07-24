@@ -25,10 +25,14 @@ export interface AuthResult {
 /**
  * 获取审计日志用的 adminId
  *
- * system-key 认证时返回 null（系统 Key 不在 admins 表中，外键约束会失败）
+ * 返回 null 的情况（audit_logs 表有外键约束 REFERENCES admins(id)）：
+ * - system-key 认证：系统 Key 不在 admins 表中
+ * - JWT 认证且 adminId="env-admin"：env-admin 是 JWT 登录的虚拟 ID，不在 admins 表中
  */
 export function getAuditAdminId(admin: AuthResult): string | null {
-  return admin.authMethod === "system-key" ? null : admin.adminId;
+  if (admin.authMethod === "system-key") return null;
+  if (admin.adminId === "env-admin") return null;
+  return admin.adminId;
 }
 
 /**
