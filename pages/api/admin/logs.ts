@@ -30,6 +30,7 @@ interface RequestLogRow {
   key_id: string | null;
   key_name: string | null;
   platform_id: string | null;
+  platform_name: string | null;
   model: string;
   endpoint: string | null;
   method: string | null;
@@ -166,9 +167,13 @@ export default async function handler(
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    // 构建带参数的 SQL
+    // 构建带参数的 SQL（LEFT JOIN platforms 获取平台名称）
     const countSql = `SELECT COUNT(*) as count FROM request_logs ${whereClause}`;
-    const itemsSql = `SELECT * FROM request_logs ${whereClause} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
+    const itemsSql = `SELECT r.*, p.name as platform_name
+      FROM request_logs r
+      LEFT JOIN platforms p ON r.platform_id = p.id
+      ${whereClause}
+      ORDER BY r.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
 
     const [items, countResult] = await Promise.all([
       db.$queryRawUnsafe<RequestLogRow[]>(itemsSql, ...params),
@@ -199,8 +204,8 @@ export default async function handler(
           keyName: log.key_name,
           key: log.key_name ? { name: log.key_name } : null,
           platformId: log.platform_id,
-          platformName: null,
-          platform: null,
+          platformName: log.platform_name,
+          platform: log.platform_name ? { name: log.platform_name } : null,
           cost: log.cost,
           createdAt: new Date(log.created_at * 1000).toISOString(),
         })),
