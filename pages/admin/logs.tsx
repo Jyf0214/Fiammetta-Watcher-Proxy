@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime, formatDate } from "@/lib/timezone";
 import AdminLayout from "@/components/AdminLayout";
 
 const { RangePicker } = DatePicker;
@@ -176,7 +177,7 @@ function DetailedLogsTab({
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("log.api_key"),
@@ -494,7 +495,7 @@ function ArchivedStatsTab({
       dataIndex: "date",
       key: "date",
       width: 120,
-      render: (v: string) => new Date(v).toLocaleDateString(),
+      render: (v: string) => formatDate(v),
     },
     {
       title: t("log.api_key"),

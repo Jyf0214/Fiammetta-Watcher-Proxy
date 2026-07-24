@@ -8,6 +8,7 @@ import { ProCard } from "@/components/ui/ProCard";
 import { Zap, Copy, Check, RefreshCw, Database, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime } from "@/lib/timezone";
 import AdminLayout from "@/components/AdminLayout";
 
 interface PlatformModel {
@@ -191,7 +192,7 @@ export default function AutoModelPage() {
       dataIndex: "fetchedAt",
       key: "fetchedAt",
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
   ];
 

@@ -9,6 +9,7 @@ import { ProCard } from "@/components/ui/ProCard";
 import { RefreshCw, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime } from "@/lib/timezone";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -80,7 +81,7 @@ export default function EventsPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("event.level"),
