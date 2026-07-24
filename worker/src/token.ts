@@ -73,6 +73,7 @@ export async function recordRequestLog(params: {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  ttft: number;
   duration: number;
   isError: boolean;
   errorMessage?: string;
@@ -94,6 +95,7 @@ export async function recordRequestLog(params: {
         tokens: params.tokens,
         promptTokens: params.promptTokens,
         completionTokens: params.completionTokens,
+        ttft: params.ttft,
         isError: params.isError,
         errorMessage: params.errorMessage ?? null,
       },
@@ -108,6 +110,11 @@ export async function recordRequestLog(params: {
  *
  * 在流式响应中逐块解析 SSE 数据，提取最后一个 usage 对象，
  * 请求完成后异步更新 API Key 用量和日志。
+ *
+ * 关键设计：
+ * - 用 ctx.waitUntil() 保护异步 DB 写入，防止 Worker 提前终止
+ * - 记录 TTFT（首字延迟）：第一个非空 chunk 到达时的时间差
+ * - SSE buffer 拼接：处理 chunk 在 JSON 中间截断的情况
  */
 export function createUsageTransformer(params: {
   keyId: string;
@@ -117,68 +124,83 @@ export function createUsageTransformer(params: {
   startTime: number;
   kv: KVNamespace;
   db: D1Database;
+  ctx: ExecutionContext;
 }): TransformStream<Uint8Array, Uint8Array> {
-  let _buffer = "";
+  let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
+  let ttft = 0;
+  let isFirstChunk = true;
+  const decoder = new TextDecoder();
 
   return new TransformStream({
     transform(chunk, controller) {
+      // 透传数据给客户端
       controller.enqueue(chunk);
 
-      // 解码并缓冲 SSE 数据
-      const text = new TextDecoder().decode(chunk);
-      _buffer += text;
+      // 记录首字时间 (TTFT)
+      if (isFirstChunk) {
+        ttft = Date.now() - params.startTime;
+        isFirstChunk = false;
+      }
 
-      // 逐行解析 SSE，寻找包含 usage 的 data 行
-      const lines = text.split("\n");
+      // 解码并缓冲 SSE 数据，处理跨 chunk 的截断行
+      sseBuffer += decoder.decode(chunk, { stream: true });
+
+      // 按换行符分割，保留最后一个可能不完整的行
+      const lines = sseBuffer.split("\n");
+      sseBuffer = lines.pop() || "";
+
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6);
         if (!data || data === "[DONE]") continue;
 
         try {
           const parsed = JSON.parse(data);
-          // usage 可能在顶层或 choices 外
           if (parsed.usage) {
             lastUsage = parsed.usage;
           }
         } catch {
-          // 忽略解析错误（可能是不完整的 JSON 片段）
+          // 忽略解析错误（不完整的 JSON 片段）
         }
       }
     },
 
-    async flush() {
-      // 流结束后异步处理 token 统计
-      try {
-        const { promptTokens, completionTokens, totalTokens } =
-          extractUsage(lastUsage);
+    flush() {
+      // 使用 ctx.waitUntil 保护异步 DB 写入，防止 Worker 提前终止
+      params.ctx.waitUntil((async () => {
+        try {
+          const { promptTokens, completionTokens, totalTokens } =
+            extractUsage(lastUsage);
 
-        if (totalTokens > 0) {
-          await updateKeyUsage(params.keyId, totalTokens, params.db);
+          if (totalTokens > 0) {
+            await updateKeyUsage(params.keyId, totalTokens, params.db);
+          }
+
+          await recordRequestLog({
+            keyId: params.keyId,
+            keyName: params.keyName,
+            platformId: params.platformId,
+            model: params.model,
+            endpoint: "stream",
+            method: "POST",
+            status: 200,
+            tokens: totalTokens,
+            promptTokens,
+            completionTokens,
+            ttft,
+            duration: Date.now() - params.startTime,
+            isError: false,
+            db: params.db,
+          });
+        } catch (err) {
+          console.error(
+            "[token] 流式响应 token 统计失败:",
+            err instanceof Error ? err.message : String(err)
+          );
         }
-
-        await recordRequestLog({
-          keyId: params.keyId,
-          keyName: params.keyName,
-          platformId: params.platformId,
-          model: params.model,
-          endpoint: "stream",
-          method: "POST",
-          status: 200,
-          tokens: totalTokens,
-          promptTokens,
-          completionTokens,
-          duration: Date.now() - params.startTime,
-          isError: false,
-          db: params.db,
-        });
-      } catch (err) {
-        console.error(
-          "[token] 流式响应 token 统计失败:",
-          err instanceof Error ? err.message : String(err)
-        );
-      }
+      })());
     },
   });
 }

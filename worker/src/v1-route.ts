@@ -87,7 +87,7 @@ export async function handleV1Route(
   if ("error" in authResult) return authResult.error;
 
   // 代理转发
-  return proxyV1Request(request, endpointConfig, authResult.apiKey, env);
+  return proxyV1Request(request, endpointConfig, authResult.apiKey, env, ctx);
 }
 
 /**

@@ -144,7 +144,8 @@ export async function proxyV1Request(
   request: Request,
   config: ProxyConfig,
   apiKey: ApiKeyRecord,
-  env: { DB: D1Database; KV: KVNamespace }
+  env: { DB: D1Database; KV: KVNamespace },
+  ctx: ExecutionContext
 ): Promise<Response> {
   const startTime = Date.now();
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
@@ -358,6 +359,7 @@ export async function proxyV1Request(
         tokens: 0,
         promptTokens: 0,
         completionTokens: 0,
+        ttft: 0,
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: errorText.substring(0, 1000),
@@ -405,6 +407,7 @@ export async function proxyV1Request(
       startTime,
       kv: env.KV,
       db: env.DB,
+      ctx,
     });
 
     const pipedStream = stream.pipeThrough(transformer);
@@ -442,6 +445,7 @@ export async function proxyV1Request(
         tokens: 0,
         promptTokens: 0,
         completionTokens: 0,
+        ttft: 0,
         duration: Date.now() - startTime,
         isError: false,
         db: env.DB,
@@ -517,6 +521,7 @@ export async function proxyV1Request(
       tokens: responseTokens,
       promptTokens: responsePromptTokens,
       completionTokens: responseCompletionTokens,
+      ttft: 0,
       duration: Date.now() - startTime,
       isError: false,
       db: env.DB,
