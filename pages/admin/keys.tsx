@@ -135,7 +135,7 @@ export default function KeysPage() {
     const controller = new AbortController();
     fetch("/api/admin/keys", { signal: controller.signal })
       .then((res) => res.json())
-      .then((data: Record<string, any>) => {
+      .then((data: any) => {
         if (data.success && Array.isArray(data.data)) setKeys(data.data);
       })
       .catch(() => {})
