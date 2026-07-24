@@ -150,23 +150,37 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
       // 事务内替换该平台的模型列表
       const now = Math.floor(Date.now() / 1000);
 
-      // 删除旧模型
-      await prisma.platformModels.deleteMany({
+      // 查询已有模型，保留用户手动设置的 enabled 状态
+      const existingModels = await prisma.platformModels.findMany({
         where: { platformId: platform.id },
+        select: { modelId: true, enabled: true, source: true },
+      });
+      const existingMap = new Map(
+        existingModels.map((m) => [m.modelId, { enabled: m.enabled, source: m.source }])
+      );
+
+      // 删除旧的自动发现模型（保留手动添加的）
+      await prisma.platformModels.deleteMany({
+        where: { platformId: platform.id, source: "auto" },
       });
 
-      // 批量插入新模型
+      // 批量插入新模型，保留已有模型的 enabled 状态
       if (models.length > 0) {
-        const values = models.map((m) => ({
-          id: crypto.randomUUID(),
-          platformId: platform.id,
-          modelId: m.id,
-          ownedBy: m.owned_by ?? platform.name,
-          modelName: m.id,
-          type: detectModelType(m.id),
-          source: "auto" as const,
-          fetchedAt: now,
-        }));
+        const values = models.map((m) => {
+          const existing = existingMap.get(m.id);
+          return {
+            id: crypto.randomUUID(),
+            platformId: platform.id,
+            modelId: m.id,
+            ownedBy: m.owned_by ?? platform.name,
+            modelName: m.id,
+            type: detectModelType(m.id),
+            source: "auto" as const,
+            fetchedAt: now,
+            // 已有模型保留原 enabled 状态，新模型默认启用
+            enabled: existing ? existing.enabled : true,
+          };
+        });
 
         // 分批插入（D1 限制每次最多 100 条）
         for (let i = 0; i < values.length; i += 100) {
