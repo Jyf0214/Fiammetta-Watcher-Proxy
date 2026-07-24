@@ -131,23 +131,21 @@ export function createUsageTransformer(params: {
   let lastUsage: Record<string, unknown> | undefined;
   let ttft = 0;
   let isFirstChunk = true;
+  let chunkCount = 0;
   const decoder = new TextDecoder();
 
   return new TransformStream({
     transform(chunk, controller) {
-      // 透传数据给客户端
-      controller.enqueue(chunk);
+      chunkCount++;
 
-      // 记录首字时间 (TTFT)
       if (isFirstChunk) {
         ttft = Date.now() - params.startTime;
         isFirstChunk = false;
       }
 
-      // 解码并缓冲 SSE 数据，处理跨 chunk 的截断行
-      sseBuffer += decoder.decode(chunk, { stream: true });
+      controller.enqueue(chunk);
 
-      // 按换行符分割，保留最后一个可能不完整的行
+      sseBuffer += decoder.decode(chunk, { stream: true });
       const lines = sseBuffer.split("\n");
       sseBuffer = lines.pop() || "";
 
@@ -156,30 +154,45 @@ export function createUsageTransformer(params: {
         if (!trimmed.startsWith("data: ")) continue;
         const data = trimmed.slice(6);
         if (!data || data === "[DONE]") continue;
-
         try {
           const parsed = JSON.parse(data);
           if (parsed.usage) {
             lastUsage = parsed.usage;
           }
         } catch {
-          // 忽略解析错误（不完整的 JSON 片段）
+          // 忽略不完整的 JSON 片段
         }
       }
     },
 
-    flush() {
-      // 使用 ctx.waitUntil 保护异步 DB 写入，防止 Worker 提前终止
-      params.ctx.waitUntil((async () => {
-        try {
-          const { promptTokens, completionTokens, totalTokens } =
-            extractUsage(lastUsage);
+    async flush() {
+      if (!lastUsage && chunkCount > 0) {
+        console.warn(
+          `[token] 流式响应未提取到 usage，chunks: ${chunkCount}，model: ${params.model}`
+        );
+      }
 
-          if (totalTokens > 0) {
-            await updateKeyUsage(params.keyId, totalTokens, params.db);
-          }
+      const { promptTokens, completionTokens, totalTokens } =
+        extractUsage(lastUsage);
+      const duration = Date.now() - params.startTime;
 
-          await recordRequestLog({
+      // 复用同一个 PrismaClient 完成所有 DB 操作
+      const prisma = await createPrismaClient(params.db);
+      try {
+        if (totalTokens > 0) {
+          await prisma.apiKeys.update({
+            where: { id: params.keyId },
+            data: {
+              usedTokens: { increment: totalTokens },
+              callUsed: { increment: 1 },
+              updatedAt: Math.floor(Date.now() / 1000),
+            },
+          });
+        }
+
+        await prisma.requestLogs.create({
+          data: {
+            id: crypto.randomUUID(),
             keyId: params.keyId,
             keyName: params.keyName,
             platformId: params.platformId,
@@ -187,21 +200,23 @@ export function createUsageTransformer(params: {
             endpoint: "stream",
             method: "POST",
             status: 200,
+            latency: duration,
             tokens: totalTokens,
             promptTokens,
             completionTokens,
             ttft,
-            duration: Date.now() - params.startTime,
             isError: false,
-            db: params.db,
-          });
-        } catch (err) {
-          console.error(
-            "[token] 流式响应 token 统计失败:",
-            err instanceof Error ? err.message : String(err)
-          );
-        }
-      })());
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        });
+      } catch (err) {
+        console.error(
+          "[token] 流式响应 DB 写入失败:",
+          err instanceof Error ? err.message : String(err)
+        );
+      } finally {
+        await prisma.$disconnect();
+      }
     },
   });
 }
