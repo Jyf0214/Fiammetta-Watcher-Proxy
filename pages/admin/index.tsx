@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Tooltip, message } from "antd";
+import { message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -37,13 +37,13 @@ function formatDuration(ms: number): { value: string; suffix: string } {
   if (ms >= 1000) {
     return { value: (ms / 1000).toFixed(2), suffix: "s" };
   }
-  return { value: String(ms), suffix: "ms" };
+  return { value: String(Math.round(ms)), suffix: "ms" };
 }
 
-/** 大数字紧凑格式化：≥1亿 → 1.23亿，≥1万 → 1.23万，≥1000 → 1.23K */
+/** 大数字紧凑格式化：≥10亿 → 1.00B，≥100万 → 1.00M，≥1000 → 1.00K */
 function formatCompactNumber(n: number): string {
-  if (n >= 1e8) return (n / 1e8).toFixed(2) + "亿";
-  if (n >= 1e4) return (n / 1e4).toFixed(2) + "万";
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
   return n.toLocaleString();
 }
@@ -51,9 +51,9 @@ function formatCompactNumber(n: number): string {
 /** 根据数值长度动态调整字号 */
 function valueFontSize(v: string): string {
   const len = v.length;
-  if (len <= 6) return "text-xl";
-  if (len <= 10) return "text-lg";
-  return "text-base";
+  if (len <= 5) return "text-lg";
+  if (len <= 8) return "text-base";
+  return "text-sm";
 }
 
 // ==================== 类型定义 ====================
@@ -158,11 +158,9 @@ function DashboardContent() {
   // 获取趋势数据（用于详细视图的迷你图表）
   const fetchTrendData = useCallback(async () => {
     try {
-      // 获取最近 24 小时的趋势数据
       const res = await fetch("/api/admin/usage/trend?period=today");
       const data: Record<string, any> = await res.json();
       if (data.success && Array.isArray(data.data)) {
-        // 转换为各指标的趋势数据
         const trends: Record<string, TrendPoint[]> = {
           requests: [],
           tokens: [],
@@ -170,31 +168,24 @@ function DashboardContent() {
           avgDuration: [],
         };
 
-        let cumulativeRequests = 0;
-        let cumulativeTokens = 0;
-        let ttftSum = 0;
-        let durationSum = 0;
-        let count = 0;
+        for (const point of data.data) {
+          const reqs = point.requests || 0;
+          const toks = point.tokens || 0;
 
-        data.data.forEach((point: { date: string; requests: number; tokens: number }) => {
-          cumulativeRequests += point.requests;
-          cumulativeTokens += point.tokens;
-          ttftSum += point.requests * (stats?.avgTtft || 0);
-          durationSum += point.requests * (stats?.avgDuration || 0);
-          count += point.requests;
+          // 请求数和 Token 用量：使用 API 原始聚合值
+          trends.requests.push({ date: point.date, value: reqs });
+          trends.tokens.push({ date: point.date, value: toks });
 
-          trends.requests.push({ date: point.date, value: cumulativeRequests });
-          trends.tokens.push({ date: point.date, value: cumulativeTokens });
-          trends.avgTtft.push({ date: point.date, value: count > 0 ? Math.round(ttftSum / count) : 0 });
-          trends.avgDuration.push({ date: point.date, value: count > 0 ? Math.round(durationSum / count) : 0 });
-        });
+          // 平均 TTFT / 耗时：API 未返回逐时段数据，不伪造
+          // 保持空数组，图表组件会优雅降级
+        }
 
         setTrendData(trends);
       }
     } catch {
       // 静默失败
     }
-  }, [stats]);
+  }, []);
 
   // 手动刷新
   const handleRefresh = useCallback(() => {
@@ -261,7 +252,7 @@ function DashboardContent() {
     },
     {
       key: "avgTtft",
-      title: `${t("usage.avg_ttft")} (ms)`,
+      title: "Avg TTFT",
       value: stats?.avgTtft ?? 0,
       icon: <Clock />,
       color: "bg-orange-50",
@@ -270,11 +261,11 @@ function DashboardContent() {
     },
     {
       key: "avgDuration",
-      title: `${t("usage.avg_duration")} (ms)`,
+      title: "Avg Duration",
       value: stats?.avgDuration ?? 0,
       icon: <Clock />,
-      color: "bg-orange-50",
-      iconColor: "text-orange-500",
+      color: "bg-cyan-50",
+      iconColor: "text-cyan-500",
       get display() { return formatDuration(this.value); },
     },
   ];
@@ -287,7 +278,7 @@ function DashboardContent() {
       requests: "#3b82f6",
       tokens: "#3b82f6",
       avgTtft: "#f97316",
-      avgDuration: "#f97316",
+      avgDuration: "#06b6d4",
     };
     return colorMap[key] || "#6b7280";
   };
@@ -315,43 +306,29 @@ function DashboardContent() {
         }
         extra={
           <div className="flex items-center gap-1">
-            <Tooltip
-              title={viewMode === "grid" ? "切换到详细视图" : "切换到网格视图"}
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                iconOnly
-                icon={viewMode === "grid" ? <List size={14} /> : <Grid size={14} />}
-                onClick={toggleViewMode}
-              />
-            </Tooltip>
-            <Tooltip
-              title={
-                autoRefresh
-                  ? t("dashboard.pause_auto_refresh") || "暂停自动刷新"
-                  : t("dashboard.resume_auto_refresh") || "开启自动刷新"
-              }
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                iconOnly
-                icon={autoRefresh ? <Pause size={14} /> : <Play size={14} />}
-                onClick={toggleAutoRefresh}
-                className="text-zinc-500"
-              />
-            </Tooltip>
-            <Tooltip title={t("common.refresh")}>
-              <Button
-                variant="ghost"
-                size="sm"
-                iconOnly
-                icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
-                onClick={handleRefresh}
-                disabled={refreshing}
-              />
-            </Tooltip>
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              icon={viewMode === "grid" ? <List size={14} /> : <Grid size={14} />}
+              onClick={toggleViewMode}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              icon={autoRefresh ? <Pause size={14} /> : <Play size={14} />}
+              onClick={toggleAutoRefresh}
+              className="text-zinc-500"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+              onClick={handleRefresh}
+              disabled={refreshing}
+            />
           </div>
         }
       />
@@ -372,7 +349,7 @@ function DashboardContent() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-zinc-500 text-[11px] leading-tight truncate">{card.title}</p>
-                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums`}>
+                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
                       {displayVal}
                     </p>
                   </div>
@@ -388,32 +365,27 @@ function DashboardContent() {
             const displayVal = "display" in card && card.display
               ? card.display.value
               : formatCompactNumber(card.value);
+            const hasTrend = trendData[card.key] && trendData[card.key].length > 0;
             return (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-9 w-9 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
-                      <span className={`${card.iconColor}`}>{card.icon}</span>
-                    </div>
-                    <div>
-                      <p className="text-zinc-500 text-xs">{card.title}</p>
-                      <p className="text-2xl font-bold text-zinc-900 tabular-nums">
-                        {displayVal}
-                      </p>
-                    </div>
+              <ProCard key={card.key} className="bg-white border-zinc-200" padding="px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
+                    <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                   </div>
-                  <div className="w-24 h-10">
-                    {trendData[card.key] && trendData[card.key].length > 0 ? (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-zinc-500 text-[11px] leading-tight">{card.title}</p>
+                    <p className="text-xl font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap">
+                      {displayVal}
+                    </p>
+                  </div>
+                  {hasTrend && (
+                    <div className="w-20 h-9 shrink-0">
                       <MiniTrendChart
                         data={trendData[card.key]}
                         color={getChartColor(card.key)}
                       />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-50 dark:bg-zinc-800 rounded flex items-center justify-center">
-                        <span className="text-xs text-zinc-300">--</span>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </ProCard>
             );
