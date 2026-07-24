@@ -9,6 +9,7 @@ import { ProCard } from "@/components/ui/ProCard";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime, formatDate } from "@/lib/timezone";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -51,7 +52,7 @@ function ApiKeyCard({
     }
   };
 
-  const createdDate = new Date(apiKey.createdAt).toLocaleDateString();
+  const createdDate = formatDate(apiKey.createdAt);
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
@@ -304,7 +305,7 @@ export default function KeysPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
       responsive: ["lg" as const],
     },
   ];

@@ -9,6 +9,7 @@ import { ProCard } from "@/components/ui/ProCard";
 import { RefreshCw, History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime } from "@/lib/timezone";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -82,7 +83,7 @@ function AuditContent() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("audit.admin"),

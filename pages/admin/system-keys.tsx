@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { formatDateTime } from "@/lib/timezone";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -129,7 +130,7 @@ export default function SystemKeysPage() {
 
   const formatTime = (ts: number | null) => {
     if (!ts) return "—";
-    return new Date(ts * 1000).toLocaleString();
+    return formatDateTime(ts);
   };
 
   const columns: TableColumnsType<SystemKeyItem> = [
