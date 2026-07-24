@@ -10,6 +10,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
 import { getAuditAdminId, type AuthResult } from "./_auth";
@@ -91,13 +92,15 @@ async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string }): Prom
 
 // ==================== Handler ====================
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-  ctx?: { env?: { KV?: KVNamespace } }
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  let kv: KVNamespace | undefined;
+  try {
+    const { env } = getCloudflareContext();
+    kv = env.KV;
+  } catch { /* 本地开发或非 CF 环境下 getCloudflareContext 可能抛异常 */ }
+
   switch (req.method) {
-    case "POST": return handleLogin(req, res, ctx?.env?.KV);
+    case "POST": return handleLogin(req, res, kv);
     case "DELETE": return handleLogout(req, res);
     case "GET": return handleGetAdmin(req, res);
     default:

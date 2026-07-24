@@ -52,42 +52,16 @@ jobs:
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
           echo "✅ Account ID 已获取"
 
-      # ==================== D1 数据库初始化 ====================
+      # ==================== 部署前：创建 D1/KV + 替换配置 ====================
 
-      - name: Init D1 Database
-        id: d1
+      - name: Init Resources (pre)
+        id: init
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
           D1_NAME: fiammetta_d1
-          INIT_SQL_PATH: init.sql
-        run: python3 deploy/init_d1.py
-
-      # ==================== KV 命名空间初始化 ====================
-
-      - name: Init KV Namespace
-        id: kv
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
           KV_NAME: fiammetta-proxy
-        run: python3 deploy/init_kv.py
-
-      # ==================== 替换 wrangler 配置占位符 ====================
-
-      - name: Update Wrangler Configs
-        env:
-          D1_ID: ${{ steps.d1.outputs.D1_ID }}
-          KV_ID: ${{ steps.kv.outputs.KV_ID }}
-        run: |
-          # Worker wrangler.toml
-          sed -i "s|placeholder-d1-id|$D1_ID|g" worker/wrangler.toml
-          sed -i "s|placeholder-kv-id|$KV_ID|g" worker/wrangler.toml
-
-          # 根目录 wrangler.jsonc（OpenNext Pages）
-          sed -i "s|placeholder-d1-id|$D1_ID|g" wrangler.jsonc
-
-          echo "✅ Wrangler 配置已更新"
+        run: python3 deploy/init.py pre
 
       # ==================== 安装依赖 & 构建 ====================
 
@@ -116,26 +90,18 @@ jobs:
           npx wrangler deploy --config wrangler.toml 2>&1 | grep -v "https://"
           echo "✅ Worker 部署完成"
 
-      - name: Set Worker Secrets (PG/MySQL only)
-        if: startsWith(env.DATABASE_URL, 'postgresql://') || startsWith(env.DATABASE_URL, 'postgres://') || startsWith(env.DATABASE_URL, 'mysql://') || startsWith(env.DATABASE_URL, 'mysqls://')
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          printf '%s' "${{ env.DATABASE_URL }}" | npx wrangler secret put DATABASE_URL --config worker/wrangler.toml --name fiammetta_worker
-          echo "✅ Worker DATABASE_URL Secret 已设置"
+      # ==================== 部署后：Pages 绑定 + Secrets ====================
 
-      # ==================== Pages 项目 + 绑定 + Secrets ====================
-
-      - name: Init Pages Project
+      - name: Init Pages + Secrets (post)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-          D1_ID: ${{ steps.d1.outputs.D1_ID }}
-          KV_ID: ${{ steps.kv.outputs.KV_ID }}
+          D1_ID: ${{ steps.init.outputs.D1_ID }}
+          KV_ID: ${{ steps.init.outputs.KV_ID }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           DATABASE_URL: ${{ env.DATABASE_URL }}
-        run: python3 deploy/init_pages.py
+        run: python3 deploy/init.py post
 
       # ==================== 部署 Pages ====================
 

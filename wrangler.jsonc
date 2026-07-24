@@ -7,12 +7,18 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  // 部署前由 CI 工作流替换 placeholder-d1-id 为实际 D1 ID
+  // 部署前由 init_pages.py 替换 placeholder 为实际 ID
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "fiammetta_d1",
       "database_id": "placeholder-d1-id"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "placeholder-kv-id"
     }
   ]
 }
