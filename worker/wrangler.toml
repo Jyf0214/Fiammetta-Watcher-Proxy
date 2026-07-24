@@ -14,9 +14,9 @@ database_id = "placeholder-d1-id"  # 部署时由 Terraform/CI 替换
 binding = "KV"
 id = "placeholder-kv-id"  # 部署时由 Terraform/CI 替换
 
-# Cron 定时任务（需在 Cloudflare Dashboard 手动配置）
-# 每小时：Key 用量重置检查
+# Cron 定时任务
 # 每 10 分钟：平台模型发现
+# 每小时：Key 用量重置检查
 # 每天凌晨 3 点：日志归档
-# [triggers]
-# crons = ["0 */1 * * *", "*/10 * * * *", "0 3 * * *"]
+[triggers]
+crons = ["*/10 * * * *", "0 */1 * * *", "0 3 * * *"]
