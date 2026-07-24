@@ -268,7 +268,7 @@ export async function routeRequest(
   );
 
   // 选择平台
-  let selectedPlatform: PlatformConfig | null = null;
+  let selectedPlatform: PlatformConfig | null;
 
   if (targetPlatformId) {
     // 映射指定了平台
