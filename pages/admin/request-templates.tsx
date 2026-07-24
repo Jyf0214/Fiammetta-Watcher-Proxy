@@ -38,9 +38,7 @@ const EXAMPLE_BODIES = [
     name: "模型思考强度",
     models: ["deepseek-*"],
     body: {
-      thinking: {
-        reasoning_effort: "max",
-      },
+      reasoning_effort: "max",
     },
   },
   {
