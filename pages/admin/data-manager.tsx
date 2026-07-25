@@ -229,6 +229,7 @@ export default function DataManagerPage() {
 
               if (event.type === "progress") {
                 const ev = event as ProgressEvent;
+                console.log("[import progress]", ev.step, "imported:", ev.imported, "skipped:", ev.skipped, "skipReasons:", ev.skipReasons);
                 setTotalProcessed(ev.totalProcessed);
                 setTotalRecords(ev.totalRecords);
                 setCurrentStepKey(ev.step);
@@ -370,6 +371,7 @@ export default function DataManagerPage() {
         {stepProgressList.map((sp, i) => {
           const _isCurrent = currentStepKey && STEP_LABELS[currentStepKey]?.labelKey === sp.labelKey;
           const _stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
+          if (sp.skipped > 0) console.log("[render step]", sp.labelKey, "skipReasons:", sp.skipReasons, "keys:", sp.skipReasons ? Object.keys(sp.skipReasons) : "null");
 
           return (
             <div key={i}>
