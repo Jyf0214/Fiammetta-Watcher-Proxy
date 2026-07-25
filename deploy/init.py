@@ -551,13 +551,13 @@ def main():
         run_check()
         return
 
+    # post-deploy 也需要 requests（调用 api_request），统一在此导入
+    import requests as _requests  # noqa: F811
+    globals()["requests"] = _requests
+
     if phase == "post-deploy":
         run_post_deploy()
         return
-
-    # check 阶段不需要 requests，延迟导入
-    import requests as _requests  # noqa: F811
-    globals()["requests"] = _requests
 
     if not ACCOUNT_ID:
         fail("未设置 CLOUDFLARE_ACCOUNT_ID")
