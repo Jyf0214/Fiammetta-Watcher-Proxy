@@ -39,6 +39,7 @@ interface ProgressEvent {
   totalProcessed: number;
   totalRecords: number;
   error?: string;
+  skipReasons?: Record<string, number>;
 }
 
 /** 流式完成事件 */
@@ -78,6 +79,7 @@ interface StepProgress {
   skipped: number;
   status: "done" | "error";
   error?: string;
+  skipReasons?: Record<string, number>;
 }
 
 /** 格式化导入字段名 */
@@ -241,6 +243,7 @@ export default function DataManagerPage() {
                     skipped: ev.skipped,
                     status: hasError ? "error" : "done",
                     error: ev.error,
+                    skipReasons: ev.skipReasons,
                   };
                   if (idx >= 0) {
                     const next = [...prev];
@@ -390,6 +393,17 @@ export default function DataManagerPage() {
               {sp.status === "error" && sp.error && (
                 <div className="text-xs text-red-500 dark:text-red-400 ml-5 truncate" title={sp.error}>
                   {sp.error}
+                </div>
+              )}
+              {sp.skipped > 0 && sp.skipReasons && Object.keys(sp.skipReasons).length > 0 && (
+                <div className="ml-5 mt-1 space-y-0.5">
+                  {Object.entries(sp.skipReasons).map(([reason, count]) => (
+                    <div key={reason} className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <span>·</span>
+                      <span>{reason}</span>
+                      <span className="text-zinc-400 dark:text-zinc-500">×{count}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

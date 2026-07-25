@@ -22,6 +22,8 @@ import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 interface ImportResult {
   imported: number;
   skipped: number;
+  skipReasons?: Record<string, number>; // { "名称重复": 3, "API Key 已脱敏": 2 }
+  error?: string;
 }
 
 /** 完整导入结果 */
@@ -106,7 +108,8 @@ export default async function handler(
       skipped: number,
       totalProcessed: number,
       totalRecords: number,
-      error?: string
+      error?: string,
+      skipReasons?: Record<string, number>
     ) => {
       const event: Record<string, unknown> = {
         type: "progress",
@@ -118,6 +121,7 @@ export default async function handler(
         totalRecords,
       };
       if (error) event.error = error;
+      if (skipReasons && Object.keys(skipReasons).length > 0) event.skipReasons = skipReasons;
       writeEvent(event);
     };
 
@@ -163,7 +167,7 @@ export default async function handler(
         result.details[step.key as keyof typeof result.details] = importResult;
         totalProcessed += stepTotal;
 
-        sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords, importResult.error);
+        sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords, importResult.error, importResult.skipReasons);
       } catch (err) {
         console.error(`[import] 导入 ${step.key} 失败:`, err);
         totalProcessed += stepTotal;
@@ -236,24 +240,35 @@ async function importPlatforms(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有平台名称，用于去重
   const existingNames = await db.platforms.findMany({ select: { name: true } });
   const existingNameSet = new Set(existingNames.map((r) => r.name));
 
-  // 过滤无效和重复记录
+  // 逐条分析跳过原因
   const validPlatforms = platforms.filter((p) => {
     const name = p.name as string;
     const apiKey = p.apiKey as string;
-    if (!name || !apiKey || apiKey.includes("***")) return false;
-    if (existingNameSet.has(name)) return false;
+    if (!name || !apiKey) {
+      skipReasons["缺少必要字段 (name/apiKey)"] = (skipReasons["缺少必要字段 (name/apiKey)"] || 0) + 1;
+      return false;
+    }
+    if (apiKey.includes("***")) {
+      skipReasons["API Key 已脱敏"] = (skipReasons["API Key 已脱敏"] || 0) + 1;
+      return false;
+    }
+    if (existingNameSet.has(name)) {
+      skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
+      return false;
+    }
     return true;
   });
 
   skipped += platforms.length - validPlatforms.length;
 
   if (validPlatforms.length === 0) {
-    return { imported, skipped };
+    return { imported, skipped, skipReasons };
   }
 
   // 批量插入
@@ -285,11 +300,13 @@ async function importPlatforms(
     await db.$transaction(stmts);
     imported += validPlatforms.length;
   } catch (err) {
-    console.error("[import] 批量导入平台失败:", err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[import] 批量导入平台失败:", errMsg);
+    skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + validPlatforms.length;
     skipped += validPlatforms.length;
   }
 
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 /**
@@ -415,16 +432,27 @@ async function importApiKeys(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有 key 集合，用于去重
   const existingKeys = await db.apiKeys.findMany({ select: { key: true } });
   const existingKeySet = new Set(existingKeys.map((r) => r.key));
 
-  // 过滤无效和重复记录
+  // 逐条分析跳过原因
   const validKeys = apiKeysData.filter((k) => {
     const key = k.key as string;
-    if (!key || key.includes("***")) return false;
-    if (existingKeySet.has(key)) return false;
+    if (!key) {
+      skipReasons["缺少 key 字段"] = (skipReasons["缺少 key 字段"] || 0) + 1;
+      return false;
+    }
+    if (key.includes("***")) {
+      skipReasons["Key 已脱敏"] = (skipReasons["Key 已脱敏"] || 0) + 1;
+      return false;
+    }
+    if (existingKeySet.has(key)) {
+      skipReasons["Key 已存在"] = (skipReasons["Key 已存在"] || 0) + 1;
+      return false;
+    }
     return true;
   });
 
@@ -468,12 +496,14 @@ async function importApiKeys(
       await db.$transaction(stmts);
       imported += batch.length;
     } catch (err) {
-      console.error("[import] 批量导入 API Key 失败:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入 API Key 失败:", errMsg);
+      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
       skipped += batch.length;
     }
   }
 
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 /**
@@ -488,6 +518,7 @@ async function importConfigs(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有配置
   const existingConfigs = await db.configs.findMany({ select: { key: true } });
@@ -502,11 +533,13 @@ async function importConfigs(
     const value = c.value as string;
 
     if (!key || !value) {
+      skipReasons["缺少必要字段 (key/value)"] = (skipReasons["缺少必要字段 (key/value)"] || 0) + 1;
       skipped++;
       continue;
     }
 
     if (key === "admin_reset_password") {
+      skipReasons["敏感配置跳过"] = (skipReasons["敏感配置跳过"] || 0) + 1;
       skipped++;
       continue;
     }
@@ -552,12 +585,14 @@ async function importConfigs(
       await db.$transaction(stmts);
       imported += toUpdate.length;
     } catch (err) {
-      console.error("[import] 批量更新配置失败:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量更新配置失败:", errMsg);
+      skipReasons["数据库更新失败"] = (skipReasons["数据库更新失败"] || 0) + toUpdate.length;
       skipped += toUpdate.length;
     }
   }
 
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 // ==================== 导入审计日志 ====================
@@ -588,12 +623,20 @@ async function importAuditLogs(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有 adminId 集合，用于外键校验
   const existingAdminRows = await db.admins.findMany({ select: { id: true } });
   const validAdminIds = new Set(existingAdminRows.map((r) => r.id));
 
-  const validLogs = logs.filter((log) => log.action);
+  // 逐条分析跳过原因
+  const validLogs = logs.filter((log) => {
+    if (!log.action) {
+      skipReasons["缺少 action 字段"] = (skipReasons["缺少 action 字段"] || 0) + 1;
+      return false;
+    }
+    return true;
+  });
 
   const batchSize = 50;
   for (let i = 0; i < validLogs.length; i += batchSize) {
@@ -616,13 +659,15 @@ async function importAuditLogs(
       await db.$transaction(stmts);
       imported += batch.length;
     } catch (err) {
-      console.error("[import] 批量导入审计日志失败:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入审计日志失败:", errMsg);
+      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
       skipped += batch.length;
     }
   }
 
   skipped += logs.length - validLogs.length;
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 // ==================== 导入系统事件 ====================
@@ -638,8 +683,16 @@ async function importSystemEvents(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
-  const validEvents = events.filter((e) => e.message);
+  // 逐条分析跳过原因
+  const validEvents = events.filter((e) => {
+    if (!e.message) {
+      skipReasons["缺少 message 字段"] = (skipReasons["缺少 message 字段"] || 0) + 1;
+      return false;
+    }
+    return true;
+  });
 
   const batchSize = 50;
   for (let i = 0; i < validEvents.length; i += batchSize) {
@@ -660,13 +713,15 @@ async function importSystemEvents(
       await db.$transaction(stmts);
       imported += batch.length;
     } catch (err) {
-      console.error("[import] 批量导入系统事件失败:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入系统事件失败:", errMsg);
+      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
       skipped += batch.length;
     }
   }
 
   skipped += events.length - validEvents.length;
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 // ==================== 导入请求日志 ====================
@@ -684,10 +739,16 @@ async function importRequestLogs(
   let imported = 0;
   let skipped = 0;
   let firstError: string | null = null;
+  const skipReasons: Record<string, number> = {};
 
-  // 过滤无效记录
-  const validLogs = logs.filter((log) => log.model);
-  skipped += logs.length - validLogs.length;
+  // 逐条分析跳过原因
+  const validLogs = logs.filter((log) => {
+    if (!log.model) {
+      skipReasons["缺少 model 字段"] = (skipReasons["缺少 model 字段"] || 0) + 1;
+      return false;
+    }
+    return true;
+  });
 
   // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
   // 备份中的旧 ID 在目标库中可能不存在（导入 platforms/apiKeys 时生成了新 UUID），需置 null 避免外键约束失败
@@ -740,6 +801,7 @@ async function importRequestLogs(
     } catch (err: any) {
       firstError = err?.message || String(err);
       console.error("[import] 请求日志插入失败（首条）:", firstError);
+      skipReasons["数据库写入失败（首条探测）"] = 1;
       skipped++;
     }
   }
@@ -758,16 +820,24 @@ async function importRequestLogs(
         await db.$transaction(stmts);
         imported += batch.length;
       } catch (err) {
-        console.error("[import] 批量导入请求日志失败:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[import] 批量导入请求日志失败:", errMsg);
+        skipReasons["数据库批量写入失败"] = (skipReasons["数据库批量写入失败"] || 0) + batch.length;
         skipped += batch.length;
       }
     }
   } else if (imported === 0 && validLogs.length > 1) {
     // 首条失败，剩余全部跳过
-    skipped += validLogs.length - 1;
+    const remainCount = validLogs.length - 1;
+    if (firstError) {
+      skipReasons["首条探测失败，批量跳过"] = (skipReasons["首条探测失败，批量跳过"] || 0) + remainCount;
+    }
+    skipped += remainCount;
   }
 
-  const result: ImportResult & { error?: string } = { imported, skipped };
+  skipped += logs.length - validLogs.length;
+
+  const result: ImportResult & { error?: string } = { imported, skipped, skipReasons };
   if (firstError) result.error = firstError;
   return result;
 }
