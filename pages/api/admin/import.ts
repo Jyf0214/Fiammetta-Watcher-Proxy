@@ -238,6 +238,18 @@ export default async function handler(
 
 type DbClient = Awaited<ReturnType<typeof createDb>>;
 
+/** TiDB/MySQL VARCHAR(191) 最大长度（Prisma 对 MySQL String 默认生成 VARCHAR(191)） */
+const VARCHAR_MAX = 191;
+
+/** createMany 每条记录一个 HTTP 请求，受 Workers 子请求限制（默认128），用小批量 */
+const BATCH_SIZE = 10;
+
+/** 截断字符串到 TiDB VARCHAR(191) 限制，避免 Data too long 错误 */
+function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
+  const s = String(val ?? "");
+  return s.length > maxLen ? s.slice(0, maxLen) : s;
+}
+
 /**
  * 导入平台配置
  *
@@ -282,34 +294,37 @@ async function importPlatforms(
 
   // 批量插入
   const now = Math.floor(Date.now() / 1000);
-  const batchData = validPlatforms.map((p) => ({
-    id: generateId(),
-    name: p.name as string,
-    baseUrl: p.baseUrl as string,
-    apiKey: p.apiKey as string,
-    apiKeys: (p.apiKeys as string) || "[]",
-    type: (p.type as string) || "openai",
-    enabled: p.enabled !== false,
-    priority: (p.priority as number) ?? 0,
-    weight: (p.weight as number) ?? 1,
-    rpmLimit: (p.rpmLimit as number) ?? null,
-    tpmLimit: (p.tpmLimit as number) ?? null,
-    forwardHeaders: (p.forwardHeaders as string) || "[]",
-    status: "healthy",
-    failCount: 0,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  for (let i = 0; i < validPlatforms.length; i += BATCH_SIZE) {
+    const batch = validPlatforms.slice(i, i + BATCH_SIZE);
+    const batchData = batch.map((p) => ({
+      id: generateId(),
+      name: p.name as string,
+      baseUrl: p.baseUrl as string,
+      apiKey: p.apiKey as string,
+      apiKeys: truncateStr(p.apiKeys, VARCHAR_MAX),
+      type: (p.type as string) || "openai",
+      enabled: p.enabled !== false,
+      priority: (p.priority as number) ?? 0,
+      weight: (p.weight as number) ?? 1,
+      rpmLimit: (p.rpmLimit as number) ?? null,
+      tpmLimit: (p.tpmLimit as number) ?? null,
+      forwardHeaders: (p.forwardHeaders as string) || "[]",
+      status: "healthy",
+      failCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    }));
 
-  try {
-    const result = await db.platforms.createMany({ data: batchData });
-    imported += result.count;
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[import] 批量导入平台失败:", errMsg);
-    const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-    skipReasons[shortErr] = (skipReasons[shortErr] || 0) + validPlatforms.length;
-    skipped += validPlatforms.length;
+    try {
+      const result = await db.platforms.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入平台失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
+    }
   }
 
   return { imported, skipped, skipReasons };
@@ -462,9 +477,8 @@ async function importApiKeys(
 
   // 批量插入
   const now = Math.floor(Date.now() / 1000);
-  const batchSize = 50;
-  for (let i = 0; i < validKeys.length; i += batchSize) {
-    const batch = validKeys.slice(i, i + batchSize);
+  for (let i = 0; i < validKeys.length; i += BATCH_SIZE) {
+    const batch = validKeys.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((k) => ({
       id: generateId(),
       key: k.key as string,
@@ -629,16 +643,15 @@ async function importAuditLogs(
     }
   }
 
-  const batchSize = 50;
-  for (let i = 0; i < validLogs.length; i += batchSize) {
-    const batch = validLogs.slice(i, i + batchSize);
+  for (let i = 0; i < validLogs.length; i += BATCH_SIZE) {
+    const batch = validLogs.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((log) => {
       const rawAdminId = log.adminId as string | null | undefined;
       return {
         id: generateId(),
         adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
         action: log.action as string,
-        detail: (log.detail as string) || null,
+        detail: truncateStr(log.detail),
         ip: (log.ip as string) || null,
         createdAt: toUnixSeconds(log.createdAt),
       };
@@ -685,14 +698,13 @@ async function importSystemEvents(
     }
   }
 
-  const batchSize = 50;
-  for (let i = 0; i < validEvents.length; i += batchSize) {
-    const batch = validEvents.slice(i, i + batchSize);
+  for (let i = 0; i < validEvents.length; i += BATCH_SIZE) {
+    const batch = validEvents.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((e) => ({
       id: generateId(),
       level: (e.level as string) || "info",
-      message: e.message as string,
-      detail: (e.detail as string) || null,
+      message: truncateStr(e.message),
+      detail: truncateStr(e.detail),
       createdAt: toUnixSeconds(e.createdAt),
     }));
 
@@ -781,9 +793,8 @@ async function importRequestLogs(
     };
   };
 
-  const batchSize = 50;
-  for (let i = 0; i < validLogs.length; i += batchSize) {
-    const batch = validLogs.slice(i, i + batchSize);
+  for (let i = 0; i < validLogs.length; i += BATCH_SIZE) {
+    const batch = validLogs.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((log) => buildValues(log));
 
     try {
