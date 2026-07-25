@@ -199,10 +199,19 @@ export default async function handler(
       console.warn("[POST /api/admin/import] 审计日志写入失败（不影响导入）:", auditErr);
     }
 
-    // 汇总导入结果
+    // 汇总导入结果（含跳过原因）
     const summary = Object.entries(result.details)
       .filter(([, v]) => v)
-      .map(([k, v]) => `${k}: ${v!.imported} 导入, ${v!.skipped} 跳过`)
+      .map(([k, v]) => {
+        let text = `${k}: ${v!.imported} 导入, ${v!.skipped} 跳过`;
+        if (v!.skipReasons && Object.keys(v!.skipReasons).length > 0) {
+          const reasons = Object.entries(v!.skipReasons)
+            .map(([reason, count]) => `${reason}×${count}`)
+            .join(", ");
+          text += `(${reasons})`;
+        }
+        return text;
+      })
       .join(", ");
 
     result.message = summary ? `导入完成: ${summary}` : "没有需要导入的数据";
