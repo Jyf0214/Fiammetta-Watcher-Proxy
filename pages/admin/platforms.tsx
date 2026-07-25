@@ -51,6 +51,7 @@ function PlatformCard({
   onEdit,
   onDelete,
   onModels,
+  onRestore,
 }: {
   platform: Platform;
   togglingId: string | null;
@@ -58,6 +59,7 @@ function PlatformCard({
   onEdit: (p: Platform) => void;
   onDelete: (id: string) => void;
   onModels: (p: Platform) => void;
+  onRestore: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const statusColor = platform.status === "healthy" ? "green" : platform.status === "degraded" ? "orange" : "red";
@@ -98,6 +100,14 @@ function PlatformCard({
         <button onClick={() => onEdit(platform)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
           <Pencil size={13} /> 编辑
         </button>
+        {platform.status !== "healthy" && (
+          <>
+            <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
+            <button onClick={() => onRestore(platform.id)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-green-500 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors">
+              <RefreshCw size={13} /> 恢复
+            </button>
+          </>
+        )}
         <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
         <Popconfirm title={t("common.confirm_delete")} onConfirm={() => onDelete(platform.id)} okText={t("common.confirm")} cancelText={t("common.cancel")}>
           <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
@@ -614,6 +624,25 @@ export default function PlatformsPage() {
     finally { setTogglingId(null); }
   };
 
+  const handleRestore = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/platforms/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "healthy", failCount: 0, cooldownEnd: null, lastFailAt: null }),
+      });
+      const data = await res.json() as Record<string, any>;
+      if (data.success) {
+        message.success("平台状态已恢复");
+        handleRefresh();
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    }
+  };
+
   const openModelDrawer = (platform: Platform) => {
     setModelPlatform(platform); setModelDrawerOpen(true); fetchModels(platform.id);
   };
@@ -755,7 +784,7 @@ export default function PlatformsPage() {
         {/* 移动端卡片 */}
         <div className="block lg:hidden space-y-3">
           {platforms.map((p) => (
-            <PlatformCard key={p.id} platform={p} togglingId={togglingId} onToggle={handleToggle} onEdit={openEditForm} onDelete={handleDelete} onModels={openModelDrawer} />
+            <PlatformCard key={p.id} platform={p} togglingId={togglingId} onToggle={handleToggle} onEdit={openEditForm} onDelete={handleDelete} onModels={openModelDrawer} onRestore={handleRestore} />
           ))}
           {platforms.length === 0 && !loading && (
             <div className="text-center py-12 text-zinc-400">

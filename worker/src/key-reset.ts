@@ -169,6 +169,44 @@ export async function handleScheduledReset(db: D1Database): Promise<void> {
     if (resetCount > 0) {
       console.log(`[key-reset] 本轮重置了 ${resetCount} 个 API Key 的用量`);
     }
+
+    // ── 清理平台异常状态：cooldown 过期的平台恢复为 healthy ──
+    const now = Math.floor(Date.now() / 1000);
+    const abnormalPlatforms = await prisma.platforms.findMany({
+      where: {
+        status: { not: "healthy" },
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        cooldownEnd: true,
+      },
+    });
+
+    let restoredCount = 0;
+    for (const p of abnormalPlatforms) {
+      // cooldown 为空或已过期 → 恢复健康
+      if (!p.cooldownEnd || p.cooldownEnd <= now) {
+        await prisma.platforms.update({
+          where: { id: p.id },
+          data: {
+            status: "healthy",
+            failCount: 0,
+            cooldownEnd: null,
+            lastFailAt: null,
+          },
+        });
+        restoredCount++;
+        console.log(
+          `[key-reset] 平台 "${p.name}" (${p.id.slice(0, 8)}...) 状态恢复为 healthy`
+        );
+      }
+    }
+
+    if (restoredCount > 0) {
+      console.log(`[key-reset] 本轮恢复了 ${restoredCount} 个异常平台`);
+    }
   } catch (err) {
     console.error(
       "[key-reset] 重置异常:",

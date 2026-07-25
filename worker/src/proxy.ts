@@ -10,7 +10,7 @@
  */
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
-import { getNextKey, getRandomKeyExcept } from "./platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey } from "./platform-keys";
 import { recordSuccess, recordFailure } from "./load-balancer";
 import {
   checkPlatformRpm,
@@ -361,10 +361,12 @@ export async function proxyV1Request(
       );
     }
 
-    // ── 429 响应：尝试切换 ──
+    // ── 429 响应：封禁当前 Key 并尝试切换 ──
     if (attempt < MAX_429_RETRIES) {
+      // 封禁该 Key 5 分钟
+      banKey(currentKey);
       console.log(
-        `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: ${currentKey.slice(0, 8)}..., attempt: ${attempt + 1}/${MAX_429_RETRIES})，尝试切换`
+        `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: ${currentKey.slice(0, 8)}..., attempt: ${attempt + 1}/${MAX_429_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
       );
 
       // 策略 1：同平台换 Key

@@ -184,6 +184,16 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.tpmLimit !== undefined)
       updateData.tpmLimit = body.tpmLimit ?? null;
 
+    // 健康状态字段（用于手动恢复平台状态）
+    if (body.status !== undefined)
+      updateData.status = body.status;
+    if (body.failCount !== undefined)
+      updateData.failCount = body.failCount;
+    if (body.cooldownEnd !== undefined)
+      updateData.cooldownEnd = body.cooldownEnd;
+    if (body.lastFailAt !== undefined)
+      updateData.lastFailAt = body.lastFailAt;
+
     // forwardHeaders 校验并更新
     if (body.forwardHeaders !== undefined) {
       if (body.forwardHeaders === "" || body.forwardHeaders === null) {
