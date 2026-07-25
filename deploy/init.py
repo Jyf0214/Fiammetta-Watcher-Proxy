@@ -321,22 +321,16 @@ def remove_d1_binding_from_worker_toml():
 
 
 def run_pre(d1_id: str, kv_id: str):
-    # 非 D1 模式：不替换 placeholder（无 D1/KV 绑定在配置中）
-    if RESOLVED_DB_TYPE == "d1":
-        replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
-        replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
+    replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
+    replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
 
     print(f"\n🔧 数据库类型: {RESOLVED_DB_TYPE}")
 
     update_db_type_in_config(WRANGLER_TOML, "worker/wrangler.toml", RESOLVED_DB_TYPE)
     update_db_type_in_config(WRANGLER_JSONC, "wrangler.jsonc", RESOLVED_DB_TYPE)
 
-    # 非 D1 模式：从 worker/wrangler.toml 移除 D1/KV 绑定，避免 Workers 部署时带上无用的 D1 binding
-    if RESOLVED_DB_TYPE != "d1":
-        print(f"🔧 外部数据库模式（{RESOLVED_DB_TYPE}）：移除 Worker D1/KV 绑定")
-        remove_d1_binding_from_worker_toml()
-    else:
-        print(f"🔧 D1 模式：保留 Worker D1/KV 绑定")
+    # Worker 始终保留 D1 绑定（createDb 根据 DB_TYPE 选择适配器，env.DB 仅 D1 模式使用）
+    print(f"🔧 Worker D1/KV 绑定保留（DB_TYPE={RESOLVED_DB_TYPE}）")
 
 
 # ==================== 阶段二：部署后 ====================
@@ -432,19 +426,8 @@ def run_post(d1_id: str, kv_id: str):
         fail(f"Service Binding 失败: {data.get('errors', [{}])[0].get('message', '未知')}")
     print(f"  ✅ Service Binding 成功")
 
-    # 配置 Pages 环境变量（DB_TYPE 等，供 Pages Functions 运行时读取）
-    print(f"🔗 配置 Pages 环境变量")
-    pages_vars = {"DB_TYPE": resolved_type}
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "vars": pages_vars,
-            }
-        }
-    })
-    if not data.get("success"):
-        fail(f"Pages 环境变量配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ Pages 环境变量成功: {pages_vars}")
+    # Pages 环境变量（DB_TYPE）由 post-deploy 步骤在 wrangler pages deploy 之后设置
+    # 不能在此处设置：wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值
 
     # 设置 Pages Secrets
     pages_secrets = {
@@ -472,6 +455,28 @@ def run_post(d1_id: str, kv_id: str):
         ])
 
     print(f"\n🎉 Pages({PAGES_PROJECT}) + Secrets 配置完成")
+
+
+def run_post_deploy():
+    """部署后设置 Pages 环境变量（必须在 wrangler pages deploy 之后运行）"""
+    resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
+
+    print(f"\n{'='*50}")
+    print(f"📦 设置 Pages 环境变量（post-deploy）")
+    print(f"{'='*50}")
+
+    pages_vars = {"DB_TYPE": resolved_type}
+    print(f"🔗 设置 Pages vars: {pages_vars}")
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": {
+                "vars": pages_vars,
+            }
+        }
+    })
+    if not data.get("success"):
+        fail(f"Pages 环境变量配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+    print(f"  ✅ Pages 环境变量已设置: {pages_vars}")
 
 
 # ==================== 入口 ====================
@@ -542,11 +547,15 @@ def run_check():
 
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
-    if phase not in ("pre", "post", "check"):
-        fail(f"用法: python3 deploy/init.py [pre|post|check]")
+    if phase not in ("pre", "post", "post-deploy", "check"):
+        fail(f"用法: python3 deploy/init.py [pre|post|post-deploy|check]")
 
     if phase == "check":
         run_check()
+        return
+
+    if phase == "post-deploy":
+        run_post_deploy()
         return
 
     # check 阶段不需要 requests，延迟导入
@@ -565,17 +574,9 @@ def main():
     kv_id = os.environ.get("KV_ID", "")
 
     if phase == "pre":
-        # 非 D1 模式：跳过 D1 创建和建表 SQL
-        if resolved_type == "d1":
-            d1_id = init_d1()
-            kv_id = init_kv()
-        else:
-            print(f"\n{'='*50}")
-            print(f"📦 外部数据库模式（{resolved_type}），跳过 D1/KV 创建")
-            print(f"{'='*50}")
-            # 仍然需要 KV（用于登录限流 + 熔断缓存）
-            kv_id = init_kv()
-            output_github("D1_ID", "")
+        # 始终创建 D1（Worker 需要 D1 binding，createDb 根据 DB_TYPE 选择适配器）
+        d1_id = init_d1()
+        kv_id = init_kv()
         run_pre(d1_id, kv_id)
     elif phase == "post":
         # D1 模式需要 d1_id；外部数据库模式不需要

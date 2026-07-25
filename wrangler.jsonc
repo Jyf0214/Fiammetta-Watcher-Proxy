@@ -7,10 +7,8 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  "vars": {
-    "DB_TYPE": "d1"
-  },
-  // 部署前由 init_pages.py 替换 placeholder 为实际 ID
+  // vars 由 deploy/init.py post-deploy 通过 Cloudflare API 设置
+  // wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值，故此处不能放 vars
   "d1_databases": [
     {
       "binding": "DB",
