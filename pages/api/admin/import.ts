@@ -241,8 +241,8 @@ type DbClient = Awaited<ReturnType<typeof createDb>>;
 /** TiDB/MySQL VARCHAR(191) 最大长度（Prisma 对 MySQL String 默认生成 VARCHAR(191)） */
 const VARCHAR_MAX = 191;
 
-/** createMany 每条记录一个 HTTP 请求，受 Workers 子请求限制（默认128），用小批量 */
-const BATCH_SIZE = 10;
+/** createMany 单批只发 1 个 HTTP 请求，批次越大单次请求数据越多，设大避免多次 HTTP 往返 */
+const BATCH_SIZE = 5000;
 
 /** 截断字符串到 TiDB VARCHAR(191) 限制，避免 Data too long 错误 */
 function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
