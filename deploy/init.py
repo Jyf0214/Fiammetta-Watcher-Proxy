@@ -43,6 +43,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 INIT_SQL_PATH = os.environ.get("INIT_SQL_PATH", "init.sql")
 DB_TYPE = os.environ.get("DB_TYPE", "")
+RESOLVED_DB_TYPE = ""  # 保存 resolve_db_type() 的结果，供 run_post 使用（避免重新推断时丢失 DB_TYPE 环境变量）
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..")
@@ -288,15 +289,54 @@ def update_db_type_in_config(path: str, label: str, db_type: str):
         print(f"  ✅ {label} DB_TYPE 已是 \"{db_type}\"")
 
 
-def run_pre(d1_id: str, kv_id: str):
-    replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
-    replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
+def remove_d1_binding_from_worker_toml():
+    """从 worker/wrangler.toml 中移除 D1/KV 绑定配置（外部数据库模式）"""
+    if not os.path.exists(WRANGLER_TOML):
+        print(f"  ⚠️ worker/wrangler.toml 不存在，跳过")
+        return
+    with open(WRANGLER_TOML, "r") as f:
+        content = f.read()
 
-    # 根据 DATABASE_URL 自动更新 DB_TYPE
-    resolved_type = resolve_db_type()
-    print(f"\n🔧 推断数据库类型: {resolved_type}")
-    update_db_type_in_config(WRANGLER_TOML, "worker/wrangler.toml", resolved_type)
-    update_db_type_in_config(WRANGLER_JSONC, "wrangler.jsonc", resolved_type)
+    import re
+    # 移除 [[d1_databases]] ... [[kv_namespaces]] 之前的所有 D1 块
+    new_content = re.sub(
+        r'\[\[d1_databases\]\].*?(?=\n\[|\Z)',
+        '',
+        content,
+        flags=re.DOTALL,
+    )
+    # 移除 [[kv_namespaces]] ... [[triggers]] 之间的 KV 块（保留 triggers）
+    new_content = re.sub(
+        r'\[\[kv_namespaces\]\].*?(?=\n\[triggers\])',
+        '',
+        new_content,
+        flags=re.DOTALL,
+    )
+    if new_content != content:
+        with open(WRANGLER_TOML, "w") as f:
+            f.write(new_content)
+        print(f"  ✅ worker/wrangler.toml 已移除 D1/KV 绑定")
+    else:
+        print(f"  ✅ worker/wrangler.toml 无 D1/KV 绑定需要移除")
+
+
+def run_pre(d1_id: str, kv_id: str):
+    # 非 D1 模式：不替换 placeholder（无 D1/KV 绑定在配置中）
+    if RESOLVED_DB_TYPE == "d1":
+        replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
+        replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
+
+    print(f"\n🔧 数据库类型: {RESOLVED_DB_TYPE}")
+
+    update_db_type_in_config(WRANGLER_TOML, "worker/wrangler.toml", RESOLVED_DB_TYPE)
+    update_db_type_in_config(WRANGLER_JSONC, "wrangler.jsonc", RESOLVED_DB_TYPE)
+
+    # 非 D1 模式：从 worker/wrangler.toml 移除 D1/KV 绑定，避免 Workers 部署时带上无用的 D1 binding
+    if RESOLVED_DB_TYPE != "d1":
+        print(f"🔧 外部数据库模式（{RESOLVED_DB_TYPE}）：移除 Worker D1/KV 绑定")
+        remove_d1_binding_from_worker_toml()
+    else:
+        print(f"🔧 D1 模式：保留 Worker D1/KV 绑定")
 
 
 # ==================== 阶段二：部署后 ====================
@@ -331,19 +371,38 @@ def run_post(d1_id: str, kv_id: str):
             msg = data.get("errors", [{}])[0].get("message", "未知")
             fail(f"Pages 项目创建失败: {msg}")
 
-    # 配置 D1 绑定 + 兼容性标志
-    print(f"🔗 配置 D1 绑定")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "d1_databases": {"DB": {"id": d1_id}},
-                "compatibility_flags": ["nodejs_compat"],
+    # 使用 pre 阶段保存的 resolved_type（避免重新推断时丢失 DB_TYPE 环境变量）
+    resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
+    print(f"🔧 使用数据库类型: {resolved_type}")
+
+    if resolved_type == "d1":
+        # D1 模式：绑定 D1 + 兼容性标志
+        print(f"🔗 配置 D1 绑定")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "d1_databases": {"DB": {"id": d1_id}},
+                    "compatibility_flags": ["nodejs_compat"],
+                }
             }
-        }
-    })
-    if not data.get("success"):
-        fail(f"D1 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ D1 + 兼容性标志成功")
+        })
+        if not data.get("success"):
+            fail(f"D1 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+        print(f"  ✅ D1 + 兼容性标志成功")
+    else:
+        # 外部数据库模式：解绑 D1，避免 Pages 误连 D1
+        print(f"🔗 外部数据库模式（{resolved_type}）：解绑 D1")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "d1_databases": {},
+                    "compatibility_flags": ["nodejs_compat"],
+                }
+            }
+        })
+        if not data.get("success"):
+            fail(f"D1 解绑失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+        print(f"  ✅ D1 已解绑 + 兼容性标志成功")
 
     # 配置 KV 绑定
     print(f"🔗 配置 KV 绑定")
@@ -372,6 +431,20 @@ def run_post(d1_id: str, kv_id: str):
     if not data.get("success"):
         fail(f"Service Binding 失败: {data.get('errors', [{}])[0].get('message', '未知')}")
     print(f"  ✅ Service Binding 成功")
+
+    # 配置 Pages 环境变量（DB_TYPE 等，供 Pages Functions 运行时读取）
+    print(f"🔗 配置 Pages 环境变量")
+    pages_vars = {"DB_TYPE": resolved_type}
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": {
+                "vars": pages_vars,
+            }
+        }
+    })
+    if not data.get("success"):
+        fail(f"Pages 环境变量配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+    print(f"  ✅ Pages 环境变量成功: {pages_vars}")
 
     # 设置 Pages Secrets
     pages_secrets = {
@@ -485,16 +558,29 @@ def main():
     if not API_TOKEN:
         fail("未设置 CLOUDFLARE_API_TOKEN")
 
+    # 推断数据库类型（pre/post 都需要）
+    resolved_type = resolve_db_type()
+
     d1_id = os.environ.get("D1_ID", "")
     kv_id = os.environ.get("KV_ID", "")
 
     if phase == "pre":
-        d1_id = init_d1()
-        kv_id = init_kv()
+        # 非 D1 模式：跳过 D1 创建和建表 SQL
+        if resolved_type == "d1":
+            d1_id = init_d1()
+            kv_id = init_kv()
+        else:
+            print(f"\n{'='*50}")
+            print(f"📦 外部数据库模式（{resolved_type}），跳过 D1/KV 创建")
+            print(f"{'='*50}")
+            # 仍然需要 KV（用于登录限流 + 熔断缓存）
+            kv_id = init_kv()
+            output_github("D1_ID", "")
         run_pre(d1_id, kv_id)
     elif phase == "post":
-        if not d1_id:
-            fail("post 阶段需要 D1_ID 环境变量")
+        # D1 模式需要 d1_id；外部数据库模式不需要
+        if resolved_type == "d1" and not d1_id:
+            fail("D1 模式下 post 阶段需要 D1_ID 环境变量")
         if not kv_id:
             fail("post 阶段需要 KV_ID 环境变量")
         run_post(d1_id, kv_id)
