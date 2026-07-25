@@ -517,22 +517,19 @@ def run_check():
             print(f"  ❌ {name} Client 缺失: {dirpath}/client.ts")
             errors.append(f"Client 缺失: {dirpath}")
 
-    # 3. 检查 DB_TYPE 在 wrangler 配置中
-    for config_path, label in [
-        ("worker/wrangler.toml", "Worker"),
-        ("wrangler.jsonc", "Pages"),
-    ]:
-        full = os.path.join(PROJECT_ROOT, config_path)
-        if not os.path.exists(full):
-            print(f"  ⚠️ {label} 配置不存在: {config_path}")
-            continue
-        with open(full, "r") as f:
+    # 3. 检查 DB_TYPE 在 Worker wrangler 配置中
+    # Pages 的 DB_TYPE 通过 API 设置（post-deploy 步骤），不在 wrangler.jsonc 中
+    worker_toml = os.path.join(PROJECT_ROOT, "worker", "wrangler.toml")
+    if os.path.exists(worker_toml):
+        with open(worker_toml, "r") as f:
             content = f.read()
         if "DB_TYPE" in content:
-            print(f"  ✅ {label} 已配置 DB_TYPE: {config_path}")
+            print(f"  ✅ Worker 已配置 DB_TYPE: worker/wrangler.toml")
         else:
-            print(f"  ❌ {label} 缺少 DB_TYPE: {config_path}")
-            errors.append(f"DB_TYPE 缺失: {config_path}")
+            print(f"  ❌ Worker 缺少 DB_TYPE: worker/wrangler.toml")
+            errors.append(f"DB_TYPE 缺失: worker/wrangler.toml")
+    else:
+        print(f"  ⚠️ Worker 配置不存在: worker/wrangler.toml")
 
     # 汇总
     print(f"\n{'='*50}")
