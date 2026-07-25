@@ -242,7 +242,7 @@ type DbClient = Awaited<ReturnType<typeof createDb>>;
 const VARCHAR_MAX = 191;
 
 /** createMany 单批只发 1 个 HTTP 请求，设大减少 HTTP 往返，但避免单次请求体过大导致 Cloudflare 超时 */
-const BATCH_SIZE = 1000;
+const BATCH_SIZE = 200;
 
 /** 截断字符串到 TiDB VARCHAR(191) 限制，避免 Data too long 错误 */
 function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
