@@ -668,7 +668,6 @@ async function importAuditLogs(
     }
   }
 
-  console.log("[importAuditLogs] 总计:", logs.length, "有效:", validLogs.length, "skipReasons:", JSON.stringify(skipReasons));
   return { imported, skipped, skipReasons };
 }
 
@@ -724,7 +723,6 @@ async function importSystemEvents(
     }
   }
 
-  console.log("[importSystemEvents] 总计:", events.length, "有效:", validEvents.length, "skipReasons:", JSON.stringify(skipReasons));
   return { imported, skipped, skipReasons };
 }
 
@@ -841,7 +839,6 @@ async function importRequestLogs(
     skipped += remainCount;
   }
 
-  console.log("[importRequestLogs] 总计:", logs.length, "有效:", validLogs.length, "skipReasons:", JSON.stringify(skipReasons));
   const result: ImportResult & { error?: string } = { imported, skipped, skipReasons };
   if (firstError) result.error = firstError;
   return result;
