@@ -26,6 +26,9 @@ import {
   BarChart3,
   Zap,
   Download,
+  Database,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { message } from "antd";
 import GlobalLoading from "@/components/Loading";
@@ -294,6 +297,7 @@ export default function AdminLayout({
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<{ status: string; dbType: string } | null>(null);
 
   const isLoginPage = pathname === "/admin/login";
 
@@ -332,6 +336,25 @@ export default function AdminLayout({
     checkAuth();
     return () => controller.abort();
   }, [isLoginPage, router]);
+
+  // 获取服务状态
+  useEffect(() => {
+    if (isLoginPage) return;
+    const controller = new AbortController();
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch("/api/health", { signal: controller.signal });
+        if (res.ok) {
+          const data = await res.json();
+          setHealthStatus({ status: data.status, dbType: data.dbType || "D1" });
+        }
+      } catch {
+        // 忽略
+      }
+    };
+    fetchHealth();
+    return () => controller.abort();
+  }, [isLoginPage]);
 
   const handleLogout = async () => {
     if (logoutLoading) return;
@@ -413,6 +436,25 @@ export default function AdminLayout({
 
       {/* 用户信息 */}
       <SidebarUserMenu username={username} onLogout={handleLogout} logoutLoading={logoutLoading} t={t} />
+
+      {/* 服务状态 */}
+      {healthStatus && (
+        <div className="px-4 py-2">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-700/50">
+            <Database size={12} className="text-zinc-400 dark:text-zinc-500" />
+            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              {healthStatus.dbType}
+            </span>
+            <span className="ml-auto">
+              {healthStatus.status === "ok" ? (
+                <Wifi size={12} className="text-emerald-500" />
+              ) : (
+                <WifiOff size={12} className="text-red-400" />
+              )}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 菜单 */}
       <nav className="flex-1 overflow-y-auto px-3 py-6 space-y-7 custom-scrollbar">

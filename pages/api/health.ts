@@ -1,24 +1,38 @@
 /**
  * GET /api/health — 健康检查
  *
- * 验证 D1 数据库连接是否正常。
+ * 验证数据库连接是否正常，返回数据库类型和连接状态。
  * 连接正常返回 200，连接失败返回 503（不泄露错误详情）。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 
+/** 根据环境变量推断数据库类型 */
+function resolveDbType(): string {
+  const dbType = process.env.DB_TYPE || "";
+  if (dbType === "tidb" || dbType === "mysql") return "TiDB";
+  if (dbType === "pg") return "PostgreSQL";
+  if (dbType === "hyperdrive") return "PostgreSQL (Hyperdrive)";
+  if (dbType === "d1") return "D1";
+  if (!dbType) {
+    const url = process.env.DATABASE_URL || "";
+    if (url.startsWith("mysql")) return "TiDB";
+    if (url.startsWith("postgres")) return "PostgreSQL";
+  }
+  return "D1";
+}
+
 export default async function handler(
   _req: NextApiRequest,
   res: NextApiResponse
 ) {
+  const dbType = resolveDbType();
   try {
     const db = await createDb();
-    // 执行简单查询验证数据库连接
     await db.admins.findMany({ take: 1, select: { id: true } });
-    res.status(200).json({ status: "ok", database: "connected" });
+    res.status(200).json({ status: "ok", database: "connected", dbType });
   } catch {
-    // 数据库连接失败时返回降级状态，不记录详细错误避免信息泄露
-    res.status(503).json({ status: "degraded", database: "disconnected" });
+    res.status(503).json({ status: "degraded", database: "disconnected", dbType });
   }
 }
