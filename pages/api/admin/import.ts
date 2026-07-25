@@ -130,7 +130,7 @@ export default async function handler(
     const steps: Array<{
       key: string;
       data: unknown;
-      fn: (db: DbClient, data: Array<Record<string, unknown>>) => Promise<ImportResult & { error?: string }>;
+      fn: (db: DbClient, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
     }> = [
       { key: "platforms", data: body.platforms, fn: importPlatforms },
       { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
@@ -282,32 +282,28 @@ async function importPlatforms(
 
   // 批量插入
   const now = Math.floor(Date.now() / 1000);
-  const stmts = validPlatforms.map((p) =>
-    db.platforms.create({
-      data: {
-        id: generateId(),
-        name: p.name as string,
-        baseUrl: p.baseUrl as string,
-        apiKey: p.apiKey as string,
-        apiKeys: (p.apiKeys as string) || "[]",
-        type: (p.type as string) || "openai",
-        enabled: p.enabled !== false,
-        priority: (p.priority as number) ?? 0,
-        weight: (p.weight as number) ?? 1,
-        rpmLimit: (p.rpmLimit as number) ?? null,
-        tpmLimit: (p.tpmLimit as number) ?? null,
-        forwardHeaders: (p.forwardHeaders as string) || "[]",
-        status: "healthy",
-        failCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-  );
+  const batchData = validPlatforms.map((p) => ({
+    id: generateId(),
+    name: p.name as string,
+    baseUrl: p.baseUrl as string,
+    apiKey: p.apiKey as string,
+    apiKeys: (p.apiKeys as string) || "[]",
+    type: (p.type as string) || "openai",
+    enabled: p.enabled !== false,
+    priority: (p.priority as number) ?? 0,
+    weight: (p.weight as number) ?? 1,
+    rpmLimit: (p.rpmLimit as number) ?? null,
+    tpmLimit: (p.tpmLimit as number) ?? null,
+    forwardHeaders: (p.forwardHeaders as string) || "[]",
+    status: "healthy",
+    failCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  }));
 
   try {
-    await db.$transaction(stmts);
-    imported += validPlatforms.length;
+    const result = await db.platforms.createMany({ data: batchData });
+    imported += result.count;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[import] 批量导入平台失败:", errMsg);
@@ -322,7 +318,7 @@ async function importPlatforms(
 /**
  * 导入模型映射
  *
- * 按 alias 去重，使用 $transaction 批量执行
+ * 按 alias 去重，使用 createMany 批量执行
  */
 async function importModelMaps(
   db: DbClient,
@@ -349,22 +345,18 @@ async function importModelMaps(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const stmts = validMaps.map((m) =>
-    db.modelMappings.create({
-      data: {
-        id: generateId(),
-        alias: m.alias as string,
-        targetModel: (m.targetModel as string) || (m.alias as string),
-        platformId: (m.platformId as string) || undefined,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-  );
+  const batchData = validMaps.map((m) => ({
+    id: generateId(),
+    alias: m.alias as string,
+    targetModel: (m.targetModel as string) || (m.alias as string),
+    platformId: (m.platformId as string) || undefined,
+    createdAt: now,
+    updatedAt: now,
+  }));
 
   try {
-    await db.$transaction(stmts);
-    imported += validMaps.length;
+    const result = await db.modelMappings.createMany({ data: batchData });
+    imported += result.count;
   } catch (err) {
     console.error("[import] 批量导入模型映射失败:", err);
     skipped += validMaps.length;
@@ -376,7 +368,7 @@ async function importModelMaps(
 /**
  * 导入套餐模板
  *
- * 按名称去重，使用 $transaction 批量执行
+ * 按名称去重，使用 createMany 批量执行
  */
 async function importPlans(
   db: DbClient,
@@ -403,26 +395,22 @@ async function importPlans(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const stmts = validPlans.map((p) =>
-    db.plans.create({
-      data: {
-        id: generateId(),
-        name: p.name as string,
-        tokenQuota: (p.tokenQuota as number) ?? 0,
-        callLimit: (p.callLimit as number) ?? null,
-        rpmLimit: (p.rpmLimit as number) ?? null,
-        tpmLimit: (p.tpmLimit as number) ?? null,
-        resetPeriod: (p.resetPeriod as string) || "monthly",
-        enabled: true,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-  );
+  const batchData = validPlans.map((p) => ({
+    id: generateId(),
+    name: p.name as string,
+    tokenQuota: (p.tokenQuota as number) ?? 0,
+    callLimit: (p.callLimit as number) ?? null,
+    rpmLimit: (p.rpmLimit as number) ?? null,
+    tpmLimit: (p.tpmLimit as number) ?? null,
+    resetPeriod: (p.resetPeriod as string) || "monthly",
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  }));
 
   try {
-    await db.$transaction(stmts);
-    imported += validPlans.length;
+    const result = await db.plans.createMany({ data: batchData });
+    imported += result.count;
   } catch (err) {
     console.error("[import] 批量导入套餐失败:", err);
     skipped += validPlans.length;
@@ -434,7 +422,7 @@ async function importPlans(
 /**
  * 导入 API Keys
  *
- * 按 key 值去重，使用 $transaction 批量执行
+ * 按 key 值去重，使用 createMany 批量执行
  */
 async function importApiKeys(
   db: DbClient,
@@ -477,34 +465,30 @@ async function importApiKeys(
   const batchSize = 50;
   for (let i = 0; i < validKeys.length; i += batchSize) {
     const batch = validKeys.slice(i, i + batchSize);
-    const stmts = batch.map((k) =>
-      db.apiKeys.create({
-        data: {
-          id: generateId(),
-          key: k.key as string,
-          name: (k.name as string) || "导入的 Key",
-          planId: (k.planId as string) || null,
-          quota: k.quota ? Number(k.quota) : null,
-          usedTokens: Number(k.usedTokens) || 0,
-          rpmLimit: (k.rpmLimit as number) ?? null,
-          tpmLimit: (k.tpmLimit as number) ?? null,
-          callLimit: (k.callLimit as number) ?? null,
-          callUsed: 0,
-          tokenLimit: (k.tokenLimit as number) ?? null,
-          resetPeriod: (k.resetPeriod as string) || "monthly",
-          status: (k.status as string) || "active",
-          expiresAt: k.expiresAt
-            ? Math.floor(new Date(k.expiresAt as string).getTime() / 1000)
-            : null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      })
-    );
+    const batchData = batch.map((k) => ({
+      id: generateId(),
+      key: k.key as string,
+      name: (k.name as string) || "导入的 Key",
+      planId: (k.planId as string) || null,
+      quota: k.quota ? Number(k.quota) : null,
+      usedTokens: Number(k.usedTokens) || 0,
+      rpmLimit: (k.rpmLimit as number) ?? null,
+      tpmLimit: (k.tpmLimit as number) ?? null,
+      callLimit: (k.callLimit as number) ?? null,
+      callUsed: 0,
+      tokenLimit: (k.tokenLimit as number) ?? null,
+      resetPeriod: (k.resetPeriod as string) || "monthly",
+      status: (k.status as string) || "active",
+      expiresAt: k.expiresAt
+        ? Math.floor(new Date(k.expiresAt as string).getTime() / 1000)
+        : null,
+      createdAt: now,
+      updatedAt: now,
+    }));
 
     try {
-      await db.$transaction(stmts);
-      imported += batch.length;
+      const result = await db.apiKeys.createMany({ data: batchData });
+      imported += result.count;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入 API Key 失败:", errMsg);
@@ -521,7 +505,7 @@ async function importApiKeys(
  * 导入系统配置
  *
  * 按 key 做 upsert（已存在则更新 value，不存在则创建）
- * 跳过敏感配置（admin_reset_password），使用 $transaction 批量执行
+ * 跳过敏感配置（admin_reset_password），insert 用 createMany，update 逐条执行
  */
 async function importConfigs(
   db: DbClient,
@@ -565,42 +549,35 @@ async function importConfigs(
 
   // 批量插入新配置
   if (toInsert.length > 0) {
-    const stmts = toInsert.map((c) =>
-      db.configs.create({
-        data: {
-          id: generateId(),
-          key: c.key as string,
-          value: c.value as string,
-          updatedAt: c.updatedAt as number,
-        },
-      })
-    );
+    const batchData = toInsert.map((c) => ({
+      id: generateId(),
+      key: c.key as string,
+      value: c.value as string,
+      updatedAt: c.updatedAt as number,
+    }));
     try {
-      await db.$transaction(stmts);
-      imported += toInsert.length;
+      const result = await db.configs.createMany({ data: batchData });
+      imported += result.count;
     } catch (err) {
       console.error("[import] 批量插入配置失败:", err);
       skipped += toInsert.length;
     }
   }
 
-  // 批量更新已有配置
-  if (toUpdate.length > 0) {
-    const stmts = toUpdate.map((c) =>
-      db.configs.update({
+  // 逐条更新已有配置（update 不支持 createMany）
+  for (const c of toUpdate) {
+    try {
+      await db.configs.update({
         where: { key: c.key as string },
         data: { value: c.value as string, updatedAt: c.updatedAt as number },
-      })
-    );
-    try {
-      await db.$transaction(stmts);
-      imported += toUpdate.length;
+      });
+      imported++;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[import] 批量更新配置失败:", errMsg);
+      console.error("[import] 更新配置失败:", errMsg);
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + toUpdate.length;
-      skipped += toUpdate.length;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + 1;
+      skipped++;
     }
   }
 
@@ -626,7 +603,7 @@ function toUnixSeconds(value: unknown): number {
 /**
  * 导入审计日志
  *
- * 无外键依赖，使用 $transaction 批量执行
+ * 无外键依赖，使用 createMany 批量执行
  * adminId 不存在时置为 null（不阻塞导入）
  */
 async function importAuditLogs(
@@ -655,27 +632,24 @@ async function importAuditLogs(
   const batchSize = 50;
   for (let i = 0; i < validLogs.length; i += batchSize) {
     const batch = validLogs.slice(i, i + batchSize);
-    const stmts = batch.map((log) => {
+    const batchData = batch.map((log) => {
       const rawAdminId = log.adminId as string | null | undefined;
-      return db.auditLogs.create({
-        data: {
-          id: generateId(),
-          adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
-          action: log.action as string,
-          detail: (log.detail as string) || null,
-          ip: (log.ip as string) || null,
-          createdAt: toUnixSeconds(log.createdAt),
-        },
-      });
+      return {
+        id: generateId(),
+        adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
+        action: log.action as string,
+        detail: (log.detail as string) || null,
+        ip: (log.ip as string) || null,
+        createdAt: toUnixSeconds(log.createdAt),
+      };
     });
 
     try {
-      await db.$transaction(stmts);
-      imported += batch.length;
+      const result = await db.auditLogs.createMany({ data: batchData });
+      imported += result.count;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 审计日志批量写入失败:", errMsg);
-      // 截取错误信息前100字符作为跳过原因，避免过长
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
       skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
@@ -690,7 +664,7 @@ async function importAuditLogs(
 /**
  * 导入系统事件
  *
- * 无外键依赖，使用 $transaction 批量执行
+ * 无外键依赖，使用 createMany 批量执行
  */
 async function importSystemEvents(
   db: DbClient,
@@ -714,21 +688,17 @@ async function importSystemEvents(
   const batchSize = 50;
   for (let i = 0; i < validEvents.length; i += batchSize) {
     const batch = validEvents.slice(i, i + batchSize);
-    const stmts = batch.map((e) =>
-      db.systemEvents.create({
-        data: {
-          id: generateId(),
-          level: (e.level as string) || "info",
-          message: e.message as string,
-          detail: (e.detail as string) || null,
-          createdAt: toUnixSeconds(e.createdAt),
-        },
-      })
-    );
+    const batchData = batch.map((e) => ({
+      id: generateId(),
+      level: (e.level as string) || "info",
+      message: e.message as string,
+      detail: (e.detail as string) || null,
+      createdAt: toUnixSeconds(e.createdAt),
+    }));
 
     try {
-      await db.$transaction(stmts);
-      imported += batch.length;
+      const result = await db.systemEvents.createMany({ data: batchData });
+      imported += result.count;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 系统事件批量写入失败:", errMsg);
@@ -752,10 +722,9 @@ async function importSystemEvents(
 async function importRequestLogs(
   db: DbClient,
   logs: Array<Record<string, unknown>>
-): Promise<ImportResult & { error?: string }> {
+): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
-  let firstError: string | null = null;
   const skipReasons: Record<string, number> = {};
 
   // 分离有效和无效记录，逐条记录跳过原因
@@ -812,52 +781,22 @@ async function importRequestLogs(
     };
   };
 
-  // 先尝试插入第一条，捕获错误原因
-  if (validLogs.length > 0) {
+  const batchSize = 50;
+  for (let i = 0; i < validLogs.length; i += batchSize) {
+    const batch = validLogs.slice(i, i + batchSize);
+    const batchData = batch.map((log) => buildValues(log));
+
     try {
-      await db.requestLogs.create({ data: buildValues(validLogs[0]) });
-      imported++;
-    } catch (err: any) {
-      firstError = err?.message || String(err);
-      console.error("[import] 请求日志首条插入失败:", firstError);
-      const shortErr = firstError.length > 100 ? firstError.slice(0, 100) + "..." : firstError;
-      skipReasons[shortErr] = 1;
-      skipped++;
+      const result = await db.requestLogs.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 请求日志批量写入失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
     }
   }
 
-  // 如果首条成功，继续批量插入剩余的
-  if (imported > 0 && validLogs.length > 1) {
-    const remaining = validLogs.slice(1);
-    const batchSize = 50;
-    for (let i = 0; i < remaining.length; i += batchSize) {
-      const batch = remaining.slice(i, i + batchSize);
-      const stmts = batch.map((log) =>
-        db.requestLogs.create({ data: buildValues(log) })
-      );
-
-      try {
-        await db.$transaction(stmts);
-        imported += batch.length;
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error("[import] 请求日志批量写入失败:", errMsg);
-        const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-        skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
-        skipped += batch.length;
-      }
-    }
-  } else if (imported === 0 && validLogs.length > 1) {
-    // 首条失败，剩余全部跳过
-    const remainCount = validLogs.length - 1;
-    if (firstError) {
-      const shortErr = firstError.length > 100 ? firstError.slice(0, 100) + "..." : firstError;
-      skipReasons[`${shortErr}（剩余批量跳过）`] = (skipReasons[`${shortErr}（剩余批量跳过）`] || 0) + remainCount;
-    }
-    skipped += remainCount;
-  }
-
-  const result: ImportResult & { error?: string } = { imported, skipped, skipReasons };
-  if (firstError) result.error = firstError;
-  return result;
+  return { imported, skipped, skipReasons };
 }
