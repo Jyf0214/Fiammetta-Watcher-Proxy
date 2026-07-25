@@ -261,7 +261,7 @@ export default function DataManagerPage() {
                   details: ev.details,
                 });
                 if (ev.success) {
-                  message.success(ev.message);
+                  message.success(ev.message.replace(/\n/g, " | "));
                 }
               } else if (event.type === "error") {
                 const ev = event as ErrorEvent;
@@ -284,7 +284,7 @@ export default function DataManagerPage() {
                 message: ev.message,
                 details: ev.details,
               });
-              if (ev.success) message.success(ev.message);
+              if (ev.success) message.success(ev.message.replace(/\n/g, " | "));
             }
           } catch {
             // 忽略最后不完整的行
@@ -592,7 +592,7 @@ export default function DataManagerPage() {
                     )}
                     <span
                       className={cn(
-                        "text-sm font-medium",
+                        "text-sm font-medium whitespace-pre-line",
                         importResult.success
                           ? "text-emerald-700 dark:text-emerald-400"
                           : "text-red-700 dark:text-red-400"

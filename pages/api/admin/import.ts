@@ -212,9 +212,9 @@ export default async function handler(
         }
         return text;
       })
-      .join(", ");
+      .join("\n");
 
-    result.message = summary ? `导入完成: ${summary}` : "没有需要导入的数据";
+    result.message = summary ? `导入完成:\n${summary}` : "没有需要导入的数据";
 
     // 发送最终结果
     writeEvent({ type: "complete", ...result });
@@ -311,7 +311,8 @@ async function importPlatforms(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[import] 批量导入平台失败:", errMsg);
-    skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + validPlatforms.length;
+    const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+    skipReasons[shortErr] = (skipReasons[shortErr] || 0) + validPlatforms.length;
     skipped += validPlatforms.length;
   }
 
@@ -507,7 +508,8 @@ async function importApiKeys(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入 API Key 失败:", errMsg);
-      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
     }
   }
@@ -596,7 +598,8 @@ async function importConfigs(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量更新配置失败:", errMsg);
-      skipReasons["数据库更新失败"] = (skipReasons["数据库更新失败"] || 0) + toUpdate.length;
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + toUpdate.length;
       skipped += toUpdate.length;
     }
   }
@@ -672,7 +675,9 @@ async function importAuditLogs(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 审计日志批量写入失败:", errMsg);
-      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
+      // 截取错误信息前100字符作为跳过原因，避免过长
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
     }
   }
@@ -727,7 +732,8 @@ async function importSystemEvents(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 系统事件批量写入失败:", errMsg);
-      skipReasons["数据库写入失败"] = (skipReasons["数据库写入失败"] || 0) + batch.length;
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
     }
   }
@@ -814,7 +820,8 @@ async function importRequestLogs(
     } catch (err: any) {
       firstError = err?.message || String(err);
       console.error("[import] 请求日志首条插入失败:", firstError);
-      skipReasons["数据库写入失败（首条探测）"] = 1;
+      const shortErr = firstError.length > 100 ? firstError.slice(0, 100) + "..." : firstError;
+      skipReasons[shortErr] = 1;
       skipped++;
     }
   }
@@ -835,7 +842,8 @@ async function importRequestLogs(
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[import] 请求日志批量写入失败:", errMsg);
-        skipReasons["数据库批量写入失败"] = (skipReasons["数据库批量写入失败"] || 0) + batch.length;
+        const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+        skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
         skipped += batch.length;
       }
     }
@@ -843,7 +851,8 @@ async function importRequestLogs(
     // 首条失败，剩余全部跳过
     const remainCount = validLogs.length - 1;
     if (firstError) {
-      skipReasons["首条探测失败，批量跳过"] = (skipReasons["首条探测失败，批量跳过"] || 0) + remainCount;
+      const shortErr = firstError.length > 100 ? firstError.slice(0, 100) + "..." : firstError;
+      skipReasons[`${shortErr}（剩余批量跳过）`] = (skipReasons[`${shortErr}（剩余批量跳过）`] || 0) + remainCount;
     }
     skipped += remainCount;
   }
