@@ -9,15 +9,29 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 - **SSE 流式响应** — 完整支持主流 LLM 平台的流式响应格式
 - **管理后台** — 平台、密钥、模型映射、日志、审计的可视化管理
 - **定时任务** — Key 用量自动重置、平台模型自动发现、日志自动归档
+- **多数据库支持** — D1 / TiDB Cloud / PostgreSQL / Hyperdrive，运行时自动切换
 
 ## 架构
 
 ```
 用户请求 → Cloudflare Worker（代理 v1/* + Cron 任务）
          → Cloudflare Pages（管理后台 + API 路由）
-         → D1 数据库
+         → D1 / TiDB / PostgreSQL（通过 lib/prisma.ts 统一工厂）
          → KV 命名空间（登录限流 + 熔断状态）
 ```
+
+## 数据库支持
+
+通过 `DB_TYPE` 环境变量选择数据库，`lib/prisma.ts` 统一工厂自动切换适配器：
+
+| DB_TYPE | 数据库 | 适配器 | 协议 |
+|---------|--------|--------|------|
+| `d1`（默认） | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding |
+| `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP |
+| `pg` | PostgreSQL 直连 | `@prisma/adapter-pg` | TCP |
+| `hyperdrive` | PostgreSQL via Hyperdrive | `@prisma/adapter-pg` | TCP（连接池加速） |
+
+> **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。
 
 ## 部署
 
@@ -25,12 +39,13 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 
 推送到 `feat/cloudflare-workers` 分支自动触发部署。工作流步骤：
 
-1. **初始化资源（pre）** — `deploy/init.py pre` 创建 D1/KV + 替换配置占位符
-2. **安装依赖** — `npm install` + 生成 Prisma Client
-3. **构建** — `npm run build:cf`（OpenNext 构建 + 产物整理）
-4. **部署 Worker** — `wrangler deploy`（API 代理 + Cron）
-5. **初始化绑定和 Secrets（post）** — `deploy/init.py post` 创建 Pages + 绑定 + 设置所有 Secrets
-6. **部署 Pages** — `wrangler pages deploy .open-next`（管理后台）
+1. **初始化资源（pre）** — `deploy/init.py pre` 创建 D1/KV + 替换配置占位符 + 写入 DB_TYPE
+2. **安装依赖** — `npm install` + 生成三方言 Prisma Client
+3. **校验配置** — `deploy/init.py check` 验证 Schema 文件和生成产物
+4. **构建** — `npm run build:cf`（OpenNext 构建 + 产物整理）
+5. **部署 Worker** — `wrangler deploy`（API 代理 + Cron）
+6. **初始化绑定和 Secrets（post）** — `deploy/init.py post` 创建 Pages + 绑定 + 设置所有 Secrets
+7. **部署 Pages** — `wrangler pages deploy .open-next`（管理后台）
 
 需要在 GitHub 仓库 Settings → Secrets 中配置：
 
@@ -40,12 +55,15 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID |
 | `ADMIN_USERNAME` | 管理员用户名 |
 | `ADMIN_PASSWORD` | 管理员密码 |
+| `DB_TYPE` | 数据库类型（`d1` / `tidb` / `pg` / `hyperdrive`，默认 `d1`） |
+| `DATABASE_URL` | 外部数据库 URL（TiDB/PG 时必需，D1 无需设置） |
 
 ### 方式二：手动部署
 
 #### 前置条件
 
 - Node.js 22+
+- Python 3.12+
 - Cloudflare 账号 + API Token
 
 #### 步骤
@@ -57,19 +75,22 @@ npm install
 # 2. 登录 Wrangler（或设置 CLOUDFLARE_API_TOKEN 环境变量）
 npx wrangler login
 
-# 3. 初始化资源（创建 D1/KV + 替换配置占位符）
+# 3. 初始化资源（创建 D1/KV + 替换配置占位符 + 写入 DB_TYPE）
 python3 deploy/init.py pre
 
-# 4. 构建
+# 4. 校验 Prisma 多方言配置
+python3 deploy/init.py check
+
+# 5. 构建
 npm run build:cf
 
-# 5. 部署 Worker
+# 6. 部署 Worker
 cd worker && npx wrangler deploy && cd ..
 
-# 6. 初始化绑定和 Secrets（Pages 绑定 + 所有 Secrets）
+# 7. 初始化绑定和 Secrets（Pages 绑定 + 所有 Secrets）
 python3 deploy/init.py post
 
-# 7. 部署 Pages
+# 8. 部署 Pages
 npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main
 ```
 
@@ -80,7 +101,8 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 | `ADMIN_USERNAME` | 管理员用户名 |
 | `ADMIN_PASSWORD` | 管理员密码 |
 | `JWT_SECRET` | JWT 签名密钥（留空自动生成） |
-| `DATABASE_URL` | 外部数据库 URL（PostgreSQL/MySQL，D1 通过 binding 连接无需设置） |
+| `DB_TYPE` | 数据库类型：`d1`（默认）/ `tidb` / `pg` / `hyperdrive` |
+| `DATABASE_URL` | 外部数据库 URL（TiDB/PG 时必需，D1 通过 binding 连接无需设置） |
 
 ## 开发
 
@@ -96,7 +118,7 @@ npm run test         # 运行测试
 
 - **运行时**: Cloudflare Workers + Pages（OpenNext）
 - **框架**: Next.js 16 + React 19
-- **数据库**: Cloudflare D1（Prisma 7 ORM）
+- **数据库**: Cloudflare D1 / TiDB Cloud / PostgreSQL（Prisma 7 ORM + Driver Adapters）
 - **缓存**: Cloudflare KV
 - **UI**: Ant Design 6 + Tailwind CSS
 - **图表**: Recharts

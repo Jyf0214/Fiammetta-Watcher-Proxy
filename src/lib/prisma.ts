@@ -5,4 +5,5 @@
 // 此文件作为 @/* 路径别名的桥接层
 // ================================================================
 
-export { createDb, disconnectDb, type Database } from "../../lib/prisma";
+export { createDb, disconnectDb, type Database, type DbKind } from "../../lib/prisma";
+export type { Prisma } from "../../lib/prisma";

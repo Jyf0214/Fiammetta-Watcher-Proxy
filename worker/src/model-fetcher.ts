@@ -10,7 +10,8 @@
  * - 使用事务替换每个平台的模型列表
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 import { parseApiKeys, getNextKey } from "./platform-keys";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -117,8 +118,8 @@ function detectModelType(modelId: string): string {
 /**
  * 拉取所有平台的模型并更新数据库
  */
-export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
-  const prisma = await createPrismaClient(db);
+export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): Promise<void> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
   const platforms = await prisma.platforms.findMany({
@@ -137,8 +138,11 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
   let totalModels = 0;
   let successCount = 0;
 
+  type PlatformSelect = { id: string; name: string; baseUrl: string; apiKey: string; apiKeys: string };
+  type ExistingModel = { modelId: string; enabled: boolean; source: string };
+
   const results = await Promise.allSettled(
-    platforms.map(async (platform) => {
+    platforms.map(async (platform: PlatformSelect) => {
       const models = await fetchPlatformModels(platform);
       if (models === null) {
         console.warn(
@@ -151,12 +155,12 @@ export async function fetchAllPlatformModels(db: D1Database): Promise<void> {
       const now = Math.floor(Date.now() / 1000);
 
       // 查询已有模型，保留用户手动设置的 enabled 状态
-      const existingModels = await prisma.platformModels.findMany({
+      const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
         where: { platformId: platform.id },
         select: { modelId: true, enabled: true, source: true },
       });
       const existingMap = new Map(
-        existingModels.map((m) => [m.modelId, { enabled: m.enabled, source: m.source }])
+        existingModels.map((m: ExistingModel) => [m.modelId, { enabled: m.enabled, source: m.source } as const])
       );
 
       // 删除旧的自动发现模型（保留手动添加的）

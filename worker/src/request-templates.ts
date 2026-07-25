@@ -5,7 +5,8 @@
  * 缓存 30 秒，按模型 ID（支持通配符）匹配后深度合并到上游请求体。
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 
 // ==================== 类型 ====================
 
@@ -88,7 +89,8 @@ const CONFIG_KEY = "system:request_templates";
  * 从 D1 加载模板列表（带缓存）
  */
 export async function loadTemplates(
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<RequestTemplate[]> {
   const now = Date.now();
   if (templateCache !== null && now - lastRefresh < CACHE_TTL) {
@@ -96,7 +98,7 @@ export async function loadTemplates(
   }
 
   try {
-    const prisma = await createPrismaClient(db);
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
     try {
       const row = await prisma.configs.findFirst({
         where: { key: CONFIG_KEY },

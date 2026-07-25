@@ -15,7 +15,8 @@
  * 2. checkAndResetApiKey — 请求处理时调用（检查单个 Key）
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 
 /**
  * 判断指定 API Key 是否需要在当前周期重置
@@ -59,9 +60,10 @@ export function getPeriodStart(resetPeriod: string): number {
  */
 export async function checkAndResetApiKey(
   db: D1Database,
-  apiKeyId: string
+  apiKeyId: string,
+  env?: WorkerEnv
 ): Promise<boolean> {
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const apiKey = await prisma.apiKeys.findFirst({
       where: { id: apiKeyId },
@@ -118,8 +120,8 @@ export async function checkAndResetApiKey(
 /**
  * 执行一轮批量重置检查（Cron 调用）
  */
-export async function handleScheduledReset(db: D1Database): Promise<void> {
-  const prisma = await createPrismaClient(db);
+export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Promise<void> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const keysToCheck = await prisma.apiKeys.findMany({
       where: {

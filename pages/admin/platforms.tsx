@@ -16,7 +16,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { Plus, Pencil, Trash2, Database, RefreshCw, Cloud, Copy, Cpu, MessageSquare, Image, Mic, Box, Layers, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Database, RefreshCw, Cloud, Copy, Cpu, MessageSquare, Image, Mic, Box, Layers, Search, ShieldCheck, ShieldOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
@@ -41,6 +41,7 @@ interface Platform {
 interface NamedApiKey {
   name: string;
   key: string;
+  whitelisted?: boolean;
 }
 
 /** 移动端平台卡片 */
@@ -357,6 +358,7 @@ function PlatformForm({
   onUpdateKeyName,
   onUpdateKeyValue,
   onCopyKey,
+  onToggleWhitelist,
   onSubmit,
   submitting,
   onClose,
@@ -369,6 +371,7 @@ function PlatformForm({
   onUpdateKeyName: (i: number, v: string) => void;
   onUpdateKeyValue: (i: number, v: string) => void;
   onCopyKey: (k: string) => void;
+  onToggleWhitelist: (i: number) => void;
   onSubmit: () => void;
   submitting: boolean;
   onClose: () => void;
@@ -411,6 +414,19 @@ function PlatformForm({
                   className="!flex-1 !min-w-0 font-mono text-xs"
                   size="small"
                 />
+                <button
+                  type="button"
+                  onClick={() => onToggleWhitelist(index)}
+                  disabled={!namedKey.key}
+                  className={`shrink-0 p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                    namedKey.whitelisted
+                      ? "text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                      : "text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                  }`}
+                  title={namedKey.whitelisted ? "白名单（点击移除）" : "加入白名单（429 时不封禁）"}
+                >
+                  {namedKey.whitelisted ? <ShieldCheck size={13} /> : <ShieldOff size={13} />}
+                </button>
                 <button
                   type="button"
                   onClick={() => onCopyKey(namedKey.key)}
@@ -510,6 +526,15 @@ export default function PlatformsPage() {
 
   const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
+  // 切换 Key 白名单状态（本地状态，保存时一起提交）
+  const handleToggleWhitelist = useCallback((index: number) => {
+    setNamedKeys((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], whitelisted: !next[index].whitelisted };
+      return next;
+    });
+  }, []);
+
   const openCreateForm = () => {
     setEditing(null);
     form.resetFields();
@@ -521,22 +546,36 @@ export default function PlatformsPage() {
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
     const parsed: NamedApiKey[] = [];
-    if (platform.apiKey && platform.apiKey.trim()) parsed.push({ name: "主密钥", key: platform.apiKey });
+    // 优先从 apiKeys 读取（统一格式，含 whitelisted 标记）
     if (platform.apiKeys) {
       try {
         const arr = JSON.parse(platform.apiKeys);
-        if (Array.isArray(arr)) {
-          if (arr.length > 0 && typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
-            arr.forEach((item: NamedApiKey) => {
-              if (item && typeof item.key === "string" && item.key.trim()) parsed.push({ name: item.name || `密钥${parsed.length + 1}`, key: item.key });
+        if (Array.isArray(arr) && arr.length > 0) {
+          // 对象数组格式 [{name, key, whitelisted?}]
+          if (typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
+            arr.forEach((item: { name?: string; key: string; whitelisted?: boolean }) => {
+              if (item && typeof item.key === "string" && item.key.trim()) {
+                parsed.push({
+                  name: item.name || `密钥${parsed.length + 1}`,
+                  key: item.key,
+                  whitelisted: !!item.whitelisted,
+                });
+              }
             });
           } else {
+            // 旧格式：字符串数组
             arr.forEach((key: string, idx: number) => {
-              if (typeof key === "string" && key.trim()) parsed.push({ name: `密钥${idx + 1}`, key });
+              if (typeof key === "string" && key.trim()) {
+                parsed.push({ name: `密钥${idx + 1}`, key });
+              }
             });
           }
         }
       } catch { /* ignore */ }
+    }
+    // 兼容：如果 apiKeys 为空但 apiKey 存在（旧数据）
+    if (parsed.length === 0 && platform.apiKey && platform.apiKey.trim()) {
+      parsed.push({ name: "主密钥", key: platform.apiKey });
     }
     if (parsed.length === 0) parsed.push({ name: "密钥1", key: "" });
     setNamedKeys(parsed);
@@ -582,7 +621,12 @@ export default function PlatformsPage() {
       const validKeys = namedKeys.filter((k) => k.key && k.key.trim());
       if (validKeys.length > 0) {
         values.apiKey = validKeys[0].key;
-        values.apiKeys = validKeys.length > 1 ? JSON.stringify(validKeys.slice(1)) : "[]";
+        // 所有密钥（含主密钥）统一存入 apiKeys，保留 whitelisted 标记
+        values.apiKeys = JSON.stringify(validKeys.map((k) => ({
+          name: k.name,
+          key: k.key,
+          ...(k.whitelisted ? { whitelisted: true } : {}),
+        })));
       }
       // forwardHeaders: 按行分割为数组
       if (typeof values.forwardHeaders === "string") {
@@ -823,6 +867,7 @@ export default function PlatformsPage() {
             onUpdateKeyName={updateKeyName}
             onUpdateKeyValue={updateKeyValue}
             onCopyKey={copyKeyValue}
+            onToggleWhitelist={handleToggleWhitelist}
             onSubmit={handleSubmit}
             submitting={submitting}
             onClose={closeForm}

@@ -6,6 +6,12 @@ compatibility_flags = ["nodejs_compat"]
 [placement]
 mode = "smart"
 
+# 环境变量（通过 Cloudflare Dashboard 或 wrangler secret 设置）
+[vars]
+DB_TYPE = "d1"
+# TIDB_URL = ""      # TiDB Cloud 连接串（DB_TYPE=tidb 时设置）
+# PG_URL = ""        # PostgreSQL 直连串（DB_TYPE=pg 时设置）
+
 # D1 数据库绑定（Worker 和 Pages 共享同一个 D1）
 [[d1_databases]]
 binding = "DB"

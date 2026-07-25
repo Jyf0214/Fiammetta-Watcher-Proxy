@@ -8,7 +8,8 @@
  * - 权重轮询选择平台
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 import type { PlatformConfig, CircuitBreakerState } from "@/lib/types";
 
 // ==================== 熔断器状态机 ====================
@@ -185,8 +186,8 @@ async function updatePlatformStatus(
 /**
  * 启动时从数据库同步熔断器状态
  */
-export async function syncCircuitBreakersFromDatabase(db: D1Database): Promise<void> {
-  const prisma = await createPrismaClient(db);
+export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: WorkerEnv): Promise<void> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const platforms = await prisma.platforms.findMany({
       select: {

@@ -28,7 +28,6 @@ import sys
 import json
 import secrets
 import subprocess
-import requests
 
 # ==================== 配置 ====================
 
@@ -43,6 +42,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 INIT_SQL_PATH = os.environ.get("INIT_SQL_PATH", "init.sql")
+DB_TYPE = os.environ.get("DB_TYPE", "")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..")
@@ -241,9 +241,62 @@ def init_kv() -> str:
     return kv_id
 
 
+def resolve_db_type() -> str:
+    """根据 DB_TYPE 环境变量或 DATABASE_URL 推断数据库类型"""
+    if DB_TYPE:
+        return DB_TYPE
+    if DATABASE_URL:
+        if DATABASE_URL.startswith("mysql://") or DATABASE_URL.startswith("mysqls://"):
+            return "tidb"
+        if DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgres://"):
+            return "pg"
+    return "d1"
+
+
+def update_db_type_in_config(path: str, label: str, db_type: str):
+    """更新 wrangler 配置中的 DB_TYPE 值"""
+    if not os.path.exists(path):
+        print(f"  ⚠️ {label} 不存在，跳过")
+        return
+    with open(path, "r") as f:
+        content = f.read()
+
+    if path.endswith(".toml"):
+        # TOML 格式：DB_TYPE = "d1"
+        import re
+        new_content = re.sub(
+            r'(DB_TYPE\s*=\s*)"[^"]*"',
+            f'\\1"{db_type}"',
+            content,
+        )
+    elif path.endswith(".jsonc") or path.endswith(".json"):
+        # JSONC 格式："DB_TYPE": "d1"
+        import re
+        new_content = re.sub(
+            r'("DB_TYPE"\s*:\s*)"[^"]*"',
+            f'\\1"{db_type}"',
+            content,
+        )
+    else:
+        return
+
+    if new_content != content:
+        with open(path, "w") as f:
+            f.write(new_content)
+        print(f"  ✅ {label} DB_TYPE 已更新为 \"{db_type}\"")
+    else:
+        print(f"  ✅ {label} DB_TYPE 已是 \"{db_type}\"")
+
+
 def run_pre(d1_id: str, kv_id: str):
     replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
     replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
+
+    # 根据 DATABASE_URL 自动更新 DB_TYPE
+    resolved_type = resolve_db_type()
+    print(f"\n🔧 推断数据库类型: {resolved_type}")
+    update_db_type_in_config(WRANGLER_TOML, "worker/wrangler.toml", resolved_type)
+    update_db_type_in_config(WRANGLER_JSONC, "wrangler.jsonc", resolved_type)
 
 
 # ==================== 阶段二：部署后 ====================
@@ -350,15 +403,87 @@ def run_post(d1_id: str, kv_id: str):
 
 # ==================== 入口 ====================
 
+def run_check():
+    """部署前检查：Schema 文件 + 生成产物 + 环境变量配置"""
+    print(f"\n{'='*50}")
+    print(f"🔍 检查 Prisma 多方言配置")
+    print(f"{'='*50}")
+
+    errors = []
+
+    # 1. 检查三个方言 Schema 文件
+    schemas = [
+        ("D1", "prisma/schema.d1.prisma"),
+        ("MySQL", "prisma/schema.mysql.prisma"),
+        ("PostgreSQL", "prisma/schema.pg.prisma"),
+    ]
+    for name, path in schemas:
+        full = os.path.join(PROJECT_ROOT, path)
+        if os.path.exists(full):
+            print(f"  ✅ {name} Schema: {path}")
+        else:
+            print(f"  ❌ {name} Schema 缺失: {path}")
+            errors.append(f"Schema 缺失: {path}")
+
+    # 2. 检查生成的 Client 目录
+    generated_dirs = [
+        ("D1", "src/generated/d1"),
+        ("MySQL", "src/generated/mysql"),
+        ("PostgreSQL", "src/generated/pg"),
+    ]
+    for name, dirpath in generated_dirs:
+        client_file = os.path.join(PROJECT_ROOT, dirpath, "client.ts")
+        if os.path.exists(client_file):
+            print(f"  ✅ {name} Client: {dirpath}/client.ts")
+        else:
+            print(f"  ❌ {name} Client 缺失: {dirpath}/client.ts")
+            errors.append(f"Client 缺失: {dirpath}")
+
+    # 3. 检查 DB_TYPE 在 wrangler 配置中
+    for config_path, label in [
+        ("worker/wrangler.toml", "Worker"),
+        ("wrangler.jsonc", "Pages"),
+    ]:
+        full = os.path.join(PROJECT_ROOT, config_path)
+        if not os.path.exists(full):
+            print(f"  ⚠️ {label} 配置不存在: {config_path}")
+            continue
+        with open(full, "r") as f:
+            content = f.read()
+        if "DB_TYPE" in content:
+            print(f"  ✅ {label} 已配置 DB_TYPE: {config_path}")
+        else:
+            print(f"  ❌ {label} 缺少 DB_TYPE: {config_path}")
+            errors.append(f"DB_TYPE 缺失: {config_path}")
+
+    # 汇总
+    print(f"\n{'='*50}")
+    if errors:
+        print(f"❌ 检查失败：{len(errors)} 项问题")
+        for e in errors:
+            print(f"  - {e}")
+        sys.exit(1)
+    else:
+        print(f"✅ 全部检查通过")
+
+
 def main():
+    phase = sys.argv[1] if len(sys.argv) > 1 else ""
+    if phase not in ("pre", "post", "check"):
+        fail(f"用法: python3 deploy/init.py [pre|post|check]")
+
+    if phase == "check":
+        run_check()
+        return
+
+    # check 阶段不需要 requests，延迟导入
+    import requests as _requests  # noqa: F811
+    globals()["requests"] = _requests
+
     if not ACCOUNT_ID:
         fail("未设置 CLOUDFLARE_ACCOUNT_ID")
     if not API_TOKEN:
         fail("未设置 CLOUDFLARE_API_TOKEN")
-
-    phase = sys.argv[1] if len(sys.argv) > 1 else ""
-    if phase not in ("pre", "post"):
-        fail(f"用法: python3 deploy/init.py [pre|post]")
 
     d1_id = os.environ.get("D1_ID", "")
     kv_id = os.environ.get("KV_ID", "")

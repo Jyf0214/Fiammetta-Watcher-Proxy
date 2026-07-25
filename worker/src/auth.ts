@@ -6,7 +6,8 @@
  * 同时处理 Key 用量重置周期检查。
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 import {
   checkAndResetApiKey,
   getPeriodStart,
@@ -43,7 +44,8 @@ export interface ApiKeyRecord {
  */
 export async function validateApiKey(
   authorizationHeader: string | null,
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<{ apiKey: ApiKeyRecord } | { error: Response }> {
   const apiKeyStr = authorizationHeader?.replace("Bearer ", "");
 
@@ -56,7 +58,7 @@ export async function validateApiKey(
     };
   }
 
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
   // 查询 API Key（D1 无 plans 表，所有限额字段在 api_keys 中）
@@ -100,7 +102,7 @@ export async function validateApiKey(
   }
 
   // 检查是否需要重置用量（调用 key-reset.ts 的统一实现）
-  await checkAndResetApiKey(db, apiKey.id);
+  await checkAndResetApiKey(db, apiKey.id, env);
 
   // 检查调用次数限制（D1 无 plans 表，直接使用 Key 级别 callLimit）
   const effectiveCallLimit = apiKey.callLimit ?? null;

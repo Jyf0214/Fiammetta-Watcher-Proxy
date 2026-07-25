@@ -1,145 +1,225 @@
 // ================================================================
-// Prisma 7 — PrismaClient 工厂（Pages Router 通用）
+// Prisma 7 — 统一数据库工厂（Pages + Worker 共用）
 //
-// 支持多种数据库后端（通过 DATABASE_URL 自动选择）：
-//   - Cloudflare D1（无 DATABASE_URL，通过 CF Context 获取 binding）
-//   - MySQL（DATABASE_URL=mysql://...）
-//   - PostgreSQL（DATABASE_URL=postgresql://...）
+// 本文件是整个项目中唯一知道 generated client 的文件。
+// 所有业务代码只从此处导入 createDb / disconnectDb / 类型。
+//
+// 支持三种数据库方言（通过 DB_TYPE 环境变量选择）：
+//   - d1：Cloudflare D1（SQLite 方言）
+//   - tidb：TiDB Cloud（MySQL 方言）
+//   - pg / hyperdrive：PostgreSQL（直连或 Hyperdrive 加速）
+//
+// 运行环境自动检测：
+//   - Pages：通过 @opennextjs/cloudflare 获取 D1 binding
+//   - Worker：通过 env 参数传入 binding
 //
 // 使用方式：
 //   import { createDb } from "@/lib/prisma";
-//   const prisma = await createDb();
-//   const rows = await prisma.platforms.findMany();
-//
-// 注意：
-//   - Prisma 7 的 provider 是编译时常量，切换数据库后需 prisma generate
-//   - runtime="cloudflare" 模式下必须通过 adapter 连接数据库
-//   - 模块级缓存确保同一进程内复用 PrismaClient 实例
-//   - Pages Router 不需要每次请求 $disconnect()
+//   const prisma = await createDb();          // Pages（自动检测）
+//   const prisma = await createDb(env);       // Worker（显式传入）
 // ================================================================
 
-import { PrismaClient } from "@/generated/client";
-
-/** 全局 PrismaClient 实例（开发热更新时避免重复创建） */
-const globalForPrisma = globalThis as unknown as { __prisma?: PrismaClient };
-
 /** 数据库类型 */
-type DbKind = "d1" | "mysql" | "postgresql";
+export type DbKind = "d1" | "tidb" | "pg" | "hyperdrive";
+
+/** 全局 PrismaClient 实例缓存（Worker 生命周期内复用） */
+let cachedPrisma: any = null;
+let cachedDbKind: DbKind | null = null;
+
+// ==================== 环境检测 ====================
 
 /**
- * 根据 DATABASE_URL 推断数据库类型
- * 无 URL 时默认为 D1（Cloudflare Pages 环境）
+ * 根据 DB_TYPE 环境变量推断数据库类型
+ * 无 DB_TYPE 时根据 DATABASE_URL 推断，默认 d1
  */
-function resolveDbKind(): DbKind {
-  const url = process.env.DATABASE_URL;
-  if (!url) return "d1";
-  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "mysql";
-  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "postgresql";
+function resolveDbKind(env?: Record<string, unknown>): DbKind {
+  // 优先读 DB_TYPE
+  const dbType = (env?.DB_TYPE as string) || process.env.DB_TYPE;
+  if (dbType === "tidb" || dbType === "mysql") return "tidb";
+  if (dbType === "pg") return "pg";
+  if (dbType === "hyperdrive") return "hyperdrive";
+  if (dbType === "d1") return "d1";
+
+  // 回退到 DATABASE_URL 推断（Pages 环境中 DATABASE_URL 在 env 对象中而非 process.env）
+  const url = (env?.DATABASE_URL as string) || process.env.DATABASE_URL || "";
+  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
   return "d1";
 }
 
 /**
- * 根据数据库类型动态加载对应的 Prisma 适配器
+ * 检测当前运行环境：Pages 还是 Worker
  */
-async function loadAdapter(
-  kind: DbKind,
-  d1Binding?: unknown,
-): Promise<{ adapter: unknown } | null> {
-  switch (kind) {
-    case "d1": {
-      if (!d1Binding) {
-        throw new Error("D1 数据库未配置：未获取到 D1 binding");
-      }
-      const { PrismaD1 } = await import("@prisma/adapter-d1");
-      return { adapter: new PrismaD1(d1Binding as any) };
-    }
-    case "mysql": {
-      const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
-      const url = process.env.DATABASE_URL;
-      if (!url) throw new Error("DATABASE_URL 未配置");
-      return { adapter: new PrismaMariaDb(url) };
-    }
-    case "postgresql": {
-      // PostgreSQL 需要 @prisma/adapter-pg
-      try {
-        const pgAdapter = await import("@prisma/adapter-pg");
-        const url = process.env.DATABASE_URL;
-        if (!url) throw new Error("DATABASE_URL 未配置");
-        return { adapter: new pgAdapter.PrismaPg({ connectionString: url }) };
-      } catch (err: unknown) {
-        if (err instanceof Error && "code" in err && (err as { code: string }).code === "ERR_MODULE_NOT_FOUND") {
-          throw new Error(
-            "PostgreSQL 支持需安装 @prisma/adapter-pg：npm install @prisma/adapter-pg",
-            { cause: err },
-          );
-        }
-        throw err;
-      }
-    }
-  }
-}
-
-/**
- * 获取 PrismaClient 单例
- *
- * 自动根据 DATABASE_URL 选择数据库适配器：
- * - 无 URL → Cloudflare D1（从 CF Context 获取 binding）
- * - mysql:// → MySQL（Prisma 7 内建支持）
- * - postgresql:// → PostgreSQL（需 @prisma/adapter-pg）
- */
-export async function createDb(): Promise<PrismaClient> {
-  if (globalForPrisma.__prisma) {
-    return globalForPrisma.__prisma;
-  }
-
-  // 优先检测 D1 binding —— Cloudflare Pages 始终通过 binding 连接，
-  // 不管 DATABASE_URL 是什么，有 D1 binding 就用 D1。
-  let d1Binding: unknown = null;
+async function detectEnvironment(): Promise<{ kind: "pages" | "worker"; d1Binding?: unknown; pagesEnv?: Record<string, unknown> }> {
+  // 尝试 Pages 环境（@opennextjs/cloudflare）
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const ctx = await getCloudflareContext({ async: true });
     const env = ctx.env as Record<string, unknown>;
-    d1Binding = env.DB;
+    if (env.DB) {
+      return { kind: "pages", d1Binding: env.DB, pagesEnv: env };
+    }
   } catch {
-    // 非 Cloudflare 环境，继续尝试其他方式
+    // 非 Pages 环境
   }
 
-  if (!d1Binding) {
-    try {
+  // 尝试 Worker 全局 env
+  try {
+    // @ts-expect-error Cloudflare Workers 全局 env
+    if (globalThis.__DB__) {
       // @ts-expect-error Cloudflare Workers 全局 env
-      d1Binding = globalThis.__DB__;
+      return { kind: "worker", d1Binding: globalThis.__DB__ };
+    }
+  } catch {
+    // 忽略
+  }
+
+  return { kind: "worker" };
+}
+
+// ==================== 动态 Client 加载 ====================
+
+/**
+ * 根据数据库类型动态加载对应的 PrismaClient 和 Adapter
+ *
+ * 这是整个项目中唯一直接 import generated client 的地方。
+ * 三份 Schema 的表结构完全一致，导出的 PrismaClient API 也完全一致。
+ */
+async function createPrismaInstance(
+  dbKind: DbKind,
+  env?: Record<string, unknown>,
+): Promise<any> {
+  switch (dbKind) {
+    // ── D1（SQLite 方言）──
+    case "d1": {
+      const { PrismaClient } = await import("../src/generated/d1/client");
+      const { PrismaD1 } = await import("@prisma/adapter-d1");
+
+      let d1Binding: unknown = env?.DB;
+
+      if (!d1Binding) {
+        const detected = await detectEnvironment();
+        d1Binding = detected.d1Binding;
+      }
+
+      if (!d1Binding) {
+        throw new Error("D1 数据库未配置：未获取到 D1 binding");
+      }
+
+      const adapter = new PrismaD1(d1Binding as any);
+      return new PrismaClient({ adapter });
+    }
+
+    // ── TiDB Cloud（MySQL 方言，HTTP 协议）──
+    case "tidb": {
+      const { PrismaClient } = await import("../src/generated/mysql/client");
+      const { PrismaTiDBCloud } = await import("@tidbcloud/prisma-adapter");
+
+      const url = env?.TIDB_URL as string || process.env.TIDB_URL || process.env.DATABASE_URL;
+      if (!url) throw new Error("TIDB_URL 或 DATABASE_URL 未配置");
+
+      const adapter = new PrismaTiDBCloud({ url });
+      return new PrismaClient({ adapter });
+    }
+
+    // ── PostgreSQL 直连 ──
+    case "pg": {
+      const { PrismaClient } = await import("../src/generated/pg/client");
+      const { PrismaPg } = await import("@prisma/adapter-pg");
+
+      const url = env?.PG_URL as string || process.env.PG_URL || process.env.DATABASE_URL;
+      if (!url) throw new Error("PG_URL 或 DATABASE_URL 未配置");
+
+      const adapter = new PrismaPg({ connectionString: url });
+      return new PrismaClient({ adapter });
+    }
+
+    // ── PostgreSQL via Hyperdrive ──
+    case "hyperdrive": {
+      const { PrismaClient } = await import("../src/generated/pg/client");
+      const { PrismaPg } = await import("@prisma/adapter-pg");
+
+      const hyperdrive = env?.HYPERDRIVE as { connectionString: string } | undefined;
+      if (!hyperdrive?.connectionString) throw new Error("HYPERDRIVE binding 未配置");
+
+      const adapter = new PrismaPg({ connectionString: hyperdrive.connectionString });
+      return new PrismaClient({ adapter });
+    }
+
+    default:
+      throw new Error(`未知的数据库类型: ${dbKind}`);
+  }
+}
+
+// ==================== 公开 API ====================
+
+/**
+ * 获取 PrismaClient 实例（全局缓存，Worker 生命周期内复用）
+ *
+ * 支持两种调用方式：
+ *   createDb()           — Pages 环境（自动检测 D1 binding）
+ *   createDb(env)        — Worker 环境（传入完整 env 对象）
+ *   createDb({ DB: d1 }) — 直接传入 D1Database binding（兼容旧代码）
+ *
+ * @returns any 类型的 PrismaClient（三个方言 API 完全一致）
+ */
+export async function createDb(
+  env?: Record<string, unknown> | { DB: unknown }
+): Promise<any> {
+  // 兼容：如果直接传入了 D1Database binding（不是 env 对象）
+  let resolvedEnv: Record<string, unknown> | undefined;
+  if (env && typeof env === "object" && "DB" in env && typeof env.DB === "object" && env.DB !== null && !("DB_TYPE" in env)) {
+    // 直接传入 D1Database：{ DB: d1Binding }
+    resolvedEnv = { DB: env.DB };
+  } else {
+    resolvedEnv = env as Record<string, unknown> | undefined;
+  }
+
+  // Pages 无参调用时：从 Cloudflare 上下文获取完整 env（含 DB_TYPE、DATABASE_URL）
+  let effectiveEnv = resolvedEnv;
+  if (!effectiveEnv) {
+    try {
+      const detected = await detectEnvironment();
+      if (detected.kind === "pages" && detected.pagesEnv) {
+        effectiveEnv = detected.pagesEnv;
+      }
     } catch {
       // 忽略
     }
   }
 
-  // 有 D1 binding → 用 D1；否则根据 DATABASE_URL 推断
-  const kind = d1Binding ? "d1" : resolveDbKind();
-  const adapterResult = await loadAdapter(kind, d1Binding ?? undefined);
+  const dbKind = resolveDbKind(effectiveEnv);
 
-  const prismaOpts = {
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  } as ConstructorParameters<typeof PrismaClient>[0];
-
-  if (adapterResult) {
-    (prismaOpts as { adapter: unknown }).adapter = adapterResult.adapter;
+  // 命中缓存则直接复用
+  if (cachedPrisma && cachedDbKind === dbKind) {
+    return cachedPrisma;
   }
 
-  const prisma = new PrismaClient(prismaOpts);
-  globalForPrisma.__prisma = prisma;
+  // 创建新实例
+  const prisma = await createPrismaInstance(dbKind, effectiveEnv);
+
+  cachedPrisma = prisma;
+  cachedDbKind = dbKind;
+
   return prisma;
 }
 
 /**
- * 断开 Prisma 连接（Worker 模式下每次请求后调用）
- *
- * Pages Router 中通常不需要调用，除非内存压力大
+ * 断开 Prisma 连接（Worker 关闭时或需要重建实例时调用）
  */
 export async function disconnectDb(): Promise<void> {
-  if (globalForPrisma.__prisma) {
-    await globalForPrisma.__prisma.$disconnect();
-    globalForPrisma.__prisma = undefined;
+  if (cachedPrisma) {
+    await cachedPrisma.$disconnect();
+    cachedPrisma = null;
+    cachedDbKind = null;
   }
 }
 
-export type Database = PrismaClient;
+// ==================== 类型导出 ====================
+// 三份 Schema 的表结构完全一致，导出 D1 版本的类型作为通用类型。
+// 业务代码通过 import type { Xxx } from "@/lib/prisma" 使用。
+
+/** PrismaClient 类型（用于函数返回值类型标注） */
+export type Database = any;
+
+export type { Prisma } from "../src/generated/d1/client";

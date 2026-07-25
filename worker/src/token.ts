@@ -5,7 +5,8 @@
  * 更新 API Key 已用 token 数，记录请求日志。
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 
 /**
  * 从 OpenAI 格式的 usage 对象中提取 token 数
@@ -40,11 +41,12 @@ export function extractUsage(usage: Record<string, unknown> | undefined): {
 export async function updateKeyUsage(
   apiKeyId: string,
   tokenCount: number,
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<void> {
   if (tokenCount <= 0) return;
 
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     await prisma.apiKeys.update({
       where: { id: apiKeyId },
@@ -78,8 +80,9 @@ export async function recordRequestLog(params: {
   isError: boolean;
   errorMessage?: string;
   db: D1Database;
+  env?: WorkerEnv;
 }): Promise<void> {
-  const prisma = await createPrismaClient(params.db);
+  const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
   try {
     await prisma.requestLogs.create({
       data: {
@@ -126,6 +129,7 @@ export function createUsageTransformer(params: {
   kv: KVNamespace;
   db: D1Database;
   ctx: ExecutionContext;
+  env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
   let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
@@ -177,7 +181,7 @@ export function createUsageTransformer(params: {
       const duration = Date.now() - params.startTime;
 
       // 复用同一个 PrismaClient 完成所有 DB 操作
-      const prisma = await createPrismaClient(params.db);
+      const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
       try {
         if (totalTokens > 0) {
           await prisma.apiKeys.update({

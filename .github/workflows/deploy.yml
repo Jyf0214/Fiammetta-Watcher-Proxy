@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
+      DB_TYPE: ${{ secrets.DB_TYPE || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,6 +71,9 @@ jobs:
 
       - name: Generate Prisma Client
         run: node scripts/prepare-db.mjs
+
+      - name: Check Prisma Multi-Dialect Config
+        run: python3 deploy/init.py check
 
       - name: Build Pages
         run: |

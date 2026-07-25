@@ -14,18 +14,34 @@ import { classifyCronExpression } from "./types";
 import { fetchAllPlatformModels } from "./model-fetcher";
 import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
+import { loadWhitelist } from "./platform-keys";
+import type { WorkerEnv } from "./config";
 
-export interface Env {
+export interface Env extends WorkerEnv {
   DB: D1Database;
   KV: KVNamespace;
 }
+
+/** 白名单是否已加载（内存态，Worker 冷启动后首次请求时加载） */
+let whitelistLoaded = false;
 
 export default {
   /**
    * HTTP 请求处理 — 代理 /v1/* 路由
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // 将 Worker 环境变量写入 process.env，供 lib/prisma.ts 工厂函数读取
+    if (env.DB_TYPE) process.env.DB_TYPE = env.DB_TYPE;
+
     const url = new URL(request.url);
+
+    // 首次请求时加载白名单（懒初始化）
+    if (!whitelistLoaded) {
+      whitelistLoaded = true;
+      ctx.waitUntil(loadWhitelist(env.DB, env).catch((err) => {
+        console.error("[worker] 白名单加载失败:", err);
+      }));
+    }
 
     // 健康检查端点
     if (url.pathname === "/health") {
@@ -59,13 +75,13 @@ export default {
 
     switch (task) {
       case "model-fetch":
-        ctx.waitUntil(fetchAllPlatformModels(env.DB));
+        ctx.waitUntil(fetchAllPlatformModels(env.DB, env));
         break;
       case "key-reset":
-        ctx.waitUntil(handleScheduledReset(env.DB));
+        ctx.waitUntil(handleScheduledReset(env.DB, env));
         break;
       case "log-archive":
-        ctx.waitUntil(runArchiveTask(env.DB));
+        ctx.waitUntil(runArchiveTask(env.DB, env));
         break;
       default:
         console.warn(`[cron] 未知的 cron 表达式: ${event.cron}`);

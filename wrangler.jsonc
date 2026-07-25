@@ -7,6 +7,9 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "vars": {
+    "DB_TYPE": "d1"
+  },
   // 部署前由 init_pages.py 替换 placeholder 为实际 ID
   "d1_databases": [
     {

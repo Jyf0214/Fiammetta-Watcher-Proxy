@@ -13,9 +13,8 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/prisma";
+import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
-import type { Prisma } from "@/generated/client";
 
 export default async function handler(
   req: NextApiRequest,

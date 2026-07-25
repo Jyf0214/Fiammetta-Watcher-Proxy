@@ -8,7 +8,8 @@
  * 聚合指标：总请求数、错误数、总 token、平均 TTFT、平均耗时等
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+import type { WorkerEnv } from "./config";
 
 /** 日志保留天数，超过此天数的日志将被聚合归档 */
 const RETENTION_DAYS = 30;
@@ -25,7 +26,7 @@ const BATCH_SIZE = 7;
  * @param db - D1 数据库实例
  * @returns 归档结果
  */
-export async function runArchiveTask(db: D1Database): Promise<{
+export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
   success: boolean;
   message: string;
   details?: { datesArchived: number; logsProcessed: number; logsDeleted: number };
@@ -33,7 +34,7 @@ export async function runArchiveTask(db: D1Database): Promise<{
   const now = Math.floor(Date.now() / 1000);
   const cutoffTs = now - RETENTION_DAYS * 86400;
 
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const oldestLog = await prisma.requestLogs.findFirst({
       orderBy: { createdAt: "asc" },
@@ -92,7 +93,7 @@ export async function runArchiveTask(db: D1Database): Promise<{
  * 归档指定时间范围内的请求日志
  */
 async function archiveLogs(
-  prisma: Awaited<ReturnType<typeof createPrismaClient>>,
+  prisma: Awaited<ReturnType<typeof createDb>>,
   startTs: number,
   endTs: number
 ): Promise<{ datesArchived: number; logsProcessed: number; logsDeleted: number }> {
@@ -130,7 +131,7 @@ async function archiveLogs(
  * 合并或创建 daily_stats 记录，然后删除原始日志。
  */
 async function archiveSingleDay(
-  prisma: Awaited<ReturnType<typeof createPrismaClient>>,
+  prisma: Awaited<ReturnType<typeof createDb>>,
   dayStartTs: number,
   dayEndTs: number
 ): Promise<{ processed: number; deleted: number }> {

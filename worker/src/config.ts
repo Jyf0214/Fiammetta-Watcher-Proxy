@@ -8,19 +8,26 @@
  * - 其他键：由各模块自行定义
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
+
+/** Worker 环境变量类型（仅需 DB_TYPE） */
+export interface WorkerEnv {
+  DB_TYPE?: string;
+}
 
 /**
  * 获取配置值
  * @param db D1 数据库绑定
  * @param key 配置键
+ * @param env Worker 环境变量（包含 DB_TYPE）
  * @returns 配置值字符串，未找到返回 null
  */
 export async function getConfig(
   db: D1Database,
-  key: string
+  key: string,
+  env?: WorkerEnv
 ): Promise<string | null> {
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const row = await prisma.configs.findFirst({
       where: { key },
@@ -40,9 +47,10 @@ export async function getConfig(
  */
 export async function getConfigJson<T = Record<string, unknown>>(
   db: D1Database,
-  key: string
+  key: string,
+  env?: WorkerEnv
 ): Promise<T | null> {
-  const value = await getConfig(db, key);
+  const value = await getConfig(db, key, env);
   if (value === null) return null;
 
   try {
@@ -63,9 +71,10 @@ export async function getConfigJson<T = Record<string, unknown>>(
 export async function getConfigOrDefault(
   db: D1Database,
   key: string,
-  defaultValue: string
+  defaultValue: string,
+  env?: WorkerEnv
 ): Promise<string> {
-  const value = await getConfig(db, key);
+  const value = await getConfig(db, key, env);
   return value ?? defaultValue;
 }
 
@@ -78,10 +87,11 @@ export async function getConfigOrDefault(
 export async function setConfig(
   db: D1Database,
   key: string,
-  value: string
+  value: string,
+  env?: WorkerEnv
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     await prisma.configs.upsert({
       where: { key },
@@ -102,9 +112,10 @@ export async function setConfig(
 export async function setConfigJson(
   db: D1Database,
   key: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  env?: WorkerEnv
 ): Promise<void> {
-  await setConfig(db, key, JSON.stringify(data));
+  await setConfig(db, key, JSON.stringify(data), env);
 }
 
 /**
@@ -115,9 +126,10 @@ export async function setConfigJson(
  */
 export async function deleteConfig(
   db: D1Database,
-  key: string
+  key: string,
+  env?: WorkerEnv
 ): Promise<boolean> {
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const result = await prisma.configs.deleteMany({ where: { key } });
     return result.count > 0;
@@ -132,9 +144,10 @@ export async function deleteConfig(
  * @returns 配置键值对
  */
 export async function getAllSystemConfigs(
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<Record<string, string>> {
-  const prisma = await createPrismaClient(db);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
     const rows = await prisma.configs.findMany({
       where: { key: { startsWith: "system:" } },

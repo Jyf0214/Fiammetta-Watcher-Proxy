@@ -22,6 +22,7 @@ import { createUsageTransformer, recordRequestLog } from "./token";
 import { extractForwardableHeaders } from "./forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
 import type { ApiKeyRecord } from "./auth";
+import type { WorkerEnv } from "./config";
 
 // ==================== 上游错误脱敏 ====================
 
@@ -144,11 +145,14 @@ export async function proxyV1Request(
   request: Request,
   config: ProxyConfig,
   apiKey: ApiKeyRecord,
-  env: { DB: D1Database; KV: KVNamespace },
+  env: { DB: D1Database; KV: KVNamespace } & WorkerEnv,
   ctx: ExecutionContext
 ): Promise<Response> {
   const startTime = Date.now();
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
+
+  // 提取 WorkerEnv 部分，供内部函数调用（避免 { DB, KV } & WorkerEnv 赋值给 WorkerEnv 的类型错误）
+  const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
 
   // ── 1. 解析请求体 ──
   const parseResult = await parseRequestBody<Record<string, unknown>>(request);
@@ -165,8 +169,8 @@ export async function proxyV1Request(
   const modelName = body.model as string | undefined;
   const requestedModel = modelName || "unknown";
   const route = modelName
-    ? await routeRequest(modelName, env.DB)
-    : await routeRequest("__any__", env.DB);
+    ? await routeRequest(modelName, env.DB, workerEnv)
+    : await routeRequest("__any__", env.DB, workerEnv);
 
   if (!route) {
     return Response.json(
@@ -287,7 +291,7 @@ export async function proxyV1Request(
 
     // 应用请求模板
     try {
-      const templates = await loadTemplates(env.DB);
+      const templates = await loadTemplates(env.DB, workerEnv);
       const applicable = getApplicableTemplates(templates, requestModel);
       if (applicable.length > 0) {
         upstreamBody = applyTemplates(upstreamBody, applicable);
@@ -422,6 +426,7 @@ export async function proxyV1Request(
         isError: true,
         errorMessage: errorText.substring(0, 1000),
         db: env.DB,
+        env: workerEnv,
       });
     } catch (logError) {
       console.error(`${logTag} 日志写入失败:`, logError);
@@ -460,10 +465,12 @@ async function handleUpstreamResponse(
   config: ProxyConfig,
   isStream: boolean,
   startTime: number,
-  env: { DB: D1Database; KV: KVNamespace },
+  env: { DB: D1Database; KV: KVNamespace } & WorkerEnv,
   ctx: ExecutionContext,
   logTag: string
 ): Promise<Response> {
+  // 提取 WorkerEnv 部分，供内部函数调用
+  const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
   // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;
@@ -488,6 +495,7 @@ async function handleUpstreamResponse(
       kv: env.KV,
       db: env.DB,
       ctx,
+      env: workerEnv,
     });
 
     const pipedStream = stream.pipeThrough(transformer);
@@ -527,6 +535,7 @@ async function handleUpstreamResponse(
         duration: Date.now() - startTime,
         isError: false,
         db: env.DB,
+        env: workerEnv,
       });
     } catch (logError) {
       console.error(`${logTag} 日志写入失败:`, logError);
@@ -575,7 +584,7 @@ async function handleUpstreamResponse(
 
       if (totalTokens > 0) {
         const { updateKeyUsage } = await import("./token");
-        await updateKeyUsage(apiKey.id, totalTokens, env.DB);
+        await updateKeyUsage(apiKey.id, totalTokens, env.DB, workerEnv);
       }
     }
   } catch {
@@ -598,6 +607,7 @@ async function handleUpstreamResponse(
       duration: Date.now() - startTime,
       isError: false,
       db: env.DB,
+      env: workerEnv,
     });
   } catch (logError) {
     console.error(`${logTag} 日志写入失败:`, logError);

@@ -22,9 +22,10 @@
     "@ant-design/icons": "^6.3.2",
     "@cloudflare/workers-types": "^5.20260721.1",
     "@prisma/adapter-d1": "^7.9.0",
-    "@prisma/adapter-mariadb": "^7.9.0",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "@tidbcloud/prisma-adapter": "^6.17.0",
+    "@tidbcloud/serverless": "^0.3.0",
     "antd": "^6.5.1",
     "clsx": "^2.1.1",
     "i18next": "^26.3.6",
@@ -41,7 +42,6 @@
     "tailwind-merge": "^3.6.0"
   },
   "optionalDependencies": {
-    "mysql2": "^3.23.1",
     "pg": "^8.22.0"
   },
   "devDependencies": {

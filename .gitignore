@@ -60,6 +60,9 @@ data/
 # 原 Next.js 项目文件（本地保留，不提交到 Cloudflare 分支）
 prisma/
 !prisma/schema.prisma
+!prisma/schema.d1.prisma
+!prisma/schema.mysql.prisma
+!prisma/schema.pg.prisma
 tests/
 next-env.d.ts
 middleware.ts

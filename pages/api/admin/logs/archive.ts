@@ -12,8 +12,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { Prisma } from "@/generated/client";
-import { createDb } from "@/lib/prisma";
+import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
 
 /**

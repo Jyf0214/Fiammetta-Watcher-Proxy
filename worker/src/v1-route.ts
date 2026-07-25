@@ -12,6 +12,7 @@
 import { validateApiKey } from "./auth";
 import { proxyV1Request, type ProxyConfig } from "./proxy";
 import { refreshCache, getPlatformCache, getPlatformModelCache } from "./router";
+import type { WorkerEnv } from "./config";
 
 /**
  * 根据路径确定端点配置
@@ -55,7 +56,7 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
  */
 export async function handleV1Route(
   request: Request,
-  env: { DB: D1Database; KV: KVNamespace },
+  env: { DB: D1Database; KV: KVNamespace } & WorkerEnv,
   ctx: ExecutionContext
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -70,19 +71,20 @@ export async function handleV1Route(
 
   // GET /v1/models — 返回模型列表
   if (url.pathname === "/v1/models" && request.method === "GET") {
-    return handleModelsList(env.DB);
+    return handleModelsList(env.DB, env);
   }
 
   // GET /v1/models/:model — 返回单个模型信息
   if (url.pathname.startsWith("/v1/models/") && request.method === "GET") {
     const modelId = decodeURIComponent(url.pathname.slice("/v1/models/".length));
-    return handleModelDetail(modelId, env.DB);
+    return handleModelDetail(modelId, env.DB, env);
   }
 
   // 验证 API Key
   const authResult = await validateApiKey(
     request.headers.get("authorization"),
-    env.DB
+    env.DB,
+    env
   );
   if ("error" in authResult) return authResult.error;
 
@@ -93,8 +95,8 @@ export async function handleV1Route(
 /**
  * GET /v1/models — 返回所有可用模型列表
  */
-async function handleModelsList(db: D1Database): Promise<Response> {
-  await refreshCache(db);
+async function handleModelsList(db: D1Database, env?: WorkerEnv): Promise<Response> {
+  await refreshCache(db, env);
 
   const models: Array<{ id: string; object: string; owned_by: string }> = [];
   const platformCache = getPlatformCache();
@@ -117,9 +119,10 @@ async function handleModelsList(db: D1Database): Promise<Response> {
  */
 async function handleModelDetail(
   modelId: string,
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<Response> {
-  await refreshCache(db);
+  await refreshCache(db, env);
 
   const platformCache = getPlatformCache();
   const platformModelCache = getPlatformModelCache();

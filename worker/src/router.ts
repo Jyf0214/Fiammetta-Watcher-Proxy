@@ -8,11 +8,12 @@
  * - 加权轮询选择平台
  */
 
-import { createPrismaClient } from "./prisma-db";
+import { createDb } from "@/lib/prisma";
 import { parseApiKeys } from "./platform-keys";
 import { selectPlatform, cleanupStaleBreakers } from "./load-balancer";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
 import { getConfig } from "./config";
+import type { WorkerEnv } from "./config";
 
 // ==================== 缓存 ====================
 
@@ -73,14 +74,14 @@ let refreshPromise: Promise<void> | null = null;
 /**
  * 刷新平台和模型映射缓存（带防并发穿透锁）
  */
-export async function refreshCache(db: D1Database): Promise<void> {
+export async function refreshCache(db: D1Database, env?: WorkerEnv): Promise<void> {
   if (refreshPromise) return refreshPromise;
 
   const now = Date.now();
   const ttl = platformCache.length > 0 ? CACHE_TTL : EMPTY_CACHE_RETRY;
   if (now - lastRefresh < ttl) return;
 
-  refreshPromise = doRefresh(db);
+  refreshPromise = doRefresh(db, env);
   try {
     await refreshPromise;
   } finally {
@@ -91,8 +92,8 @@ export async function refreshCache(db: D1Database): Promise<void> {
 /**
  * 执行实际的缓存刷新
  */
-async function doRefresh(db: D1Database): Promise<void> {
-  const prisma = await createPrismaClient(db);
+async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
   const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
@@ -112,10 +113,10 @@ async function doRefresh(db: D1Database): Promise<void> {
         },
       }),
       // 查询自动模型 ID
-      getConfig(db, "system:auto_model_id"),
+      getConfig(db, "system:auto_model_id", env),
     ]);
 
-  const newPlatforms: PlatformConfig[] = platformRows.map((p) => ({
+  const newPlatforms: PlatformConfig[] = platformRows.map((p: any) => ({
     id: p.id,
     name: p.name,
     baseUrl: p.baseUrl,
@@ -134,7 +135,7 @@ async function doRefresh(db: D1Database): Promise<void> {
     cooldownEnd: p.cooldownEnd,
   }));
 
-  const newModelMaps: ModelMapConfig[] = modelMapRows.map((m) => ({
+  const newModelMaps: ModelMapConfig[] = modelMapRows.map((m: any) => ({
     id: m.id,
     alias: m.alias,
     targetModel: m.targetModel,
@@ -160,7 +161,7 @@ async function doRefresh(db: D1Database): Promise<void> {
   lastRefresh = Date.now();
 
   // 清理已删除平台的断路器条目
-  cleanupStaleBreakers(platformRows.map((p) => p.id));
+  cleanupStaleBreakers(platformRows.map((p: any) => p.id));
 
   } finally {
     await prisma.$disconnect();
@@ -170,9 +171,9 @@ async function doRefresh(db: D1Database): Promise<void> {
 /**
  * 强制刷新缓存
  */
-export async function forceRefreshRouterCache(db: D1Database): Promise<void> {
+export async function forceRefreshRouterCache(db: D1Database, env?: WorkerEnv): Promise<void> {
   lastRefresh = 0;
-  await refreshCache(db);
+  await refreshCache(db, env);
 }
 
 // ==================== 模型映射 ====================
@@ -232,9 +233,10 @@ function resolveModelMapping(
  */
 export async function routeRequest(
   requestedModel: string,
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<RouteDecision | null> {
-  await refreshCache(db);
+  await refreshCache(db, env);
 
   // 自动模型处理
   let actualModel = requestedModel;
