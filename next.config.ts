@@ -51,7 +51,9 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // 按 DB_TYPE 只生成一个方言的 Prisma Client，其他方言 alias 到空 stub
+  // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析
+  turbopack: {},
+  // Webpack（--webpack 模式）：alias 未使用的方言到空 stub
   webpack: (config) => {
     const alias = getPrismaAlias();
     if (Object.keys(alias).length > 0) {
