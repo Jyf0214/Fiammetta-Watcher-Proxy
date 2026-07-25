@@ -774,7 +774,6 @@ async function importRequestLogs(
       keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
       keyName: (log.keyName as string) || null,
       platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
-      proxyId: (log.proxyId as string) || null,
       model: log.model as string,
       endpoint: (log.endpoint as string) || null,
       method: (log.method as string) || null,
