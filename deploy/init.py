@@ -369,34 +369,19 @@ def run_post(d1_id: str, kv_id: str):
     resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
     print(f"🔧 使用数据库类型: {resolved_type}")
 
-    if resolved_type == "d1":
-        # D1 模式：绑定 D1 + 兼容性标志
-        print(f"🔗 配置 D1 绑定")
-        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-            "deployment_configs": {
-                "production": {
-                    "d1_databases": {"DB": {"id": d1_id}},
-                    "compatibility_flags": ["nodejs_compat"],
-                }
+    # 始终绑定 D1 + 兼容性标志（Worker 和 Pages 共享同一个 D1）
+    print(f"🔗 配置 D1 绑定（始终绑定）")
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": {
+                "d1_databases": {"DB": {"id": d1_id}},
+                "compatibility_flags": ["nodejs_compat"],
             }
-        })
-        if not data.get("success"):
-            fail(f"D1 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-        print(f"  ✅ D1 + 兼容性标志成功")
-    else:
-        # 外部数据库模式：解绑 D1，避免 Pages 误连 D1
-        print(f"🔗 外部数据库模式（{resolved_type}）：解绑 D1")
-        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-            "deployment_configs": {
-                "production": {
-                    "d1_databases": {},
-                    "compatibility_flags": ["nodejs_compat"],
-                }
-            }
-        })
-        if not data.get("success"):
-            fail(f"D1 解绑失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-        print(f"  ✅ D1 已解绑 + 兼容性标志成功")
+        }
+    })
+    if not data.get("success"):
+        fail(f"D1 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+    print(f"  ✅ D1 + 兼容性标志成功")
 
     # 配置 KV 绑定
     print(f"🔗 配置 KV 绑定")
@@ -503,19 +488,14 @@ def run_check():
             print(f"  ❌ {name} Schema 缺失: {path}")
             errors.append(f"Schema 缺失: {path}")
 
-    # 2. 检查生成的 Client 目录
-    generated_dirs = [
-        ("D1", "src/generated/d1"),
-        ("MySQL", "src/generated/mysql"),
-        ("PostgreSQL", "src/generated/pg"),
-    ]
-    for name, dirpath in generated_dirs:
-        client_file = os.path.join(PROJECT_ROOT, dirpath, "client.ts")
-        if os.path.exists(client_file):
-            print(f"  ✅ {name} Client: {dirpath}/client.ts")
-        else:
-            print(f"  ❌ {name} Client 缺失: {dirpath}/client.ts")
-            errors.append(f"Client 缺失: {dirpath}")
+    # 2. 检查生成的 Client 目录（按 DB_TYPE 只生成一个）
+    generated_dir = "src/generated/client"
+    client_file = os.path.join(PROJECT_ROOT, generated_dir, "client.ts")
+    if os.path.exists(client_file):
+        print(f"  ✅ Prisma Client: {generated_dir}/client.ts")
+    else:
+        print(f"  ❌ Prisma Client 缺失: {generated_dir}/client.ts")
+        errors.append(f"Client 缺失: {generated_dir}")
 
     # 3. 检查 DB_TYPE 在 Worker wrangler 配置中
     # Pages 的 DB_TYPE 通过 API 设置（post-deploy 步骤），不在 wrangler.jsonc 中

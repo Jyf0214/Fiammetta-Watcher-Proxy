@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
-      DB_TYPE: ${{ secrets.DB_TYPE || '' }}
+      DB_TYPE: ${{ secrets.DB_TYPE || 'd1' }}
     steps:
       - uses: actions/checkout@v4
 

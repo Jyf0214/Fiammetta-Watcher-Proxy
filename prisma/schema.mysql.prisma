@@ -1,11 +1,11 @@
 // ================================================================
 // Fiammetta Watcher Proxy — Prisma Schema (MySQL / TiDB Cloud 方言)
-// 生成客户端输出到 src/generated/mysql
+// 生成客户端输出到 src/generated/client（按 DB_TYPE 只生成需要的方言）
 // ================================================================
 
 generator client {
   provider = "prisma-client"
-  output   = "../src/generated/mysql"
+  output   = "../src/generated/client"
   runtime  = "cloudflare"
 }
 
