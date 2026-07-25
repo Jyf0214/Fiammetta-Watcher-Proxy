@@ -488,14 +488,19 @@ def run_check():
             print(f"  ❌ {name} Schema 缺失: {path}")
             errors.append(f"Schema 缺失: {path}")
 
-    # 2. 检查生成的 Client 目录（按 DB_TYPE 只生成一个）
-    generated_dir = "src/generated/client"
-    client_file = os.path.join(PROJECT_ROOT, generated_dir, "client.ts")
-    if os.path.exists(client_file):
-        print(f"  ✅ Prisma Client: {generated_dir}/client.ts")
-    else:
-        print(f"  ❌ Prisma Client 缺失: {generated_dir}/client.ts")
-        errors.append(f"Client 缺失: {generated_dir}")
+    # 2. 检查生成的 Client 目录（按 DB_TYPE 只生成一个，其余为 stub）
+    generated_dirs = [
+        ("D1", "src/generated/d1"),
+        ("MySQL", "src/generated/mysql"),
+        ("PostgreSQL", "src/generated/pg"),
+    ]
+    for name, dirpath in generated_dirs:
+        client_file = os.path.join(PROJECT_ROOT, dirpath, "client.ts")
+        if os.path.exists(client_file):
+            print(f"  ✅ {name} Client: {dirpath}/client.ts")
+        else:
+            print(f"  ❌ {name} Client 缺失: {dirpath}/client.ts")
+            errors.append(f"Client 缺失: {dirpath}")
 
     # 3. 检查 DB_TYPE 在 Worker wrangler 配置中
     # Pages 的 DB_TYPE 通过 API 设置（post-deploy 步骤），不在 wrangler.jsonc 中

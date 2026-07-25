@@ -92,7 +92,7 @@ async function createPrismaInstance(
   switch (dbKind) {
     // ── D1（SQLite 方言）──
     case "d1": {
-      const { PrismaClient } = await import("../src/generated/client");
+      const { PrismaClient } = await import("../src/generated/d1/client");
       const { PrismaD1 } = await import("@prisma/adapter-d1");
 
       let d1Binding: unknown = env?.DB;
@@ -112,7 +112,7 @@ async function createPrismaInstance(
 
     // ── TiDB Cloud（MySQL 方言，HTTP 协议）──
     case "tidb": {
-      const { PrismaClient } = await import("../src/generated/client");
+      const { PrismaClient } = await import("../src/generated/mysql/client");
       const { PrismaTiDBCloud } = await import("@tidbcloud/prisma-adapter");
 
       const url = env?.TIDB_URL as string || process.env.TIDB_URL || process.env.DATABASE_URL;
@@ -124,7 +124,7 @@ async function createPrismaInstance(
 
     // ── PostgreSQL 直连 ──
     case "pg": {
-      const { PrismaClient } = await import("../src/generated/client");
+      const { PrismaClient } = await import("../src/generated/pg/client");
       const { PrismaPg } = await import("@prisma/adapter-pg");
 
       const url = env?.PG_URL as string || process.env.PG_URL || process.env.DATABASE_URL;
@@ -136,7 +136,7 @@ async function createPrismaInstance(
 
     // ── PostgreSQL via Hyperdrive ──
     case "hyperdrive": {
-      const { PrismaClient } = await import("../src/generated/client");
+      const { PrismaClient } = await import("../src/generated/pg/client");
       const { PrismaPg } = await import("@prisma/adapter-pg");
 
       const hyperdrive = env?.HYPERDRIVE as { connectionString: string } | undefined;
@@ -222,4 +222,4 @@ export async function disconnectDb(): Promise<void> {
 /** PrismaClient 类型（用于函数返回值类型标注） */
 export type Database = any;
 
-export type { Prisma } from "../src/generated/client";
+export type { Prisma } from "../src/generated/d1/client";

@@ -1,4 +1,17 @@
 import type { NextConfig } from "next";
+import { resolve } from "path";
+
+/** 按 DB_TYPE 只生成一个方言的 Prisma Client，其他方言用空 stub 代替 */
+function getPrismaAlias() {
+  const dbType = process.env.DB_TYPE || "d1";
+  const dialects = ["d1", "mysql", "pg"];
+  const alias: Record<string, string> = {};
+  for (const d of dialects) {
+    if (d === dbType || (dbType === "hyperdrive" && d === "pg")) continue;
+    alias[`../src/generated/${d}/client`] = resolve(__dirname, "scripts/empty-client.ts");
+  }
+  return alias;
+}
 
 const nextConfig: NextConfig = {
   // Cloudflare Pages 不支持图片优化
@@ -37,6 +50,15 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
+  },
+  // 按 DB_TYPE 只生成一个方言的 Prisma Client，其他方言 alias 到空 stub
+  webpack: (config) => {
+    const alias = getPrismaAlias();
+    if (Object.keys(alias).length > 0) {
+      config.resolve = config.resolve || {};
+      config.resolve.alias = { ...config.resolve.alias, ...alias };
+    }
+    return config;
   },
   // MySQL/PG 驱动仅在切换数据库时需要，标记为外部避免 Turbopack 打包
   // Prisma 7 WASM 引擎必须排除在 Next.js 打包之外，否则报 fs.readdir is not implemented
