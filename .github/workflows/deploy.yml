@@ -63,8 +63,6 @@ jobs:
           D1_NAME: fiammetta_d1
           KV_NAME: fiammetta-proxy
           HYPERDRIVE_NAME: fiammetta-hyperdrive
-          DB_TYPE: ${{ env.DB_TYPE }}
-          DATABASE_URL: ${{ env.DATABASE_URL }}
         run: python3 deploy/init.py pre
 
       # ==================== 安装依赖 & 构建 ====================
@@ -108,8 +106,6 @@ jobs:
           HYPERDRIVE_ID: ${{ steps.init.outputs.HYPERDRIVE_ID }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          DB_TYPE: ${{ env.DB_TYPE }}
         run: python3 deploy/init.py post
 
       # ==================== 部署 Pages ====================
@@ -127,7 +123,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-          DB_TYPE: ${{ env.DB_TYPE }}
           HYPERDRIVE_ID: ${{ steps.init.outputs.HYPERDRIVE_ID }}
         run: python3 deploy/init.py post-deploy
 
