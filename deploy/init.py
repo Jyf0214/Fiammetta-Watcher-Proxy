@@ -134,6 +134,19 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
             if v:
                 content = content.replace(k, v)
 
+        # 当 hyperdrive_id 为空时，移除 Hyperdrive 绑定块（避免 wrangler 校验 placeholder UUID 失败）
+        if not hyperdrive_id:
+            if path.endswith(".toml"):
+                content = re.sub(
+                    r'\n*# Hyperdrive 绑定[^\n]*\n+\[\[hyperdrive\]\]\n.*?\n.*?\n',
+                    '\n', content, flags=re.DOTALL,
+                )
+            else:
+                content = re.sub(
+                    r',?\s*"hyperdrive"\s*:\s*\[[\s\S]*?\]',
+                    '', content,
+                )
+
         # 仅替换独立的 DB_TYPE 行（精确匹配行首缩进与双引号/单引号配置）
         # 注意：不能用 f'\1' —— Python f-string 会把 \1 解释为 SOH 控制字符，破坏 TOML key
         if path.endswith(".toml"):
