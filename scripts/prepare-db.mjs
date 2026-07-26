@@ -83,7 +83,12 @@ try {
 // ==================== 4. 为未使用的方言生成空 stub ====================
 
 const STUB_CONTENT = `// 自动生成的空 stub — 未使用的 Prisma client 不打包到构建产物中
-export {};
+// 导出占位 PrismaClient，满足 lib/prisma.ts 的动态 import 类型检查
+export class PrismaClient {
+  constructor(..._args: unknown[]) {
+    throw new Error("此方言未启用，请切换 DB_TYPE");
+  }
+}
 `;
 
 for (const [key, d] of Object.entries(DIALECTS)) {
