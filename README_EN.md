@@ -1,5 +1,7 @@
 # Fiammetta Watcher Proxy
 
+English | [简体中文](README.md)
+
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployed on Cloudflare's global edge network.
 
 ## Features

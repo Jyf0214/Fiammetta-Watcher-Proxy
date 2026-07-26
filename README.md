@@ -1,5 +1,7 @@
 # Fiammetta Watcher Proxy
 
+[English](README_EN.md) | 简体中文
+
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络。
 
 ## 功能特性
