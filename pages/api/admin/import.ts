@@ -89,6 +89,16 @@ export default async function handler(
       return;
     }
 
+    // 数据量上限检查：避免超大导入导致 Cloudflare Workers 超时（CF1102）
+    const requestLogCount = Array.isArray(body.requestLogs) ? body.requestLogs.length : 0;
+    if (requestLogCount > 10000) {
+      res.status(400).json({
+        success: false,
+        error: `请求日志数量 (${requestLogCount}) 超过上限 (10000)，请分批导入`,
+      });
+      return;
+    }
+
     const db = await createDb();
 
     // 流式响应：边处理边推送进度
@@ -341,6 +351,7 @@ async function importModelMaps(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有 alias，用于去重
   const existingAliases = await db.modelMappings.findMany({ select: { alias: true } });
@@ -348,36 +359,48 @@ async function importModelMaps(
 
   const validMaps = modelMaps.filter((m) => {
     const alias = m.alias as string;
-    if (!alias) return false;
-    if (existingAliasSet.has(alias)) return false;
+    if (!alias) {
+      skipReasons["缺少 alias 字段"] = (skipReasons["缺少 alias 字段"] || 0) + 1;
+      return false;
+    }
+    if (existingAliasSet.has(alias)) {
+      skipReasons["alias 已存在"] = (skipReasons["alias 已存在"] || 0) + 1;
+      return false;
+    }
     return true;
   });
 
   skipped += modelMaps.length - validMaps.length;
 
   if (validMaps.length === 0) {
-    return { imported, skipped };
+    return { imported, skipped, skipReasons };
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const batchData = validMaps.map((m) => ({
-    id: generateId(),
-    alias: m.alias as string,
-    targetModel: (m.targetModel as string) || (m.alias as string),
-    platformId: (m.platformId as string) || undefined,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  for (let i = 0; i < validMaps.length; i += BATCH_SIZE) {
+    const batch = validMaps.slice(i, i + BATCH_SIZE);
+    const batchData = batch.map((m) => ({
+      id: generateId(),
+      alias: m.alias as string,
+      targetModel: (m.targetModel as string) || (m.alias as string),
+      platformId: (m.platformId as string) || undefined,
+      createdAt: now,
+      updatedAt: now,
+    }));
 
-  try {
-    const result = await db.modelMappings.createMany({ data: batchData });
-    imported += result.count;
-  } catch (err) {
-    console.error("[import] 批量导入模型映射失败:", err);
-    skipped += validMaps.length;
+    try {
+      const result = await db.modelMappings.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入模型映射失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
+    }
   }
 
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 /**
@@ -391,6 +414,7 @@ async function importPlans(
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
+  const skipReasons: Record<string, number> = {};
 
   // 预加载已有名称，用于去重
   const existingNames = await db.plans.findMany({ select: { name: true } });
@@ -398,40 +422,52 @@ async function importPlans(
 
   const validPlans = plans.filter((p) => {
     const name = p.name as string;
-    if (!name) return false;
-    if (existingNameSet.has(name)) return false;
+    if (!name) {
+      skipReasons["缺少 name 字段"] = (skipReasons["缺少 name 字段"] || 0) + 1;
+      return false;
+    }
+    if (existingNameSet.has(name)) {
+      skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
+      return false;
+    }
     return true;
   });
 
   skipped += plans.length - validPlans.length;
 
   if (validPlans.length === 0) {
-    return { imported, skipped };
+    return { imported, skipped, skipReasons };
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const batchData = validPlans.map((p) => ({
-    id: generateId(),
-    name: p.name as string,
-    tokenQuota: (p.tokenQuota as number) ?? 0,
-    callLimit: (p.callLimit as number) ?? null,
-    rpmLimit: (p.rpmLimit as number) ?? null,
-    tpmLimit: (p.tpmLimit as number) ?? null,
-    resetPeriod: (p.resetPeriod as string) || "monthly",
-    enabled: true,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  for (let i = 0; i < validPlans.length; i += BATCH_SIZE) {
+    const batch = validPlans.slice(i, i + BATCH_SIZE);
+    const batchData = batch.map((p) => ({
+      id: generateId(),
+      name: p.name as string,
+      tokenQuota: (p.tokenQuota as number) ?? 0,
+      callLimit: (p.callLimit as number) ?? null,
+      rpmLimit: (p.rpmLimit as number) ?? null,
+      tpmLimit: (p.tpmLimit as number) ?? null,
+      resetPeriod: (p.resetPeriod as string) || "monthly",
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    }));
 
-  try {
-    const result = await db.plans.createMany({ data: batchData });
-    imported += result.count;
-  } catch (err) {
-    console.error("[import] 批量导入套餐失败:", err);
-    skipped += validPlans.length;
+    try {
+      const result = await db.plans.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入套餐失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
+    }
   }
 
-  return { imported, skipped };
+  return { imported, skipped, skipReasons };
 }
 
 /**
@@ -739,29 +775,31 @@ async function importRequestLogs(
   let skipped = 0;
   const skipReasons: Record<string, number> = {};
 
-  // 分离有效和无效记录，逐条记录跳过原因
+  // 分离有效和无效记录，同时收集需要校验的外键 ID
   const validLogs: Array<Record<string, unknown>> = [];
+  const referencedKeyIds = new Set<string>();
+  const referencedPlatformIds = new Set<string>();
+
   for (const log of logs) {
     if (!log.model) {
       skipReasons["缺少 model 字段"] = (skipReasons["缺少 model 字段"] || 0) + 1;
       skipped++;
-    } else {
-      validLogs.push(log);
+      continue;
     }
+    validLogs.push(log);
+    if (log.keyId) referencedKeyIds.add(log.keyId as string);
+    if (log.platformId) referencedPlatformIds.add(log.platformId as string);
   }
 
   // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
   // 备份中的旧 ID 在目标库中可能不存在（导入 platforms/apiKeys 时生成了新 UUID），需置 null 避免外键约束失败
-  const referencedKeyIds = [...new Set(validLogs.map((l) => l.keyId).filter(Boolean) as string[])];
-  const referencedPlatformIds = [...new Set(validLogs.map((l) => l.platformId).filter(Boolean) as string[])];
-
-  const existingKeyRows = referencedKeyIds.length > 0
-    ? await db.apiKeys.findMany({ where: { id: { in: referencedKeyIds } }, select: { id: true } })
+  const existingKeyRows = referencedKeyIds.size > 0
+    ? await db.apiKeys.findMany({ where: { id: { in: Array.from(referencedKeyIds) } }, select: { id: true } })
     : [];
   const existingKeyIds = new Set(existingKeyRows.map((r) => r.id));
 
-  const existingPlatformRows = referencedPlatformIds.length > 0
-    ? await db.platforms.findMany({ where: { id: { in: referencedPlatformIds } }, select: { id: true } })
+  const existingPlatformRows = referencedPlatformIds.size > 0
+    ? await db.platforms.findMany({ where: { id: { in: Array.from(referencedPlatformIds) } }, select: { id: true } })
     : [];
   const existingPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
 
