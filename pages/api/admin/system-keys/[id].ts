@@ -8,6 +8,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
+import { requireCsrf } from "../_csrf";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -18,6 +19,8 @@ function now(): number {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   const { id } = req.query;
   if (typeof id !== "string") {
     return res.status(400).json({ success: false, error: "无效的 ID" });
@@ -72,7 +75,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     return res.status(200).json({ success: true, message: "系统 Key 已删除" });
   } catch (err) {
     console.error("[DELETE /api/admin/system-keys] 删除系统 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "删除系统 Key 失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "删除系统 Key 失败" });
   }
 }
 
@@ -108,6 +111,6 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     return res.status(200).json({ success: true, message: enabled ? "系统 Key 已启用" : "系统 Key 已禁用" });
   } catch (err) {
     console.error("[PATCH /api/admin/system-keys] 更新系统 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "更新系统 Key 失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "更新系统 Key 失败" });
   }
 }

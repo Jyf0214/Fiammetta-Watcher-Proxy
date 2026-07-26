@@ -9,6 +9,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
+import { requireCsrf } from "../_csrf";
 
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
@@ -55,7 +56,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[GET /api/admin/platforms/[id]] 获取平台失败:", err);
-    return res.status(500).json({ success: false, error: "获取平台失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "获取平台失败" });
   }
 }
 
@@ -308,7 +309,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[PUT /api/admin/platforms/[id]] 更新平台失败:", err);
-    return res.status(500).json({ success: false, error: "更新平台失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "更新平台失败" });
   }
 }
 
@@ -373,7 +374,6 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     return res.status(500).json({
       success: false,
       error: "删除平台失败",
-      detail: err instanceof Error ? err.message : String(err),
     });
   }
 }
@@ -382,6 +382,8 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
  * 路由分发
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   const id = String(req.query.id || "");
 
   switch (req.method) {

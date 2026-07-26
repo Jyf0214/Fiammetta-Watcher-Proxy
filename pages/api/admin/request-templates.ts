@@ -14,6 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -70,6 +71,8 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  if (!(await requireCsrf(req, res))) return;
+
   const admin = await getAdminFromRequest(req);
   if (!admin) {
     res.status(401).json({ success: false, error: "未授权" });
@@ -223,6 +226,6 @@ export default async function handler(
     res.status(405).json({ success: false, error: "Method not allowed" });
   } catch (error) {
     console.error("[request-templates] 操作失败:", error);
-    res.status(500).json({ success: false, error: "操作失败", detail: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({ success: false, error: "操作失败" });
   }
 }

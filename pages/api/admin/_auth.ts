@@ -10,7 +10,21 @@
 
 import type { NextApiRequest } from "next";
 import { verifyToken } from "@/lib/auth";
+import { createDb } from "@/lib/prisma";
 import { validateSystemApiKey } from "./_system-auth";
+
+const COOKIE_NAME = "admin_token";
+
+/** 从请求 Cookie 中提取指定名称的 cookie 值 */
+export function getTokenFromCookie(req: NextApiRequest): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+  for (const cookie of cookieHeader.split(";")) {
+    const [name, ...rest] = cookie.trim().split("=");
+    if (name === COOKIE_NAME) return rest.join("=");
+  }
+  return null;
+}
 
 /** 统一认证结果 */
 export interface AuthResult {
@@ -49,6 +63,21 @@ export async function getAdminFromRequest(
     if (token) {
       const payload = await verifyToken(token, { JWT_SECRET: process.env.JWT_SECRET });
       if (payload && payload.adminId && payload.username) {
+        // 验证 tokenVersion（吊销机制）
+        if (payload.adminId === "env-admin") {
+          try {
+            const db = await createDb();
+            const admin = await db.admins.findFirst({
+              where: { username: payload.username as string },
+              select: { tokenVersion: true },
+            });
+            if (admin && admin.tokenVersion !== ((payload as unknown as Record<string, unknown>).tokenVersion as number)) {
+              return null; // token 已被吊销
+            }
+          } catch {
+            // 数据库查询失败，放行（避免数据库问题导致所有请求被拒）
+          }
+        }
         return {
           adminId: payload.adminId as string,
           username: payload.username as string,
@@ -72,3 +101,6 @@ export async function getAdminFromRequest(
 
   return null;
 }
+
+// Next.js 16 类型检查器将 pages/api/ 下所有文件视为路由，工具模块导出空 handler 避免误报
+export default function _noop() {}

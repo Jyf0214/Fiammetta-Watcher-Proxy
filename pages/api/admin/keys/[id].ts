@@ -12,6 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "../_auth";
+import { requireCsrf } from "../_csrf";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -28,6 +29,8 @@ function getClientIp(req: NextApiRequest): string {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   const admin = await getAdminFromRequest(req);
   if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
 
@@ -52,7 +55,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adm
     return res.status(200).json({ success: true, data: { ...key, key: maskKey(key.key) } });
   } catch (err) {
     console.error("[GET /api/admin/keys/[id]] 获取 Key 详情失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "获取 Key 详情失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "获取 Key 详情失败", type: "server_error" } });
   }
 }
 
@@ -141,7 +144,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key) }, message: "API Key 更新成功" });
   } catch (err) {
     console.error("[PUT /api/admin/keys/[id]] 更新失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "更新 API Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "更新 API Key 失败", type: "server_error" } });
   }
 }
 
@@ -167,6 +170,6 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogsResult.count });
   } catch (err) {
     console.error("[DELETE /api/admin/keys/[id]] 删除失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "删除 API Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "删除 API Key 失败", type: "server_error" } });
   }
 }

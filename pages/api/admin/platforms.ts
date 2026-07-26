@@ -8,11 +8,14 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 /**
  * GET /api/admin/platforms — 获取平台列表
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   if (req.method === "GET") {
     const admin = await getAdminFromRequest(req);
     if (!admin) {
@@ -39,7 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (err) {
       console.error("[GET /api/admin/platforms] 获取平台列表失败:", err);
-      return res.status(500).json({ success: false, error: "获取平台列表失败", detail: err instanceof Error ? err.message : String(err) });
+      return res.status(500).json({ success: false, error: "获取平台列表失败" });
     }
   }
 
@@ -286,7 +289,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (err) {
       console.error("[POST /api/admin/platforms] 创建平台失败:", err);
-      return res.status(500).json({ success: false, error: "创建平台失败", detail: err instanceof Error ? err.message : String(err) });
+      return res.status(500).json({ success: false, error: "创建平台失败" });
     }
   }
 

@@ -12,11 +12,14 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  if (!(await requireCsrf(req, res))) return;
+
   const admin = await getAdminFromRequest(req);
   if (!admin) {
     res.status(401).json({ success: false, error: "未授权" });
@@ -102,6 +105,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/stats] 获取统计数据失败:", err);
-    res.status(500).json({ success: false, error: "获取统计数据失败", detail: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "获取统计数据失败" });
   }
 }

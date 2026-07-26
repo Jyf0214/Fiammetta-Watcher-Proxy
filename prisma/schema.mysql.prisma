@@ -20,6 +20,7 @@ model admins {
   id           String @id
   username     String @unique
   passwordHash String @map("password_hash")
+  tokenVersion Int    @default(0) @map("token_version")
   createdAt    Int    @default(0) @map("created_at")
   updatedAt    Int    @default(0) @map("updated_at")
 

@@ -20,9 +20,9 @@ const nextConfig: NextConfig = {
   },
   // 生产环境禁用源码映射，防止源码泄露
   productionBrowserSourceMaps: false,
-  // 临时跳过 TypeScript 类型检查（迁移期间）
+  // TypeScript 类型检查（生产构建必须启用）
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   // 安全响应头
   async headers() {

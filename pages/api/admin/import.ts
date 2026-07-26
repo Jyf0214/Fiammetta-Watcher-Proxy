@@ -17,6 +17,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -60,6 +61,8 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  if (!(await requireCsrf(req, res))) return;
+
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     res.status(405).json({ success: false, error: "Method not allowed" });
@@ -236,7 +239,7 @@ export default async function handler(
       if (!res.headersSent) {
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       }
-      res.write(JSON.stringify({ type: "error", error: "导入数据失败", detail: err instanceof Error ? err.message : String(err) }) + "\n");
+      res.write(JSON.stringify({ type: "error", error: "导入数据失败" }) + "\n");
       res.end();
     } catch {
       // 如果流已关闭，忽略
@@ -275,7 +278,7 @@ async function importPlatforms(
 
   // 预加载已有平台名称，用于去重
   const existingNames = await db.platforms.findMany({ select: { name: true } });
-  const existingNameSet = new Set(existingNames.map((r) => r.name));
+  const existingNameSet = new Set((existingNames as any[]).map((r) => r.name));
 
   // 逐条分析跳过原因
   const validPlatforms = platforms.filter((p) => {
@@ -355,7 +358,7 @@ async function importModelMaps(
 
   // 预加载已有 alias，用于去重
   const existingAliases = await db.modelMappings.findMany({ select: { alias: true } });
-  const existingAliasSet = new Set(existingAliases.map((r) => r.alias));
+  const existingAliasSet = new Set((existingAliases as any[]).map((r) => r.alias));
 
   const validMaps = modelMaps.filter((m) => {
     const alias = m.alias as string;
@@ -418,7 +421,7 @@ async function importPlans(
 
   // 预加载已有名称，用于去重
   const existingNames = await db.plans.findMany({ select: { name: true } });
-  const existingNameSet = new Set(existingNames.map((r) => r.name));
+  const existingNameSet = new Set((existingNames as any[]).map((r) => r.name));
 
   const validPlans = plans.filter((p) => {
     const name = p.name as string;
@@ -485,7 +488,7 @@ async function importApiKeys(
 
   // 预加载已有 key 集合，用于去重
   const existingKeys = await db.apiKeys.findMany({ select: { key: true } });
-  const existingKeySet = new Set(existingKeys.map((r) => r.key));
+  const existingKeySet = new Set((existingKeys as any[]).map((r) => r.key));
 
   // 逐条分析跳过原因
   const validKeys = apiKeysData.filter((k) => {
@@ -567,7 +570,7 @@ async function importConfigs(
 
   // 预加载已有配置
   const existingConfigs = await db.configs.findMany({ select: { key: true } });
-  const existingKeySet = new Set(existingConfigs.map((r) => r.key));
+  const existingKeySet = new Set((existingConfigs as any[]).map((r) => r.key));
 
   // 分离插入和更新
   const toInsert: Array<Record<string, unknown>> = [];
@@ -666,7 +669,7 @@ async function importAuditLogs(
 
   // 预加载已有 adminId 集合，用于外键校验
   const existingAdminRows = await db.admins.findMany({ select: { id: true } });
-  const validAdminIds = new Set(existingAdminRows.map((r) => r.id));
+  const validAdminIds = new Set((existingAdminRows as any[]).map((r) => r.id));
 
   // 分离有效和无效记录，逐条记录跳过原因
   const validLogs: Array<Record<string, unknown>> = [];
@@ -796,12 +799,12 @@ async function importRequestLogs(
   const existingKeyRows = referencedKeyIds.size > 0
     ? await db.apiKeys.findMany({ where: { id: { in: Array.from(referencedKeyIds) } }, select: { id: true } })
     : [];
-  const existingKeyIds = new Set(existingKeyRows.map((r) => r.id));
+  const existingKeyIds = new Set((existingKeyRows as any[]).map((r) => r.id));
 
   const existingPlatformRows = referencedPlatformIds.size > 0
     ? await db.platforms.findMany({ where: { id: { in: Array.from(referencedPlatformIds) } }, select: { id: true } })
     : [];
-  const existingPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
+  const existingPlatformIds = new Set((existingPlatformRows as any[]).map((r) => r.id));
 
   // 构建安全的插入数据：外键不存在时置 null
   const buildValues = (log: Record<string, unknown>) => {

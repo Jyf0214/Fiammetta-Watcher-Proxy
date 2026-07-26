@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -34,6 +35,8 @@ function getClientIp(req: NextApiRequest): string {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   switch (req.method) {
     case "GET": return handleGet(req, res);
     case "POST": return handlePost(req, res);
@@ -50,11 +53,11 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   try {
     const db = await createDb();
     const keys = await db.apiKeys.findMany({ orderBy: { createdAt: "desc" } });
-    const maskedKeys = keys.map((k) => ({ ...k, key: maskKey(k.key) }));
+    const maskedKeys = (keys as any[]).map((k) => ({ ...k, key: maskKey(k.key) }));
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
     console.error("[GET /api/admin/keys] 获取 Key 列表失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "获取 Key 列表失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "获取 Key 列表失败", type: "server_error" } });
   }
 }
 
@@ -139,6 +142,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: newKey, message: "API Key 创建成功" });
   } catch (err) {
     console.error("[POST /api/admin/keys] 创建 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "创建 Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "创建 Key 失败", type: "server_error" } });
   }
 }

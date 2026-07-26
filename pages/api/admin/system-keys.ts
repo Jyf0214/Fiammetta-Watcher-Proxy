@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { requireCsrf } from "./_csrf";
 
 // ==================== 工具函数 ====================
 
@@ -37,6 +38,8 @@ function now(): number {
 // ==================== Handler ====================
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!(await requireCsrf(req, res))) return;
+
   switch (req.method) {
     case "GET":
       return handleGet(req, res);
@@ -62,7 +65,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
       orderBy: { createdAt: "desc" },
     });
 
-    const maskedKeys = keys.map((k) => ({
+    const maskedKeys = (keys as any[]).map((k) => ({
       ...k,
       key: maskKey(k.key),
     }));
@@ -70,7 +73,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
     console.error("[GET /api/admin/system-keys] 获取系统 Key 列表失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "获取系统 Key 列表失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "获取系统 Key 列表失败" });
   }
 }
 
@@ -133,6 +136,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     });
   } catch (err) {
     console.error("[POST /api/admin/system-keys] 创建系统 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: "创建系统 Key 失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "创建系统 Key 失败" });
   }
 }
