@@ -135,10 +135,19 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
                 content = content.replace(k, v)
 
         # 仅替换独立的 DB_TYPE 行（精确匹配行首缩进与双引号/单引号配置）
+        # 注意：不能用 f'\1' —— Python f-string 会把 \1 解释为 SOH 控制字符，破坏 TOML key
         if path.endswith(".toml"):
-            content = re.sub(r'(^\s*DB_TYPE\s*=\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(
+                r'(^\s*DB_TYPE\s*=\s*)"[^"]*"',
+                lambda m: m.group(1) + f'"{db_type}"',
+                content, flags=re.MULTILINE,
+            )
         else:
-            content = re.sub(r'(^\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(
+                r'(^\s*"DB_TYPE"\s*:\s*)"[^"]*"',
+                lambda m: m.group(1) + f'"{db_type}"',
+                content, flags=re.MULTILINE,
+            )
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
