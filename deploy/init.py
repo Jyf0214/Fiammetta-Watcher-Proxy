@@ -263,9 +263,12 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
     cf_api("PATCH", f"/pages/projects/{PAGES_PROJECT}", {"deployment_configs": {"production": prod_config}})
     print("  ✅ Pages 绑定与环境变量同步成功")
 
-    # 如果是非 D1 外部数据库模式，通过 Wrangler 设置 Worker 的 DATABASE_URL Secret
+    # Worker Secret 同步（非 D1 外部数据库模式下需要设置 DATABASE_URL）
+    print(f"\n🔐 同步 Worker Secret (DB_TYPE={db_type})...")
     if db_type != "d1" and DATABASE_URL:
         set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
+    else:
+        print(f"  ⏭️  跳过 Worker DATABASE_URL Secret（DB_TYPE={db_type}，非外部数据库模式）")
 
 
 def run_post(db_type: str):
