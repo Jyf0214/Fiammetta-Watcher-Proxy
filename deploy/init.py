@@ -136,9 +136,9 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
 
         # 仅替换独立的 DB_TYPE 行，防止乱穿匹配
         if path.endswith(".toml"):
-            content = re.sub(r'^(DB_TYPE\s*=\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(r'^(DB_TYPE\s*=\s*)"[^"]*"', f'\\1"{db_type}"', content, flags=re.MULTILINE)
         else:
-            content = re.sub(r'("^?\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(r'("^?\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\\1"{db_type}"', content, flags=re.MULTILINE)
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -162,7 +162,7 @@ def set_secret(key: str, value: str, extra_args: list):
 def init_d1() -> str:
     print(f"\n📦 初始化 D1 数据库: {D1_NAME}")
     cf_api("POST", "/d1/database", {"name": D1_NAME}, ok_codes=[7502])
-
+    
     data, _, _ = cf_api("GET", "/d1/database?per_page=1000")
     dbs = data.get("result", [])
     d1_id = next((db["uuid"] for db in dbs if db.get("name") == D1_NAME), None)
