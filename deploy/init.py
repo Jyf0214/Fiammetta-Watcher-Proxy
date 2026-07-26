@@ -263,6 +263,10 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
     cf_api("PATCH", f"/pages/projects/{PAGES_PROJECT}", {"deployment_configs": {"production": prod_config}})
     print("  ✅ Pages 绑定与环境变量同步成功")
 
+    # 如果是非 D1 外部数据库模式，通过 Wrangler 设置 Worker 的 DATABASE_URL Secret
+    if db_type != "d1" and DATABASE_URL:
+        set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
+
 
 def run_post(db_type: str):
     """设置 Pages 项目与 Secrets"""
