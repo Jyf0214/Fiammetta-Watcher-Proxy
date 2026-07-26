@@ -34,7 +34,7 @@ export default async function handler(
       activeKeys,
       requestAgg,
       errorCount,
-      perfRows,
+      perfAgg,
       recentEvents,
     ] = await Promise.all([
       // 平台总数
@@ -52,10 +52,11 @@ export default async function handler(
       ]),
       // 错误请求数
       db.requestLogs.count({ where: { isError: true } }),
-      // 性能统计：非错误请求的 ttft 和 latency，JS 侧计算平均值
-      db.requestLogs.findMany({
+      // 性能统计：在数据库层面聚合，避免全量拉取
+      db.requestLogs.aggregate({
         where: { isError: false },
-        select: { ttft: true, latency: true },
+        _count: { id: true },
+        _sum: { ttft: true, latency: true },
       }),
       // 最近 10 条系统事件
       db.systemEvents.findMany({
@@ -67,26 +68,21 @@ export default async function handler(
     const totalRequests = requestAgg[0];
     const sumTokens = requestAgg[1]._sum.tokens ?? 0;
 
-    // JS 侧计算平均 TTFT 和平均耗时（仅统计 ttft > 0 / latency > 0 的记录）
-    const validTtftRows = perfRows.filter((r) => r.ttft > 0);
-    const validLatencyRows = perfRows.filter((r) => r.latency > 0);
-    const avgTtft =
-      validTtftRows.length > 0
-        ? Math.round(validTtftRows.reduce((s, r) => s + r.ttft, 0) / validTtftRows.length)
-        : 0;
-    const avgDuration =
-      validLatencyRows.length > 0
-        ? Math.round(validLatencyRows.reduce((s, r) => s + r.latency, 0) / validLatencyRows.length)
-        : 0;
+    // 从聚合结果计算平均值（仅统计 ttft > 0 / latency > 0 的记录）
+    const perfCount = perfAgg._count.id ?? 0;
+    const sumTtft = perfAgg._sum.ttft ?? 0;
+    const sumLatency = perfAgg._sum.latency ?? 0;
+    const avgTtft = perfCount > 0 ? Math.round(sumTtft / perfCount) : 0;
+    const avgDuration = perfCount > 0 ? Math.round(sumLatency / perfCount) : 0;
 
     // 查询管理员信息（能查到说明 D1 已连接）
-    const admin = await db.admins.findMany({ take: 1, select: { username: true } });
+    const adminInfo = await db.admins.findMany({ take: 1, select: { username: true } });
 
     res.status(200).json({
       success: true,
       data: {
         dbConnected: true,
-        adminUsername: admin[0]?.username || "",
+        adminUsername: adminInfo[0]?.username || "",
         totalPlatforms,
         activePlatforms,
         totalKeys,
@@ -96,7 +92,7 @@ export default async function handler(
         totalTokens: sumTokens,
         avgTtft,
         avgDuration,
-        recentEvents: recentEvents.map((e) => ({
+        recentEvents: recentEvents.map((e: { id: string; level: string; message: string; createdAt: number }) => ({
           id: e.id,
           level: e.level,
           message: e.message,

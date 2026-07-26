@@ -165,8 +165,6 @@ model requestLogs {
   errorMessage     String? @map("error_message")
   createdAt        Int     @default(0) @map("created_at")
 
-  @@index([keyId])
-  @@index([platformId])
   @@index([createdAt])
   @@index([keyId, createdAt])
   @@index([platformId, createdAt])

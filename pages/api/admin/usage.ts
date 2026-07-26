@@ -7,7 +7,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/prisma";
+import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
 
 /**
@@ -18,18 +18,6 @@ function maskKey(key: string): string {
     return key.substring(0, 8) + "..." + key.substring(key.length - 4);
   }
   return "***";
-}
-
-/** 单个 Key 的聚合统计结果 */
-interface KeyAgg {
-  totalRequests: number;
-  totalTokens: number;
-  promptTokens: number;
-  completionTokens: number;
-  avgTtft: number;
-  avgDuration: number;
-  firstRequestAt: number | null;
-  lastRequestAt: number | null;
 }
 
 export default async function handler(
@@ -82,80 +70,43 @@ export default async function handler(
       where.keyId = keyId;
     }
 
-    // 通过 ORM 获取所有匹配的请求日志
-    const logs = await orm.requestLogs.findMany({
-      where,
-      select: {
-        keyId: true,
+    // 用 groupBy 在数据库层面完成聚合，避免全量拉取日志到内存
+    const grouped: any[] = await orm.requestLogs.groupBy({
+      by: ["keyId"],
+      where: where as Prisma.requestLogsWhereInput,
+      _count: { id: true },
+      _sum: {
         tokens: true,
         promptTokens: true,
         completionTokens: true,
         ttft: true,
         latency: true,
-        createdAt: true,
       },
+      _min: { createdAt: true },
+      _max: { createdAt: true },
     });
 
-    // 按 keyId 分组，手动计算聚合值
-    const statsMap = new Map<string, KeyAgg>();
-
-    for (const log of logs) {
-      if (!log.keyId) continue;
-
-      let agg = statsMap.get(log.keyId);
-      if (!agg) {
-        agg = {
-          totalRequests: 0,
-          totalTokens: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          avgTtft: 0,
-          avgDuration: 0,
-          firstRequestAt: null,
-          lastRequestAt: null,
-        };
-        statsMap.set(log.keyId, agg);
-      }
-
-      agg.totalRequests += 1;
-      agg.totalTokens += log.tokens ?? 0;
-      agg.promptTokens += log.promptTokens ?? 0;
-      agg.completionTokens += log.completionTokens ?? 0;
-
-      // 累加用于计算平均值
-      agg.avgTtft += log.ttft ?? 0;
-      agg.avgDuration += log.latency ?? 0;
-
-      // 记录最早和最晚请求时间（createdAt 已是 Unix 秒）
-      const ts = log.createdAt;
-      if (agg.firstRequestAt === null || ts < agg.firstRequestAt) {
-        agg.firstRequestAt = ts;
-      }
-      if (agg.lastRequestAt === null || ts > agg.lastRequestAt) {
-        agg.lastRequestAt = ts;
-      }
-    }
-
-    // 计算平均值
-    for (const agg of statsMap.values()) {
-      if (agg.totalRequests > 0) {
-        agg.avgTtft = Math.round(agg.avgTtft / agg.totalRequests);
-        agg.avgDuration = Math.round(agg.avgDuration / agg.totalRequests);
-      }
-    }
+    // 按 keyId 建索引
+    const statsMap = new Map<string, typeof grouped[number]>(
+      grouped
+        .filter((g: typeof grouped[number]) => g.keyId != null)
+        .map((g: typeof grouped[number]) => [g.keyId as string, g])
+    );
 
     // 合并 Key 信息和统计数据
-    const result = keys.map((k) => {
-      const keyStats = statsMap.get(k.id);
-      const totalTokens = keyStats?.totalTokens ?? 0;
-      const totalRequests = keyStats?.totalRequests ?? 0;
+    const result = keys.map((k: { id: string; name: string; key: string; status: string; tokenLimit: number | null; usedTokens: number; createdAt: number }) => {
+      const g = statsMap.get(k.id);
+      const totalTokens = g?._sum.tokens ?? 0;
+      const totalRequests = g?._count.id ?? 0;
+      const firstRequestAt = g?._min.createdAt ?? null;
+      const lastRequestAt = g?._max.createdAt ?? null;
 
       // 计算实际活动时间跨度
       let timeSpanSeconds = 0;
-      if (keyStats?.firstRequestAt != null && keyStats?.lastRequestAt != null) {
-        timeSpanSeconds = Math.max(1, keyStats.lastRequestAt - keyStats.firstRequestAt);
-      } else if (keyStats?.firstRequestAt != null) {
-        timeSpanSeconds = Math.max(1, now - keyStats.firstRequestAt);
+      if (firstRequestAt != null && lastRequestAt != null) {
+        timeSpanSeconds = Math.max(1, lastRequestAt - firstRequestAt);
+      } else if (firstRequestAt != null) {
+        timeSpanSeconds = Math.max(1, now - firstRequestAt);
       }
 
       return {
@@ -169,24 +120,24 @@ export default async function handler(
         stats: {
           totalRequests,
           totalTokens,
-          promptTokens: keyStats?.promptTokens ?? 0,
-          completionTokens: keyStats?.completionTokens ?? 0,
-          avgTtft: keyStats?.avgTtft ?? 0,
-          avgDuration: keyStats?.avgDuration ?? 0,
+          promptTokens: g?._sum.promptTokens ?? 0,
+          completionTokens: g?._sum.completionTokens ?? 0,
+          avgTtft: totalRequests > 0 ? Math.round((g?._sum.ttft ?? 0) / totalRequests) : 0,
+          avgDuration: totalRequests > 0 ? Math.round((g?._sum.latency ?? 0) / totalRequests) : 0,
           avgTokensPerSecond: timeSpanSeconds > 0
             ? Math.round((totalTokens / timeSpanSeconds) * 100) / 100
             : 0,
           avgRequestsPerMinute: timeSpanSeconds > 0
             ? Math.round(((totalRequests / timeSpanSeconds) * 60) * 100) / 100
             : 0,
-          firstRequestAt: keyStats?.firstRequestAt ?? null,
+          firstRequestAt,
         },
       };
     });
 
     // 如果指定了 keyId，只返回该 Key 的数据
     if (keyId) {
-      const filtered = result.filter((r) => r.id === keyId);
+      const filtered = result.filter((r: { id: string }) => r.id === keyId);
       res.status(200).json({
         success: true,
         data: filtered.length > 0 ? filtered[0] : null,
