@@ -49,29 +49,21 @@ function resolveDbKind(env?: Record<string, unknown>): DbKind {
 
 /**
  * 检测当前运行环境：Pages 还是 Worker
+ *
+ * 只要能从 @opennextjs/cloudflare 拿到 env 就认为是 Pages 环境，
+ * 不再硬编码检查 env.DB（Hyperdrive 模式下没有 D1 binding）。
  */
-async function detectEnvironment(): Promise<{ kind: "pages" | "worker"; d1Binding?: unknown; pagesEnv?: Record<string, unknown> }> {
+async function detectEnvironment(): Promise<{ kind: "pages" | "worker"; pagesEnv?: Record<string, unknown> }> {
   // 尝试 Pages 环境（@opennextjs/cloudflare）
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const ctx = await getCloudflareContext({ async: true });
     const env = ctx.env as Record<string, unknown>;
-    if (env.DB) {
-      return { kind: "pages", d1Binding: env.DB, pagesEnv: env };
+    if (env && Object.keys(env).length > 0) {
+      return { kind: "pages", pagesEnv: env };
     }
   } catch {
     // 非 Pages 环境
-  }
-
-  // 尝试 Worker 全局 env
-  try {
-    // @ts-expect-error Cloudflare Workers 全局 env
-    if (globalThis.__DB__) {
-      // @ts-expect-error Cloudflare Workers 全局 env
-      return { kind: "worker", d1Binding: globalThis.__DB__ };
-    }
-  } catch {
-    // 忽略
   }
 
   return { kind: "worker" };
@@ -95,16 +87,8 @@ async function createPrismaInstance(
       const { PrismaClient } = await import("../src/generated/d1/client");
       const { PrismaD1 } = await import("@prisma/adapter-d1");
 
-      let d1Binding: unknown = env?.DB;
-
-      if (!d1Binding) {
-        const detected = await detectEnvironment();
-        d1Binding = detected.d1Binding;
-      }
-
-      if (!d1Binding) {
-        throw new Error("D1 数据库未配置：未获取到 D1 binding");
-      }
+      const d1Binding = env?.DB || (globalThis as any).__DB__;
+      if (!d1Binding) throw new Error("D1 数据库未配置：未获取到 DB binding");
 
       const adapter = new PrismaD1(d1Binding as any);
       return new PrismaClient({ adapter });
@@ -115,7 +99,7 @@ async function createPrismaInstance(
       const { PrismaClient } = await import("../src/generated/mysql/client");
       const { PrismaTiDBCloud } = await import("@tidbcloud/prisma-adapter");
 
-      const url = env?.TIDB_URL as string || process.env.TIDB_URL || process.env.DATABASE_URL;
+      const url = (env?.TIDB_URL as string) || process.env.TIDB_URL || process.env.DATABASE_URL;
       if (!url) throw new Error("TIDB_URL 或 DATABASE_URL 未配置");
 
       const adapter = new PrismaTiDBCloud({ url });
@@ -126,11 +110,13 @@ async function createPrismaInstance(
     case "pg": {
       const { PrismaClient } = await import("../src/generated/pg/client");
       const { PrismaPg } = await import("@prisma/adapter-pg");
+      const { Pool } = await import("pg");
 
-      const url = env?.PG_URL as string || process.env.PG_URL || process.env.DATABASE_URL;
+      const url = (env?.PG_URL as string) || process.env.PG_URL || process.env.DATABASE_URL;
       if (!url) throw new Error("PG_URL 或 DATABASE_URL 未配置");
 
-      const adapter = new PrismaPg({ connectionString: url });
+      const pool = new Pool({ connectionString: url });
+      const adapter = new PrismaPg(pool);
       return new PrismaClient({ adapter });
     }
 
@@ -138,11 +124,15 @@ async function createPrismaInstance(
     case "hyperdrive": {
       const { PrismaClient } = await import("../src/generated/pg/client");
       const { PrismaPg } = await import("@prisma/adapter-pg");
+      const { Pool } = await import("pg");
 
       const hyperdrive = env?.HYPERDRIVE as { connectionString: string } | undefined;
-      if (!hyperdrive?.connectionString) throw new Error("HYPERDRIVE binding 未配置");
+      if (!hyperdrive?.connectionString) {
+        throw new Error("HYPERDRIVE binding 未配置（请检查 Cloudflare 绑定的名称是否叫 HYPERDRIVE）");
+      }
 
-      const adapter = new PrismaPg({ connectionString: hyperdrive.connectionString });
+      const pool = new Pool({ connectionString: hyperdrive.connectionString });
+      const adapter = new PrismaPg(pool);
       return new PrismaClient({ adapter });
     }
 
