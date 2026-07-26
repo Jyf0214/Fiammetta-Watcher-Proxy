@@ -2,16 +2,16 @@
 set -o pipefail
 # Pre-push: ESLint + TypeScript + 测试 + 完整构建（零容忍）
 
-# 0. 主 Schema 文件和 init.sql 必须同时提交（方言 schema 由主 schema 派生，不要求同步）
+# 0. 所有 Schema 文件和 init.sql 必须同时提交
 LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
-HAS_MAIN_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep "^prisma/schema\.prisma$")
+HAS_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep -E "^prisma/schema\..*\.prisma$|^prisma/schema\.prisma$")
 HAS_INITSQL=$(echo "$LAST_COMMIT_FILES" | grep "^init.sql$")
-if [ -n "$HAS_MAIN_PRISMA" ] && [ -z "$HAS_INITSQL" ]; then
-  echo "❌ [pre-push] 主 Schema 文件已修改但 init.sql 未同步提交"
+if [ -n "$HAS_PRISMA" ] && [ -z "$HAS_INITSQL" ]; then
+  echo "❌ [pre-push] Schema 文件已修改但 init.sql 未同步提交"
   exit 1
 fi
-if [ -z "$HAS_MAIN_PRISMA" ] && [ -n "$HAS_INITSQL" ]; then
-  echo "❌ [pre-push] init.sql 已修改但主 Schema 文件未同步提交"
+if [ -z "$HAS_PRISMA" ] && [ -n "$HAS_INITSQL" ]; then
+  echo "❌ [pre-push] init.sql 已修改但 Schema 文件未同步提交"
   exit 1
 fi
 
