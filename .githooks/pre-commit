@@ -1,16 +1,16 @@
 #!/bin/sh
 # Pre-commit: ESLint + TypeScript 类型检查（零容忍：零 error 零 warning）
 
-# 0. 所有 Schema 文件和 init.sql 必须同时提交
+# 0. 主 Schema 文件和 init.sql 必须同时提交（方言 schema 由主 schema 派生，不要求同步）
 STAGED_FILES=$(git diff --cached --name-only)
-STAGED_PRISMA=$(echo "$STAGED_FILES" | grep -E "^prisma/schema\..*\.prisma$|^prisma/schema\.prisma$")
+STAGED_MAIN_PRISMA=$(echo "$STAGED_FILES" | grep "^prisma/schema\.prisma$")
 STAGED_INITSQL=$(echo "$STAGED_FILES" | grep "^init.sql$")
-if [ -n "$STAGED_PRISMA" ] && [ -z "$STAGED_INITSQL" ]; then
-  echo "❌ [pre-commit] Schema 文件已修改但 init.sql 未同步提交"
+if [ -n "$STAGED_MAIN_PRISMA" ] && [ -z "$STAGED_INITSQL" ]; then
+  echo "❌ [pre-commit] 主 Schema 文件已修改但 init.sql 未同步提交"
   exit 1
 fi
-if [ -z "$STAGED_PRISMA" ] && [ -n "$STAGED_INITSQL" ]; then
-  echo "❌ [pre-commit] init.sql 已修改但 Schema 文件未同步提交"
+if [ -z "$STAGED_MAIN_PRISMA" ] && [ -n "$STAGED_INITSQL" ]; then
+  echo "❌ [pre-commit] init.sql 已修改但主 Schema 文件未同步提交"
   exit 1
 fi
 
