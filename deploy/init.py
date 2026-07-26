@@ -526,14 +526,67 @@ def run_post(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
     print(f"\n🎉 Pages({PAGES_PROJECT}) + Secrets 配置完成")
 
 
+def _build_db_env_vars(resolved_type: str, database_url: str) -> dict:
+    """构建数据库相关的环境变量字典（DB_TYPE + DATABASE_URL + 方言特定变量）"""
+    env_vars = {
+        "DB_TYPE": {"type": "plain_text", "value": resolved_type},
+    }
+    # 只有外部数据库才需要设置 URL
+    if database_url:
+        env_vars["DATABASE_URL"] = {"type": "plain_text", "value": database_url}
+        if resolved_type == "tidb":
+            env_vars["TIDB_URL"] = {"type": "plain_text", "value": database_url}
+        elif resolved_type in ("pg", "hyperdrive"):
+            env_vars["PG_URL"] = {"type": "plain_text", "value": database_url}
+    return env_vars
+
+
+def _sync_worker_env_vars(db_env_vars: dict):
+    """通过 Cloudflare API 显式设置 Worker 环境变量，确保与 GitHub Secrets 同步"""
+    print(f"🔧 同步 Worker 环境变量: {', '.join(db_env_vars.keys())}")
+
+    # 读取 Worker 当前 settings（含已有 bindings）
+    data = api_request("GET", f"/workers/scripts/{WORKER_NAME}/settings")
+    if not data.get("success"):
+        print(f"  ⚠️ 无法读取 Worker settings: {data.get('errors', [{}])[0].get('message', '未知')}")
+        return
+
+    existing_bindings = data.get("result", {}).get("bindings", [])
+    # 保留非数据库的 bindings（如 D1、KV、Hyperdrive），替换数据库相关 bindings
+    non_db_bindings = [
+        b for b in existing_bindings
+        if b.get("name") not in db_env_vars
+    ]
+    new_db_bindings = [
+        {"name": name, "type": cfg["type"], "text": cfg["value"]}
+        for name, cfg in db_env_vars.items()
+    ]
+    all_bindings = non_db_bindings + new_db_bindings
+
+    # 写回 Worker settings
+    data = api_request("PUT", f"/workers/scripts/{WORKER_NAME}/settings", {
+        "bindings": all_bindings,
+    })
+    if data.get("success"):
+        print(f"  ✅ Worker 环境变量已同步")
+    else:
+        print(f"  ⚠️ Worker 环境变量同步失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+
+
 def run_post_deploy(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
     """在项目部署完成后运行：一键设置所有 Pages 绑定与环境变量，防止被覆盖"""
     resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
+    database_url = os.environ.get("DATABASE_URL", "")
 
     print(f"\n{'='*50}")
-    print(f"📦 统一配置 Pages 绑定与环境变量（post-deploy）")
+    print(f"📦 统一配置 Pages + Worker 绑定与环境变量（post-deploy）")
     print(f"{'='*50}")
 
+    # ---- 1. 同步 Worker 环境变量（通过 API 显式设置，不依赖 wrangler.toml [vars]）----
+    db_env_vars = _build_db_env_vars(resolved_type, database_url)
+    _sync_worker_env_vars(db_env_vars)
+
+    # ---- 2. 同步 Pages 绑定与环境变量 ----
     production_config = {
         "compatibility_flags": ["nodejs_compat"],
         "d1_databases": {"DB": {"id": d1_id}},
@@ -541,12 +594,7 @@ def run_post_deploy(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
         "services": {
             "WORKER": {"service": WORKER_NAME, "environment": "production"}
         },
-        "env_vars": {
-            "DB_TYPE": {
-                "type": "plain_text",
-                "value": resolved_type
-            }
-        }
+        "env_vars": db_env_vars,
     }
 
     if resolved_type == "hyperdrive" and hyperdrive_id:
@@ -561,7 +609,7 @@ def run_post_deploy(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
 
     if not data.get("success"):
         fail(f"Pages 统一配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ Pages 统一配置成功（D1, KV, Service, Hyperdrive 及 DB_TYPE 环境变量已全部绑定）")
+    print(f"  ✅ Pages 统一配置成功（D1, KV, Service, Hyperdrive 及环境变量已全部绑定）")
 
 
 # ==================== 入口 ====================
