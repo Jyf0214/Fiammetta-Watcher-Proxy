@@ -29,9 +29,11 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 | `d1`（默认） | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding |
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP |
 | `pg` | PostgreSQL 直连 | `@prisma/adapter-pg` | TCP |
-| `hyperdrive` | PostgreSQL via Hyperdrive | `@prisma/adapter-pg` | TCP（连接池加速） |
+| `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP（连接池加速）~~ |
 
-> **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。
+> ⚠️ `hyperdrive` 已弃用 — `pg.Pool` 与 Hyperdrive transaction 模式不兼容，请求严格交替成功/失败，且推荐的 `postgres.js` 驱动无法被 OpenNext 打包。
+
+> **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。免费版 Workers 存在 CPU/请求限制，批量导入日志（多条记录写入）时 API 可能超时不可用。
 
 ## 部署
 
@@ -47,7 +49,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 6. **初始化绑定和 Secrets（post）** — `deploy/init.py post` 创建 Pages + 绑定 + 设置所有 Secrets
 7. **部署 Pages** — `wrangler pages deploy .open-next`（管理后台）
 
-需要在 GitHub 仓库 Settings → Secrets 中配置：
+    需要在 GitHub 仓库 Settings → Secrets 中配置：
 
 | Secret | 说明 |
 |--------|------|
