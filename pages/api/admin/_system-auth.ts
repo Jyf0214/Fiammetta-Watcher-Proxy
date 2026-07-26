@@ -54,6 +54,3 @@ export async function validateSystemApiKey(
     return null;
   }
 }
-
-// Next.js 16 类型检查器将 pages/api/ 下所有文件视为路由，工具模块导出空 handler 避免误报
-export default function _noop() {}

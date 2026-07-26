@@ -8,14 +8,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
-import { requireCsrf } from "./_csrf";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  if (!(await requireCsrf(req, res))) return;
-
   const admin = await getAdminFromRequest(req);
   if (!admin) {
     res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
@@ -81,6 +78,6 @@ export default async function handler(
     res.status(405).json({ success: false, error: { message: "Method not allowed", type: "invalid_request_error" } });
   } catch (error) {
     console.error(`[API /api/admin/config] 操作失败:`, error instanceof Error ? error.message : String(error));
-    res.status(500).json({ success: false, error: { message: "操作失败", type: "server_error" } });
+    res.status(500).json({ success: false, error: { message: "操作失败", type: "server_error" }, detail: error instanceof Error ? error.message : String(error) });
   }
 }

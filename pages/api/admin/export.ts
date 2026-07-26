@@ -54,7 +54,7 @@ export default async function handler(
       // 平台配置（保留 apiKey 明文，用于跨环境迁移）
       const platforms = await db.platforms.findMany();
 
-      exportData.platforms = (platforms as any[]).map((p) => ({
+      exportData.platforms = platforms.map((p) => ({
         id: p.id,
         name: p.name,
         baseUrl: p.baseUrl,
@@ -73,7 +73,7 @@ export default async function handler(
       // 模型映射
       const modelMaps = await db.modelMappings.findMany();
 
-      exportData.modelMaps = (modelMaps as any[]).map((m) => ({
+      exportData.modelMaps = modelMaps.map((m) => ({
         alias: m.alias,
         targetModel: m.targetModel,
         platformId: m.platformId,
@@ -82,7 +82,7 @@ export default async function handler(
       // 套餐模板
       const plans = await db.plans.findMany();
 
-      exportData.plans = (plans as any[]).map((p) => ({
+      exportData.plans = plans.map((p) => ({
         name: p.name,
         tokenQuota: p.tokenQuota,
         callLimit: p.callLimit,
@@ -94,7 +94,7 @@ export default async function handler(
       // 系统配置（全部导出）
       const configs = await db.configs.findMany();
 
-      exportData.configs = (configs as any[]).map((c) => ({
+      exportData.configs = configs.map((c) => ({
         key: c.key,
         value: c.value,
       }));
@@ -105,7 +105,7 @@ export default async function handler(
       // API Keys（保留明文，用于跨环境迁移）
       const apiKeysData = await db.apiKeys.findMany();
 
-      exportData.apiKeys = (apiKeysData as any[]).map((k) => ({
+      exportData.apiKeys = apiKeysData.map((k) => ({
         id: k.id,
         key: k.key,
         name: k.name,
@@ -130,9 +130,9 @@ export default async function handler(
         take: 10000,
       });
 
-      exportData.requestLogs = (requestLogsData as any[])
-        .filter((r: any) => r.createdAt >= thirtyDaysAgo)
-        .map((r: any) => ({
+      exportData.requestLogs = requestLogsData
+        .filter((r) => r.createdAt >= thirtyDaysAgo)
+        .map((r) => ({
           keyId: r.keyId,
           keyName: r.keyName,
           platformId: r.platformId,
@@ -166,9 +166,9 @@ export default async function handler(
         take: 5000,
       });
 
-      exportData.auditLogs = (auditLogsData as any[])
-        .filter((l: any) => l.createdAt >= thirtyDaysAgo)
-        .map((l: any) => ({
+      exportData.auditLogs = auditLogsData
+        .filter((l) => l.createdAt >= thirtyDaysAgo)
+        .map((l) => ({
           adminId: l.adminId,
           action: l.action,
           detail: l.detail,
@@ -182,9 +182,9 @@ export default async function handler(
         take: 2000,
       });
 
-      exportData.systemEvents = (systemEventsData as any[])
-        .filter((e: any) => e.createdAt >= thirtyDaysAgo)
-        .map((e: any) => ({
+      exportData.systemEvents = systemEventsData
+        .filter((e) => e.createdAt >= thirtyDaysAgo)
+        .map((e) => ({
           level: e.level,
           message: e.message,
           detail: e.detail,
@@ -214,6 +214,6 @@ export default async function handler(
     res.status(200).send(jsonContent);
   } catch (err) {
     console.error("[GET /api/admin/export] 导出数据失败:", err);
-    res.status(500).json({ success: false, error: "导出数据失败" });
+    res.status(500).json({ success: false, error: "导出数据失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

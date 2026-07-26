@@ -24,10 +24,6 @@ const COOKIE_NAME = "admin_token";
 export interface AdminPayload {
   adminId: string;
   username: string;
-  /** CSRF token（防跨站请求伪造） */
-  csrf?: string;
-  /** Token 版本号（用于吊销机制） */
-  tokenVersion?: number;
 }
 
 // ==================== 环境变量检查 ====================
@@ -185,8 +181,6 @@ export function getTokenFromCookie(request: Request): string | null {
 // ==================== 管理员身份验证 ====================
 
 /**
- * @deprecated 此函数仅用于 Worker 环境，Pages API 请使用 pages/api/admin/_auth.ts 的 getAdminFromRequest
- *
  * 从请求中提取管理员身份
  *
  * 流程：

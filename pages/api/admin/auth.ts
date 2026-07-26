@@ -13,8 +13,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
-import { getAuditAdminId, getTokenFromCookie, type AuthResult } from "./_auth";
-import { generateCsrfToken, setCsrfCookie, clearCsrfCookie, requireCsrf } from "./_csrf";
+import { getAuditAdminId, type AuthResult } from "./_auth";
 
 const COOKIE_NAME = "admin_token";
 
@@ -60,6 +59,16 @@ function getClientIp(req: NextApiRequest): string {
   const forwarded = req.headers["x-forwarded-for"];
   const str = Array.isArray(forwarded) ? forwarded[0] : forwarded;
   return str?.split(",")[0]?.trim() || (req.headers["x-real-ip"] as string) || "unknown";
+}
+
+function getTokenFromCookie(req: NextApiRequest): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+  for (const cookie of cookieHeader.split(";")) {
+    const [name, ...rest] = cookie.trim().split("=");
+    if (name === COOKIE_NAME) return rest.join("=");
+  }
+  return null;
 }
 
 function setAuthCookie(res: NextApiResponse, token: string, isProd: boolean): void {
@@ -153,35 +162,20 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
       await kv.delete(kvKey(clientIp));
     }
 
-    // 查询管理员 tokenVersion
-    let tokenVersion = 0;
-    try {
-      const db = await createDb();
-      const admin = await db.admins.findFirst({
-        where: { username: env.ADMIN_USERNAME! },
-        select: { tokenVersion: true },
-      });
-      if (admin) tokenVersion = admin.tokenVersion;
-    } catch { /* 首次部署时 admins 表可能还没有记录 */ }
-
     const isProd = env.ENVIRONMENT === "production";
-    const csrfToken = generateCsrfToken();
-    const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME!, csrf: csrfToken, tokenVersion }, env);
+    const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME! }, env);
     setAuthCookie(res, token, isProd);
-    setCsrfCookie(res, csrfToken, isProd);
 
     return res.status(200).json({ success: true, data: { username: env.ADMIN_USERNAME }, message: "登录成功" });
   } catch (error) {
     console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
-    return res.status(500).json({ success: false, error: "登录失败" });
+    return res.status(500).json({ success: false, error: "登录失败", detail: error instanceof Error ? error.message : String(error) });
   }
 }
 
 // ==================== DELETE — 管理员登出 ====================
 
 async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
-  if (!(await requireCsrf(req, res))) return;
-
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
@@ -193,7 +187,6 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
     const admin = await getAdmin(req, env);
     const clientIp = getClientIp(req);
     clearAuthCookie(res);
-    clearCsrfCookie(res);
 
     if (admin) {
       try {
@@ -215,8 +208,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
   } catch (err) {
     console.error("[DELETE /api/admin/auth] 登出异常:", err);
     clearAuthCookie(res);
-    clearCsrfCookie(res);
-    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除" });
+    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -235,6 +227,6 @@ async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: { adminId: admin.adminId, username: admin.username } });
   } catch (err) {
     console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
-    return res.status(401).json({ success: false, error: "未授权" });
+    return res.status(401).json({ success: false, error: "未授权", detail: err instanceof Error ? err.message : String(err) });
   }
 }

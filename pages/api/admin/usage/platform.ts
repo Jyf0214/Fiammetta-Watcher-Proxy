@@ -143,7 +143,7 @@ export default async function handler(
     }
 
     // 合并平台信息和统计数据
-    const result = (allPlatforms as any[]).map((p) => {
+    const result = allPlatforms.map((p) => {
       const logGroup = grouped.get(p.id);
       const rates = logGroup ? computeRates(logGroup) : {
         totalRequests: 0,
@@ -193,6 +193,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/usage/platform] 获取平台用量失败:", err);
-    res.status(500).json({ success: false, error: "获取平台用量失败" });
+    res.status(500).json({ success: false, error: "获取平台用量失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

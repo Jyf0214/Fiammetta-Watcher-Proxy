@@ -14,7 +14,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "../_auth";
-import { requireCsrf } from "../_csrf";
 
 /**
  * 将 YYYY-MM-DD 日期字符串转换为当天结束时的 Unix 时间戳（23:59:59）
@@ -36,8 +35,6 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  if (!(await requireCsrf(req, res))) return;
-
   const admin = await getAdminFromRequest(req);
   if (!admin) {
     res.status(401).json({ success: false, error: "未授权" });
@@ -106,6 +103,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/logs/archive] 查询归档日志失败:", err);
-    res.status(500).json({ success: false, error: "查询归档日志失败" });
+    res.status(500).json({ success: false, error: "查询归档日志失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

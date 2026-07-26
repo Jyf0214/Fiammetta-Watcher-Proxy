@@ -41,25 +41,23 @@ export default async function handler(
     ]);
 
     // 批量查询关联的管理员用户名
-    type AuditLogItem = { adminId: string | null; [key: string]: unknown };
-    const adminIds = Array.from(new Set((items as AuditLogItem[]).map((log) => log.adminId).filter((id): id is string => id !== null)));
+    const adminIds = Array.from(new Set(items.map((log) => log.adminId).filter((id): id is string => id !== null)));
     const admins = adminIds.length > 0
       ? await db.admins.findMany({ where: { id: { in: adminIds } } })
       : [];
-    type AdminItem = { id: string; username: string };
-    const adminMap = new Map((admins as AdminItem[]).map((a) => [a.id, a.username]));
+    const adminMap = new Map(admins.map((a) => [a.id, a.username]));
 
     res.status(200).json({
       success: true,
       data: {
-        items: (items as AuditLogItem[]).map((log) => ({
+        items: items.map((log) => ({
           id: log.id,
           adminId: log.adminId,
           username: log.adminId ? adminMap.get(log.adminId) ?? null : null,
           action: log.action,
           detail: log.detail,
           ip: log.ip,
-          createdAt: new Date((log.createdAt as number) * 1000).toISOString(),
+          createdAt: new Date(log.createdAt * 1000).toISOString(),
         })),
         total,
         page,
@@ -69,6 +67,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/audit] 获取审计日志失败:", err);
-    res.status(500).json({ success: false, error: "获取审计日志失败" });
+    res.status(500).json({ success: false, error: "获取审计日志失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

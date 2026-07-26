@@ -345,7 +345,7 @@ export default function AdminLayout({
       try {
         const res = await fetch("/api/health", { signal: controller.signal });
         if (res.ok) {
-          const data = await res.json() as { status: string; dbType?: string };
+          const data = await res.json();
           setHealthStatus({ status: data.status, dbType: data.dbType || "D1" });
         }
       } catch {

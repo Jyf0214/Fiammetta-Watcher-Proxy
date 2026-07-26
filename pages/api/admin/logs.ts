@@ -73,7 +73,7 @@ export default async function handler(
       res.status(200).json({
         success: true,
         data: {
-          items: (items as any[]).map((e) => ({
+          items: items.map((e) => ({
             id: e.id,
             level: e.level,
             message: e.message,
@@ -134,20 +134,20 @@ export default async function handler(
     ]);
 
     // 批量查询关联平台名称（Prisma 无 relation，手动 JOIN）
-    const platformIds = [...new Set((items as any[]).map((r) => r.platformId).filter(Boolean))] as string[];
+    const platformIds = [...new Set(items.map((r) => r.platformId).filter(Boolean))] as string[];
     let platformMap = new Map<string, string>();
     if (platformIds.length > 0) {
       const platforms = await db.platforms.findMany({
         where: { id: { in: platformIds } },
         select: { id: true, name: true },
       });
-      platformMap = new Map((platforms as any[]).map((p) => [p.id, p.name]));
+      platformMap = new Map(platforms.map((p) => [p.id, p.name]));
     }
 
     res.status(200).json({
       success: true,
       data: {
-        items: (items as any[]).map((log) => ({
+        items: items.map((log) => ({
           id: log.id,
           model: log.model,
           status: log.status,
@@ -181,6 +181,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/logs] 获取日志失败:", err);
-    res.status(500).json({ success: false, error: "获取日志失败" });
+    res.status(500).json({ success: false, error: "获取日志失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }

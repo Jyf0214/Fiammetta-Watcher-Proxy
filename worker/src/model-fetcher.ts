@@ -34,24 +34,6 @@ async function fetchPlatformModels(platform: {
 }): Promise<UpstreamModel[] | null> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
-  // SSRF 防护：校验目标 URL 不指向内网地址
-  try {
-    const parsedUrl = new URL(url);
-    const hostname = parsedUrl.hostname;
-    if (
-      hostname === "localhost" || hostname === "0.0.0.0" || hostname === "127.0.0.1" ||
-      /^10\./.test(hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-      /^192\.168\./.test(hostname) || /^169\.254\./.test(hostname) ||
-      hostname === "[::1]" || hostname === "::1"
-    ) {
-      console.warn(`[model-fetcher] 平台 ${platform.name} URL 指向内网地址，跳过: ${hostname}`);
-      return null;
-    }
-  } catch {
-    console.warn(`[model-fetcher] 平台 ${platform.name} URL 格式无效: ${url}`);
-    return null;
-  }
-
   const extraKeys = parseApiKeys(platform.apiKeys);
   const platformConfig: PlatformConfig = {
     id: platform.id,

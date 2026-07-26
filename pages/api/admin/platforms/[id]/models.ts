@@ -10,7 +10,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../../_auth";
-import { requireCsrf } from "../../_csrf";
 
 
 /** 生成唯一 ID（cuid 风格） */
@@ -40,7 +39,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
       "[GET /api/admin/platforms/[id]/models] 获取平台模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "获取平台模型失败" });
+    return res.status(500).json({ success: false, error: "获取平台模型失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -113,7 +112,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       "[POST /api/admin/platforms/[id]/models] 添加模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "添加模型失败" });
+    return res.status(500).json({ success: false, error: "添加模型失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -146,7 +145,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       "[DELETE /api/admin/platforms/[id]/models] 删除模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "删除模型失败" });
+    return res.status(500).json({ success: false, error: "删除模型失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -226,9 +225,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       clearTimeout(timeout);
 
       if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
         return res.status(502).json({
           success: false,
           error: `上游平台返回错误 (${response.status})`,
+          detail: errorText.slice(0, 500),
         });
       }
 
@@ -239,7 +240,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       if (message.includes("abort")) {
         return res.status(504).json({ success: false, error: "上游平台响应超时（15秒）" });
       }
-      return res.status(502).json({ success: false, error: "无法连接到上游平台" });
+      return res.status(502).json({ success: false, error: "无法连接到上游平台", detail: message });
     }
 
     if (upstreamModels.length === 0) {
@@ -255,7 +256,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       where: { platformId: id },
     });
 
-    const existingMap = new Map((existingModels as any[]).map((m) => [m.modelId, m]));
+    const existingMap = new Map(existingModels.map((m) => [m.modelId, m]));
     const upstreamIds = new Set(upstreamModels.map((m) => m.id));
 
     const now = Math.floor(Date.now() / 1000);
@@ -312,7 +313,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       "[PUT /api/admin/platforms/[id]/models] 刷新模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "刷新模型失败" });
+    return res.status(500).json({ success: false, error: "刷新模型失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -363,13 +364,11 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     });
   } catch (err) {
     console.error("[PATCH /api/admin/platforms/[id]/models] 切换模型状态失败:", err);
-    return res.status(500).json({ success: false, error: "操作失败" });
+    return res.status(500).json({ success: false, error: "操作失败", detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (!(await requireCsrf(req, res))) return;
-
   const id = String(req.query.id || "");
 
   switch (req.method) {

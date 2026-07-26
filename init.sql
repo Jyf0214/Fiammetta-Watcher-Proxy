@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS "admins" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "username" TEXT NOT NULL,
     "password_hash" TEXT NOT NULL,
-    "token_version" INTEGER NOT NULL DEFAULT 0,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );
