@@ -124,15 +124,17 @@ async function createPrismaInstance(
     case "hyperdrive": {
       const { PrismaClient } = await import("../src/generated/pg/client");
       const { PrismaPg } = await import("@prisma/adapter-pg");
-      const { Pool } = await import("pg");
+      const { PostgresJsPool } = await import("../lib/postgresjs-pool");
 
       const hyperdrive = env?.HYPERDRIVE as { connectionString: string } | undefined;
       if (!hyperdrive?.connectionString) {
         throw new Error("HYPERDRIVE binding 未配置（请检查 Cloudflare 绑定的名称是否叫 HYPERDRIVE）");
       }
 
-      const pool = new Pool({ connectionString: hyperdrive.connectionString });
-      const adapter = new PrismaPg(pool);
+      // 使用 postgres.js 而非 pg.Pool —— Cloudflare Hyperdrive 推荐的驱动
+      // postgres.js 原生支持 transaction 模式，不会出现 pg.Pool 的连接复用问题
+      const pool = new PostgresJsPool(hyperdrive.connectionString);
+      const adapter = new PrismaPg(pool as any);
       return new PrismaClient({ adapter });
     }
 
