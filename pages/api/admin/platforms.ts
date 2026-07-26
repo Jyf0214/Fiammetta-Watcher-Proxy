@@ -123,13 +123,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (!Array.isArray(parsed)) {
               errors.push("附加密钥必须为数组格式");
             } else {
-              parsedApiKeys = parsed.filter(
-                (k: unknown): k is string =>
-                  typeof k === "string" &&
-                  k.trim().length > 0 &&
-                  k.length <= 500
-              );
-              if (parsedApiKeys.length !== parsed.length) {
+              // 兼容两种格式：纯字符串数组 ["key1"] 和对象数组 [{name, key}]
+              const filtered: string[] = [];
+              let invalidCount = 0;
+              for (const k of parsed) {
+                const keyStr = typeof k === "string" ? k : k?.key;
+                if (typeof keyStr === "string" && keyStr.trim().length > 0 && keyStr.length <= 500) {
+                  filtered.push(keyStr);
+                } else {
+                  invalidCount++;
+                }
+              }
+              parsedApiKeys = filtered;
+              if (invalidCount > 0) {
                 errors.push("部分附加密钥格式无效或超过 500 字符，已自动过滤");
               }
             }
