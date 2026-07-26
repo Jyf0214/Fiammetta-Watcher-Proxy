@@ -238,8 +238,8 @@ def init_hyperdrive() -> str:
 
 
 def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str):
-    """同步 Pages 与 Worker 的环境变量和绑定（如遇到错误绝不跳过，直接报 fail）"""
-    print(f"\n🔗 同步部署配置 (DB_TYPE={db_type})...")
+    """统一同步 Pages 的绑定与环境变量（Worker 变量由 wrangler.toml 在部署时自动生效）"""
+    print(f"\n🔗 同步 Pages 部署配置 (DB_TYPE={db_type})...")
 
     db_vars = {"DB_TYPE": {"type": "plain_text", "value": db_type}}
     if db_type != "d1" and DATABASE_URL:
@@ -249,18 +249,7 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
         elif db_type in ("pg", "hyperdrive"):
             db_vars["PG_URL"] = {"type": "plain_text", "value": DATABASE_URL}
 
-    # 1. 同步 Worker Settings 环境变量（彻底清理历史残留变量）
-    settings_data, _, _ = cf_api("GET", f"/workers/scripts/{WORKER_NAME}/settings")
-    existing = settings_data.get("result", {}).get("bindings", [])
-    clean_bindings = [
-        b for b in existing
-        if b.get("name") not in ("DB_TYPE", "DATABASE_URL", "TIDB_URL", "PG_URL")
-    ]
-    new_bindings = [{"name": k, "type": v["type"], "text": v["value"]} for k, v in db_vars.items()]
-    cf_api("PUT", f"/workers/scripts/{WORKER_NAME}/settings", {"bindings": clean_bindings + new_bindings})
-    print("  ✅ Worker 环境变量同步成功")
-
-    # 2. 同步 Pages 项目配置
+    # 同步 Pages 项目配置 (D1, KV, WORKER service, Hyperdrive, env_vars)
     prod_config = {
         "compatibility_flags": ["nodejs_compat"],
         "d1_databases": {"DB": {"id": d1_id}} if d1_id else {},
