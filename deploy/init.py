@@ -649,7 +649,10 @@ def main():
         fail("未设置 CLOUDFLARE_API_TOKEN")
 
     # 推断数据库类型（pre/post 都需要）
-    resolved_type = resolve_db_type()
+    # 必须更新全局变量，供 run_pre() 中的 update_db_type_in_config() 使用
+    global RESOLVED_DB_TYPE
+    RESOLVED_DB_TYPE = resolve_db_type()
+    resolved_type = RESOLVED_DB_TYPE
 
     d1_id = os.environ.get("D1_ID", "")
     kv_id = os.environ.get("KV_ID", "")
