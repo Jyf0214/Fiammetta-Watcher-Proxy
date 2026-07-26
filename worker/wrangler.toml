@@ -32,5 +32,9 @@ id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
 # 每小时：Key 用量重置检查
 # 每 6 小时：平台模型发现
 # 每天凌晨 3 点：日志归档
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [triggers]
 crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]

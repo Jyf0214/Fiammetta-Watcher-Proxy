@@ -35,31 +35,50 @@ export default {
 
     const url = new URL(request.url);
 
-    // 首次请求时加载白名单（懒初始化）
-    if (!whitelistLoaded) {
-      whitelistLoaded = true;
-      ctx.waitUntil(loadWhitelist(env.DB, env).catch((err) => {
-        console.error("[worker] 白名单加载失败:", err);
-      }));
-    }
+    try {
+      // 首次请求时加载白名单（懒初始化）
+      if (!whitelistLoaded) {
+        whitelistLoaded = true;
+        ctx.waitUntil(loadWhitelist(env.DB, env).catch((err) => {
+          console.error("[worker] 白名单加载失败:", err);
+        }));
+      }
 
-    // 健康检查端点
-    if (url.pathname === "/health") {
-      return new Response(JSON.stringify({ status: "ok", timestamp: Math.floor(Date.now() / 1000) }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+      // 健康检查端点
+      if (url.pathname === "/health") {
+        return new Response(JSON.stringify({ status: "ok", timestamp: Math.floor(Date.now() / 1000) }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
-    // v1 代理路由
-    if (url.pathname.startsWith("/v1/")) {
-      return handleV1Route(request, env, ctx);
-    }
+      // v1 代理路由
+      if (url.pathname.startsWith("/v1/")) {
+        return await handleV1Route(request, env, ctx);
+      }
 
-    return new Response(
-      JSON.stringify({ error: { message: "Not Found", type: "invalid_request_error" } }),
-      { status: 404, headers: { "Content-Type": "application/json" } },
-    );
+      return new Response(
+        JSON.stringify({ error: { message: "Not Found", type: "invalid_request_error" } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorStack = err instanceof Error ? err.stack : undefined;
+      console.error(
+        `[worker] 未捕获异常: ${url.pathname} ${request.method}`,
+        errorMessage,
+        errorStack
+      );
+      return Response.json(
+        {
+          error: {
+            message: "服务器内部错误",
+            type: "server_error",
+          },
+        },
+        { status: 500 }
+      );
+    }
   },
 
   /**

@@ -10,7 +10,7 @@
  */
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
-import { getNextKey, getRandomKeyExcept, banKey } from "./platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted } from "./platform-keys";
 import { recordSuccess, recordFailure } from "./load-balancer";
 import {
   checkPlatformRpm,
@@ -271,6 +271,51 @@ export async function proxyV1Request(
   const triedKeys = new Set<string>();
   const triedPlatforms = new Set<string>();
 
+  // 如果初始平台没有可用 Key，尝试切换到其他有可用 Key 的平台
+  if (!currentKey) {
+    const allKeys = getAllKeys(currentPlatform);
+    console.warn(
+      `${logTag} 初始平台 "${currentPlatform.name}" (${currentPlatform.id}) 无可用 Key` +
+      `（共 ${allKeys.length} 个 Key，封禁: ${allKeys.filter(isKeyBanned).length}` +
+      `，降级: ${allKeys.filter(isKeyDeprioritized).length}` +
+      `，白名单: ${allKeys.filter(isKeyWhitelisted).length}）` +
+      `，尝试切换到其他平台`
+    );
+    triedPlatforms.add(currentPlatform.id);
+
+    const availablePlatforms = getPlatformsForModel(
+      currentTargetModel,
+      triedPlatforms
+    );
+    let switched = false;
+    for (const p of availablePlatforms) {
+      const key = getNextKey(p);
+      if (key) {
+        currentPlatform = p;
+        currentKey = key;
+        switched = true;
+        console.log(`${logTag} 已切换到平台 "${p.name}" (${p.id})`);
+        break;
+      }
+    }
+
+    if (!switched) {
+      console.error(
+        `${logTag} 所有平台均无可用 Key，` +
+        `已检查 ${availablePlatforms.length + 1} 个平台`
+      );
+      return Response.json(
+        {
+          error: {
+            message: "所有平台均无可用 API Key",
+            type: "server_error",
+          },
+        },
+        { status: 500 }
+      );
+    }
+  }
+
   for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
     // 记录本次尝试的 Key 和平台
     if (currentKey) triedKeys.add(currentKey);
@@ -278,8 +323,21 @@ export async function proxyV1Request(
 
     // 无可用 Key
     if (!currentKey) {
+      const platformKeys = getAllKeys(currentPlatform);
+      console.error(
+        `${logTag} 平台 "${currentPlatform.name}" (${currentPlatform.id}) ` +
+        `已无可用 Key（共 ${platformKeys.length} 个，` +
+        `已尝试: ${triedKeys.size}，` +
+        `封禁: ${platformKeys.filter(isKeyBanned).length}，` +
+        `降级: ${platformKeys.filter(isKeyDeprioritized).length}）`
+      );
       return Response.json(
-        { error: { message: "平台无可用 API Key", type: "server_error" } },
+        {
+          error: {
+            message: `平台 "${currentPlatform.name}" 无可用 API Key`,
+            type: "server_error",
+          },
+        },
         { status: 500 }
       );
     }
