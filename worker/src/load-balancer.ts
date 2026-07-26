@@ -84,7 +84,7 @@ export function incrementHalfOpenPending(platformId: string): void {
  * - closed → 保持 closed，清零失败计数
  * - half-open → 转为 closed（恢复）
  */
-export async function recordSuccess(platformId: string): Promise<void> {
+export async function recordSuccess(platformId: string, db: D1Database): Promise<void> {
   const entry = breakers.get(platformId);
   if (!entry) return;
 
@@ -97,7 +97,7 @@ export async function recordSuccess(platformId: string): Promise<void> {
     console.log(`[circuit-breaker] 平台 ${platformId} 恢复为 closed`);
 
     // 更新数据库状态
-    await updatePlatformStatus(platformId, "healthy", 0, null);
+    await updatePlatformStatus(platformId, "healthy", 0, null, db);
   } else if (entry.state === "closed") {
     // closed 状态成功 → 清零失败计数
     if (entry.failureCount > 0) {
@@ -113,7 +113,7 @@ export async function recordSuccess(platformId: string): Promise<void> {
  * - closed → 失败计数递增，达到阈值则熔断（open）
  * - half-open → 失败则回到 open
  */
-export async function recordFailure(platformId: string): Promise<void> {
+export async function recordFailure(platformId: string, db: D1Database): Promise<void> {
   const now = Date.now();
   let entry = breakers.get(platformId);
 
@@ -143,7 +143,7 @@ export async function recordFailure(platformId: string): Promise<void> {
       `[circuit-breaker] 平台 ${platformId} 半开状态失败，回到 open，冷却至 ${new Date(entry.cooldownEnd).toISOString()}`
     );
 
-    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd);
+    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db);
   } else if (
     entry.state === "closed" &&
     entry.failureCount >= DEFAULT_FAILURE_THRESHOLD
@@ -155,26 +155,40 @@ export async function recordFailure(platformId: string): Promise<void> {
       `[circuit-breaker] 平台 ${platformId} 连续失败 ${entry.failureCount} 次，熔断至 ${new Date(entry.cooldownEnd).toISOString()}`
     );
 
-    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd);
+    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db);
   }
 }
 
 /**
  * 更新平台状态到数据库
+ *
+ * @param cooldownEnd 熔断器冷却结束时间（毫秒时间戳），存入数据库时转换为秒
  */
 async function updatePlatformStatus(
   platformId: string,
   status: string,
   failCount: number,
-  _cooldownEnd: number | null
+  cooldownEnd: number | null,
+  db: D1Database
 ): Promise<void> {
   try {
-    // 这里需要通过 Worker 的 Env.DB 来更新，但 load-balancer 不直接持有 DB
-    // 通过全局 env 引用或参数传入
-    // 暂时使用 console 记录，实际状态由 router 通过 API 更新
-    console.log(
-      `[circuit-breaker] 平台 ${platformId} 状态更新: status=${status} failCount=${failCount}`
-    );
+    const prisma = await createDb({ DB: db });
+    try {
+      await prisma.platforms.update({
+        where: { id: platformId },
+        data: {
+          status,
+          failCount,
+          lastFailAt: Math.floor(Date.now() / 1000),
+          cooldownEnd: cooldownEnd !== null ? Math.floor(cooldownEnd / 1000) : null,
+        },
+      });
+      console.log(
+        `[circuit-breaker] 平台 ${platformId} 状态已更新: status=${status} failCount=${failCount}`
+      );
+    } finally {
+      await prisma.$disconnect();
+    }
   } catch (err) {
     console.error(
       `[circuit-breaker] 更新平台状态失败:`,

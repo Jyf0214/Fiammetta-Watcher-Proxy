@@ -459,7 +459,7 @@ export async function proxyV1Request(
     // 最后一次尝试或无处可切换：返回 429
     const errorText = await upstreamResponse.text();
     try {
-      await recordFailure(currentPlatform.id);
+      await recordFailure(currentPlatform.id, env.DB);
     } catch (recordError) {
       console.error(
         `${logTag} 熔断器记录失败:`,
@@ -534,7 +534,7 @@ async function handleUpstreamResponse(
     const stream = upstreamResponse.body;
     if (!stream) {
       try {
-        await recordFailure(platform.id);
+        await recordFailure(platform.id, env.DB);
       } catch {
         console.error(`${logTag} 流式响应缺失时熔断器记录失败`);
       }
@@ -557,7 +557,7 @@ async function handleUpstreamResponse(
     });
 
     const pipedStream = stream.pipeThrough(transformer);
-    await recordSuccess(platform.id);
+    await recordSuccess(platform.id, env.DB);
 
     return new Response(pipedStream, {
       status: 200,
@@ -575,7 +575,7 @@ async function handleUpstreamResponse(
 
   // multipart 响应（audio/images）直接透传
   if (responseContentType.includes("multipart/")) {
-    await recordSuccess(platform.id);
+    await recordSuccess(platform.id, env.DB);
 
     try {
       await recordRequestLog({
@@ -610,7 +610,7 @@ async function handleUpstreamResponse(
   try {
     responseBody = await upstreamResponse.text();
   } catch {
-    await recordFailure(platform.id);
+    await recordFailure(platform.id, env.DB);
     return Response.json(
       { error: { message: "读取上游响应失败", type: "server_error" } },
       { status: 500 }
@@ -671,7 +671,7 @@ async function handleUpstreamResponse(
     console.error(`${logTag} 日志写入失败:`, logError);
   }
 
-  await recordSuccess(platform.id);
+  await recordSuccess(platform.id, env.DB);
 
   return new Response(responseBody, {
     status: upstreamResponse.status,
