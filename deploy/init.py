@@ -1,35 +1,21 @@
 #!/usr/bin/env python3
 """
-Cloudflare 资源统一初始化
+Cloudflare 资源统一初始化脚本 (严谨修复版)
 
 用法：
-  python3 deploy/init.py pre     — 部署前：创建 D1/KV + 替换配置占位符
-  python3 deploy/init.py post    — 部署后：创建 Pages + 绑定 + Secrets
-
-环境变量：
-  CLOUDFLARE_ACCOUNT_ID  — Cloudflare 账户 ID
-  CLOUDFLARE_API_TOKEN   — Cloudflare API Token（Edit 权限）
-  D1_NAME                — D1 数据库名称（默认 fiammetta_d1）
-  KV_NAME                — KV 命名空间名称（默认 fiammetta-proxy）
-  PAGES_PROJECT          — Pages 项目名称（默认 fiammetta-watcher）
-  WORKER_NAME            — Worker 名称（默认 fiammetta_worker）
-  ADMIN_USERNAME         — 管理员用户名（默认 admin）
-  ADMIN_PASSWORD         — 管理员密码（Pages 部署时必需）
-  JWT_SECRET             — JWT 密钥（留空则自动生成）
-  DATABASE_URL           — 外部数据库 URL（仅 PG/MySQL 时设置为 Secret）
-  INIT_SQL_PATH          — 建表 SQL 文件路径（默认 init.sql）
-
-输出（GITHUB_OUTPUT）：
-  D1_ID — D1 数据库 UUID
-  KV_ID — KV 命名空间 ID
+  python3 deploy/init.py pre          — 部署前：创建 D1/KV/Hyperdrive + 替换配置文件占位符
+  python3 deploy/init.py post         — 部署后：创建 Pages + 绑定 Secrets
+  python3 deploy/init.py post-deploy  — 部署后：统一同步 Pages & Worker 的绑定与环境变量
+  python3 deploy/init.py check        — 本地/CI 检查：校验 Schema 与 Client 生成产物
 """
 import os
 import sys
-import json
+import re
 import secrets
 import subprocess
+from urllib.parse import urlparse
 
-# ==================== 配置 ====================
+# ==================== 环境变量配置 ====================
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
@@ -41,22 +27,13 @@ WORKER_NAME = os.environ.get("WORKER_NAME", "fiammetta_worker")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 INIT_SQL_PATH = os.environ.get("INIT_SQL_PATH", "init.sql")
-DB_TYPE = os.environ.get("DB_TYPE", "")
-RESOLVED_DB_TYPE = ""  # 保存 resolve_db_type() 的结果，供 run_post 使用（避免重新推断时丢失 DB_TYPE 环境变量）
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..")
 WRANGLER_TOML = os.path.join(PROJECT_ROOT, "worker", "wrangler.toml")
 WRANGLER_JSONC = os.path.join(PROJECT_ROOT, "wrangler.jsonc")
-
-API_BASE = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
-HEADERS = {
-    "Authorization": f"Bearer {API_TOKEN}",
-    "Content-Type": "application/json",
-}
-
 
 # ==================== 工具函数 ====================
 
@@ -65,671 +42,328 @@ def fail(msg: str):
     sys.exit(1)
 
 
-def is_pg_or_mysql(url: str) -> bool:
-    return (
-        url.startswith("postgresql://")
-        or url.startswith("postgres://")
-        or url.startswith("mysql://")
-        or url.startswith("mysqls://")
-    )
+def get_db_type() -> str:
+    """精准推断 DB_TYPE：显式设置优先 > 根据 DATABASE_URL 推断 > 默认 d1"""
+    env_type = os.environ.get("DB_TYPE", "").strip().lower()
+    if env_type:
+        return env_type
+    if DATABASE_URL:
+        if DATABASE_URL.startswith(("mysql://", "mysqls://")):
+            return "tidb"
+        if DATABASE_URL.startswith(("postgresql://", "postgres://")):
+            return "pg"
+    return "d1"
 
 
-def api_request(method: str, path: str, json_data=None) -> dict:
-    url = f"{API_BASE}{path}"
-    resp = requests.request(method, url, headers=HEADERS, json=json_data)
-    try:
-        return resp.json()
-    except Exception:
-        fail(f"API 请求失败: {method} {path} (HTTP {resp.status_code})")
-        return {}
-
-
-def check_response(resp, action: str):
-    try:
-        data = resp.json()
-    except Exception:
-        fail(f"{action}: 响应解析失败 (HTTP {resp.status_code})")
-    if not data.get("success"):
-        errors = data.get("errors", [])
-        msg = errors[0].get("message", "未知错误") if errors else "未知错误"
-        code = errors[0].get("code", 0) if errors else 0
-        return data, code, msg
-    return data, 0, ""
-
-
-def parse_database_url(url: str) -> dict:
-    """解析 PostgreSQL 连接字符串为 origin 对象各字段"""
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    return {
-        "scheme": parsed.scheme,
-        "host": parsed.hostname or "",
-        "port": parsed.port or 5432,
-        "database": (parsed.path.lstrip("/")) or "",
-        "user": parsed.username or "",
-        "password": parsed.password or "",
+def cf_api(method: str, path: str, json_data=None, ok_codes: list = None) -> tuple:
+    """
+    严谨的 Cloudflare API 请求助手
+    返回 tuple: (response_data, error_code, error_message)
+    - 成功时 error_code 为 0
+    - 如果失败且 error_code 属于允许的 ok_codes (如表/项目已存在)，返回 code 供外层判断
+    - 遇到未预期的错误，直接 fail() 终止程序，决不静默吞错误
+    """
+    import requests
+    url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}{path}"
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json",
     }
+    try:
+        resp = requests.request(method, url, headers=headers, json=json_data)
+        data = resp.json()
+    except Exception as e:
+        fail(f"API 网络请求失败 [{method} {path}]: {e}")
+
+    if data.get("success"):
+        return data, 0, ""
+
+    errors = data.get("errors", [])
+    code = errors[0].get("code", 0) if errors else 0
+    msg = errors[0].get("message", "未知错误") if errors else "未知错误"
+
+    if ok_codes and code in ok_codes:
+        return data, code, msg
+
+    fail(f"API 请求失败 [{method} {path}]: {msg} (错误码 {code})")
+    return {}, code, msg
+
+
+def clean_sql_statements(sql_content: str) -> list:
+    """安全清洗 SQL，按行处理注释，避免误切字符串内部的 '--' 导致语句断行破坏"""
+    statements = []
+    raw_stmts = sql_content.split(";")
+    for raw in raw_stmts:
+        lines = []
+        for line in raw.split("\n"):
+            stripped = line.strip()
+            # 过滤独立的单行注释和空行
+            if not stripped or stripped.startswith("--"):
+                continue
+            # 处理行尾注释（仅当 -- 前有空格时才判定为注释，防止切断字符串）
+            if " --" in line:
+                line = line.split(" --")[0]
+            lines.append(line.rstrip())
+        stmt = "\n".join(lines).strip()
+        if stmt:
+            statements.append(stmt)
+    return statements
 
 
 def output_github(key: str, value: str):
     github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, "a") as f:
+    if github_output and value:
+        with open(github_output, "a", encoding="utf-8") as f:
             f.write(f"{key}={value}\n")
 
 
-def replace_placeholders(path: str, label: str, d1_id: str, kv_id: str, hyperdrive_id: str = ""):
-    if not os.path.exists(path):
-        print(f"  ⚠️ {label} 不存在，跳过")
-        return
-    with open(path, "r") as f:
-        content = f.read()
-    content = content.replace("placeholder-d1-id", d1_id)
-    content = content.replace("placeholder-kv-id", kv_id)
-    if hyperdrive_id:
-        content = content.replace("placeholder-hyperdrive-id", hyperdrive_id)
-    with open(path, "w") as f:
-        f.write(content)
-    print(f"  ✅ {label} 已更新")
+def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str):
+    """更新 wrangler.toml 与 wrangler.jsonc 中的占位符与 DB_TYPE (使用 MULTILINE 避免跨行破坏)"""
+    replacements = {
+        "placeholder-d1-id": d1_id,
+        "placeholder-kv-id": kv_id,
+        "placeholder-hyperdrive-id": hyperdrive_id,
+    }
+    for path in [WRANGLER_TOML, WRANGLER_JSONC]:
+        if not os.path.exists(path):
+            continue
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        for k, v in replacements.items():
+            if v:
+                content = content.replace(k, v)
+
+        # 仅替换独立的 DB_TYPE 行，防止乱穿匹配
+        if path.endswith(".toml"):
+            content = re.sub(r'^(DB_TYPE\s*=\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+        else:
+            content = re.sub(r'("^?\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"  ✅ 已更新配置文件: {os.path.relpath(path, PROJECT_ROOT)}")
 
 
 def set_secret(key: str, value: str, extra_args: list):
-    """通过 wrangler CLI 设置 Secret，extra_args 需包含完整的子命令路径"""
-    print(f"🔐 设置 Secret: {key}")
-    result = subprocess.run(
+    """通过 Wrangler CLI 设置 Secret"""
+    res = subprocess.run(
         ["npx", "wrangler"] + extra_args + [key],
-        input=value.encode(),
-        capture_output=True,
-        timeout=60,
+        input=value.encode(), capture_output=True, timeout=60
     )
-    if result.returncode == 0:
-        print(f"  ✅ {key} 已设置")
+    if res.returncode == 0:
+        print(f"  🔐 Secret 已设置: {key}")
     else:
-        err = result.stderr.decode().strip()
-        fail(f"Secret {key} 设置失败: {err}")
+        fail(f"Secret {key} 设置失败: {res.stderr.decode().strip()}")
 
 
-# ==================== 阶段一：部署前 ====================
+# ==================== 阶段实现 ====================
 
 def init_d1() -> str:
-    print(f"\n{'='*50}")
-    print(f"📦 初始化 D1 数据库: {D1_NAME}")
-    print(f"{'='*50}")
+    print(f"\n📦 初始化 D1 数据库: {D1_NAME}")
+    cf_api("POST", "/d1/database", {"name": D1_NAME}, ok_codes=[7502])
 
-    resp = requests.post(f"{API_BASE}/d1/database", headers=HEADERS, json={"name": D1_NAME})
-    data, code, msg = check_response(resp, "创建 D1")
-    if data.get("success"):
-        print(f"  ✅ D1 数据库已创建")
-    elif code == 7502:
-        print(f"  ✅ D1 数据库已存在，复用")
-    else:
-        fail(f"D1 创建失败: {msg}")
-
-    resp = requests.get(f"{API_BASE}/d1/database?per_page=1000", headers=HEADERS)
-    data, _, msg = check_response(resp, "查询 D1")
-    d1_id = None
-    for db in data.get("result", []):
-        if db.get("name") == D1_NAME:
-            d1_id = db.get("uuid")
-            break
+    data, _, _ = cf_api("GET", "/d1/database?per_page=1000")
+    dbs = data.get("result", [])
+    d1_id = next((db["uuid"] for db in dbs if db.get("name") == D1_NAME), None)
     if not d1_id:
         fail(f"无法找到 D1 数据库 '{D1_NAME}'")
     print(f"  ✅ D1_ID: {d1_id}")
 
+    # 安全执行 SQL 语句并严格校验返回值
     if os.path.exists(INIT_SQL_PATH):
-        with open(INIT_SQL_PATH, "r") as f:
-            init_sql = f.read()
-        if init_sql.strip():
-            print(f"📝 执行建表 SQL")
-            statements = []
-            for stmt in init_sql.split(";"):
-                stripped = stmt.strip()
-                if not stripped:
-                    continue
-                lines = [line.split("--")[0].strip() for line in stripped.split("\n")]
-                clean = "\n".join(l for l in lines if l)
-                if clean:
-                    statements.append(clean)
+        with open(INIT_SQL_PATH, "r", encoding="utf-8") as f:
+            sql_content = f.read()
+        statements = clean_sql_statements(sql_content)
+        if statements:
+            print(f"📝 正在执行建表 SQL ({len(statements)} 条语句)...")
+            success_count = 0
+            skipped_count = 0
+            failed_stmts = []
 
-            created = skipped = failed = 0
             for i, stmt in enumerate(statements, 1):
-                is_migration = stmt.upper().startswith("ALTER TABLE")
-                resp = requests.post(
-                    f"{API_BASE}/d1/database/{d1_id}/query",
-                    headers=HEADERS,
-                    json={"sql": stmt},
+                res, code, msg = cf_api(
+                    "POST", f"/d1/database/{d1_id}/query",
+                    {"sql": stmt},
+                    ok_codes=[7000, 7500, 7502]
                 )
-                data, code, msg = check_response(resp, f"语句 #{i}")
-                if data.get("success"):
-                    created += 1
-                elif is_migration:
-                    skipped += 1
+                if res.get("success"):
+                    success_count += 1
+                elif code in (7000, 7500, 7502) or "already exists" in msg.lower():
+                    skipped_count += 1
                 else:
-                    failed += 1
-                    print(f"  ❌ 语句 #{i} 失败: {msg}")
-            if failed > 0:
-                fail(f"Schema 初始化失败：{failed} 条语句执行失败")
-            print(f"  ✅ Schema 完成（{created} 执行，{skipped} 跳过）")
-    else:
-        print(f"  ⚠️ 建表 SQL 不存在: {INIT_SQL_PATH}，跳过")
+                    failed_stmts.append((i, msg))
+                    print(f"  ❌ 语句 #{i} 执行出错: {msg}")
+
+            print(f"  ✅ Schema SQL 执行完成（成功 {success_count} 条，已存在跳过 {skipped_count} 条）")
+            if failed_stmts:
+                fail(f"D1 Schema 建表有 {len(failed_stmts)} 条 SQL 失败，中止部署！")
 
     output_github("D1_ID", d1_id)
     return d1_id
 
 
 def init_kv() -> str:
-    print(f"\n{'='*50}")
-    print(f"📦 初始化 KV 命名空间: {KV_NAME}")
-    print(f"{'='*50}")
-
-    resp = requests.get(f"{API_BASE}/storage/kv/namespaces", headers=HEADERS)
-    try:
-        data = resp.json()
-    except Exception:
-        fail(f"KV 查询失败: HTTP {resp.status_code}")
-    if not data.get("success"):
-        fail(f"KV 查询失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-
-    kv_id = None
-    for ns in data.get("result", []):
-        if ns.get("title") == KV_NAME:
-            kv_id = ns.get("id")
-            break
-
-    if kv_id:
-        print(f"  ✅ 复用已有 KV: {kv_id}")
-    else:
-        resp = requests.post(
-            f"{API_BASE}/storage/kv/namespaces",
-            headers=HEADERS,
-            json={"title": KV_NAME},
-        )
-        try:
-            data = resp.json()
-        except Exception:
-            fail(f"KV 创建失败: HTTP {resp.status_code}")
-        if data.get("success"):
-            kv_id = data["result"]["id"]
-            print(f"  ✅ KV 已创建: {kv_id}")
-        else:
-            msg = data.get("errors", [{}])[0].get("message", "未知")
-            fail(f"KV 创建失败: {msg}")
-
+    print(f"\n📦 初始化 KV 命名空间: {KV_NAME}")
+    data, _, _ = cf_api("GET", "/storage/kv/namespaces")
+    namespaces = data.get("result", [])
+    kv_id = next((ns["id"] for ns in namespaces if ns.get("title") == KV_NAME), None)
+    if not kv_id:
+        res, _, _ = cf_api("POST", "/storage/kv/namespaces", {"title": KV_NAME})
+        kv_id = res["result"]["id"]
+    print(f"  ✅ KV_ID: {kv_id}")
     output_github("KV_ID", kv_id)
     return kv_id
 
 
 def init_hyperdrive() -> str:
-    """创建 Hyperdrive 实例（复用已存在或新建）"""
-    print(f"\n{'='*50}")
-    print(f"📦 初始化 Hyperdrive: {HYPERDRIVE_NAME}")
-    print(f"{'='*50}")
-
+    print(f"\n📦 初始化 Hyperdrive: {HYPERDRIVE_NAME}")
     if not DATABASE_URL:
         fail("Hyperdrive 模式需要 DATABASE_URL 环境变量")
 
-    origin = parse_database_url(DATABASE_URL)
-    print(f"  🔗 Origin: {origin['host']}:{origin['port']}/{origin['database']}")
-
-    # 查询已存在的 Hyperdrive
-    resp = requests.get(f"{API_BASE}/hyperdrive/configs", headers=HEADERS)
-    try:
-        data = resp.json()
-    except Exception:
-        fail(f"Hyperdrive 查询失败: HTTP {resp.status_code}")
-    if not data.get("success"):
-        fail(f"Hyperdrive 查询失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-
-    hyperdrive_id = None
-    for cfg in data.get("result", []):
-        if cfg.get("name") == HYPERDRIVE_NAME:
-            hyperdrive_id = cfg.get("id")
-            break
-
-    if hyperdrive_id:
-        print(f"  ✅ 复用已有 Hyperdrive: {hyperdrive_id}")
-    else:
-        resp = requests.post(
-            f"{API_BASE}/hyperdrive/configs",
-            headers=HEADERS,
-            json={
-                "name": HYPERDRIVE_NAME,
-                "origin": origin,
-            },
-        )
-        try:
-            data = resp.json()
-        except Exception:
-            fail(f"Hyperdrive 创建失败: HTTP {resp.status_code}")
-        if data.get("success"):
-            hyperdrive_id = data["result"]["id"]
-            print(f"  ✅ Hyperdrive 已创建: {hyperdrive_id}")
-        else:
-            msg = data.get("errors", [{}])[0].get("message", "未知")
-            fail(f"Hyperdrive 创建失败: {msg}")
-
-    output_github("HYPERDRIVE_ID", hyperdrive_id)
-    return hyperdrive_id
+    p = urlparse(DATABASE_URL)
+    origin = {
+        "scheme": p.scheme, "host": p.hostname or "", "port": p.port or 5432,
+        "database": p.path.lstrip("/"), "user": p.username or "", "password": p.password or ""
+    }
+    data, _, _ = cf_api("GET", "/hyperdrive/configs")
+    cfgs = data.get("result", [])
+    hd_id = next((c["id"] for c in cfgs if c.get("name") == HYPERDRIVE_NAME), None)
+    if not hd_id:
+        res, _, _ = cf_api("POST", "/hyperdrive/configs", {"name": HYPERDRIVE_NAME, "origin": origin})
+        hd_id = res["result"]["id"]
+    print(f"  ✅ HYPERDRIVE_ID: {hd_id}")
+    output_github("HYPERDRIVE_ID", hd_id)
+    return hd_id
 
 
-def resolve_db_type() -> str:
-    """根据 DB_TYPE 环境变量或 DATABASE_URL 推断数据库类型"""
-    if DB_TYPE and DB_TYPE.strip():
-        return DB_TYPE.strip()
-    if DATABASE_URL:
-        if DATABASE_URL.startswith("mysql://") or DATABASE_URL.startswith("mysqls://"):
-            return "tidb"
-        if DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgres://"):
-            return "pg"
-    return "d1"
+def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str):
+    """同步 Pages 与 Worker 的环境变量和绑定（如遇到错误绝不跳过，直接报 fail）"""
+    print(f"\n🔗 同步部署配置 (DB_TYPE={db_type})...")
+
+    db_vars = {"DB_TYPE": {"type": "plain_text", "value": db_type}}
+    if db_type != "d1" and DATABASE_URL:
+        db_vars["DATABASE_URL"] = {"type": "plain_text", "value": DATABASE_URL}
+        if db_type == "tidb":
+            db_vars["TIDB_URL"] = {"type": "plain_text", "value": DATABASE_URL}
+        elif db_type in ("pg", "hyperdrive"):
+            db_vars["PG_URL"] = {"type": "plain_text", "value": DATABASE_URL}
+
+    # 1. 同步 Worker Settings 环境变量（彻底清理历史残留变量）
+    settings_data, _, _ = cf_api("GET", f"/workers/scripts/{WORKER_NAME}/settings")
+    existing = settings_data.get("result", {}).get("bindings", [])
+    clean_bindings = [
+        b for b in existing
+        if b.get("name") not in ("DB_TYPE", "DATABASE_URL", "TIDB_URL", "PG_URL")
+    ]
+    new_bindings = [{"name": k, "type": v["type"], "text": v["value"]} for k, v in db_vars.items()]
+    cf_api("PUT", f"/workers/scripts/{WORKER_NAME}/settings", {"bindings": clean_bindings + new_bindings})
+    print("  ✅ Worker 环境变量同步成功")
+
+    # 2. 同步 Pages 项目配置
+    prod_config = {
+        "compatibility_flags": ["nodejs_compat"],
+        "d1_databases": {"DB": {"id": d1_id}} if d1_id else {},
+        "kv_namespaces": {"KV": {"namespace_id": kv_id}} if kv_id else {},
+        "services": {"WORKER": {"service": WORKER_NAME, "environment": "production"}},
+        "env_vars": db_vars,
+    }
+    if db_type == "hyperdrive" and hyperdrive_id:
+        prod_config["hyperdrive_bindings"] = {"HYPERDRIVE": {"id": hyperdrive_id}}
+
+    cf_api("PATCH", f"/pages/projects/{PAGES_PROJECT}", {"deployment_configs": {"production": prod_config}})
+    print("  ✅ Pages 绑定与环境变量同步成功")
 
 
-def update_db_type_in_config(path: str, label: str, db_type: str):
-    """更新 wrangler 配置中的 DB_TYPE 值"""
-    if not os.path.exists(path):
-        print(f"  ⚠️ {label} 不存在，跳过")
-        return
-    with open(path, "r") as f:
-        content = f.read()
-
-    if path.endswith(".toml"):
-        # TOML 格式：DB_TYPE = "d1"
-        import re
-        new_content = re.sub(
-            r'(DB_TYPE\s*=\s*)"[^"]*"',
-            f'\\1"{db_type}"',
-            content,
-        )
-    elif path.endswith(".jsonc") or path.endswith(".json"):
-        # JSONC 格式："DB_TYPE": "d1"
-        import re
-        new_content = re.sub(
-            r'("DB_TYPE"\s*:\s*)"[^"]*"',
-            f'\\1"{db_type}"',
-            content,
-        )
-    else:
-        return
-
-    if new_content != content:
-        with open(path, "w") as f:
-            f.write(new_content)
-        print(f"  ✅ {label} DB_TYPE 已更新为 \"{db_type}\"")
-    else:
-        print(f"  ✅ {label} DB_TYPE 已是 \"{db_type}\"")
-
-
-def remove_d1_binding_from_worker_toml():
-    """从 worker/wrangler.toml 中移除 D1/KV 绑定配置（外部数据库模式）"""
-    if not os.path.exists(WRANGLER_TOML):
-        print(f"  ⚠️ worker/wrangler.toml 不存在，跳过")
-        return
-    with open(WRANGLER_TOML, "r") as f:
-        content = f.read()
-
-    import re
-    # 移除 [[d1_databases]] ... [[kv_namespaces]] 之前的所有 D1 块
-    new_content = re.sub(
-        r'\[\[d1_databases\]\].*?(?=\n\[|\Z)',
-        '',
-        content,
-        flags=re.DOTALL,
-    )
-    # 移除 [[kv_namespaces]] ... [[triggers]] 之间的 KV 块（保留 triggers）
-    new_content = re.sub(
-        r'\[\[kv_namespaces\]\].*?(?=\n\[triggers\])',
-        '',
-        new_content,
-        flags=re.DOTALL,
-    )
-    if new_content != content:
-        with open(WRANGLER_TOML, "w") as f:
-            f.write(new_content)
-        print(f"  ✅ worker/wrangler.toml 已移除 D1/KV 绑定")
-    else:
-        print(f"  ✅ worker/wrangler.toml 无 D1/KV 绑定需要移除")
-
-
-def run_pre(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
-    replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id, hyperdrive_id)
-    replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id, hyperdrive_id)
-
-    print(f"\n🔧 数据库类型: {RESOLVED_DB_TYPE}")
-
-    update_db_type_in_config(WRANGLER_TOML, "worker/wrangler.toml", RESOLVED_DB_TYPE)
-    update_db_type_in_config(WRANGLER_JSONC, "wrangler.jsonc", RESOLVED_DB_TYPE)
-
-    # Worker 始终保留 D1 绑定（createDb 根据 DB_TYPE 选择适配器，env.DB 仅 D1 模式使用）
-    print(f"🔧 Worker D1/KV 绑定保留（DB_TYPE={RESOLVED_DB_TYPE}）")
-
-
-# ==================== 阶段二：部署后 ====================
-
-def run_post(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
+def run_post(db_type: str):
+    """设置 Pages 项目与 Secrets"""
     global JWT_SECRET
-
-    print(f"\n{'='*50}")
-    print(f"📦 配置 Pages + Secrets")
-    print(f"{'='*50}")
-
+    print(f"\n📦 配置 Pages 项目与 Secrets...")
     if not JWT_SECRET:
         JWT_SECRET = secrets.token_urlsafe(32)
-        print(f"🔑 已自动生成 JWT_SECRET")
-
+        print("  🔑 已自动生成 JWT_SECRET")
     if not ADMIN_PASSWORD:
-        fail("未设置 ADMIN_PASSWORD")
+        fail("未设置 ADMIN_PASSWORD 环境变量")
 
-    # 创建 Pages 项目
-    print(f"📦 检查 Pages 项目: {PAGES_PROJECT}")
-    data = api_request("GET", f"/pages/projects/{PAGES_PROJECT}")
+    # 显式查询与创建，不靠误吞错误盲撞 API
+    data, code, _ = cf_api("GET", f"/pages/projects/{PAGES_PROJECT}", ok_codes=[800001])
     if data.get("success"):
-        print(f"  ✅ Pages 项目已存在")
+        print(f"  ✅ Pages 项目已存在: {PAGES_PROJECT}")
     else:
-        data = api_request("POST", "/pages/projects", {
-            "name": PAGES_PROJECT,
-            "production_branch": "main",
-        })
-        if data.get("success"):
-            print(f"  ✅ Pages 项目已创建")
-        else:
-            msg = data.get("errors", [{}])[0].get("message", "未知")
-            fail(f"Pages 项目创建失败: {msg}")
+        cf_api("POST", "/pages/projects", {"name": PAGES_PROJECT, "production_branch": "main"})
+        print(f"  ✅ Pages 项目创建成功: {PAGES_PROJECT}")
 
-    # 使用 pre 阶段保存的 resolved_type（避免重新推断时丢失 DB_TYPE 环境变量）
-    resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
-    print(f"🔧 使用数据库类型: {resolved_type}")
-
-    # 始终绑定 D1 + 兼容性标志（Worker 和 Pages 共享同一个 D1）
-    print(f"🔗 配置 D1 绑定（始终绑定）")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "d1_databases": {"DB": {"id": d1_id}},
-                "compatibility_flags": ["nodejs_compat"],
-            }
-        }
-    })
-    if not data.get("success"):
-        fail(f"D1 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ D1 + 兼容性标志成功")
-
-    # 配置 KV 绑定
-    print(f"🔗 配置 KV 绑定")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "kv_namespaces": {"KV": {"namespace_id": kv_id}}
-            }
-        }
-    })
-    if not data.get("success"):
-        fail(f"KV 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ KV 绑定成功")
-
-    # 配置 Service Binding
-    print(f"🔗 配置 Service Binding")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "services": {
-                    "WORKER": {"service": WORKER_NAME, "environment": "production"}
-                }
-            }
-        }
-    })
-    if not data.get("success"):
-        fail(f"Service Binding 失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ Service Binding 成功")
-
-    # Hyperdrive 绑定（仅 hyperdrive 模式）
-    if resolved_type == "hyperdrive" and hyperdrive_id:
-        print(f"🔗 配置 Hyperdrive 绑定")
-        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-            "deployment_configs": {
-                "production": {
-                    "hyperdrive": {"HYPERDRIVE": {"id": hyperdrive_id}}
-                }
-            }
-        })
-        if not data.get("success"):
-            fail(f"Hyperdrive 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-        print(f"  ✅ Hyperdrive 绑定成功")
-
-    # Pages 环境变量（DB_TYPE）由 post-deploy 步骤在 wrangler pages deploy 之后设置
-    # 不能在此处设置：wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值
-
-    # 设置 Pages Secrets
-    pages_secrets = {
+    secrets_dict = {
         "ADMIN_USERNAME": ADMIN_USERNAME,
         "ADMIN_PASSWORD": ADMIN_PASSWORD,
         "JWT_SECRET": JWT_SECRET,
     }
-    if DATABASE_URL and is_pg_or_mysql(DATABASE_URL):
-        pages_secrets["DATABASE_URL"] = DATABASE_URL
+    if db_type != "d1" and DATABASE_URL:
+        secrets_dict["DATABASE_URL"] = DATABASE_URL
 
-    for key, value in pages_secrets.items():
-        set_secret(key, value, [
-            "pages", "secret", "put",
-            "--project-name", PAGES_PROJECT,
-            "--env", "production",
-        ])
+    for k, v in secrets_dict.items():
+        set_secret(k, v, ["pages", "secret", "put", "--project-name", PAGES_PROJECT, "--env", "production"])
 
-    # 设置 Worker Secrets（仅 PG/MySQL，Worker 已部署）
-    if DATABASE_URL and is_pg_or_mysql(DATABASE_URL):
-        print(f"\n🔗 设置 Worker Secret: DATABASE_URL")
-        set_secret("DATABASE_URL", DATABASE_URL, [
-            "secret", "put",
-            "--config", WRANGLER_TOML,
-            "--name", WORKER_NAME,
-        ])
+    if db_type != "d1" and DATABASE_URL:
+        set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
 
-    print(f"\n🎉 Pages({PAGES_PROJECT}) + Secrets 配置完成")
-
-
-def _build_db_env_vars(resolved_type: str, database_url: str) -> dict:
-    """构建数据库相关的环境变量字典（DB_TYPE + DATABASE_URL + 方言特定变量）"""
-    env_vars = {
-        "DB_TYPE": {"type": "plain_text", "value": resolved_type},
-    }
-    # 只有外部数据库才需要设置 URL
-    if database_url:
-        env_vars["DATABASE_URL"] = {"type": "plain_text", "value": database_url}
-        if resolved_type == "tidb":
-            env_vars["TIDB_URL"] = {"type": "plain_text", "value": database_url}
-        elif resolved_type in ("pg", "hyperdrive"):
-            env_vars["PG_URL"] = {"type": "plain_text", "value": database_url}
-    return env_vars
-
-
-def _sync_worker_env_vars(db_env_vars: dict):
-    """通过 Cloudflare API 显式设置 Worker 环境变量，确保与 GitHub Secrets 同步"""
-    print(f"🔧 同步 Worker 环境变量: {', '.join(db_env_vars.keys())}")
-
-    # 读取 Worker 当前 settings（含已有 bindings）
-    data = api_request("GET", f"/workers/scripts/{WORKER_NAME}/settings")
-    if not data.get("success"):
-        print(f"  ⚠️ 无法读取 Worker settings: {data.get('errors', [{}])[0].get('message', '未知')}")
-        return
-
-    existing_bindings = data.get("result", {}).get("bindings", [])
-    # 保留非数据库的 bindings（如 D1、KV、Hyperdrive），替换数据库相关 bindings
-    non_db_bindings = [
-        b for b in existing_bindings
-        if b.get("name") not in db_env_vars
-    ]
-    new_db_bindings = [
-        {"name": name, "type": cfg["type"], "text": cfg["value"]}
-        for name, cfg in db_env_vars.items()
-    ]
-    all_bindings = non_db_bindings + new_db_bindings
-
-    # 写回 Worker settings
-    data = api_request("PUT", f"/workers/scripts/{WORKER_NAME}/settings", {
-        "bindings": all_bindings,
-    })
-    if data.get("success"):
-        print(f"  ✅ Worker 环境变量已同步")
-    else:
-        print(f"  ⚠️ Worker 环境变量同步失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-
-
-def run_post_deploy(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
-    """在项目部署完成后运行：一键设置所有 Pages 绑定与环境变量，防止被覆盖"""
-    resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
-    database_url = os.environ.get("DATABASE_URL", "")
-
-    print(f"\n{'='*50}")
-    print(f"📦 统一配置 Pages + Worker 绑定与环境变量（post-deploy）")
-    print(f"{'='*50}")
-
-    # ---- 1. 同步 Worker 环境变量（通过 API 显式设置，不依赖 wrangler.toml [vars]）----
-    db_env_vars = _build_db_env_vars(resolved_type, database_url)
-    _sync_worker_env_vars(db_env_vars)
-
-    # ---- 2. 同步 Pages 绑定与环境变量 ----
-    production_config = {
-        "compatibility_flags": ["nodejs_compat"],
-        "d1_databases": {"DB": {"id": d1_id}},
-        "kv_namespaces": {"KV": {"namespace_id": kv_id}},
-        "services": {
-            "WORKER": {"service": WORKER_NAME, "environment": "production"}
-        },
-        "env_vars": db_env_vars,
-    }
-
-    if resolved_type == "hyperdrive" and hyperdrive_id:
-        production_config["hyperdrive_bindings"] = {"HYPERDRIVE": {"id": hyperdrive_id}}
-
-    print(f"🔗 正在向 Pages 项目写入统一配置...")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": production_config
-        }
-    })
-
-    if not data.get("success"):
-        fail(f"Pages 统一配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ Pages 统一配置成功（D1, KV, Service, Hyperdrive 及环境变量已全部绑定）")
-
-
-# ==================== 入口 ====================
 
 def run_check():
-    """部署前检查：Schema 文件 + 生成产物 + 环境变量配置"""
-    print(f"\n{'='*50}")
-    print(f"🔍 检查 Prisma 多方言配置")
-    print(f"{'='*50}")
-
+    """部署前检查产物完整性"""
+    print(f"\n🔍 校验 Prisma Schema 与 Client 生成产物...")
     errors = []
-
-    # 1. 检查三个方言 Schema 文件
-    schemas = [
-        ("D1", "prisma/schema.d1.prisma"),
-        ("MySQL", "prisma/schema.mysql.prisma"),
-        ("PostgreSQL", "prisma/schema.pg.prisma"),
-    ]
-    for name, path in schemas:
-        full = os.path.join(PROJECT_ROOT, path)
-        if os.path.exists(full):
-            print(f"  ✅ {name} Schema: {path}")
-        else:
-            print(f"  ❌ {name} Schema 缺失: {path}")
+    for path in ["prisma/schema.d1.prisma", "prisma/schema.mysql.prisma", "prisma/schema.pg.prisma"]:
+        if not os.path.exists(os.path.join(PROJECT_ROOT, path)):
             errors.append(f"Schema 缺失: {path}")
 
-    # 2. 检查生成的 Client 目录（按 DB_TYPE 只生成一个，其余为 stub）
-    generated_dirs = [
-        ("D1", "src/generated/d1"),
-        ("MySQL", "src/generated/mysql"),
-        ("PostgreSQL", "src/generated/pg"),
-    ]
-    for name, dirpath in generated_dirs:
-        client_file = os.path.join(PROJECT_ROOT, dirpath, "client.ts")
-        if os.path.exists(client_file):
-            print(f"  ✅ {name} Client: {dirpath}/client.ts")
-        else:
-            print(f"  ❌ {name} Client 缺失: {dirpath}/client.ts")
-            errors.append(f"Client 缺失: {dirpath}")
+    for path in ["src/generated/d1/client.ts", "src/generated/mysql/client.ts", "src/generated/pg/client.ts"]:
+        if not os.path.exists(os.path.join(PROJECT_ROOT, path)):
+            errors.append(f"Client 缺失: {path}")
 
-    # 3. 检查 DB_TYPE 在 Worker wrangler 配置中
-    # Pages 的 DB_TYPE 通过 API 设置（post-deploy 步骤），不在 wrangler.jsonc 中
-    worker_toml = os.path.join(PROJECT_ROOT, "worker", "wrangler.toml")
-    if os.path.exists(worker_toml):
-        with open(worker_toml, "r") as f:
-            content = f.read()
-        if "DB_TYPE" in content:
-            print(f"  ✅ Worker 已配置 DB_TYPE: worker/wrangler.toml")
-        else:
-            print(f"  ❌ Worker 缺少 DB_TYPE: worker/wrangler.toml")
-            errors.append(f"DB_TYPE 缺失: worker/wrangler.toml")
-    else:
-        print(f"  ⚠️ Worker 配置不存在: worker/wrangler.toml")
-
-    # 汇总
-    print(f"\n{'='*50}")
     if errors:
-        print(f"❌ 检查失败：{len(errors)} 项问题")
-        for e in errors:
-            print(f"  - {e}")
-        sys.exit(1)
-    else:
-        print(f"✅ 全部检查通过")
+        for err in errors:
+            print(f"  ❌ {err}")
+        fail("部署前校验失败")
+    print("  ✅ 全部产物校验通过")
 
+
+# ==================== 程序主入口 ====================
 
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
     if phase not in ("pre", "post", "post-deploy", "check"):
-        fail(f"用法: python3 deploy/init.py [pre|post|post-deploy|check]")
+        fail("用法: python3 deploy/init.py [pre|post|post-deploy|check]")
 
     if phase == "check":
         run_check()
         return
 
-    # post-deploy 也需要 requests（调用 api_request），统一在此导入
-    import requests as _requests  # noqa: F811
-    globals()["requests"] = _requests
+    if not ACCOUNT_ID or not API_TOKEN:
+        fail("缺少 CLOUDFLARE_ACCOUNT_ID 或 CLOUDFLARE_API_TOKEN 环境变量")
 
-    if phase == "post-deploy":
-        d1_id = os.environ.get("D1_ID", "")
-        kv_id = os.environ.get("KV_ID", "")
-        hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
-        run_post_deploy(d1_id, kv_id, hyperdrive_id)
-        return
-
-    if not ACCOUNT_ID:
-        fail("未设置 CLOUDFLARE_ACCOUNT_ID")
-    if not API_TOKEN:
-        fail("未设置 CLOUDFLARE_API_TOKEN")
-
-    # 推断数据库类型（pre/post 都需要）
-    # 必须更新全局变量，供 run_pre() 中的 update_db_type_in_config() 使用
-    global RESOLVED_DB_TYPE
-    RESOLVED_DB_TYPE = resolve_db_type()
-    resolved_type = RESOLVED_DB_TYPE
-
+    db_type = get_db_type()
     d1_id = os.environ.get("D1_ID", "")
     kv_id = os.environ.get("KV_ID", "")
     hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
 
+    print(f"🚀 执行阶段: [{phase}] | 识别到的数据库类型: [{db_type}]")
+
     if phase == "pre":
-        # 始终创建 D1（Worker 需要 D1 binding，createDb 根据 DB_TYPE 选择适配器）
         d1_id = init_d1()
         kv_id = init_kv()
-        # Hyperdrive 模式：创建 Hyperdrive 实例
-        if resolved_type == "hyperdrive":
+        if db_type == "hyperdrive":
             hyperdrive_id = init_hyperdrive()
-        run_pre(d1_id, kv_id, hyperdrive_id)
+        update_config_files(d1_id, kv_id, hyperdrive_id, db_type)
+
     elif phase == "post":
-        # D1 模式需要 d1_id；外部数据库模式不需要
-        if resolved_type == "d1" and not d1_id:
-            fail("D1 模式下 post 阶段需要 D1_ID 环境变量")
         if not kv_id:
             fail("post 阶段需要 KV_ID 环境变量")
-        # Hyperdrive 模式需要 hyperdrive_id
-        if resolved_type == "hyperdrive" and not hyperdrive_id:
-            fail("Hyperdrive 模式下 post 阶段需要 HYPERDRIVE_ID 环境变量")
-        run_post(d1_id, kv_id, hyperdrive_id)
+        run_post(db_type)
 
-    print(f"\n🎉 {phase} 阶段完成")
+    elif phase == "post-deploy":
+        sync_env_and_bindings(d1_id, kv_id, hyperdrive_id, db_type)
+
+    print(f"\n🎉 [{phase}] 阶段顺利完成！")
 
 
 if __name__ == "__main__":
