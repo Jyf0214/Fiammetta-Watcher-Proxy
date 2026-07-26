@@ -526,41 +526,42 @@ def run_post(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
     print(f"\n🎉 Pages({PAGES_PROJECT}) + Secrets 配置完成")
 
 
-def run_post_deploy():
-    """部署后设置 Pages 环境变量（必须在 wrangler pages deploy 之后运行）"""
+def run_post_deploy(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
+    """在项目部署完成后运行：一键设置所有 Pages 绑定与环境变量，防止被覆盖"""
     resolved_type = RESOLVED_DB_TYPE or resolve_db_type()
 
     print(f"\n{'='*50}")
-    print(f"📦 设置 Pages 环境变量（post-deploy）")
+    print(f"📦 统一配置 Pages 绑定与环境变量（post-deploy）")
     print(f"{'='*50}")
 
-    pages_vars = {"DB_TYPE": resolved_type}
-
-    # Hyperdrive 绑定（post-deploy 独立进程，需重新绑定）
-    hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
-    if resolved_type == "hyperdrive" and hyperdrive_id:
-        print(f"🔗 配置 Hyperdrive 绑定")
-        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-            "deployment_configs": {
-                "production": {
-                    "hyperdrive": {"HYPERDRIVE": {"id": hyperdrive_id}}
-                }
-            }
-        })
-        if not data.get("success"):
-            fail(f"Hyperdrive 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-        print(f"  ✅ Hyperdrive 绑定成功")
-    print(f"🔗 设置 Pages vars: {pages_vars}")
-    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
-        "deployment_configs": {
-            "production": {
-                "vars": pages_vars,
+    production_config = {
+        "compatibility_flags": ["nodejs_compat"],
+        "d1_databases": {"DB": {"id": d1_id}},
+        "kv_namespaces": {"KV": {"namespace_id": kv_id}},
+        "services": {
+            "WORKER": {"service": WORKER_NAME, "environment": "production"}
+        },
+        "env_vars": {
+            "DB_TYPE": {
+                "type": "plain_text",
+                "value": resolved_type
             }
         }
+    }
+
+    if resolved_type == "hyperdrive" and hyperdrive_id:
+        production_config["hyperdrive_bindings"] = {"HYPERDRIVE": {"id": hyperdrive_id}}
+
+    print(f"🔗 正在向 Pages 项目写入统一配置...")
+    data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+        "deployment_configs": {
+            "production": production_config
+        }
     })
+
     if not data.get("success"):
-        fail(f"Pages 环境变量配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
-    print(f"  ✅ Pages 环境变量已设置: {pages_vars}")
+        fail(f"Pages 统一配置失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+    print(f"  ✅ Pages 统一配置成功（D1, KV, Service, Hyperdrive 及 DB_TYPE 环境变量已全部绑定）")
 
 
 # ==================== 入口 ====================
@@ -640,7 +641,10 @@ def main():
     globals()["requests"] = _requests
 
     if phase == "post-deploy":
-        run_post_deploy()
+        d1_id = os.environ.get("D1_ID", "")
+        kv_id = os.environ.get("KV_ID", "")
+        hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
+        run_post_deploy(d1_id, kv_id, hyperdrive_id)
         return
 
     if not ACCOUNT_ID:

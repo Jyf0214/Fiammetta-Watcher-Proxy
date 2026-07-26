@@ -123,6 +123,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          D1_ID: ${{ steps.init.outputs.D1_ID }}
+          KV_ID: ${{ steps.init.outputs.KV_ID }}
           HYPERDRIVE_ID: ${{ steps.init.outputs.HYPERDRIVE_ID }}
         run: python3 deploy/init.py post-deploy
 
