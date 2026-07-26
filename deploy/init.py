@@ -314,8 +314,8 @@ def init_hyperdrive() -> str:
 
 def resolve_db_type() -> str:
     """根据 DB_TYPE 环境变量或 DATABASE_URL 推断数据库类型"""
-    if DB_TYPE:
-        return DB_TYPE
+    if DB_TYPE and DB_TYPE.strip():
+        return DB_TYPE.strip()
     if DATABASE_URL:
         if DATABASE_URL.startswith("mysql://") or DATABASE_URL.startswith("mysqls://"):
             return "tidb"
@@ -535,6 +535,21 @@ def run_post_deploy():
     print(f"{'='*50}")
 
     pages_vars = {"DB_TYPE": resolved_type}
+
+    # Hyperdrive 绑定（post-deploy 独立进程，需重新绑定）
+    hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
+    if resolved_type == "hyperdrive" and hyperdrive_id:
+        print(f"🔗 配置 Hyperdrive 绑定")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "hyperdrive": {"HYPERDRIVE": {"id": hyperdrive_id}}
+                }
+            }
+        })
+        if not data.get("success"):
+            fail(f"Hyperdrive 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+        print(f"  ✅ Hyperdrive 绑定成功")
     print(f"🔗 设置 Pages vars: {pages_vars}")
     data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
         "deployment_configs": {
