@@ -134,11 +134,11 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
             if v:
                 content = content.replace(k, v)
 
-        # 仅替换独立的 DB_TYPE 行，防止乱穿匹配
+        # 仅替换独立的 DB_TYPE 行（精确匹配行首缩进与双引号/单引号配置）
         if path.endswith(".toml"):
-            content = re.sub(r'^(DB_TYPE\s*=\s*)"[^"]*"', f'\\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(r'(^\s*DB_TYPE\s*=\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
         else:
-            content = re.sub(r'("^?\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\\1"{db_type}"', content, flags=re.MULTILINE)
+            content = re.sub(r'(^\s*"DB_TYPE"\s*:\s*)"[^"]*"', f'\1"{db_type}"', content, flags=re.MULTILINE)
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
