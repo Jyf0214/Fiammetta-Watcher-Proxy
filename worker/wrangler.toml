@@ -23,6 +23,11 @@ database_id = "placeholder-d1-id"  # 部署时由 Terraform/CI 替换
 binding = "KV"
 id = "placeholder-kv-id"  # 部署时由 Terraform/CI 替换
 
+# Hyperdrive 绑定（DB_TYPE=hyperdrive 时启用，提供 PostgreSQL 连接池加速）
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
+
 # Cron 定时任务
 # 每小时：Key 用量重置检查
 # 每 6 小时：平台模型发现

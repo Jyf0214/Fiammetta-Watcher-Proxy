@@ -53,7 +53,7 @@ jobs:
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
           echo "✅ Account ID 已获取"
 
-      # ==================== 部署前：初始化资源（D1/KV 按需） ====================
+      # ==================== 部署前：初始化资源（D1/KV/Hyperdrive 按需） ====================
 
       - name: Init Resources (pre)
         id: init
@@ -62,6 +62,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
           D1_NAME: fiammetta_d1
           KV_NAME: fiammetta-proxy
+          HYPERDRIVE_NAME: fiammetta-hyperdrive
           DB_TYPE: ${{ env.DB_TYPE }}
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: python3 deploy/init.py pre
@@ -104,6 +105,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
           D1_ID: ${{ steps.init.outputs.D1_ID }}
           KV_ID: ${{ steps.init.outputs.KV_ID }}
+          HYPERDRIVE_ID: ${{ steps.init.outputs.HYPERDRIVE_ID }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           DATABASE_URL: ${{ env.DATABASE_URL }}

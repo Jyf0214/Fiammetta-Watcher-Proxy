@@ -35,6 +35,7 @@ ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
 D1_NAME = os.environ.get("D1_NAME", "fiammetta_d1")
 KV_NAME = os.environ.get("KV_NAME", "fiammetta-proxy")
+HYPERDRIVE_NAME = os.environ.get("HYPERDRIVE_NAME", "fiammetta-hyperdrive")
 PAGES_PROJECT = os.environ.get("PAGES_PROJECT", "fiammetta-watcher")
 WORKER_NAME = os.environ.get("WORKER_NAME", "fiammetta_worker")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
@@ -96,6 +97,20 @@ def check_response(resp, action: str):
     return data, 0, ""
 
 
+def parse_database_url(url: str) -> dict:
+    """解析 PostgreSQL 连接字符串为 origin 对象各字段"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return {
+        "scheme": parsed.scheme,
+        "host": parsed.hostname or "",
+        "port": parsed.port or 5432,
+        "database": (parsed.path.lstrip("/")) or "",
+        "user": parsed.username or "",
+        "password": parsed.password or "",
+    }
+
+
 def output_github(key: str, value: str):
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
@@ -103,7 +118,7 @@ def output_github(key: str, value: str):
             f.write(f"{key}={value}\n")
 
 
-def replace_placeholders(path: str, label: str, d1_id: str, kv_id: str):
+def replace_placeholders(path: str, label: str, d1_id: str, kv_id: str, hyperdrive_id: str = ""):
     if not os.path.exists(path):
         print(f"  ⚠️ {label} 不存在，跳过")
         return
@@ -111,6 +126,8 @@ def replace_placeholders(path: str, label: str, d1_id: str, kv_id: str):
         content = f.read()
     content = content.replace("placeholder-d1-id", d1_id)
     content = content.replace("placeholder-kv-id", kv_id)
+    if hyperdrive_id:
+        content = content.replace("placeholder-hyperdrive-id", hyperdrive_id)
     with open(path, "w") as f:
         f.write(content)
     print(f"  ✅ {label} 已更新")
@@ -242,6 +259,59 @@ def init_kv() -> str:
     return kv_id
 
 
+def init_hyperdrive() -> str:
+    """创建 Hyperdrive 实例（复用已存在或新建）"""
+    print(f"\n{'='*50}")
+    print(f"📦 初始化 Hyperdrive: {HYPERDRIVE_NAME}")
+    print(f"{'='*50}")
+
+    if not DATABASE_URL:
+        fail("Hyperdrive 模式需要 DATABASE_URL 环境变量")
+
+    origin = parse_database_url(DATABASE_URL)
+    print(f"  🔗 Origin: {origin['host']}:{origin['port']}/{origin['database']}")
+
+    # 查询已存在的 Hyperdrive
+    resp = requests.get(f"{API_BASE}/hyperdrive/configs", headers=HEADERS)
+    try:
+        data = resp.json()
+    except Exception:
+        fail(f"Hyperdrive 查询失败: HTTP {resp.status_code}")
+    if not data.get("success"):
+        fail(f"Hyperdrive 查询失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+
+    hyperdrive_id = None
+    for cfg in data.get("result", []):
+        if cfg.get("name") == HYPERDRIVE_NAME:
+            hyperdrive_id = cfg.get("id")
+            break
+
+    if hyperdrive_id:
+        print(f"  ✅ 复用已有 Hyperdrive: {hyperdrive_id}")
+    else:
+        resp = requests.post(
+            f"{API_BASE}/hyperdrive/configs",
+            headers=HEADERS,
+            json={
+                "name": HYPERDRIVE_NAME,
+                "origin": origin,
+            },
+        )
+        try:
+            data = resp.json()
+        except Exception:
+            fail(f"Hyperdrive 创建失败: HTTP {resp.status_code}")
+        if data.get("success"):
+            hyperdrive_id = data["result"]["id"]
+            print(f"  ✅ Hyperdrive 已创建: {hyperdrive_id}")
+        else:
+            msg = data.get("errors", [{}])[0].get("message", "未知")
+            fail(f"Hyperdrive 创建失败: {msg}")
+
+    output_github("HYPERDRIVE_ID", hyperdrive_id)
+    return hyperdrive_id
+
+
 def resolve_db_type() -> str:
     """根据 DB_TYPE 环境变量或 DATABASE_URL 推断数据库类型"""
     if DB_TYPE:
@@ -320,9 +390,9 @@ def remove_d1_binding_from_worker_toml():
         print(f"  ✅ worker/wrangler.toml 无 D1/KV 绑定需要移除")
 
 
-def run_pre(d1_id: str, kv_id: str):
-    replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id)
-    replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id)
+def run_pre(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
+    replace_placeholders(WRANGLER_TOML, "worker/wrangler.toml", d1_id, kv_id, hyperdrive_id)
+    replace_placeholders(WRANGLER_JSONC, "wrangler.jsonc", d1_id, kv_id, hyperdrive_id)
 
     print(f"\n🔧 数据库类型: {RESOLVED_DB_TYPE}")
 
@@ -335,7 +405,7 @@ def run_pre(d1_id: str, kv_id: str):
 
 # ==================== 阶段二：部署后 ====================
 
-def run_post(d1_id: str, kv_id: str):
+def run_post(d1_id: str, kv_id: str, hyperdrive_id: str = ""):
     global JWT_SECRET
 
     print(f"\n{'='*50}")
@@ -410,6 +480,20 @@ def run_post(d1_id: str, kv_id: str):
     if not data.get("success"):
         fail(f"Service Binding 失败: {data.get('errors', [{}])[0].get('message', '未知')}")
     print(f"  ✅ Service Binding 成功")
+
+    # Hyperdrive 绑定（仅 hyperdrive 模式）
+    if resolved_type == "hyperdrive" and hyperdrive_id:
+        print(f"🔗 配置 Hyperdrive 绑定")
+        data = api_request("PATCH", f"/pages/projects/{PAGES_PROJECT}", {
+            "deployment_configs": {
+                "production": {
+                    "hyperdrive": {"HYPERDRIVE": {"id": hyperdrive_id}}
+                }
+            }
+        })
+        if not data.get("success"):
+            fail(f"Hyperdrive 绑定失败: {data.get('errors', [{}])[0].get('message', '未知')}")
+        print(f"  ✅ Hyperdrive 绑定成功")
 
     # Pages 环境变量（DB_TYPE）由 post-deploy 步骤在 wrangler pages deploy 之后设置
     # 不能在此处设置：wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值
@@ -554,19 +638,26 @@ def main():
 
     d1_id = os.environ.get("D1_ID", "")
     kv_id = os.environ.get("KV_ID", "")
+    hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
 
     if phase == "pre":
         # 始终创建 D1（Worker 需要 D1 binding，createDb 根据 DB_TYPE 选择适配器）
         d1_id = init_d1()
         kv_id = init_kv()
-        run_pre(d1_id, kv_id)
+        # Hyperdrive 模式：创建 Hyperdrive 实例
+        if resolved_type == "hyperdrive":
+            hyperdrive_id = init_hyperdrive()
+        run_pre(d1_id, kv_id, hyperdrive_id)
     elif phase == "post":
         # D1 模式需要 d1_id；外部数据库模式不需要
         if resolved_type == "d1" and not d1_id:
             fail("D1 模式下 post 阶段需要 D1_ID 环境变量")
         if not kv_id:
             fail("post 阶段需要 KV_ID 环境变量")
-        run_post(d1_id, kv_id)
+        # Hyperdrive 模式需要 hyperdrive_id
+        if resolved_type == "hyperdrive" and not hyperdrive_id:
+            fail("Hyperdrive 模式下 post 阶段需要 HYPERDRIVE_ID 环境变量")
+        run_post(d1_id, kv_id, hyperdrive_id)
 
     print(f"\n🎉 {phase} 阶段完成")
 
