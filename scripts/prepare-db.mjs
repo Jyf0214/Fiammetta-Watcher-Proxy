@@ -102,7 +102,7 @@ if (dialect.needsPush) {
   const url = process.env.DATABASE_URL || "";
   if (url) {
     console.log(`⚙️  执行 prisma db push（${dialect.name}）...`);
-    execSync(`npx prisma db push --schema=${dialect.file}`, {
+    execSync(`npx prisma db push --schema=${dialect.file} --accept-data-loss`, {
       cwd: ROOT,
       stdio: "inherit",
       env: { ...process.env, DATABASE_URL: url },
