@@ -10,6 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "../../_auth";
+import { checkCsrfOrigin } from "../../_security";
 
 
 /** 生成唯一 ID（cuid 风格） */
@@ -56,6 +57,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const body: { modelId?: string; modelName?: string } = req.body;
@@ -125,6 +128,8 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
+  if (!checkCsrfOrigin(req, res)) return;
+
   try {
     const modelId = req.query.modelId as string | undefined;
 
@@ -186,6 +191,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
+  if (!checkCsrfOrigin(req, res)) return;
+
   try {
     const db = await createDb();
 
@@ -225,11 +232,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       clearTimeout(timeout);
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
         return res.status(502).json({
           success: false,
           error: `上游平台返回错误 (${response.status})`,
-          detail: errorText.slice(0, 500),
         });
       }
 
@@ -240,7 +245,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       if (message.includes("abort")) {
         return res.status(504).json({ success: false, error: "上游平台响应超时（15秒）" });
       }
-      return res.status(502).json({ success: false, error: "无法连接到上游平台", detail: message });
+      return res.status(502).json({ success: false, error: "无法连接到上游平台" });
     }
 
     if (upstreamModels.length === 0) {
@@ -328,6 +333,8 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const body: { modelId?: string; enabled?: boolean } = req.body;

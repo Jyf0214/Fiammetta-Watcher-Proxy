@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { checkCsrfOrigin } from "./_security";
 
 // ==================== 工具函数 ====================
 
@@ -81,6 +82,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const body = req.body as { name?: string };

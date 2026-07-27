@@ -8,6 +8,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
+import { checkCsrfOrigin } from "./_security";
 
 export default async function handler(
   req: NextApiRequest,
@@ -38,6 +39,8 @@ export default async function handler(
     }
 
     if (req.method === "PUT") {
+      if (!checkCsrfOrigin(req, res)) return;
+
       const body = req.body as { key?: string; value?: string };
 
       // 验证配置键必须以 system: 开头
@@ -78,6 +81,6 @@ export default async function handler(
     res.status(405).json({ success: false, error: { message: "Method not allowed", type: "invalid_request_error" } });
   } catch (error) {
     console.error(`[API /api/admin/config] 操作失败:`, error instanceof Error ? error.message : String(error));
-    res.status(500).json({ success: false, error: { message: "操作失败", type: "server_error" }, detail: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({ success: false, error: { message: "操作失败", type: "server_error" } });
   }
 }

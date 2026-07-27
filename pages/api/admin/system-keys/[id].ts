@@ -8,6 +8,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
+import { checkCsrfOrigin } from "../_security";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -39,6 +40,8 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const db = await createDb();
@@ -81,6 +84,8 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const body = req.body as { enabled?: boolean };

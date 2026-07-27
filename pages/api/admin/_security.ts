@@ -67,22 +67,29 @@ export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason
   }
 
   // 第二层：DNS 解析后 IP 检查（防 DNS Rebinding）
+  // 在支持 node:dns 的环境中启用（如 Node.js 本地开发），
+  // 在 Cloudflare Pages Functions 中优雅降级（保留 hostname 黑名单防护）
   try {
-    const { dns } = await import("node:dns");
-    const addresses = await new Promise<string[]>((resolve, reject) => {
-      dns.resolve4(hostname, (err, addrs) => {
-        if (err) reject(err);
-        else resolve(addrs);
+    const dnsMod = await import("node:dns");
+    const resolve4 = dnsMod.default?.resolve4 ?? (dnsMod as Record<string, unknown>).resolve4 as ((host: string, cb: (err: Error | null, addrs: string[]) => void) => void) | undefined;
+    if (resolve4) {
+      const addresses = await new Promise<string[]>((resolve, reject) => {
+        resolve4(hostname, (err: Error | null, addrs: string[]) => {
+          if (err) reject(err);
+          else resolve(addrs);
+        });
       });
-    });
 
-    for (const addr of addresses) {
-      if (isPrivateIp(addr)) {
-        return { safe: false, reason: `域名 ${hostname} 解析到内网地址 ${addr}` };
+      for (const addr of addresses) {
+        if (isPrivateIp(addr)) {
+          return { safe: false, reason: `域名 ${hostname} 解析到内网地址 ${addr}` };
+        }
       }
     }
+    // node:dns 不可用时静默跳过（hostname 黑名单已提供基础防护）
   } catch {
-    // DNS 解析失败（域名不存在等）— 不阻止，让后续 fetch 报错
+    // node:dns 不可用（Cloudflare Pages Functions 环境）— 静默跳过，
+    // 依赖 hostname 字符串黑名单提供基础 SSRF 防护
   }
 
   return { safe: true };
@@ -99,12 +106,21 @@ export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason
  * @returns true 表示来源合法，false 表示已被拦截（已发送 403 响应）
  */
 export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): boolean {
-  // 获取 Origin 或 Referer
   const origin = (req.headers.origin as string) || "";
   const referer = (req.headers.referer as string) || "";
 
-  // 无 Origin 且无 Referer：可能是同源请求或旧浏览器，放行
-  if (!origin && !referer) return true;
+  // 非生产环境：无 Origin 且无 Referer 时放行（本地开发 curl 等工具不发送这些头）
+  const isProd = process.env.ENVIRONMENT === "production";
+  if (!origin && !referer) {
+    if (isProd) {
+      // 生产环境：POST/PUT/DELETE 请求必须有 Origin 或 Referer
+      if (req.method && ["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+        res.status(403).json({ success: false, error: "请求缺少来源标识" });
+        return false;
+      }
+    }
+    return true;
+  }
 
   // 从 Origin/Referer 提取 host
   let sourceHost = "";
@@ -117,11 +133,12 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   // 获取当前请求的 host
   const reqHost = req.headers.host || "";
 
-  // 允许 localhost 和 127.0.0.1（本地开发）
+  // 仅在非生产环境允许 localhost 绕过
   const isLocalhost = (h: string) =>
     h === "localhost" || h === "127.0.0.1" || h.startsWith("localhost:");
+  const localhostAllowed = !isProd && isLocalhost(sourceHost) && isLocalhost(reqHost);
 
-  if (sourceHost && sourceHost !== reqHost && !(isLocalhost(sourceHost) && isLocalhost(reqHost))) {
+  if (sourceHost && sourceHost !== reqHost && !localhostAllowed) {
     res.status(403).json({ success: false, error: "请求来源不合法" });
     return false;
   }

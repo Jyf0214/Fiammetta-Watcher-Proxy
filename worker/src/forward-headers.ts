@@ -3,7 +3,25 @@
  *
  * 从下游请求中提取白名单内的请求头，透传给上游平台。
  * 仅提取平台配置中 forwardHeaders 白名单内指定的头。
+ * 对头值做 CR/LF/NUL 净化，防止 HTTP 头注入。
  */
+
+/**
+ * 净化 HTTP 头值，移除 CR (\r)、LF (\n)、NUL (\0) 字符
+ *
+ * 这些字符可能被用于 HTTP 头注入攻击，必须在透传前清除。
+ */
+function sanitizeHeaderValue(value: string): string {
+  // 移除 CR (0x0D)、LF (0x0A)、NUL (0x00) 字符，防止 HTTP 头注入
+  let result = "";
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code !== 0x0d && code !== 0x0a && code !== 0x00) {
+      result += value[i];
+    }
+  }
+  return result;
+}
 
 /**
  * 从下游请求头中提取可透传的请求头
@@ -33,7 +51,7 @@ export function extractForwardableHeaders(
     const lowerName = headerName.toLowerCase();
     const value = requestHeaders.get(headerName) ?? requestHeaders.get(lowerName);
     if (value !== null) {
-      result[headerName] = value;
+      result[headerName] = sanitizeHeaderValue(value);
     }
   }
 
