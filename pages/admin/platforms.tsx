@@ -530,7 +530,9 @@ export default function PlatformsPage() {
   const handleToggleWhitelist = useCallback((index: number) => {
     setNamedKeys((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], whitelisted: !next[index].whitelisted };
+      const newState = !next[index].whitelisted;
+      next[index] = { ...next[index], whitelisted: newState };
+      message.info(newState ? "已加入白名单（429 时不封禁）" : "已移出白名单");
       return next;
     });
   }, []);
