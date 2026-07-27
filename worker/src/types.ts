@@ -76,13 +76,14 @@ export type CircuitBreakerState = "closed" | "open" | "half-open";
 
 export type CronTask = "model-fetch" | "key-reset" | "log-archive";
 
-/** 将 cron 表达式映射到任务类型 */
+/** 将 cron 表达式映射到任务类型（精确匹配） */
 export function classifyCronExpression(cron: string): CronTask | null {
+  const trimmed = cron.trim();
   // 每 6 小时 → 模型发现
-  if (cron.includes("0 */6")) return "model-fetch";
+  if (trimmed === "0 */6 * * *") return "model-fetch";
   // 每小时 → Key 重置
-  if (cron.includes("0 */1 * * *")) return "key-reset";
+  if (trimmed === "0 */1 * * *") return "key-reset";
   // 每天凌晨 3 点 → 日志归档
-  if (cron.includes("0 3 * * *")) return "log-archive";
+  if (trimmed === "0 3 * * *") return "log-archive";
   return null;
 }

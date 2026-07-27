@@ -28,16 +28,38 @@ const CACHE_TTL = 30_000;
 
 // ==================== 深度合并 ====================
 
+/** mergeBody 允许合并的字段白名单，防止注入 model/messages/tools 等危险字段 */
+const MERGEBODY_ALLOWED_KEYS = new Set([
+  "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
+  "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
+  "n", "logprobs", "top_logprobs", "response_format", "seed",
+]);
+
+/**
+ * 过滤 mergeBody 中不在白名单中的键
+ */
+function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (MERGEBODY_ALLOWED_KEYS.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 /**
  * 深度合并两个对象。数组整体替换，不合并元素。
+ * 仅允许白名单中的键参与合并。
  */
 function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>
 ): Record<string, unknown> {
+  const sanitized = sanitizeMergeBody(source);
   const result = { ...target };
-  for (const key of Object.keys(source)) {
-    const srcVal = source[key];
+  for (const key of Object.keys(sanitized)) {
+    const srcVal = sanitized[key];
     const tgtVal = result[key];
     if (
       srcVal !== null &&

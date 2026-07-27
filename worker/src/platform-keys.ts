@@ -82,7 +82,13 @@ export function getWhitelist(): string[] {
 
 // ==================== Key 封禁机制（429 专用） ====================
 
-/** Key 封禁到期时间戳（内存态，重启归零） */
+/**
+ * Key 封禁到期时间戳（内存态，重启归零）
+ *
+ * 已知限制：Worker 冷启动后封禁状态丢失，被封禁的 Key 可能立即恢复使用。
+ * 这是 Cloudflare Workers 无状态架构的固有限制。
+ * 如需持久化封禁状态，可使用 KV 存储（增加一次网络往返）。
+ */
 const keyCooldowns = new Map<string, number>();
 
 const DEFAULT_KEY_BAN_MS = 5 * 60 * 1000; // 5 分钟

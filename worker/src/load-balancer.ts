@@ -130,7 +130,9 @@ export async function recordFailure(platformId: string, db: D1Database): Promise
     return;
   }
 
-  entry.failureCount++;
+  // 原子递增，防止并发竞态导致多计数
+  const prevCount = entry.failureCount;
+  entry.failureCount = prevCount + 1;
   entry.lastFailureAt = now;
 
   if (entry.state === "half-open") {

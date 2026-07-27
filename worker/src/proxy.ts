@@ -24,6 +24,55 @@ import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
 
+// ==================== SSRF 防护 ====================
+
+/** 内网地址正则匹配 */
+const PRIVATE_IP_PATTERNS = [
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^127\./,
+  /^0\./,
+];
+
+/** Key 哈希摘要（日志脱敏用） */
+function keyFingerprint(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(16).padStart(8, "0");
+}
+
+/**
+ * 校验上游 URL 是否安全（防 SSRF）
+ * 仅允许 http/https 协议，禁止内网地址
+ */
+function isSafeUpstreamUrl(urlStr: string): { safe: boolean; reason?: string } {
+  let url: URL;
+  try {
+    url = new URL(urlStr);
+  } catch {
+    return { safe: false, reason: "URL 格式不合法" };
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { safe: false, reason: "URL 协议必须是 http 或 https" };
+  }
+  const hostname = url.hostname;
+  if (
+    hostname === "localhost" ||
+    hostname === "0.0.0.0" ||
+    hostname === "127.0.0.1" ||
+    PRIVATE_IP_PATTERNS.some((p) => p.test(hostname)) ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  ) {
+    return { safe: false, reason: "URL 不能指向内网或本地地址" };
+  }
+  return { safe: true };
+}
+
 // ==================== 上游错误脱敏 ====================
 
 /**
@@ -371,6 +420,15 @@ export async function proxyV1Request(
 
     const upstreamUrl = `${currentPlatform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
 
+    // SSRF 防护：校验上游 URL
+    const urlCheck = isSafeUpstreamUrl(currentPlatform.baseUrl);
+    if (!urlCheck.safe) {
+      return Response.json(
+        { error: { message: `上游 URL 不安全: ${urlCheck.reason}`, type: "invalid_request_error" } },
+        { status: 400 }
+      );
+    }
+
     // 发送上游请求
     let upstreamResponse: Response;
     try {
@@ -419,6 +477,7 @@ export async function proxyV1Request(
         startTime,
         env,
         ctx,
+        estimatedTokens,
         logTag
       );
     }
@@ -428,7 +487,7 @@ export async function proxyV1Request(
       // 封禁该 Key 5 分钟
       banKey(currentKey);
       console.log(
-        `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: ${currentKey.slice(0, 8)}..., attempt: ${attempt + 1}/${MAX_429_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
+        `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: fingerprint:${keyFingerprint(currentKey)}, attempt: ${attempt + 1}/${MAX_429_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
       );
 
       // 策略 1：同平台换 Key
@@ -525,6 +584,7 @@ async function handleUpstreamResponse(
   startTime: number,
   env: { DB: D1Database; KV: KVNamespace } & WorkerEnv,
   ctx: ExecutionContext,
+  maxTokensEstimate: number,
   logTag: string
 ): Promise<Response> {
   // 提取 WorkerEnv 部分，供内部函数调用
@@ -617,7 +677,7 @@ async function handleUpstreamResponse(
     );
   }
 
-  // 提取 usage 并更新统计
+  // 提取 usage 并更新统计（传入 max_tokens 预估值防篡改）
   let responseTokens = 0;
   let responsePromptTokens = 0;
   let responseCompletionTokens = 0;
@@ -626,23 +686,16 @@ async function handleUpstreamResponse(
     const parsed = JSON.parse(responseBody);
     const usage = parsed?.usage;
     if (usage) {
-      let promptTokens = Number(usage.prompt_tokens) || 0;
-      let completionTokens = Number(usage.completion_tokens) || 0;
-      const totalTokens =
-        Number(usage.total_tokens) || promptTokens + completionTokens;
+      const { extractUsage } = await import("./token");
+      const extracted = extractUsage(usage, maxTokensEstimate);
 
-      if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
-        promptTokens = totalTokens;
-        completionTokens = totalTokens;
-      }
+      responseTokens = extracted.totalTokens;
+      responsePromptTokens = extracted.promptTokens;
+      responseCompletionTokens = extracted.completionTokens;
 
-      responseTokens = totalTokens;
-      responsePromptTokens = promptTokens;
-      responseCompletionTokens = completionTokens;
-
-      if (totalTokens > 0) {
+      if (extracted.totalTokens > 0) {
         const { updateKeyUsage } = await import("./token");
-        await updateKeyUsage(apiKey.id, totalTokens, env.DB, workerEnv);
+        await updateKeyUsage(apiKey.id, extracted.totalTokens, env.DB, workerEnv);
       }
     }
   } catch {

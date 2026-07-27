@@ -10,8 +10,13 @@ import type { WorkerEnv } from "./config";
 
 /**
  * 从 OpenAI 格式的 usage 对象中提取 token 数
+ *
+ * @param maxTokensEstimate - 请求体中的 max_tokens 预估值，用于防止上游返回 0 绕过配额
  */
-export function extractUsage(usage: Record<string, unknown> | undefined): {
+export function extractUsage(
+  usage: Record<string, unknown> | undefined,
+  maxTokensEstimate: number = 0
+): {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -30,6 +35,15 @@ export function extractUsage(usage: Record<string, unknown> | undefined): {
   if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
     promptTokens = totalTokens;
     completionTokens = totalTokens;
+  }
+
+  // 防止上游篡改 token 计数绕过配额：usage 为 0 时使用请求体预估值
+  if (totalTokens <= 0 && maxTokensEstimate > 0) {
+    return {
+      promptTokens: maxTokensEstimate,
+      completionTokens: 0,
+      totalTokens: maxTokensEstimate,
+    };
   }
 
   return { promptTokens, completionTokens, totalTokens };

@@ -117,12 +117,22 @@ describe("applyTemplates", () => {
   });
 
   it("嵌套对象深度合并", () => {
-    const body = { model: "gpt-4o", extra_body: { option_a: 1 } };
+    const body = { model: "gpt-4o", temperature: 0.3 };
     const templates: RequestTemplate[] = [
-      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { extra_body: { option_b: 2 } }, enabled: true },
+      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { temperature: 0.7 }, enabled: true },
     ];
     const result = applyTemplates(body, templates);
-    expect(result).toEqual({ model: "gpt-4o", extra_body: { option_a: 1, option_b: 2 } });
+    expect(result).toEqual({ model: "gpt-4o", temperature: 0.7 });
+  });
+
+  it("非白名单字段被过滤", () => {
+    const body = { model: "gpt-4o", messages: [{ role: "user", content: "hi" }] };
+    const templates: RequestTemplate[] = [
+      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { model: "claude-3", messages: [], tools: [{ type: "function" }] }, enabled: true },
+    ];
+    const result = applyTemplates(body, templates);
+    // model 和 messages 不在白名单，不应被覆盖；tools 不在白名单，应被过滤
+    expect(result).toEqual({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
   });
 
   it("数组整体替换", () => {
