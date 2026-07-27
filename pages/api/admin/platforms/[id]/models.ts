@@ -39,7 +39,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
       "[GET /api/admin/platforms/[id]/models] 获取平台模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "获取平台模型失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "获取平台模型失败" });
   }
 }
 
@@ -112,7 +112,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       "[POST /api/admin/platforms/[id]/models] 添加模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "添加模型失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "添加模型失败" });
   }
 }
 
@@ -145,7 +145,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       "[DELETE /api/admin/platforms/[id]/models] 删除模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "删除模型失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "删除模型失败" });
   }
 }
 
@@ -313,7 +313,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       "[PUT /api/admin/platforms/[id]/models] 刷新模型失败:",
       err
     );
-    return res.status(500).json({ success: false, error: "刷新模型失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "刷新模型失败" });
   }
 }
 
@@ -364,7 +364,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
     });
   } catch (err) {
     console.error("[PATCH /api/admin/platforms/[id]/models] 切换模型状态失败:", err);
-    return res.status(500).json({ success: false, error: "操作失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "操作失败" });
   }
 }
 

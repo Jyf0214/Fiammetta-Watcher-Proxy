@@ -9,6 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 import { checkAdminRateLimit } from "./_rate-limit";
+import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "./_security";
 
 /**
  * GET /api/admin/platforms — 获取平台列表
@@ -49,6 +50,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!admin) {
       return res.status(401).json({ success: false, error: "未授权" });
     }
+    if (!checkCsrfOrigin(req, res)) return;
     if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
     try {
@@ -76,29 +78,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!baseUrl || typeof baseUrl !== "string" || baseUrl.trim().length === 0) {
         errors.push("基础 URL 不能为空");
       } else {
-        // SSRF 防护：校验 URL 格式及内网地址黑名单
-        try {
-          const url = new URL(baseUrl);
-          if (!["http:", "https:"].includes(url.protocol)) {
-            errors.push("URL 协议必须是 http 或 https");
-          }
-          const hostname = url.hostname;
-          // 内网地址黑名单
-          if (
-            hostname === "localhost" ||
-            hostname === "0.0.0.0" ||
-            hostname === "127.0.0.1" ||
-            /^10\./.test(hostname) ||
-            /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-            /^192\.168\./.test(hostname) ||
-            /^169\.254\./.test(hostname) ||
-            hostname === "[::1]" ||
-            hostname === "::1"
-          ) {
-            errors.push("URL 不能指向内网或本地地址");
-          }
-        } catch {
-          errors.push("URL 格式不合法");
+        // SSRF 防护（含 DNS Rebinding 检测）
+        const urlCheck = await isSafeUrl(baseUrl);
+        if (!urlCheck.safe) {
+          errors.push(urlCheck.reason || "URL 不安全");
         }
       }
 
@@ -235,7 +218,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await db.platforms.create({
         data: {
           id,
-          name: name.trim(),
+          name: escapeHtml(name.trim()),
           baseUrl: baseUrl.trim(),
           apiKey: apiKey.trim(),
           apiKeys: JSON.stringify(parsedApiKeys),

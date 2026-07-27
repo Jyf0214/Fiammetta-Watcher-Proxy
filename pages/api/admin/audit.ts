@@ -67,6 +67,6 @@ export default async function handler(
     });
   } catch (err) {
     console.error("[GET /api/admin/audit] 获取审计日志失败:", err);
-    res.status(500).json({ success: false, error: "获取审计日志失败", detail: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "获取审计日志失败" });
   }
 }

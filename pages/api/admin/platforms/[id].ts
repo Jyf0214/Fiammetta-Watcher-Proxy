@@ -9,6 +9,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "../_auth";
+import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "../_security";
 
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
@@ -67,6 +68,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const body: any = req.body;
@@ -98,7 +100,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
-    // SSRF 防护：校验 baseUrl 格式及内网地址黑名单
+    // SSRF 防护（含 DNS Rebinding 检测）
     if (body.baseUrl !== undefined) {
       if (
         typeof body.baseUrl !== "string" ||
@@ -106,27 +108,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       ) {
         errors.push("基础 URL 不能为空");
       } else {
-        try {
-          const url = new URL(body.baseUrl);
-          if (!["http:", "https:"].includes(url.protocol)) {
-            errors.push("URL 协议必须是 http 或 https");
-          }
-          const hostname = url.hostname;
-          if (
-            hostname === "localhost" ||
-            hostname === "0.0.0.0" ||
-            hostname === "127.0.0.1" ||
-            /^10\./.test(hostname) ||
-            /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-            /^192\.168\./.test(hostname) ||
-            /^169\.254\./.test(hostname) ||
-            hostname === "[::1]" ||
-            hostname === "::1"
-          ) {
-            errors.push("URL 不能指向内网或本地地址");
-          }
-        } catch {
-          errors.push("URL 格式不合法");
+        const urlCheck = await isSafeUrl(body.baseUrl);
+        if (!urlCheck.safe) {
+          errors.push(urlCheck.reason || "URL 不安全");
         }
       }
     }
@@ -172,7 +156,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 
     // 构建更新数据（仅包含传入的字段）
     const updateData: Record<string, unknown> = {};
-    if (body.name !== undefined) updateData.name = body.name;
+    if (body.name !== undefined) updateData.name = escapeHtml(body.name);
     if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
     if (body.enabled !== undefined)
@@ -350,6 +334,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const db = await createDb();

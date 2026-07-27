@@ -14,6 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "./_auth";
+import { checkCsrfOrigin } from "./_security";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -27,6 +28,24 @@ export interface RequestTemplate {
   models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
+}
+
+/** mergeBody 允许的字段白名单，防止注入 tools/functions 等危险字段 */
+const MERGEBODY_ALLOWED_KEYS = new Set([
+  "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
+  "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
+  "n", "logprobs", "top_logprobs", "response_format", "seed",
+]);
+
+/** 校验 mergeBody 字段，过滤不在白名单中的键 */
+function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (MERGEBODY_ALLOWED_KEYS.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
 }
 
 /** 从 configs 表读取所有模板 */
@@ -88,6 +107,7 @@ export default async function handler(
 
     // ==================== POST — 创建新模板 ====================
     if (req.method === "POST") {
+      if (!checkCsrfOrigin(req, res)) return;
       const body: {
         name?: string;
         description?: string;
@@ -121,7 +141,7 @@ export default async function handler(
         name: name.trim(),
         description: description?.trim() || "",
         models: Array.isArray(models) && models.length > 0 ? models : ["*"],
-        mergeBody,
+        mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>),
         enabled: true,
       };
 
@@ -138,6 +158,7 @@ export default async function handler(
 
     // ==================== PUT — 更新已有模板 ====================
     if (req.method === "PUT") {
+      if (!checkCsrfOrigin(req, res)) return;
       const body: {
         id?: string;
         name?: string;
@@ -171,7 +192,7 @@ export default async function handler(
       if (name !== undefined) templates[idx].name = name.trim();
       if (description !== undefined) templates[idx].description = description.trim();
       if (models !== undefined) templates[idx].models = models;
-      if (mergeBody !== undefined) templates[idx].mergeBody = mergeBody;
+      if (mergeBody !== undefined) templates[idx].mergeBody = sanitizeMergeBody(mergeBody as Record<string, unknown>);
       if (enabled !== undefined) templates[idx].enabled = enabled;
 
       await saveTemplates(db, templates);
@@ -186,6 +207,7 @@ export default async function handler(
 
     // ==================== DELETE — 删除模板 ====================
     if (req.method === "DELETE") {
+      if (!checkCsrfOrigin(req, res)) return;
       const body: { id?: string } = req.body;
       if (!body || typeof body !== "object") {
         res.status(400).json({ success: false, error: "请求格式错误" });
@@ -223,6 +245,6 @@ export default async function handler(
     res.status(405).json({ success: false, error: "Method not allowed" });
   } catch (error) {
     console.error("[request-templates] 操作失败:", error);
-    res.status(500).json({ success: false, error: "操作失败", detail: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({ success: false, error: "操作失败" });
   }
 }

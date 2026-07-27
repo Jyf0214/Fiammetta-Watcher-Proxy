@@ -8,31 +8,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 
-/** 根据环境变量推断数据库类型 */
-function resolveDbType(): string {
-  const dbType = process.env.DB_TYPE || "";
-  if (dbType === "tidb" || dbType === "mysql") return "TiDB";
-  if (dbType === "pg") return "PostgreSQL";
-  if (dbType === "hyperdrive") return "PostgreSQL (Hyperdrive)";
-  if (dbType === "d1") return "D1";
-  if (!dbType) {
-    const url = process.env.DATABASE_URL || "";
-    if (url.startsWith("mysql")) return "TiDB";
-    if (url.startsWith("postgres")) return "PostgreSQL";
-  }
-  return "D1";
-}
-
 export default async function handler(
   _req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const dbType = resolveDbType();
   try {
     const db = await createDb();
     await db.admins.findMany({ take: 1, select: { id: true } });
-    res.status(200).json({ status: "ok", database: "connected", dbType });
+    res.status(200).json({ status: "ok", database: "connected" });
   } catch {
-    res.status(503).json({ status: "degraded", database: "disconnected", dbType });
+    res.status(503).json({ status: "degraded", database: "disconnected" });
   }
 }

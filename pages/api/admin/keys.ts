@@ -12,6 +12,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 import { checkAdminRateLimit } from "./_rate-limit";
+import { checkCsrfOrigin } from "./_security";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -62,6 +63,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);
   if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+  if (!checkCsrfOrigin(req, res)) return;
   if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
   try {

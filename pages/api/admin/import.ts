@@ -18,6 +18,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
 import { checkAdminRateLimit } from "./_rate-limit";
+import { isSafeUrl } from "./_security";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -279,46 +280,37 @@ async function importPlatforms(
   const existingNames = await db.platforms.findMany({ select: { name: true } });
   const existingNameSet = new Set(existingNames.map((r) => r.name));
 
-  // SSRF 防护：内网地址黑名单
-  function isPrivateUrl(urlStr: string): boolean {
-    try {
-      const url = new URL(urlStr);
-      if (!["http:", "https:"].includes(url.protocol)) return true;
-      const h = url.hostname;
-      return (
-        h === "localhost" || h === "0.0.0.0" || h === "127.0.0.1" ||
-        /^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-        /^192\.168\./.test(h) || /^169\.254\./.test(h) ||
-        h === "[::1]" || h === "::1"
-      );
-    } catch {
-      return true;
-    }
-  }
-
-  // 逐条分析跳过原因
-  const validPlatforms = platforms.filter((p) => {
+  // SSRF 防护（含 DNS Rebinding 检测）
+  const validPlatforms = [];
+  for (const p of platforms) {
     const name = p.name as string;
     const apiKey = p.apiKey as string;
     const baseUrl = p.baseUrl as string;
     if (!name || !apiKey) {
       skipReasons["缺少必要字段 (name/apiKey)"] = (skipReasons["缺少必要字段 (name/apiKey)"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
     if (apiKey.includes("***")) {
       skipReasons["API Key 已脱敏"] = (skipReasons["API Key 已脱敏"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
     if (existingNameSet.has(name)) {
       skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    if (baseUrl && isPrivateUrl(baseUrl)) {
-      skipReasons["URL 指向内网地址"] = (skipReasons["URL 指向内网地址"] || 0) + 1;
-      return false;
+    if (baseUrl) {
+      const urlCheck = await isSafeUrl(baseUrl);
+      if (!urlCheck.safe) {
+        skipReasons["URL 指向内网地址"] = (skipReasons["URL 指向内网地址"] || 0) + 1;
+        skipped++;
+        continue;
+      }
     }
-    return true;
-  });
+    validPlatforms.push(p);
+  }
 
   skipped += platforms.length - validPlatforms.length;
 

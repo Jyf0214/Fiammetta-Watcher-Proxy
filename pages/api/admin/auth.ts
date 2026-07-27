@@ -55,6 +55,9 @@ async function saveFails(kv: KVNamespace, ip: string, failures: number[]): Promi
 
 // ==================== 工具函数 ====================
 
+/** JWT_SECRET 最小长度（防止弱密钥被暴力破解） */
+const MIN_JWT_SECRET_LENGTH = 32;
+
 /** 常量时间字符串比较，防止时序攻击 */
 function timingSafeStringEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -138,6 +141,9 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
     ENVIRONMENT: process.env.ENVIRONMENT,
   };
   if (!env.JWT_SECRET) return res.status(500).json({ success: false, error: "JWT_SECRET 环境变量未配置" });
+  if (env.JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
+    return res.status(500).json({ success: false, error: `JWT_SECRET 强度不足：至少需要 ${MIN_JWT_SECRET_LENGTH} 个字符` });
+  }
   if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD) {
     return res.status(500).json({ success: false, error: "管理员账号未配置（ADMIN_USERNAME / ADMIN_PASSWORD）" });
   }

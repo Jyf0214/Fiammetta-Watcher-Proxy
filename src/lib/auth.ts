@@ -36,6 +36,9 @@ export interface AdminPayload {
  * - verifyToken(token, "secret-string") → 直接传入密钥
  * - verifyToken(token, { JWT_SECRET: "..." }) → 传入 env 对象
  */
+/** JWT_SECRET 最小长度（防止弱密钥被暴力破解） */
+const MIN_JWT_SECRET_LENGTH = 32;
+
 function resolveJwtSecret(
   secretOrEnv?: string | { JWT_SECRET?: string }
 ): Uint8Array {
@@ -54,6 +57,13 @@ function resolveJwtSecret(
   if (!secret) {
     throw new Error("JWT_SECRET 环境变量未配置，无法生成或验证 Token");
   }
+
+  if (secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+      `JWT_SECRET 强度不足：至少需要 ${MIN_JWT_SECRET_LENGTH} 个字符（当前 ${secret.length} 个）`
+    );
+  }
+
   return new TextEncoder().encode(secret);
 }
 
