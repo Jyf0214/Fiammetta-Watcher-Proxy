@@ -8,6 +8,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { checkAdminRateLimit } from "./_rate-limit";
 
 /**
  * GET /api/admin/platforms — 获取平台列表
@@ -39,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (err) {
       console.error("[GET /api/admin/platforms] 获取平台列表失败:", err);
-      return res.status(500).json({ success: false, error: "获取平台列表失败", detail: err instanceof Error ? err.message : String(err) });
+      return res.status(500).json({ success: false, error: "获取平台列表失败" });
     }
   }
 
@@ -48,6 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!admin) {
       return res.status(401).json({ success: false, error: "未授权" });
     }
+    if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
     try {
       const body: any = req.body;
@@ -286,7 +288,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (err) {
       console.error("[POST /api/admin/platforms] 创建平台失败:", err);
-      return res.status(500).json({ success: false, error: "创建平台失败", detail: err instanceof Error ? err.message : String(err) });
+      return res.status(500).json({ success: false, error: "创建平台失败" });
     }
   }
 

@@ -55,7 +55,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[GET /api/admin/platforms/[id]] 获取平台失败:", err);
-    return res.status(500).json({ success: false, error: "获取平台失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "获取平台失败" });
   }
 }
 
@@ -184,15 +184,41 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.tpmLimit !== undefined)
       updateData.tpmLimit = body.tpmLimit ?? null;
 
-    // 健康状态字段（用于手动恢复平台状态）
-    if (body.status !== undefined)
-      updateData.status = body.status;
-    if (body.failCount !== undefined)
-      updateData.failCount = body.failCount;
-    if (body.cooldownEnd !== undefined)
-      updateData.cooldownEnd = body.cooldownEnd;
-    if (body.lastFailAt !== undefined)
-      updateData.lastFailAt = body.lastFailAt;
+    // 健康状态字段（用于手动恢复平台状态）— 类型和范围校验
+    const VALID_STATUSES = ["healthy", "degraded", "down"];
+    if (body.status !== undefined) {
+      if (!VALID_STATUSES.includes(body.status)) {
+        errors.push(`status 无效，允许: ${VALID_STATUSES.join(", ")}`);
+      } else {
+        updateData.status = body.status;
+      }
+    }
+    if (body.failCount !== undefined) {
+      if (typeof body.failCount !== "number" || !Number.isInteger(body.failCount) || body.failCount < 0) {
+        errors.push("failCount 必须为非负整数");
+      } else {
+        updateData.failCount = body.failCount;
+      }
+    }
+    if (body.cooldownEnd !== undefined) {
+      if (body.cooldownEnd !== null && (typeof body.cooldownEnd !== "number" || body.cooldownEnd < 0)) {
+        errors.push("cooldownEnd 必须为非负整数或 null");
+      } else {
+        updateData.cooldownEnd = body.cooldownEnd;
+      }
+    }
+    if (body.lastFailAt !== undefined) {
+      if (body.lastFailAt !== null && (typeof body.lastFailAt !== "number" || body.lastFailAt < 0)) {
+        errors.push("lastFailAt 必须为非负整数或 null");
+      } else {
+        updateData.lastFailAt = body.lastFailAt;
+      }
+    }
+
+    // 校验健康状态字段后再检查一次
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, error: errors.join("; ") });
+    }
 
     // forwardHeaders 校验并更新
     if (body.forwardHeaders !== undefined) {
@@ -308,7 +334,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     });
   } catch (err) {
     console.error("[PUT /api/admin/platforms/[id]] 更新平台失败:", err);
-    return res.status(500).json({ success: false, error: "更新平台失败", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "更新平台失败" });
   }
 }
 
@@ -373,7 +399,6 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     return res.status(500).json({
       success: false,
       error: "删除平台失败",
-      detail: err instanceof Error ? err.message : String(err),
     });
   }
 }

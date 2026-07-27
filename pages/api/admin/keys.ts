@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { checkAdminRateLimit } from "./_rate-limit";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -54,13 +55,14 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
     console.error("[GET /api/admin/keys] 获取 Key 列表失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "获取 Key 列表失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "获取 Key 列表失败", type: "server_error" } });
   }
 }
 
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);
   if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+  if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
   try {
     const body = req.body as any;
@@ -139,6 +141,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: newKey, message: "API Key 创建成功" });
   } catch (err) {
     console.error("[POST /api/admin/keys] 创建 Key 失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "创建 Key 失败", type: "server_error" }, detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: { message: "创建 Key 失败", type: "server_error" } });
   }
 }

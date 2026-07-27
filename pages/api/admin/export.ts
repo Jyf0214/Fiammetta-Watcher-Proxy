@@ -36,7 +36,12 @@ export default async function handler(
       return;
     }
 
-    const exportType = ((req.query.type as string) || "all") as ExportType;
+    const rawExportType = (req.query.type as string) || "all";
+    const VALID_EXPORT_TYPES = ["system", "data", "all"];
+    if (!VALID_EXPORT_TYPES.includes(rawExportType)) {
+      return res.status(400).json({ success: false, error: `无效的导出类型，允许: ${VALID_EXPORT_TYPES.join(", ")}` });
+    }
+    const exportType = rawExportType as ExportType;
 
     const db = await createDb();
 
@@ -214,6 +219,6 @@ export default async function handler(
     res.status(200).send(jsonContent);
   } catch (err) {
     console.error("[GET /api/admin/export] 导出数据失败:", err);
-    res.status(500).json({ success: false, error: "导出数据失败", detail: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "导出数据失败" });
   }
 }

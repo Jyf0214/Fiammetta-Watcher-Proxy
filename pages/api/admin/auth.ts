@@ -55,6 +55,25 @@ async function saveFails(kv: KVNamespace, ip: string, failures: number[]): Promi
 
 // ==================== 工具函数 ====================
 
+/** 常量时间字符串比较，防止时序攻击 */
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.length !== bufB.length) {
+    let result = bufA.length ^ bufB.length;
+    for (let i = 0; i < bufA.length; i++) {
+      result |= bufA[i] ^ (bufB[i % bufB.length] || 0);
+    }
+    return result === 0;
+  }
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
 function getClientIp(req: NextApiRequest): string {
   const forwarded = req.headers["x-forwarded-for"];
   const str = Array.isArray(forwarded) ? forwarded[0] : forwarded;
@@ -146,21 +165,49 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
     const { username, password } = body;
     if (!username || !password) return res.status(400).json({ success: false, error: "用户名和密码不能为空" });
 
-    // 直接比对环境变量中的用户名和密码
-    if (username !== env.ADMIN_USERNAME || password !== env.ADMIN_PASSWORD) {
-      // 密码错误 → KV 记录失败
+    // 常量时间比对用户名和密码，防止时序攻击
+    const usernameMatch = timingSafeStringEqual(username, env.ADMIN_USERNAME);
+    const passwordMatch = timingSafeStringEqual(password, env.ADMIN_PASSWORD);
+    if (!usernameMatch || !passwordMatch) {
+      // 密码错误 → KV 记录失败 + 审计日志
       if (kv) {
         const fails = await getRecentFails(kv, clientIp);
         fails.push(Date.now());
         await saveFails(kv, clientIp, fails);
       }
+      try {
+        const db = await createDb();
+        await db.auditLogs.create({
+          data: {
+            id: crypto.randomUUID(),
+            adminId: "unknown",
+            action: "login_failed",
+            detail: JSON.stringify({ username, reason: "用户名或密码错误" }),
+            ip: clientIp,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        });
+      } catch { /* 审计日志写入失败不阻塞主流程 */ }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
 
-    // 登录成功 → 清除该 IP 全部失败记录
+    // 登录成功 → 清除该 IP 全部失败记录 + 审计日志
     if (kv) {
       await kv.delete(kvKey(clientIp));
     }
+    try {
+      const db = await createDb();
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: "env-admin",
+          action: "login_success",
+          detail: JSON.stringify({ username: env.ADMIN_USERNAME }),
+          ip: clientIp,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      });
+    } catch { /* 审计日志写入失败不阻塞主流程 */ }
 
     const isProd = env.ENVIRONMENT === "production";
     const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME! }, env);
@@ -169,7 +216,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
     return res.status(200).json({ success: true, data: { username: env.ADMIN_USERNAME }, message: "登录成功" });
   } catch (error) {
     console.error("[auth] 登录异常:", error instanceof Error ? error.message : String(error));
-    return res.status(500).json({ success: false, error: "登录失败", detail: error instanceof Error ? error.message : String(error) });
+    return res.status(500).json({ success: false, error: "登录失败" });
   }
 }
 
@@ -208,7 +255,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
   } catch (err) {
     console.error("[DELETE /api/admin/auth] 登出异常:", err);
     clearAuthCookie(res);
-    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除" });
   }
 }
 
@@ -227,6 +274,6 @@ async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
     return res.status(200).json({ success: true, data: { adminId: admin.adminId, username: admin.username } });
   } catch (err) {
     console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
-    return res.status(401).json({ success: false, error: "未授权", detail: err instanceof Error ? err.message : String(err) });
+    return res.status(401).json({ success: false, error: "未授权" });
   }
 }
