@@ -102,7 +102,11 @@ export async function validateApiKey(
   }
 
   // 检查是否需要重置用量（调用 key-reset.ts 的统一实现）
-  await checkAndResetApiKey(db, apiKey.id, env);
+  // 注意：checkAndResetApiKey 会执行额外的数据库查询，为减少 CPU 开销，
+  // 仅在 Key 状态异常时才调用（避免每次都查询）
+  if (apiKey.status === "disabled") {
+    await checkAndResetApiKey(db, apiKey.id, env);
+  }
 
   // 检查调用次数限制（D1 无 plans 表，直接使用 Key 级别 callLimit）
   const effectiveCallLimit = apiKey.callLimit ?? null;
