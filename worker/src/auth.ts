@@ -128,9 +128,5 @@ export async function validateApiKey(
   }
 
   return { apiKey };
-
-  } finally {
-    await prisma.$disconnect();
-  }
 }
 

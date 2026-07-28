@@ -136,9 +136,6 @@ export async function loadTemplates(
       const parsed = JSON.parse(row.value);
       templateCache = Array.isArray(parsed) ? parsed : [];
       lastRefresh = now;
-    } finally {
-      await prisma.$disconnect();
-    }
   } catch (err) {
     console.error("[request-templates] 加载模板失败:", err);
     templateCache = [];

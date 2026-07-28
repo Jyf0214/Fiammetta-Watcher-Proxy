@@ -188,9 +188,6 @@ async function updatePlatformStatus(
       console.log(
         `[circuit-breaker] 平台 ${platformId} 状态已更新: status=${status} failCount=${failCount}`
       );
-    } finally {
-      await prisma.$disconnect();
-    }
   } catch (err) {
     console.error(
       `[circuit-breaker] 更新平台状态失败:`,
@@ -252,8 +249,6 @@ export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: Work
       "[circuit-breaker] 从数据库同步状态失败:",
       err instanceof Error ? err.message : String(err)
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 

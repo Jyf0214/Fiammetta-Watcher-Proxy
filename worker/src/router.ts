@@ -162,10 +162,6 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
 
   // 清理已删除平台的断路器条目
   cleanupStaleBreakers(platformRows.map((p: any) => p.id));
-
-  } finally {
-    await prisma.$disconnect();
-  }
 }
 
 /**

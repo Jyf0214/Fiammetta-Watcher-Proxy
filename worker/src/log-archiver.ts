@@ -84,8 +84,6 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
         logsDeleted: totalLogsDeleted,
       },
     };
-  } finally {
-    await prisma.$disconnect();
   }
 }
 

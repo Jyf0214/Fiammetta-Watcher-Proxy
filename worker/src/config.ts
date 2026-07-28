@@ -34,8 +34,6 @@ export async function getConfig(
       select: { value: true },
     });
     return row?.value ?? null;
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -98,8 +96,6 @@ export async function setConfig(
       create: { id: crypto.randomUUID(), key, value, updatedAt: now },
       update: { value, updatedAt: now },
     });
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -133,8 +129,6 @@ export async function deleteConfig(
   try {
     const result = await prisma.configs.deleteMany({ where: { key } });
     return result.count > 0;
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -159,7 +153,5 @@ export async function getAllSystemConfigs(
       data[row.key] = row.value;
     }
     return data;
-  } finally {
-    await prisma.$disconnect();
   }
 }

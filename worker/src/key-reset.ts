@@ -112,8 +112,6 @@ export async function checkAndResetApiKey(
       error instanceof Error ? error.message : String(error)
     );
     return false;
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -214,7 +212,5 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
       "[key-reset] 重置异常:",
       err instanceof Error ? err.message : String(err)
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

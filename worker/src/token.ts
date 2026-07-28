@@ -70,8 +70,6 @@ export async function updateKeyUsage(
         updatedAt: Math.floor(Date.now() / 1000),
       },
     });
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -118,8 +116,6 @@ export async function recordRequestLog(params: {
         createdAt: Math.floor(Date.now() / 1000),
       },
     });
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -232,8 +228,6 @@ export function createUsageTransformer(params: {
           "[token] 流式响应 DB 写入失败:",
           err instanceof Error ? err.message : String(err)
         );
-      } finally {
-        await prisma.$disconnect();
       }
     },
   });

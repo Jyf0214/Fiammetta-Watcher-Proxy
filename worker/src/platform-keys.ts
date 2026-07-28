@@ -58,10 +58,7 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
         } catch { /* ignore */ }
       }
       console.log(`[platform-keys] 已加载 ${whitelistedKeys.size} 个白名单 Key`);
-    } finally {
-      await prisma.$disconnect();
-    }
-  } catch (err) {
+    } catch (err) {
     console.error("[platform-keys] 加载白名单失败:", err);
   }
 }
