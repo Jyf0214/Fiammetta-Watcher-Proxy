@@ -412,11 +412,17 @@ export async function proxyV1Request(
       upstreamBody.stream_options = { include_usage: true };
     }
 
-    // 解析透传头
-    const forwardHeaders = extractForwardableHeaders(
+    // 解析透传头（只保留合法 header 名，Workers fetch 对非法名会抛 TypeError）
+    const rawForwardHeaders = extractForwardableHeaders(
       request.headers,
       currentPlatform.forwardHeaders
     );
+    const forwardHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawForwardHeaders)) {
+      if (/^[a-zA-Z0-9-]+$/.test(k)) {
+        forwardHeaders[k] = v;
+      }
+    }
 
     const upstreamUrl = `${currentPlatform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
 

@@ -80,8 +80,8 @@ export function extractForwardableHeaders(
       if (value !== null) {
         result[headerName] = sanitizeHeaderValue(value);
       }
-    } catch {
-      // Workers 对某些 header 名会抛 TypeError，静默跳过
+    } catch (err) {
+      console.warn(`[forward-headers] 跳过非法 header: "${headerName}"`, err);
     }
   }
 
