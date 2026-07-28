@@ -66,7 +66,11 @@ export function extractForwardableHeaders(
   }
 
   for (const headerName of allowedHeaders) {
-    if (typeof headerName !== "string" || !isValidHeaderName(headerName)) continue;
+    if (typeof headerName !== "string") continue;
+    if (!isValidHeaderName(headerName)) {
+      console.warn(`[forward-headers] 跳过非法 header 名称: "${headerName}"`);
+      continue;
+    }
     const lowerName = headerName.toLowerCase();
     const value = requestHeaders.get(headerName) ?? requestHeaders.get(lowerName);
     if (value !== null) {
