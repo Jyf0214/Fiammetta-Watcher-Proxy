@@ -108,6 +108,17 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 async function parseRequestBody<T>(
   request: Request
 ): Promise<{ body: T } | { error: Response }> {
+  // 优先用 Content-Length 头快速拒绝超大请求，避免读取整个 body
+  const contentLength = Number(request.headers.get("content-length") || "0");
+  if (contentLength > MAX_BODY_BYTES) {
+    return {
+      error: Response.json(
+        { error: { message: "请求体过大", type: "invalid_request_error" } },
+        { status: 413 }
+      ),
+    };
+  }
+
   let bodyText: string;
   try {
     bodyText = await request.text();
@@ -120,7 +131,8 @@ async function parseRequestBody<T>(
     };
   }
 
-  if (new TextEncoder().encode(bodyText).byteLength > MAX_BODY_BYTES) {
+  // Content-Length 不存在或不准时，用字符串长度兜底（中文等多字节会略小，但足够做限制）
+  if (bodyText.length > MAX_BODY_BYTES) {
     return {
       error: Response.json(
         { error: { message: "请求体过大", type: "invalid_request_error" } },
