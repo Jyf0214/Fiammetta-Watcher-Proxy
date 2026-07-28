@@ -209,4 +209,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
   console.log(
     `[model-fetcher] 完成: ${successCount} 个平台成功, ${failedCount} 个失败, 共发现 ${totalModels} 个模型`
   );
+  } catch (err) {
+    console.error("[model-fetcher] 模型拉取任务异常:", err instanceof Error ? err.message : String(err));
+  }
 }

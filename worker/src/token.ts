@@ -70,6 +70,8 @@ export async function updateKeyUsage(
         updatedAt: Math.floor(Date.now() / 1000),
       },
     });
+  } catch (err) {
+    console.error("[token] 更新 Key 用量失败:", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -116,6 +118,8 @@ export async function recordRequestLog(params: {
         createdAt: Math.floor(Date.now() / 1000),
       },
     });
+  } catch (err) {
+    console.error("[token] 记录请求日志失败:", err instanceof Error ? err.message : String(err));
   }
 }
 

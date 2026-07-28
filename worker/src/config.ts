@@ -34,6 +34,9 @@ export async function getConfig(
       select: { value: true },
     });
     return row?.value ?? null;
+  } catch (err) {
+    console.error(`[config] 获取配置 ${key} 失败:`, err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 
@@ -96,6 +99,9 @@ export async function setConfig(
       create: { id: crypto.randomUUID(), key, value, updatedAt: now },
       update: { value, updatedAt: now },
     });
+  } catch (err) {
+    console.error(`[config] 设置配置 ${key} 失败:`, err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 
@@ -129,6 +135,9 @@ export async function deleteConfig(
   try {
     const result = await prisma.configs.deleteMany({ where: { key } });
     return result.count > 0;
+  } catch (err) {
+    console.error(`[config] 删除配置 ${key} 失败:`, err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 
@@ -153,5 +162,8 @@ export async function getAllSystemConfigs(
       data[row.key] = row.value;
     }
     return data;
+  } catch (err) {
+    console.error("[config] 获取系统配置失败:", err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }

@@ -34,31 +34,30 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
   try {
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-    try {
-      const platforms = await prisma.platforms.findMany({
-        select: { apiKeys: true },
-      });
-      whitelistedKeys.clear();
-      for (const p of platforms) {
-        if (!p.apiKeys) continue;
-        try {
-          const arr = JSON.parse(p.apiKeys);
-          if (!Array.isArray(arr)) continue;
-          for (const item of arr) {
-            if (
-              typeof item === "object" &&
-              item !== null &&
-              typeof item.key === "string" &&
-              item.key.trim() &&
-              item.whitelisted === true
-            ) {
-              whitelistedKeys.add(item.key.trim());
-            }
+    const platforms = await prisma.platforms.findMany({
+      select: { apiKeys: true },
+    });
+    whitelistedKeys.clear();
+    for (const p of platforms) {
+      if (!p.apiKeys) continue;
+      try {
+        const arr = JSON.parse(p.apiKeys);
+        if (!Array.isArray(arr)) continue;
+        for (const item of arr) {
+          if (
+            typeof item === "object" &&
+            item !== null &&
+            typeof item.key === "string" &&
+            item.key.trim() &&
+            item.whitelisted === true
+          ) {
+            whitelistedKeys.add(item.key.trim());
           }
-        } catch { /* ignore */ }
-      }
-      console.log(`[platform-keys] 已加载 ${whitelistedKeys.size} 个白名单 Key`);
-    } catch (err) {
+        }
+      } catch { /* ignore */ }
+    }
+    console.log(`[platform-keys] 已加载 ${whitelistedKeys.size} 个白名单 Key`);
+  } catch (err) {
     console.error("[platform-keys] 加载白名单失败:", err);
   }
 }

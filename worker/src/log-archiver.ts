@@ -84,6 +84,12 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
         logsDeleted: totalLogsDeleted,
       },
     };
+  } catch (err) {
+    console.error("[log-archiver] 归档任务异常:", err instanceof Error ? err.message : String(err));
+    return {
+      success: false,
+      message: `归档失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 

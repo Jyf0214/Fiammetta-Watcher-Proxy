@@ -19,8 +19,10 @@ echo "🚀 [pre-push] 完整构建验证..."
 
 # 1. Worker TypeScript 类型检查
 echo "📝 [pre-push] Worker TypeScript..."
-(cd worker && npx tsc --noEmit 2>&1 | head -20)
-if [ $? -ne 0 ]; then
+TSC_OUTPUT=$(cd worker && npx tsc --noEmit 2>&1)
+TSC_EXIT=$?
+echo "$TSC_OUTPUT" | head -20
+if [ $TSC_EXIT -ne 0 ]; then
   echo "❌ [pre-push] Worker TypeScript 失败，推送被阻止"
   exit 1
 fi
@@ -40,8 +42,10 @@ echo "✅ [pre-push] Frontend TypeScript 通过"
 
 # 3. Worker ESLint（零 warning）
 echo "🔍 [pre-push] Worker ESLint..."
-(cd worker && npx eslint src/ --max-warnings=0 2>&1 | head -20)
-if [ $? -ne 0 ]; then
+ESLINT_OUTPUT=$(cd worker && npx eslint src/ --max-warnings=0 2>&1)
+ESLINT_EXIT=$?
+echo "$ESLINT_OUTPUT" | head -20
+if [ $ESLINT_EXIT -ne 0 ]; then
   echo "❌ [pre-push] Worker ESLint 失败，推送被阻止"
   exit 1
 fi

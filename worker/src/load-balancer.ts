@@ -175,19 +175,18 @@ async function updatePlatformStatus(
 ): Promise<void> {
   try {
     const prisma = await createDb({ DB: db });
-    try {
-      await prisma.platforms.update({
-        where: { id: platformId },
-        data: {
-          status,
-          failCount,
-          lastFailAt: Math.floor(Date.now() / 1000),
-          cooldownEnd: cooldownEnd !== null ? Math.floor(cooldownEnd / 1000) : null,
-        },
-      });
-      console.log(
-        `[circuit-breaker] 平台 ${platformId} 状态已更新: status=${status} failCount=${failCount}`
-      );
+    await prisma.platforms.update({
+      where: { id: platformId },
+      data: {
+        status,
+        failCount,
+        lastFailAt: Math.floor(Date.now() / 1000),
+        cooldownEnd: cooldownEnd !== null ? Math.floor(cooldownEnd / 1000) : null,
+      },
+    });
+    console.log(
+      `[circuit-breaker] 平台 ${platformId} 状态已更新: status=${status} failCount=${failCount}`
+    );
   } catch (err) {
     console.error(
       `[circuit-breaker] 更新平台状态失败:`,

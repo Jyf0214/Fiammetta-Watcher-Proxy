@@ -128,5 +128,14 @@ export async function validateApiKey(
   }
 
   return { apiKey };
+  } catch (err) {
+    console.error("[auth] API Key 验证失败:", err instanceof Error ? err.message : String(err));
+    return {
+      error: Response.json(
+        { error: { message: "服务器内部错误", type: "internal_server_error" } },
+        { status: 500 }
+      ),
+    };
+  }
 }
 

@@ -121,21 +121,20 @@ export async function loadTemplates(
 
   try {
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-    try {
-      const row = await prisma.configs.findFirst({
-        where: { key: CONFIG_KEY },
-        select: { value: true },
-      });
+    const row = await prisma.configs.findFirst({
+      where: { key: CONFIG_KEY },
+      select: { value: true },
+    });
 
-      if (!row || !row.value) {
-        templateCache = [];
-        lastRefresh = now;
-        return templateCache;
-      }
-
-      const parsed = JSON.parse(row.value);
-      templateCache = Array.isArray(parsed) ? parsed : [];
+    if (!row || !row.value) {
+      templateCache = [];
       lastRefresh = now;
+      return templateCache;
+    }
+
+    const parsed = JSON.parse(row.value);
+    templateCache = Array.isArray(parsed) ? parsed : [];
+    lastRefresh = now;
   } catch (err) {
     console.error("[request-templates] 加载模板失败:", err);
     templateCache = [];
