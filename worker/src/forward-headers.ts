@@ -24,21 +24,28 @@ function sanitizeHeaderValue(value: string): string {
 }
 
 /**
- * 验证 HTTP 头名称是否合法
+ * 验证 HTTP 头名称是否合法（RFC 7230 token 字符）
  *
- * HTTP 头名称只能包含可打印 ASCII 字符，不能包含空格、冒号等特殊字符。
+ * HTTP 头名称只允许: 字母、数字、以及 !#$%&'*+-.^_`|~ 这些符号。
+ * 空格、冒号、括号、斜杠等均不合法。
  * @param name - 要验证的头名称
  * @returns 是否合法
  */
 function isValidHeaderName(name: string): boolean {
   if (!name || name.length === 0) return false;
-  // HTTP 头名称只允许可打印 ASCII 字符（0x21-0x7E），不允许空格(0x20)、控制字符等
   for (let i = 0; i < name.length; i++) {
-    const code = name.charCodeAt(i);
-    if (code < 0x21 || code > 0x7e) return false;
+    const c = name.charCodeAt(i);
+    // ALPHA: A-Z (0x41-0x5A) 或 a-z (0x61-0x7A)
+    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) continue;
+    // DIGIT: 0-9 (0x30-0x39)
+    if (c >= 0x30 && c <= 0x39) continue;
+    // tchar: ! # $ % & ' * + - . ^ _ ` | ~
+    if ("!#$%&'*+-.^_`|~".charCodeAt(0) <= c) {
+      const tchars = "!#$%&'*+-.^_`|~";
+      if (tchars.includes(name[i])) continue;
+    }
+    return false;
   }
-  // 不能包含冒号（头名称:头值的分隔符）
-  if (name.includes(":")) return false;
   return true;
 }
 
@@ -66,15 +73,15 @@ export function extractForwardableHeaders(
   }
 
   for (const headerName of allowedHeaders) {
-    if (typeof headerName !== "string") continue;
-    if (!isValidHeaderName(headerName)) {
-      console.warn(`[forward-headers] 跳过非法 header 名称: "${headerName}"`);
-      continue;
-    }
-    const lowerName = headerName.toLowerCase();
-    const value = requestHeaders.get(headerName) ?? requestHeaders.get(lowerName);
-    if (value !== null) {
-      result[headerName] = sanitizeHeaderValue(value);
+    if (typeof headerName !== "string" || !isValidHeaderName(headerName)) continue;
+    try {
+      const lowerName = headerName.toLowerCase();
+      const value = requestHeaders.get(headerName) ?? requestHeaders.get(lowerName);
+      if (value !== null) {
+        result[headerName] = sanitizeHeaderValue(value);
+      }
+    } catch {
+      // Workers 对某些 header 名会抛 TypeError，静默跳过
     }
   }
 
