@@ -221,11 +221,14 @@ Verify `package.json` `build:cf` script is complete:
 
 ### Worker CPU Timeout
 
-Cloudflare Workers Free plan CPU limit is 10ms/request. If timeouts occur:
+::: warning Free Tier Limitation
+Cloudflare Workers Free plan CPU limit is 10ms/request. Proxying AI API requests frequently exceeds this limit, causing repeated failures. You must either upgrade to Workers Paid plan (50ms CPU/request), or switch to another deployment method (e.g., [Vercel](/en/deployment/vercel), [Node.js Standalone](/en/deployment/standalone)).
+:::
+
+Troubleshooting:
 
 - Check for unnecessary synchronous computation
 - Ensure `prisma.$disconnect()` is not called (destroys connection cache, causing CPU spikes)
-- Consider upgrading to Workers Paid plan (50ms CPU/request)
 
 ### D1 Connection Issues
 

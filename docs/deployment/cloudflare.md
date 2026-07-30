@@ -225,11 +225,14 @@ crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
 
 ### Worker CPU 超时
 
-Cloudflare Workers Free 计划 CPU 限制 10ms/请求。如果经常超时：
+::: warning 免费用户注意
+Cloudflare Workers Free 计划 CPU 限制 10ms/请求。代理 AI API 请求时，CPU 时间很容易超出上限，导致请求频繁失败。这种情况只能升级到 Workers Paid 计划（50ms CPU/请求），或改用其他部署方式（如 [Vercel](/deployment/vercel)、[Node.js 直接部署](/deployment/standalone)）。
+:::
+
+排查步骤：
 
 - 检查是否有不必要的同步计算
 - 确认没有调用 `prisma.$disconnect()`（会破坏连接缓存导致 CPU 飙升）
-- 考虑升级到 Workers Paid 计划（50ms CPU/请求）
 
 ### D1 连接问题
 
