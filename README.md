@@ -7,6 +7,8 @@
 
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络。
 
+📖 **部署教程请见：[https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
+
 ## 功能特性
 
 - **多平台负载均衡** — 多上游 API 平台，按优先级、权重、健康状态自动路由

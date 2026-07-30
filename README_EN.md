@@ -7,6 +7,8 @@ English | [简体中文](README.md)
 
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployed on Cloudflare's global edge network.
 
+📖 **Deployment guide: [https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
+
 ## Features
 
 - **Multi-platform load balancing** — Routes across upstream API platforms by priority, weight, and health status
