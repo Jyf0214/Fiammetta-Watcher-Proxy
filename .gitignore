@@ -68,8 +68,11 @@ next-env.d.ts
 middleware.ts
 vitest.config.mjs
 
+# VitePress
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 # 原项目遗留文件
-docs/
 home/
 tmp/
 CODE_REVIEW_REPORT.md

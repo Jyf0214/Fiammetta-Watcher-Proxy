@@ -21,11 +21,5 @@
       "binding": "KV",
       "id": "placeholder-kv-id"
     }
-  ],
-  "hyperdrive": [
-    {
-      "binding": "HYPERDRIVE",
-      "id": "placeholder-hyperdrive-id"
-    }
   ]
 }
