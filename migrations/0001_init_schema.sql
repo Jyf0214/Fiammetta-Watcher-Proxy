@@ -1,3 +1,4 @@
+
 -- CreateTable
 CREATE TABLE "admins" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -25,30 +26,6 @@ CREATE TABLE "platforms" (
     "last_fail_at" INTEGER,
     "cooldown_end" INTEGER,
     "forward_headers" TEXT NOT NULL DEFAULT '[]',
-    "created_at" INTEGER NOT NULL DEFAULT 0,
-    "updated_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
-CREATE TABLE "proxy_pools" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "created_at" INTEGER NOT NULL DEFAULT 0,
-    "updated_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
-CREATE TABLE "proxies" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "address" TEXT NOT NULL,
-    "pool_id" TEXT,
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "status" TEXT NOT NULL DEFAULT 'healthy',
-    "fail_count" INTEGER NOT NULL DEFAULT 0,
-    "ban_count" INTEGER NOT NULL DEFAULT 0,
-    "last_fail_at" INTEGER,
-    "cooldown_end" INTEGER,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );
@@ -127,7 +104,6 @@ CREATE TABLE "request_logs" (
     "key_id" TEXT,
     "key_name" TEXT,
     "platform_id" TEXT,
-    "proxy_id" TEXT,
     "model" TEXT NOT NULL,
     "endpoint" TEXT,
     "method" TEXT,
@@ -214,12 +190,6 @@ CREATE UNIQUE INDEX "admins_username_key" ON "admins"("username");
 CREATE INDEX "platforms_enabled_status_idx" ON "platforms"("enabled", "status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "proxy_pools_name_key" ON "proxy_pools"("name");
-
--- CreateIndex
-CREATE INDEX "proxies_pool_id_enabled_status_idx" ON "proxies"("pool_id", "enabled", "status");
-
--- CreateIndex
 CREATE UNIQUE INDEX "plans_name_key" ON "plans"("name");
 
 -- CreateIndex
@@ -248,12 +218,6 @@ CREATE INDEX "platform_models_model_id_idx" ON "platform_models"("model_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "platform_models_platform_id_model_id_key" ON "platform_models"("platform_id", "model_id");
-
--- CreateIndex
-CREATE INDEX "request_logs_key_id_idx" ON "request_logs"("key_id");
-
--- CreateIndex
-CREATE INDEX "request_logs_platform_id_idx" ON "request_logs"("platform_id");
 
 -- CreateIndex
 CREATE INDEX "request_logs_created_at_idx" ON "request_logs"("created_at");
@@ -290,3 +254,4 @@ CREATE INDEX "audit_logs_admin_id_idx" ON "audit_logs"("admin_id");
 
 -- CreateIndex
 CREATE INDEX "audit_logs_created_at_idx" ON "audit_logs"("created_at");
+
