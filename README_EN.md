@@ -2,6 +2,9 @@
 
 English | [简体中文](README.md)
 
+> [!TIP]
+> **Note: This project is under active development and unstable. Not recommended for production use. Please switch to the `stable` branch and deploy via Docker.**
+
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployed on Cloudflare's global edge network.
 
 ## Features
