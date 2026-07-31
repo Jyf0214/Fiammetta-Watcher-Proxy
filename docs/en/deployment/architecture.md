@@ -1,132 +1,54 @@
 # Architecture
 
-FWP uses a **dual-mode build architecture** — a single codebase automatically switches runtime modes based on the deployment platform.
+FWP is an AI gateway: it exposes an OpenAI-compatible proxy API outward, and provides an admin panel inward (manage API Keys, models, usage and logs). There are two deployment modes — which one you get depends on the platform you choose.
 
-## Dual-Mode Architecture
+## The Two Modes
 
-### Cloudflare Mode
-
-When `DEPLOY_PLATFORM=cf` environment variable is present, the build system switches to Cloudflare mode:
+### Cloudflare Mode (managed, recommended)
 
 ```
-┌─────────────────────────────────────────┐
-│            Cloudflare Edge              │
-│                                         │
-│  Worker (/v1/* proxy + Cron tasks)      │
-│       ↓                                 │
-│  D1 Database (SQLite via Binding)       │
-│                                         │
-│  Pages (Frontend + Admin API + Setup)   │
-│       ↓                                 │
-│  D1 Database (shared)                   │
-└─────────────────────────────────────────┘
+Requests → proxy API + scheduled tasks (run by Cloudflare)
+         → frontend + admin panel (hosted by Cloudflare)
+                  ↓
+              D1 database (built into Cloudflare)
 ```
 
-- **Worker** handles all `/v1/*` proxy requests and Cron tasks
-- **Pages** handles frontend static assets and admin API
-- Both share the same D1 database (via Binding)
+- The proxy API and the 3 scheduled tasks (model discovery, key usage reset, log archival) all run on Cloudflare — they consume none of your own server resources
+- The frontend and admin panel are also hosted on Cloudflare
+- Data lives in Cloudflare's built-in D1 database — no external database needed within the free tier
+- Scheduled tasks are built in and run automatically for free
 
-### Non-Cloudflare Mode (Default)
-
-```
-┌─────────────────────────────────────────┐
-│         Node.js Server                  │
-│                                         │
-│  Next.js Server                         │
-│  ├── /v1/* proxy (Pages API routes)     │
-│  ├── /api/cron/* (HTTP endpoints)       │
-│  ├── /api/admin/* (admin API)           │
-│  └── Frontend static assets             │
-│       ↓                                 │
-│  TiDB / PostgreSQL (DATABASE_URL)       │
-└─────────────────────────────────────────┘
-```
-
-- `/v1/*` proxy handled by Pages API route `pages/api/v1/[[...v1]].ts`
-- Cron tasks exposed as HTTP endpoints via `pages/api/cron/[[...cron]].ts`
-- Rate limiting uses in-memory Map (not KV)
-- Database connects via `DATABASE_URL`
-
-## Build Gate Mechanism
-
-Shell scripts automatically handle route switching during build:
-
-### build-gate.sh (Pre-Build)
+### Self-Hosted Mode (Vercel / EdgeOne / your own server)
 
 ```
-DEPLOY_PLATFORM=cf → Moves pages/api/v1/ and pages/api/cron/ to .build-gate-tmp/
+Requests → Next.js service
+     ├── proxy API /v1/*
+     ├── cron endpoints /api/cron/* (must be triggered externally)
+     ├── admin panel
+     └── frontend pages
+              ↓
+         TiDB / PostgreSQL (remote database)
 ```
 
-This ensures Cloudflare builds don't package v1 and cron routes into Pages (Worker handles them).
+- The whole application runs in one service (serverless functions on Vercel / EdgeOne, or your own server)
+- You provide the database yourself: TiDB Cloud (free tier) or PostgreSQL, connected via a connection string
+- Scheduled tasks have no built-in scheduler — an external service must call the endpoints on schedule (see each platform's guide)
+- Rate-limit counters reset on service restarts (cold start) — expected, and it does not affect functionality
 
-### Build Process
+## Platform Differences at a Glance
 
-```bash
-# build:cf script in package.json
-DEPLOY_PLATFORM=cf bash scripts/build-gate.sh &&
-node scripts/prepare-db.mjs &&
-opennextjs-cloudflare build &&
-DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh
-```
+| Item | Cloudflare | Vercel / EdgeOne | Own server |
+|------|-----------|------------------|-----------|
+| Database | built-in D1 (free) | self-provided TiDB / PostgreSQL | self-provided |
+| Scheduled tasks | built-in, free | external scheduler (Vercel Cron needs Pro) | system cron |
+| Login rate limit | survives restarts | resets on restart | resets on restart |
 
-### build-gate-restore.sh (Post-Build)
-
-```
-DEPLOY_PLATFORM=cf → Restores files from .build-gate-tmp/ to original locations
-```
-
-::: warning
-Route files must be restored after build. Otherwise, local dev and non-Cloudflare deployments will miss `/v1/*` and `/api/cron/*` routes.
-:::
-
-## Worker Module Reuse
-
-Pages API routes (`pages/api/v1/[[...v1]].ts`) import Worker business modules via relative paths:
-
-```typescript
-import { validateApiKey } from "../../../worker/src/auth";
-import { routeRequest } from "../../../worker/src/router";
-import { getNextKey } from "../../../worker/src/platform-keys";
-```
-
-This design ensures:
-
-- Business logic is maintained in one place (`worker/src/`)
-- Pages API and Worker share identical routing, auth, and load-balancing logic
-- Modules get database connections via `createDb()` factory, not direct D1 Binding
-
-## Database Adapter Layer
-
-FWP uses Prisma 7 multi-schema to support multiple databases:
-
-```
-prisma/
-├── schema.d1.prisma     → Cloudflare D1 (wasm runtime)
-├── schema.mysql.prisma  → TiDB / MySQL
-└── schema.pg.prisma     → PostgreSQL
-```
-
-All three schemas define identical table structures but use different Generators and Runtimes:
-
-| Schema | Generator | Runtime | Adapter |
-|--------|-----------|---------|---------|
-| `schema.d1.prisma` | `prisma-client-js` | `cloudflare` | `@prisma/adapter-d1` |
-| `schema.mysql.prisma` | `prisma-client-js` | `node` | `mysql2` |
-| `schema.pg.prisma` | `prisma-client-js` | `node` | `@prisma/pg-worker` |
-
-`scripts/prepare-db.mjs` automatically selects the correct schema based on `DB_TYPE` and runs migration.
-
-## Rate Limiting Implementation
-
-| Environment | Storage | Persistent | Notes |
-|-------------|---------|------------|-------|
-| Cloudflare Worker | KV Namespace | ✅ Persistent | Survives cold starts |
-| Pages API (non-CF) | In-memory Map | ❌ Non-persistent | Resets on cold start |
-
-Both implementations share the same interface (`checkPlatformRpm`, `checkApiKeyRpm`, etc.) — only the underlying storage differs.
+> Admin login rate limit: 5 failed attempts within 30 minutes temporarily blocks login — wait a while and try again.
 
 ## Related Docs
 
-- [Cloudflare Deployment](/en/deployment/cloudflare) — Cloudflare platform deployment guide
-- [Vercel Deployment](/en/deployment/vercel) — Non-Cloudflare platform deployment
-- [Environment Variables](/en/deployment/env) — Complete env var reference
+- [Deployment Guide](/en/deployment/) — platform comparison and selection
+- [Cloudflare](/en/deployment/cloudflare)
+- [Vercel](/en/deployment/vercel)
+- [EdgeOne](/en/deployment/edgeone)
+- [Environment Variables](/en/deployment/env)

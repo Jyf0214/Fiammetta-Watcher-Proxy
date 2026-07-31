@@ -1,256 +1,165 @@
 # Cloudflare 部署
 
-FWP 的原生部署平台。使用 Cloudflare Pages 托管前端和管理 API，Cloudflare Worker 处理 `/v1/*` 代理和定时任务，D1 作为数据库。全球边缘节点，零运维成本。
+FWP 部署到 Cloudflare 后由两部分组成：**Worker** 处理 `/v1/*` 代理与 3 个定时任务，**Pages** 托管前台与管理后台，两者共享同一个数据库。
 
-## 架构概览
-
-```
-┌─────────────────────────────────────────────┐
-│              Cloudflare Edge                │
-│                                             │
-│  ┌──────────────┐  ┌──────────────────────┐ │
-│  │   Worker     │  │      Pages           │ │
-│  │              │  │                      │ │
-│  │ /v1/* 代理   │  │ 前端 (React/Next.js) │ │
-│  │ Cron 定时任务 │  │ /api/admin/* 管理API │ │
-│  │              │  │ /api/setup/* 初始化   │ │
-│  └──────┬───────┘  └──────────┬───────────┘ │
-│         │                     │             │
-│         └─────────┬───────────┘             │
-│                   ▼                         │
-│          ┌──────────────┐                   │
-│          │   D1 数据库   │                   │
-│          │  (SQLite)    │                   │
-│          └──────────────┘                   │
-└─────────────────────────────────────────────┘
-```
-
-- **Worker**：处理 `/v1/*` 代理请求（API Key 验证 → 路由 → 转发 → 流式响应）和 Cron 定时任务（模型发现、Key 重置、日志归档）
-- **Pages**：托管前端静态资源和管理后台 API（平台管理、Key 管理、用量监控等）
-- **D1**：Cloudflare 原生 SQLite 数据库，通过 Binding 连接，无需 `DATABASE_URL`
+- 数据库默认 `DB_TYPE=d1`（Cloudflare D1，免费，无需任何配置）；也可用 TiDB/PG
+- 推荐使用 GitHub Actions 自动部署：推送代码即完成全部发布
 
 ## 前置条件
 
-1. [Cloudflare 账号](https://dash.cloudflare.com/sign-up)（免费即可）
-2. [GitHub 账号](https://github.com)
-3. 项目的 GitHub 仓库 fork 到你的账号下
+- [Cloudflare 账号](https://dash.cloudflare.com/sign-up)（免费即可；生产建议 Workers 付费计划，见[常见问题](#常见问题)）
+- GitHub 账号
 
 ## 方式一：GitHub Actions 自动部署（推荐）
 
-### 1. 创建 Cloudflare 资源
+全程网页操作，无需本地终端。
 
-项目提供了自动化脚本，一键创建所需的所有 Cloudflare 资源：
+### 1. Fork 项目
 
-```bash
-# 克隆项目
-git clone https://github.com/你的用户名/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
+打开 [Fiammetta-Watcher-Proxy](https://github.com/Jyf0214/Fiammetta-Watcher-Proxy)，点右上角 Fork 复制到你的 GitHub 账号。
 
-# 获取 Cloudflare API Token
-# 访问 https://dash.cloudflare.com/profile/api-tokens
-# 创建 Token，权限需要：Account > Cloudflare Workers > Edit, D1 > Edit, Pages > Edit
+### 2. 启用工作流
 
-# 安装 Python（脚本需要）
-pip install -r deploy/requirements.txt
+进入 Fork 后仓库的 Actions 页面，按提示启用工作流（首次可能需要批准）。
 
-# 运行初始化脚本（创建 D1 数据库、KV 命名空间、Worker、Pages 项目）
-export CLOUDFLARE_API_TOKEN="你的API-Token"
-export CLOUDFLARE_ACCOUNT_ID="你的账号ID"
-python deploy/init.py
-```
+### 3. 配置 GitHub Secrets
 
-`init.py` 执行三个阶段：
+仓库 Settings → Secrets and variables → Actions → New repository secret：
 
-1. **pre-check**：检查账号权限和现有资源
-2. **create**：创建 D1 数据库、KV 命名空间、Worker、Pages 项目，配置绑定
-3. **post-check**：验证资源创建成功
-
-### 2. 配置 GitHub Secrets
-
-在 GitHub 仓库的 Settings → Secrets and variables → Actions 中添加：
-
-| Secret 名称 | 说明 | 来源 |
-|-------------|------|------|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token | [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账号 ID | [Cloudflare Dashboard](https://dash.cloudflare.com/) 右侧栏 |
-| `CF_D1_DATABASE_ID` | D1 数据库 ID | init.py 输出 |
-| `CF_KV_NAMESPACE_ID` | KV 命名空间 ID | init.py 输出 |
-
-::: tip
-`init.py` 执行完成后会在终端输出所有需要的 ID，直接复制到 GitHub Secrets 即可。
-:::
-
-### 3. 配置环境变量
-
-在 Cloudflare Dashboard → Workers & Pages → 你的 Worker → Settings → Variables 中设置：
-
-| 变量名 | 值 | 类型 |
-|--------|-----|------|
-| `ADMIN_USERNAME` | 管理员用户名 | Text |
-| `ADMIN_PASSWORD` | 管理员密码 | Text (Encrypted) |
-| `CRON_SECRET` | 定时任务认证密钥（可选） | Text (Encrypted) |
-
-::: warning
-Worker 的环境变量需要在 Cloudflare Dashboard 中配置，不是 GitHub Secrets。D1 绑定在 `init.py` 中自动配置。
-:::
+| Secret | 说明 |
+|--------|------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（账号级 Edit 权限，[创建地址](https://dash.cloudflare.com/profile/api-tokens)） |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账号 ID（Dashboard 右侧栏） |
+| `ADMIN_USERNAME` | 管理后台登录用户名 |
+| `ADMIN_PASSWORD` | 管理后台登录密码（**必填**，缺失则部署失败） |
+| `DB_TYPE` | 数据库类型，默认 `d1`；用 TiDB/PG 时设为 `tidb`/`pg` |
+| `DATABASE_URL` | 外部数据库连接串（仅 `DB_TYPE=tidb/pg` 时需要） |
 
 ### 4. 触发部署
 
-推送代码到 `canary` 分支即可自动触发 Cloudflare 部署（`main` 分支触发 EdgeOne 部署，也可在 Actions 页面手动选择平台）：
+Actions 页面 → 左侧 Deploy 工作流 → Run workflow → **分支选择 `canary`**（Fork 后的默认分支不是 `canary`，务必手动选择）→ 平台选择 `cf` → 点击 Run workflow。
+
+运行后自动完成：创建数据库与缓存资源 → 构建 → 部署 Worker → 部署 Pages → 配置后台登录凭据。全程无需登录 Cloudflare 控制台。
+
+### 5. 验证
+
+| 检查项 | 地址 |
+|--------|------|
+| 健康检查 | `https://<项目名>.pages.dev/api/health` → `{"status":"ok",...}` |
+| 代理可用 | `https://<worker名>.<账号>.workers.dev/v1/models`（无 API Key 返回 401 即正常） |
+| 管理后台 | `https://<项目名>.pages.dev/admin`，用 Secrets 里的账号密码登录 |
+
+> Worker 与 Pages 的域名在 Dashboard → Workers & Pages 中查看。生产环境建议绑定自定义域名（Dashboard → 项目 → Custom domains）。
+
+## 方式二：手动部署（Wrangler，调试用）
+
+### 1. 登录并创建资源
 
 ```bash
-git push origin canary
+npx wrangler login
+
+# 创建 D1 数据库，记下输出的 database_id
+npx wrangler d1 create fiammetta_d1
+
+# 创建 KV 命名空间，记下输出的 id
+npx wrangler kv namespace create fiammetta-proxy
 ```
 
-部署流程：
+### 2. 配置 worker/wrangler.toml
 
-1. `build:cf` — Cloudflare 模式构建（临时移除 v1/cron 路由 → OpenNext 构建 → 还原路由）
-2. Worker 部署到 Cloudflare Workers
-3. Pages 部署到 Cloudflare Pages
-4. D1 数据库 Schema 自动迁移
-
-### 5. 验证部署
-
-```bash
-# 检查 Worker 健康
-curl https://你的-worker子域名.workers.dev/v1/models
-
-# 检查 Pages 管理后台
-curl https://你的-pages子域名.pages.dev/api/health
-```
-
-## 方式二：Wrangler 手动部署
-
-适合开发调试或自定义部署流程。
-
-### 1. 安装 Wrangler
-
-```bash
-npm install -g wrangler
-wrangler login
-```
-
-### 2. 创建资源
-
-```bash
-# 创建 D1 数据库
-wrangler d1 create fiammetta-watcher-db
-# 记下输出的 database_id，更新到 wrangler.toml
-
-# 创建 KV 命名空间
-wrangler kv namespace create CACHE
-wrangler kv namespace create CACHE --preview
-# 记下输出的 id，更新到 wrangler.toml
-```
-
-### 3. 配置 wrangler.toml
-
-打开 `worker/wrangler.toml`，更新以下配置：
+把上一步的 ID 填入：
 
 ```toml
-name = "fwp-worker"
-main = "worker/src/index.ts"
-compatibility_date = "2024-01-01"
+name = "fiammetta_worker"
+main = "src/index.ts"
+compatibility_date = "2025-04-02"
+compatibility_flags = ["nodejs_compat"]
 
-# D1 数据库绑定
-[[d1_databases]]
-binding = "DB"
-database_name = "fiammetta-watcher-db"
-database_id = "你的-database-id"
-
-# KV 命名空间绑定
-[[kv_namespaces]]
-binding = "CACHE"
-id = "你的-kv-namespace-id"
+[placement]
+mode = "smart"
 
 [vars]
-DB_TYPE = "d1"
-```
+DB_TYPE = "d1"                     # 或 tidb / pg
 
-### 4. 初始化数据库
+[[d1_databases]]
+binding = "DB"
+database_name = "fiammetta_d1"
+database_id = "你的-d1-database-id"
 
-```bash
-npx wrangler d1 execute fiammetta-watcher-db --file=./migrations/0001_init_schema.sql
-```
+[[kv_namespaces]]
+binding = "KV"
+id = "你的-kv-namespace-id"
 
-### 5. 部署 Worker
-
-```bash
-cd worker
-wrangler deploy
-```
-
-### 6. 部署 Pages
-
-```bash
-# Cloudflare 模式构建（build:cf 内部已设置 DEPLOY_PLATFORM=cf）
-npm run build:cf
-
-# 部署到 Pages（部署 .open-next 目录而非 assets，否则会退化为纯静态站点）
-npx wrangler pages deploy .open-next --project-name=你的-pages项目名
-```
-
-## 定时任务配置
-
-FWP 有 3 个定时任务：
-
-| 任务 | 路径 | 默认频率 | 功能 |
-|------|------|----------|------|
-| 模型发现 | `model-fetch` | 每 10 分钟 | 自动发现各平台支持的模型 |
-| Key 重置 | `key-reset` | 每天 | 重置 Key 用量计数器 |
-| 日志归档 | `log-archive` | 每天 | 归档过期请求日志为统计数据 |
-
-在 `worker/wrangler.toml` 中配置 Cron Triggers：
-
-```toml
 [triggers]
-crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
 
-或在 Cloudflare Dashboard → Worker → Settings → Triggers → Cron Triggers 中配置。
+### 3. 初始化数据库
+
+```bash
+npx wrangler d1 execute fiammetta_d1 --file=init.sql --remote
+```
+
+（`init.sql` 在项目根目录。）
+
+### 4. 构建并部署 Worker
+
+```bash
+npm run build:cf
+cd worker
+npx wrangler deploy --config wrangler.toml
+```
+
+### 5. 部署 Pages
+
+```bash
+npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main
+```
+
+> 必须部署 `.open-next` 目录，不是 `.open-next/assets`——部署 assets 会退化为纯静态站点，管理后台全部 404。
+
+### 6. 配置 Pages 后台凭据与绑定
+
+Pages 需要数据库/缓存绑定和后台登录凭据。导出两个环境变量后运行：
+
+```bash
+export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx
+python3 deploy/init.py post
+python3 deploy/init.py post-deploy
+```
+
+（本地运行前需 `pip install requests`。也可以在 Dashboard → Workers & Pages → 项目 → Settings 中手动配置。）
+
+## 定时任务
+
+| 任务 | Cron | 频率 | 功能 |
+|------|------|------|------|
+| 模型发现 | `0 */6 * * *` | 每 6 小时 | 自动发现各平台可用模型 |
+| Key 用量重置 | `0 */1 * * *` | 每小时 | 按周期重置 Key 用量 |
+| 日志归档 | `0 3 * * *` | 每天 3:00 | 归档 30 天前的请求日志 |
+
+已随 Worker 自动部署；也可在 Dashboard → Worker → Settings → Triggers → Cron Triggers 查看修改。
 
 ## 常见问题
 
-### 构建失败：OpenNext 报错
+### 免费版请求频繁失败（CPU 超时）
 
-检查 `package.json` 中的 `build:cf` 命令是否完整：
+Workers 免费版单请求 CPU 上限 **10ms**，代理 AI 流式请求很容易超限。生产建议升级 Workers Paid（CPU 上限默认 30s，最高 5 分钟），或改用 [Vercel](/deployment/vercel) / [EdgeOne](/deployment/edgeone)。
 
-```json
-{
-  "scripts": {
-    "build:cf": "DEPLOY_PLATFORM=cf bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\" && DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh"
-  }
-}
-```
+### D1 免费额度
 
-### Worker CPU 超时
-
-::: warning 免费用户注意
-Cloudflare Workers Free 计划 CPU 限制 10ms/请求。代理 AI API 请求时，CPU 时间很容易超出上限，导致请求频繁失败。这种情况只能升级到 Workers Paid 计划（50ms CPU/请求），或改用其他部署方式（如 [Vercel](/deployment/vercel)、[Node.js 直接部署](/deployment/standalone)）。
-:::
-
-排查步骤：
-
-- 检查是否有不必要的同步计算
-- 确认没有调用 `prisma.$disconnect()`（会破坏连接缓存导致 CPU 飙升）
-
-### D1 连接问题
-
-确保：
-
-- `wrangler.toml` 中的 `database_id` 正确
-- Worker 环境变量 `DB_TYPE = "d1"`
-- 没有使用 `DATABASE_URL`（D1 通过 Binding 连接，不需要 URL）
+5GB 存储、5M 行读取/天、100k 行写入/天。用量统计与日志归档会消耗行数，流量大时留意（Dashboard → D1 → 用量）。
 
 ### 流式响应中断
 
-如果 SSE 流式响应经常中断，检查：
+免费版下较常见。注意 120 秒是应用对上游请求的默认超时（各平台一致），免费版流式中断更常见的原因是 CPU 10ms 超限（见上）。升级付费计划或换平台可改善。
 
-- Cloudflare Workers 的 `ctx.waitUntil()` 是否正确保护了异步写入
-- 请求超时设置（默认 120 秒）
+### 部署后管理后台 404
+
+方式二部署时检查是否部署了 `.open-next` 目录（不是 `.open-next/assets`）。
 
 ## 相关文档
 
-- [架构说明](/deployment/architecture) — 双模式构建架构详解
-- [环境变量](/deployment/env) — 完整环境变量参考
-- [Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/)
+- [架构说明](/deployment/architecture)
+- [环境变量](/deployment/env)
+- [Wrangler 文档](https://developers.cloudflare.com/workers/wrangler/)

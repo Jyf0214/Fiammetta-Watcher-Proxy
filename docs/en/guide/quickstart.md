@@ -12,21 +12,19 @@ The simplest deployment method — zero operational cost, global edge nodes.
 ### Steps
 
 1. Fork the project to your GitHub account
-2. Get a [Cloudflare API Token](https://dash.cloudflare.com/profile/api-tokens) (permissions: Workers Edit, D1 Edit, Pages Edit)
-3. Run the initialization script:
+2. Get a [Cloudflare API Token](https://dash.cloudflare.com/profile/api-tokens) (permissions: Workers Edit, Workers KV Storage Edit, D1 Edit, Pages Edit)
+3. In repo Settings → Secrets and variables → Actions, add these secrets:
 
-```bash
-git clone https://github.com/your-username/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
-pip install -r deploy/requirements.txt
-export CLOUDFLARE_API_TOKEN="your-token"
-export CLOUDFLARE_ACCOUNT_ID="your-account-id"
-python deploy/init.py
-```
+| Secret | Description |
+|--------|-------------|
+| `CLOUDFLARE_API_TOKEN` | Your Cloudflare API Token |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare Account ID (right sidebar in the Dashboard) |
+| `ADMIN_USERNAME` | Admin panel login username |
+| `ADMIN_PASSWORD` | Admin panel login password |
+| `DB_TYPE` | Database type, default `d1` — no database to provision |
 
-4. Add the IDs from `init.py` output to GitHub repo Settings → Secrets
-5. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in Cloudflare Dashboard → Worker → Settings → Variables
-6. Push to `main` branch — auto-deploys
+4. In the Actions tab, enable the workflow (approve the first run if prompted)
+5. Run the workflow manually: Actions → Deploy → Run workflow → branch `canary` → platform `cf` → Run workflow. Deployment completes automatically (database, Worker, Pages, and admin credentials are all configured for you)
 
 See [Cloudflare Deployment](/en/deployment/cloudflare) for details.
 
@@ -35,9 +33,9 @@ See [Cloudflare Deployment](/en/deployment/cloudflare) for details.
 ### 1. Install Dependencies
 
 ```bash
-git clone https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
+git clone -b canary https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
 cd Fiammetta-Watcher-Proxy
-npm install
+npm install --legacy-peer-deps
 ```
 
 ### 2. Configure Environment Variables
@@ -48,23 +46,17 @@ DB_TYPE=tidb
 DATABASE_URL=mysql://user:password@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-password
-JWT_SECRET=
+JWT_SECRET=random-secret-32+chars
 EOF
 ```
 
-### 3. Initialize Database
-
-```bash
-node scripts/prepare-db.mjs
-```
-
-### 4. Start Dev Server
+### 3. Start the Dev Server
 
 ```bash
 npm run dev
 ```
 
-### 5. Access Admin Panel
+### 4. Access the Admin Panel
 
 Open `http://localhost:3000/admin` and log in with your admin credentials.
 
@@ -72,7 +64,7 @@ Open `http://localhost:3000/admin` and log in with your admin credentials.
 
 1. Import the GitHub repository in [Vercel Dashboard](https://vercel.com/dashboard)
 2. Framework preset: Next.js
-3. Add environment variables (`DB_TYPE`, `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`)
+3. Add environment variables (`DB_TYPE`, `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`)
 4. Deploy
 
 See [Vercel Deployment](/en/deployment/vercel) for details.
@@ -80,14 +72,12 @@ See [Vercel Deployment](/en/deployment/vercel) for details.
 ## Option 4: Node.js Standalone
 
 ```bash
-git clone https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
+git clone -b canary https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
 cd Fiammetta-Watcher-Proxy
-git checkout feat/cloudflare-workers
-npm install
-# Configure .env file (see Option 2)
-node scripts/prepare-db.mjs
+npm install --legacy-peer-deps
+# Configure the .env file (see Option 2)
 npm run build
-npm start
+npx next start
 ```
 
 See [Node.js Standalone](/en/deployment/standalone) for details.

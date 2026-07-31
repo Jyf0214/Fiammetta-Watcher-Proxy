@@ -1,229 +1,128 @@
-# Vercel / Non-Cloudflare Platform Deployment
-
-FWP supports deployment to Vercel, Netlify, or any Node.js-compatible Serverless platform. In non-Cloudflare mode, Pages API handles `/v1/*` proxy requests and Cron tasks directly — no Worker needed.
-
-## Differences from Cloudflare Deployment
-
-| Feature | Cloudflare Mode | Non-Cloudflare Mode |
-|---------|-----------------|---------------------|
-| `/v1/*` proxy | Worker handles | Pages API handles |
-| Cron tasks | Worker Cron Triggers | HTTP endpoints + external scheduler |
-| Rate limiting | KV persistent | In-memory Map (resets on cold start) |
-| Database | D1 (Binding) | TiDB / PostgreSQL (`DATABASE_URL`) |
-| Streaming | Worker native | Node.js ReadableStream |
-
-::: tip Key Difference
-Non-Cloudflare rate limiting uses in-memory storage that resets on cold start. This is acceptable for most use cases (rate limiting is best-effort).
-:::
+# Vercel Deployment
 
 ## Prerequisites
 
-1. [Vercel account](https://vercel.com/signup) (free tier works)
-2. [TiDB Cloud](https://tidbcloud.com/) or PostgreSQL database
-3. Project GitHub repository
+1. [Vercel account](https://vercel.com/signup)
+2. Remote database: [TiDB Cloud](https://tidbcloud.com/) (free) or PostgreSQL
+3. GitHub repository
 
-## Method 1: Vercel Deployment
+## 1. Import the Project
 
-### 1. Import Project
+Vercel Dashboard → Add New → Project → import the repository from GitHub. Framework preset: **Next.js**; keep the default build command.
 
-1. Log in to [Vercel Dashboard](https://vercel.com/dashboard)
-2. Click "Add New → Project"
-3. Import the FWP repository from GitHub
-4. Framework preset: **Next.js**
-5. Build command: `npm run build`
-6. Output directory: `.next`
+## 2. Configure Environment Variables
 
-### 2. Configure Environment Variables
-
-In Vercel project Settings → Environment Variables:
+Settings → Environment Variables:
 
 ```env
-# Database (required)
-DB_TYPE=tidb
-DATABASE_URL=mysql://user:password@host:4000/dbname?sslaccept=accept_invalid_certs
-
-# Security (required)
+DB_TYPE=tidb                        # or pg — never d1
+DATABASE_URL=mysql://user:pass@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-admin-password
-
-# JWT secret (leave empty for auto-generation, or specify)
-JWT_SECRET=
-
-# Cron auth secret (optional, for /api/cron/* endpoints)
-CRON_SECRET=random-secret-string
+ADMIN_PASSWORD=your-password
+JWT_SECRET=random-secret-32+chars
+CRON_SECRET=random-secret           # optional
 ```
 
-::: warning Important
-- `DB_TYPE` must be `tidb` or `pg` (not `d1` — no D1 Binding available)
-- `DATABASE_URL` must be a remote database accessible from Vercel's Serverless functions
-- Vercel Serverless functions are stateless; database must support remote connections
-:::
+## 3. Deploy
 
-### 3. Deploy
+Push the code — Vercel builds and deploys automatically. Note: you still need to set up the scheduled tasks afterwards (see the next section) — the free option requires an external scheduler.
 
-Vercel auto-detects `next.config.ts` and triggers build/deploy. Push code to auto-deploy.
+## 4. Scheduled Tasks
 
-### 4. Configure Cron Tasks
+### Option A: Vercel Cron (Pro plan required)
 
-Vercel Hobby plan supports Cron. Create `vercel.json` in project root:
+Not available on the Hobby plan. Create `vercel.json` in the project root (the repo does not ship one — create it yourself):
 
 ```json
 {
   "crons": [
-    { "path": "/api/cron/model-fetch", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/key-reset", "schedule": "0 0 * * *" },
-    { "path": "/api/cron/log-archive", "schedule": "0 1 * * *" }
+    { "path": "/api/cron/model-fetch", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/key-reset",   "schedule": "0 */1 * * *" },
+    { "path": "/api/cron/log-archive", "schedule": "0 3 * * *" }
   ]
 }
 ```
 
-::: tip Vercel Cron Authentication
-Vercel Cron automatically adds `Authorization: Bearer <CRON_SECRET>` header. Set `CRON_SECRET` in Vercel environment variables to enable auth. External services can also call these endpoints.
-:::
+With `CRON_SECRET` set, Vercel adds the auth header automatically.
 
-Without Vercel Cron, use external services ([Cron-job.org](https://cron-job.org), [UptimeRobot](https://uptimerobot.com)):
+### Option B: External Scheduler (free)
+
+Call the three endpoints on a schedule:
 
 ```bash
-curl -X GET https://your-domain/api/cron/model-fetch \
+curl -X GET https://your-domain.com/api/cron/model-fetch \
   -H "Authorization: Bearer your-CRON_SECRET"
 ```
 
-## Method 2: Netlify Deployment
-
-### 1. Import Project
-
-1. Log in to [Netlify Dashboard](https://app.netlify.com)
-2. Click "Add new site → Import an existing project"
-3. Import from GitHub
-
-### 2. Build Configuration
-
-| Setting | Value |
-|---------|-------|
-| Build command | `npm run build` |
-| Publish directory | `.next` |
-| Node.js version | 22 |
-
-### 3. Environment Variables
-
-Same as Vercel — configure in Netlify project Settings → Environment variables.
-
-### 4. Cron Tasks
-
-Netlify supports [Scheduled Functions](https://docs.netlify.com/functions/scheduled-functions/) or use external cron services to call `/api/cron/*` endpoints.
-
-## Method 3: Other Node.js Platforms
-
-Non-Cloudflare mode runs on any Node.js platform:
-
-### 1. Build
-
-```bash
-npm install
-npm run build
-```
-
-### 2. Set Environment Variables
-
-```env
-DB_TYPE=tidb  # or pg
-DATABASE_URL=your-database-connection-string
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-password
-```
-
-### 3. Start
-
-```bash
-npm start
-```
-
-### 4. Configure Cron
-
-Call `/api/cron/*` endpoints via external services:
-
 | Endpoint | Function | Suggested Frequency |
 |----------|----------|---------------------|
-| `GET /api/cron/model-fetch` | Model discovery | Every 10 minutes |
-| `GET /api/cron/key-reset` | Key reset | Daily |
-| `GET /api/cron/log-archive` | Log archival | Daily |
+| `/api/cron/model-fetch` | Model discovery | every 6h |
+| `/api/cron/key-reset` | Key usage reset | hourly |
+| `/api/cron/log-archive` | Log archival | daily 03:00 |
 
-Recommended external Cron services:
-
-- [Cron-job.org](https://cron-job.org) — Free, HTTP calls
-- [UptimeRobot](https://uptimerobot.com) — Free, monitoring + scheduled calls
-- [GitHub Actions](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule) — `schedule` trigger on `main` branch
-
-**GitHub Actions Cron Example**:
+Services: Cron-job.org, UptimeRobot, GitHub Actions (`schedule` trigger). GitHub Actions example:
 
 ```yaml
 name: Cron Tasks
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 */6 * * *'   # model discovery
+    - cron: '0 * * * *'     # key reset
+    - cron: '0 3 * * *'     # log archival
   workflow_dispatch:
 
 jobs:
-  model-fetch:
+  cron:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Model Fetch
+      - name: Trigger Cron
         run: |
-          curl -X GET "${{ secrets.APP_URL }}/api/cron/model-fetch" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          for task in model-fetch key-reset log-archive; do
+            curl -fsS -X GET "https://${{ secrets.APP_URL }}/api/cron/$task" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" || true
+          done
 ```
 
 ## Database Options
 
-Non-Cloudflare mode supports:
+### TiDB Cloud (free, recommended)
 
-### TiDB Cloud (Recommended Free Option)
+Sign up → create a Serverless cluster → copy the connection string:
 
-1. Sign up at [TiDB Cloud](https://tidbcloud.com/)
-2. Create a Serverless cluster (free tier: 500MB storage + 50M RCUs)
-3. Connection string:
-   ```
-   mysql://user:password@gateway01.xxxx.prod.aws.tidbcloud.com:4000/dbname?sslaccept=accept_invalid_certs
-   ```
+```
+mysql://user:pass@gateway01.xxxx.prod.aws.tidbcloud.com:4000/dbname?sslaccept=accept_invalid_certs
+```
+
+`DB_TYPE=tidb`.
 
 ### PostgreSQL
 
-Any remotely accessible PostgreSQL:
+Any remotely accessible PostgreSQL (Neon / Supabase / Railway / self-hosted):
 
-- [Neon](https://neon.tech) — Free 512MB
-- [Supabase](https://supabase.com) — Free 500MB
-- [Railway](https://railway.app) — Free tier
-- Self-hosted PostgreSQL
-
-```env
-DB_TYPE=pg
-DATABASE_URL=postgresql://user:password@host:port/dbname
 ```
+DB_TYPE=pg
+DATABASE_URL=postgresql://user:pass@host:port/dbname
+```
+
+> On hosts with less than 1GB RAM, append `?connection_limit=5&pool_timeout=10` to the URL.
 
 ## Troubleshooting
 
 ### Rate Limit Resets on Cold Start
 
-Expected behavior. In-memory Map storage resets when the Serverless function cold starts. Rate limiting is best-effort and doesn't affect core functionality.
+Expected: the rate-limit counter clears when a Serverless function cold-starts. It is best-effort and does not affect functionality.
 
-### Streaming Not Working
+### Cron Endpoints Return 401
 
-Verify the platform supports Node.js `ReadableStream`. Vercel and Netlify both support it, but some platforms may not support Server-Sent Events.
+With `CRON_SECRET` set, requests must carry `Authorization: Bearer <CRON_SECRET>`.
 
 ### Database Connection Timeout
 
-In Serverless environments, database connections are ephemeral:
-
-- Ensure the database allows remote connections
-- Check firewall/whitelist for Vercel/Netlify IPs
-- TiDB Cloud supports remote connections natively
-
-### `/api/cron/*` Returns 401
-
-If `CRON_SECRET` is configured, requests must include `Authorization: Bearer <CRON_SECRET>` header. If `CRON_SECRET` is not set, endpoints require no auth.
+- Confirm the database allows remote connections (TiDB Cloud does natively)
+- Check firewall / whitelist rules
 
 ## Related Docs
 
-- [Architecture](/en/deployment/architecture) — Dual-mode build architecture
-- [Environment Variables](/en/deployment/env) — Complete env var reference
-- [Nginx Configuration](/en/deployment/nginx) — Reverse proxy and HTTPS (self-hosted)
+- [Architecture](/en/deployment/architecture)
+- [Environment Variables](/en/deployment/env)
+- [EdgeOne](/en/deployment/edgeone) — same runtime model

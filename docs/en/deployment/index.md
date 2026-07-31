@@ -1,83 +1,46 @@
 # Deployment Guide
 
-FWP supports multiple deployment methods. Choose the one that best fits your needs.
+FWP supports 4 deployment methods, grouped by target:
 
-## Deployment Options Comparison
+| Method | Architecture | Database | Scheduled Tasks |
+|--------|--------------|----------|------------------|
+| **Cloudflare Pages + Worker** | Worker handles proxy + scheduled tasks, Pages serves the frontend and admin panel | D1 (free, zero config) or TiDB/PG | Built into Cloudflare (free) |
+| **Vercel / EdgeOne** | Serverless functions handle everything | TiDB / PostgreSQL (remote) | HTTP endpoints + external scheduler (Vercel Cron requires Pro) |
+| **Node.js standalone** | Full server on your own machine | TiDB / PostgreSQL | HTTP endpoints + system cron |
+| **Docker** | Containerized deployment | PostgreSQL / MySQL | HTTP endpoints + system cron |
 
-| Method | Use Case | Cost | Difficulty | Notes |
-|--------|----------|------|------------|-------|
-| [Cloudflare Pages + Worker](/en/deployment/cloudflare) | **Recommended for production** | Free tier available | ⭐ | Serverless, auto-scaling, global CDN |
-| [Vercel / Netlify etc.](/en/deployment/vercel) | Serverless deployment | Free tier available | ⭐⭐ | Pages API handles `/v1/*` proxy and Cron |
-| [Node.js Standalone](/en/deployment/standalone) | Self-hosted, dev/debug | Server required | ⭐⭐ | Traditional deployment, full control |
-| [Docker](/en/deployment/docker) | Containerized deployment | Server required | ⭐ | Container-based, consistent environment |
+## Platform Comparison
 
-## Architecture Modes
+| Item | Cloudflare | Vercel | EdgeOne | Node.js / Docker |
+|------|-----------|--------|---------|------------------|
+| Free tier | Worker CPU 10ms/request (streaming AI proxy often exceeds this) | 100GB bandwidth/month | See official pricing | None (own resources) |
+| Scheduled tasks | Built-in (free) | **Pro plan only** | External scheduler | System cron |
+| Database | D1 (default, zero config) | TiDB/PG (remote) | TiDB/PG (remote) | TiDB/PG |
+| Deploy trigger | Manual via web UI, or push `canary` | Connect Git repo in console | Manual via web UI | Manual |
+| Best for | Zero-cost default | Existing Vercel / TiDB account | Tencent Cloud ecosystem | Full control |
 
-FWP uses a **dual-mode build architecture** that automatically switches based on the deployment platform.
+> **Free-tier note**: Cloudflare Workers Free allows 10ms CPU per request. Proxying streaming AI requests easily exceeds this. For production, upgrade to Workers Paid (CPU limit defaults to 30s, up to 5 min) or choose another platform.
 
-### Cloudflare Mode (`DEPLOY_PLATFORM=cf`)
+## How to Choose
 
-```
-Requests → Cloudflare Worker (/v1/* + Cron)
-         → Cloudflare Pages (Frontend + Admin API)
-```
+1. **Zero-cost serverless** → [Cloudflare](/en/deployment/cloudflare) (production default; D1 is free)
+2. **Existing Vercel project or TiDB Cloud** → [Vercel](/en/deployment/vercel)
+3. **Tencent Cloud user / needs China acceleration** → [EdgeOne](/en/deployment/edgeone) (new platform — verify the first deployment manually)
+4. **Own server / VPS / intranet** → [Node.js standalone](/en/deployment/standalone) or [Docker](/en/deployment/docker)
+5. **Only need the environment variables** → [Environment](/en/deployment/env)
 
-- Worker handles `/v1/*` proxy requests and scheduled tasks
-- Pages handles frontend and admin API
-- Database: Cloudflare D1 (via Binding)
-
-### Non-Cloudflare Mode (default)
-
-```
-Requests → Pages API / Next.js Server (/v1/* proxy + Cron + Admin API)
-         → Frontend
-```
-
-- `/v1/*` proxy handled by Pages API routes (reusing Worker business modules)
-- Cron tasks exposed via generic HTTP endpoints `/api/cron/*`, called by external services
-- Database: TiDB / PostgreSQL (via `DATABASE_URL`)
-
-::: tip Build Gate Mechanism
-During build, `scripts/build-gate.sh` automatically handles routing: removes `pages/api/v1/` and `pages/api/cron/` during CF builds, restores them after. See [Architecture](/en/deployment/architecture).
-:::
+> The whole deployment happens from the GitHub web UI: run the workflow manually and pick the target platform — no deployment mode configuration needed.
 
 ## Database Options
 
-| Database | DB_TYPE | Connection | Best For |
-|----------|---------|------------|----------|
-| Cloudflare D1 | `d1` | D1 Binding (no URL needed) | CF deployments, serverless-native |
-| TiDB Cloud | `tidb` | `DATABASE_URL` (MySQL protocol) | Free serverless MySQL |
-| PostgreSQL | `pg` | `DATABASE_URL` | Full features, self-hosted |
-| PostgreSQL via Hyperdrive | `pg` | Hyperdrive Connection String | PG on CF deployments |
+| Database | What to set | Platforms |
+|----------|-------------|-----------|
+| Cloudflare D1 | Nothing (`DB_TYPE=d1`) | Cloudflare only |
+| TiDB Cloud | `DB_TYPE=tidb` + `DATABASE_URL` (MySQL protocol) | All |
+| PostgreSQL | `DB_TYPE=pg` + `DATABASE_URL` | All |
 
-::: warning Important
-`DB_TYPE` is a core environment variable that determines which Prisma adapter to use. It must match your actual database.
-:::
+## Related Docs
 
-## Resource Requirements
-
-### Serverless (CF / Vercel)
-
-No resource management needed:
-- Cloudflare Workers: Free plan 10ms CPU/request
-- Cloudflare Pages: Free plan unlimited requests
-- Vercel: Hobby plan 100GB bandwidth/month
-
-### Self-Hosted
-
-| Config | Minimum | Recommended |
-|--------|---------|-------------|
-| CPU | 1 vCPU | 2 vCPU |
-| RAM | 512MB | 1GB+ |
-| Disk | 10GB | 20GB |
-| Node.js | 18.0 | 22.x LTS |
-
-## Next Steps
-
-- [Cloudflare Deployment](/en/deployment/cloudflare) — Recommended serverless deployment
-- [Vercel Deployment](/en/deployment/vercel) — Non-CF platform deployment
-- [Architecture](/en/deployment/architecture) — Dual-mode build architecture
-- [Node.js Standalone](/en/deployment/standalone) — Self-hosted guide
-- [Docker Deployment](/en/deployment/docker) — Containerized deployment
-- [Environment Variables](/en/deployment/env) — Complete env var reference
-- [Nginx Configuration](/en/deployment/nginx) — Reverse proxy and HTTPS
+- [Architecture](/en/deployment/architecture) — the two deployment modes and platform differences
+- [Environment Variables](/en/deployment/env)
+- [Nginx](/en/deployment/nginx) — reverse proxy for self-hosted setups

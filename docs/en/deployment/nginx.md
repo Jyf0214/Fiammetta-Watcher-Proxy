@@ -1,5 +1,7 @@
 # Nginx Configuration
 
+Reverse proxy and HTTPS setup for self-hosted deployments ([Node.js Standalone](/en/deployment/standalone) / [Docker](/en/deployment/docker)).
+
 ## Basic Reverse Proxy
 
 ```nginx
@@ -96,5 +98,9 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## Next Steps
+## Related Docs
+
+- [Node.js Standalone](/en/deployment/standalone)
+- [Docker](/en/deployment/docker)
+- [Environment Variables](/en/deployment/env)
 

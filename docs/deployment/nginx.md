@@ -1,5 +1,7 @@
 # Nginx 配置
 
+适用于自托管部署（[Node.js 直接部署](/deployment/standalone) / [Docker](/deployment/docker)）的反向代理与 HTTPS 配置。
+
 ## 基本反向代理
 
 ```nginx
@@ -96,5 +98,9 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## 下一步
+## 相关文档
+
+- [Node.js 直接部署](/deployment/standalone)
+- [Docker 部署](/deployment/docker)
+- [环境变量](/deployment/env)
 

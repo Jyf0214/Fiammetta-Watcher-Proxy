@@ -1,131 +1,54 @@
 # 架构说明
 
-FWP 采用**双模式构建架构**，同一套代码库可根据部署平台自动切换运行模式。
+FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对内提供管理后台（管理 API Key、模型、用量与日志）。部署方式分为两种运行模式，你选择的平台决定走哪一种。
 
-## 双模式架构
+## 两种运行模式
 
-### Cloudflare 模式
-
-当 `DEPLOY_PLATFORM=cf` 环境变量存在时，构建系统自动切换到 Cloudflare 模式：
+### Cloudflare 模式（托管，推荐）
 
 ```
-┌─────────────────────────────────────────┐
-│            Cloudflare Edge              │
-│                                         │
-│  Worker (/v1/* 代理 + Cron 定时任务)     │
-│       ↓                                 │
-│  D1 数据库 (SQLite via Binding)          │
-│                                         │
-│  Pages (前端 + 管理 API + 设置 API)      │
-│       ↓                                 │
-│  D1 数据库 (共享)                        │
-└─────────────────────────────────────────┘
+请求 → 代理接口与定时任务（Cloudflare 托管运行）
+     → 前端与管理后台（Cloudflare 托管运行）
+              ↓
+         D1 数据库（Cloudflare 内置）
 ```
 
-- **Worker** 处理所有 `/v1/*` 代理请求和 Cron 定时任务
-- **Pages** 处理前端静态资源和管理后台 API
-- 两者共享同一个 D1 数据库（通过 Binding）
+- 对外代理接口与 3 个定时任务（模型发现、Key 用量重置、日志归档）全部由 Cloudflare 托管运行，不占你自己的服务器资源
+- 前端与管理后台同样托管在 Cloudflare
+- 数据存于 Cloudflare 内置的 D1 数据库，免费额度内无需自备数据库
+- 定时任务由平台内置调度，免费自动执行
 
-### 非 Cloudflare 模式（默认）
-
-```
-┌─────────────────────────────────────────┐
-│         Node.js 服务器                   │
-│                                         │
-│  Next.js Server                         │
-│  ├── /v1/* 代理（Pages API 路由）        │
-│  ├── /api/cron/* 定时任务（HTTP 端点）    │
-│  ├── /api/admin/* 管理 API               │
-│  └── 前端静态资源                        │
-│       ↓                                 │
-│  TiDB / PostgreSQL (DATABASE_URL)       │
-└─────────────────────────────────────────┘
-```
-
-- `/v1/*` 代理由 Pages API 路由 `pages/api/v1/[[...v1]].ts` 处理
-- Cron 任务通过 `pages/api/cron/[[...cron]].ts` 暴露为 HTTP 端点
-- 速率限制使用内存 Map 存储（非 KV）
-- 数据库通过 `DATABASE_URL` 连接
-
-## 构建门控机制
-
-构建时通过 shell 脚本自动处理路由切换：
-
-### build-gate.sh（构建前）
+### 自托管式（Vercel / EdgeOne / 自有服务器）
 
 ```
-DEPLOY_PLATFORM=cf → 将 pages/api/v1/ 和 pages/api/cron/ 移到 .build-gate-tmp/
+请求 → Next.js 服务
+     ├── 代理接口 /v1/*
+     ├── 定时任务端点 /api/cron/*（需外部定时调用）
+     ├── 管理后台
+     └── 前端页面
+              ↓
+         TiDB / PostgreSQL（远程数据库）
 ```
 
-这确保 Cloudflare 构建时不会将 v1 和 cron 路由打包到 Pages 中（这些由 Worker 处理）。
+- 整个应用运行在一个服务里（Vercel / EdgeOne 的 Serverless 函数，或你自己的服务器）
+- 数据库需要自己准备：TiDB Cloud（免费档）或 PostgreSQL，通过连接串连接
+- 定时任务没有内置调度，需用外部服务定时调用各端点（见各平台文档）
+- 服务重启（冷启动）后限流计数会清零，属正常现象，不影响功能
 
-### 构建过程
+## 平台差异一览
 
-```bash
-# package.json 中的 build:cf 脚本
-DEPLOY_PLATFORM=cf bash scripts/build-gate.sh &&
-node scripts/prepare-db.mjs &&
-opennextjs-cloudflare build &&
-DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh
-```
+| 项目 | Cloudflare | Vercel / EdgeOne | 自有服务器 |
+|------|-----------|------------------|-----------|
+| 数据库 | D1 内置（免费） | 自备 TiDB / PostgreSQL | 自备 |
+| 定时任务 | 内置免费 | 外部调度（Vercel Cron 需付费版） | 系统 cron |
+| 登录限流 | 重启后依然生效 | 重启后清零 | 重启后清零 |
 
-### build-gate-restore.sh（构建后）
-
-```
-DEPLOY_PLATFORM=cf → 将 .build-gate-tmp/ 中的文件还原到原位
-```
-
-::: warning 注意
-构建完成后必须还原路由文件，否则本地开发和非 Cloudflare 部署会缺少 `/v1/*` 和 `/api/cron/*` 路由。
-:::
-
-## Worker 模块复用
-
-Pages API 路由（`pages/api/v1/[[...v1]].ts`）通过相对路径导入 Worker 业务模块：
-
-```typescript
-import { validateApiKey } from "../../../worker/src/auth";
-import { routeRequest } from "../../../worker/src/router";
-import { getNextKey } from "../../../worker/src/platform-keys";
-```
-
-这种设计确保：
-- 业务逻辑只维护一份（在 `worker/src/` 下）
-- Pages API 和 Worker 共享相同的路由、认证、负载均衡逻辑
-- 模块通过 `createDb()` 工厂函数获取数据库连接，而非直接使用 D1 Binding
-
-## 数据库适配层
-
-FWP 使用 Prisma 7 多 Schema 方案支持多种数据库：
-
-```
-prisma/
-├── schema.d1.prisma     → Cloudflare D1（wasm runtime）
-├── schema.mysql.prisma  → TiDB / MySQL
-└── schema.pg.prisma     → PostgreSQL
-```
-
-三个 Schema 定义相同的表结构，但使用不同的 Generator 和 Runtime：
-
-| Schema | Generator | Runtime | 适配器 |
-|--------|-----------|---------|--------|
-| `schema.d1.prisma` | `prisma-client-js` | `cloudflare` | `@prisma/adapter-d1` |
-| `schema.mysql.prisma` | `prisma-client-js` | `node` | `mysql2` |
-| `schema.pg.prisma` | `prisma-client-js` | `node` | `@prisma/pg-worker` |
-
-`scripts/prepare-db.mjs` 根据 `DB_TYPE` 环境变量自动选择对应的 Schema 并执行迁移。
-
-## 速率限制实现差异
-
-| 环境 | 存储 | 持久化 | 说明 |
-|------|------|--------|------|
-| Cloudflare Worker | KV Namespace | ✅ 持久化 | 冷启动不丢失 |
-| Pages API（非 CF 模式） | 内存 Map | ❌ 非持久化 | 冷启动后重置 |
-
-两种实现共享相同的接口（`checkPlatformRpm`、`checkApiKeyRpm` 等），仅底层存储不同。
+> 管理后台登录限流：30 分钟内连续失败 5 次会临时限制登录，过一段时间再试即可。
 
 ## 相关文档
 
-- [Cloudflare 部署](/deployment/cloudflare) — Cloudflare 平台部署指南
-- [Vercel 部署](/deployment/vercel) — 非 Cloudflare 平台部署
-- [环境变量](/deployment/env) — 完整环境变量参考
+- [部署指南](/deployment/) — 平台对比与选择
+- [Cloudflare 部署](/deployment/cloudflare)
+- [Vercel 部署](/deployment/vercel)
+- [EdgeOne 部署](/deployment/edgeone)
+- [环境变量](/deployment/env)

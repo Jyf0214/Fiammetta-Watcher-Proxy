@@ -1,254 +1,165 @@
 # Cloudflare Deployment
 
-FWP's native deployment platform. Cloudflare Pages hosts the frontend and admin API, Cloudflare Worker handles `/v1/*` proxy and scheduled tasks, D1 serves as the database. Global edge nodes, zero operational cost.
+FWP on Cloudflare consists of two parts: the **Worker** handles the `/v1/*` proxy and 3 scheduled tasks, while **Pages** serves the frontend and admin panel. Both share the same database.
 
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────┐
-│              Cloudflare Edge                │
-│                                             │
-│  ┌──────────────┐  ┌──────────────────────┐ │
-│  │   Worker     │  │      Pages           │ │
-│  │              │  │                      │ │
-│  │ /v1/* proxy  │  │ Frontend (React/     │ │
-│  │ Cron tasks   │  │   Next.js)           │ │
-│  │              │  │ /api/admin/* admin   │ │
-│  │              │  │ /api/setup/* init    │ │
-│  └──────┬───────┘  └──────────┬───────────┘ │
-│         │                     │             │
-│         └─────────┬───────────┘             │
-│                   ▼                         │
-│          ┌──────────────┐                   │
-│          │   D1 Database│                   │
-│          │  (SQLite)    │                   │
-│          └──────────────┘                   │
-└─────────────────────────────────────────────┘
-```
-
-- **Worker**: Handles `/v1/*` proxy requests (API key validation → routing → forwarding → streaming) and Cron tasks (model discovery, key reset, log archival)
-- **Pages**: Hosts frontend static assets and admin API (platform management, key management, usage monitoring, etc.)
-- **D1**: Cloudflare's native SQLite database, connected via Binding — no `DATABASE_URL` needed
+- Database defaults to `DB_TYPE=d1` (Cloudflare D1 — free, zero configuration); TiDB/PG are also supported
+- GitHub Actions auto-deploy is recommended: push the code and everything is published
 
 ## Prerequisites
 
-1. [Cloudflare account](https://dash.cloudflare.com/sign-up) (free tier works)
-2. [GitHub account](https://github.com)
-3. Fork the project repository to your account
+- [Cloudflare account](https://dash.cloudflare.com/sign-up) (free tier works; for production, consider Workers Paid — see [Troubleshooting](#troubleshooting))
+- A GitHub account
 
-## Method 1: GitHub Actions Auto-Deploy (Recommended)
+## Option 1: GitHub Actions Auto-Deploy (Recommended)
 
-### 1. Create Cloudflare Resources
+All done from the web UI — no local terminal needed.
 
-The project provides an automation script to create all required Cloudflare resources:
+### 1. Fork the Project
 
-```bash
-# Clone the project
-git clone https://github.com/your-username/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
+Open [Fiammetta-Watcher-Proxy](https://github.com/Jyf0214/Fiammetta-Watcher-Proxy) and click Fork (top right) to copy it to your GitHub account.
 
-# Get Cloudflare API Token
-# Visit https://dash.cloudflare.com/profile/api-tokens
-# Create a token with: Account > Cloudflare Workers > Edit, D1 > Edit, Pages > Edit
+### 2. Enable the Workflow
 
-# Install Python (required by the script)
-pip install -r deploy/requirements.txt
+Open the Actions tab of your fork and enable the workflow if prompted (the first run may need approval).
 
-# Run initialization script (creates D1, KV, Worker, Pages project)
-export CLOUDFLARE_API_TOKEN="your-api-token"
-export CLOUDFLARE_ACCOUNT_ID="your-account-id"
-python deploy/init.py
-```
+### 3. Configure GitHub Secrets
 
-`init.py` runs three phases:
+Repo Settings → Secrets and variables → Actions → New repository secret:
 
-1. **pre-check**: Verify account permissions and existing resources
-2. **create**: Create D1 database, KV namespace, Worker, Pages project; configure bindings
-3. **post-check**: Verify resource creation succeeded
+| Secret | Description |
+|--------|-------------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token (account-level Edit; [create here](https://dash.cloudflare.com/profile/api-tokens)) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (Dashboard sidebar) |
+| `ADMIN_USERNAME` | Admin login username |
+| `ADMIN_PASSWORD` | Admin login password (**required** — deployment fails without it) |
+| `DB_TYPE` | Database type, default `d1`; set `tidb`/`pg` when using TiDB/PG |
+| `DATABASE_URL` | External database URL (only needed for `DB_TYPE=tidb/pg`) |
 
-### 2. Configure GitHub Secrets
+### 4. Trigger the Deployment
 
-Add these in your GitHub repo's Settings → Secrets and variables → Actions:
+Actions tab → Deploy workflow → Run workflow → **branch `canary`** (the fork's default branch is not `canary` — select it explicitly) → platform `cf` → Run workflow.
 
-| Secret Name | Description | Source |
-|-------------|-------------|--------|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token | [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID | [Cloudflare Dashboard](https://dash.cloudflare.com/) right sidebar |
-| `CF_D1_DATABASE_ID` | D1 Database ID | Output from init.py |
-| `CF_KV_NAMESPACE_ID` | KV Namespace ID | Output from init.py |
+It automatically: creates the database and cache resources → builds → deploys the Worker → deploys Pages → configures the admin credentials. No Cloudflare console interaction needed.
 
-::: tip
-After `init.py` completes, it prints all required IDs in the terminal. Copy them directly to GitHub Secrets.
-:::
+### 5. Verify
 
-### 3. Configure Environment Variables
+| Check | URL |
+|-------|-----|
+| Health | `https://<project>.pages.dev/api/health` → `{"status":"ok",...}` |
+| Proxy | `https://<worker>.<account>.workers.dev/v1/models` (401 without API Key is expected) |
+| Admin panel | `https://<project>.pages.dev/admin`, log in with the credentials from Secrets |
 
-In Cloudflare Dashboard → Workers & Pages → Your Worker → Settings → Variables:
+> Worker/Pages domains are listed in Dashboard → Workers & Pages. For production, bind a custom domain (Dashboard → project → Custom domains).
 
-| Variable | Value | Type |
-|----------|-------|------|
-| `ADMIN_USERNAME` | Admin username | Text |
-| `ADMIN_PASSWORD` | Admin password | Text (Encrypted) |
-| `CRON_SECRET` | Cron auth secret (optional) | Text (Encrypted) |
+## Option 2: Manual Deployment (Wrangler, for debugging)
 
-::: warning
-Worker environment variables are configured in the Cloudflare Dashboard, not GitHub Secrets. D1 bindings are auto-configured by `init.py`.
-:::
-
-### 4. Trigger Deployment
-
-Push to the `main` branch to auto-deploy:
+### 1. Log In and Create Resources
 
 ```bash
-git push origin main
+npx wrangler login
+
+# Create the D1 database and note the database_id
+npx wrangler d1 create fiammetta_d1
+
+# Create the KV namespace and note the id
+npx wrangler kv namespace create fiammetta-proxy
 ```
 
-Deployment pipeline:
+### 2. Configure worker/wrangler.toml
 
-1. `build:cf` — Cloudflare mode build (temporarily remove v1/cron routes → OpenNext build → restore routes)
-2. Worker deploys to Cloudflare Workers
-3. Pages deploys to Cloudflare Pages
-4. D1 database schema auto-migrates
-
-### 5. Verify Deployment
-
-```bash
-# Check Worker health
-curl https://your-worker-subdomain.workers.dev/v1/models
-
-# Check Pages admin panel
-curl https://your-pages-subdomain.pages.dev/api/health
-```
-
-## Method 2: Manual Wrangler Deploy
-
-For development, debugging, or custom deployment workflows.
-
-### 1. Install Wrangler
-
-```bash
-npm install -g wrangler
-wrangler login
-```
-
-### 2. Create Resources
-
-```bash
-# Create D1 database
-wrangler d1 create fiammetta-watcher-db
-# Note the database_id, update wrangler.toml
-
-# Create KV namespace
-wrangler kv namespace create CACHE
-wrangler kv namespace create CACHE --preview
-# Note the id, update wrangler.toml
-```
-
-### 3. Configure wrangler.toml
-
-Edit `worker/wrangler.toml`:
+Fill in the IDs from the previous step:
 
 ```toml
-name = "fwp-worker"
-main = "worker/src/index.ts"
-compatibility_date = "2024-01-01"
+name = "fiammetta_worker"
+main = "src/index.ts"
+compatibility_date = "2025-04-02"
+compatibility_flags = ["nodejs_compat"]
+
+[placement]
+mode = "smart"
+
+[vars]
+DB_TYPE = "d1"                     # or tidb / pg
 
 [[d1_databases]]
 binding = "DB"
-database_name = "fiammetta-watcher-db"
-database_id = "your-database-id"
+database_name = "fiammetta_d1"
+database_id = "your-d1-database-id"
 
 [[kv_namespaces]]
-binding = "CACHE"
+binding = "KV"
 id = "your-kv-namespace-id"
 
-[vars]
-DB_TYPE = "d1"
-```
-
-### 4. Initialize Database
-
-```bash
-npx wrangler d1 execute fiammetta-watcher-db --file=./migrations/0001_init_schema.sql
-```
-
-### 5. Deploy Worker
-
-```bash
-cd worker
-wrangler deploy
-```
-
-### 6. Deploy Pages
-
-```bash
-# Cloudflare mode build (build:cf sets DEPLOY_PLATFORM=cf internally)
-npm run build:cf
-# Deploy to Pages (deploy the .open-next dir, not assets — otherwise it degrades to a static site)
-npx wrangler pages deploy .open-next --project-name=your-pages-project
-```
-
-## Cron Task Configuration
-
-FWP has 3 scheduled tasks:
-
-| Task | Path | Default Frequency | Function |
-|------|------|-------------------|----------|
-| Model Discovery | `model-fetch` | Every 10 min | Auto-discover platform models |
-| Key Reset | `key-reset` | Daily | Reset key usage counters |
-| Log Archival | `log-archive` | Daily | Archive old request logs to stats |
-
-Configure Cron Triggers in `worker/wrangler.toml`:
-
-```toml
 [triggers]
-crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
 
-Or in Cloudflare Dashboard → Worker → Settings → Triggers → Cron Triggers.
+### 3. Initialize the Database
+
+```bash
+npx wrangler d1 execute fiammetta_d1 --file=init.sql --remote
+```
+
+(`init.sql` lives at the project root.)
+
+### 4. Build and Deploy the Worker
+
+```bash
+npm run build:cf
+cd worker
+npx wrangler deploy --config wrangler.toml
+```
+
+### 5. Deploy Pages
+
+```bash
+npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main
+```
+
+> Deploy the `.open-next` directory, **not** `.open-next/assets` — deploying assets degrades to a static site and the admin panel returns 404.
+
+### 6. Configure Pages Credentials and Bindings
+
+Pages needs database/cache bindings and admin credentials. Export the two environment variables and run:
+
+```bash
+export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx
+python3 deploy/init.py post
+python3 deploy/init.py post-deploy
+```
+
+(Run `pip install requests` first when doing this locally. Alternatively, configure everything manually in Dashboard → Workers & Pages → project → Settings.)
+
+## Scheduled Tasks
+
+| Task | Cron | Frequency | Purpose |
+|------|------|-----------|---------|
+| Model discovery | `0 */6 * * *` | every 6h | Discover available models on each platform |
+| Key usage reset | `0 */1 * * *` | hourly | Reset key usage by period |
+| Log archival | `0 3 * * *` | daily 03:00 | Archive request logs older than 30 days |
+
+Deployed automatically with the Worker; also viewable/editable in Dashboard → Worker → Settings → Triggers → Cron Triggers.
 
 ## Troubleshooting
 
-### Build Failure: OpenNext Errors
+### Frequent Failures on the Free Tier (CPU Timeout)
 
-Verify `package.json` `build:cf` script is complete:
+Workers Free allows **10ms CPU** per request. Proxying streaming AI requests easily exceeds this. For production, upgrade to Workers Paid (CPU limit defaults to 30s, up to 5 min) or switch to [Vercel](/en/deployment/vercel) / [EdgeOne](/en/deployment/edgeone).
 
-```json
-{
-  "scripts": {
-    "build:cf": "DEPLOY_PLATFORM=cf bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\" && DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh"
-  }
-}
-```
+### D1 Free Tier Limits
 
-### Worker CPU Timeout
+5GB storage, 5M row reads/day, 100k row writes/day. Usage stats and log archival consume rows — monitor if traffic is high (Dashboard → D1 → usage).
 
-::: warning Free Tier Limitation
-Cloudflare Workers Free plan CPU limit is 10ms/request. Proxying AI API requests frequently exceeds this limit, causing repeated failures. You must either upgrade to Workers Paid plan (50ms CPU/request), or switch to another deployment method (e.g., [Vercel](/en/deployment/vercel), [Node.js Standalone](/en/deployment/standalone)).
-:::
+### Streaming Responses Interrupted
 
-Troubleshooting:
+Common on the free tier. Note the 120-second limit is the app's default upstream request timeout (same on every platform); on the free tier the more common cause is the 10ms CPU limit (see above). Upgrade to a paid plan or switch platforms.
 
-- Check for unnecessary synchronous computation
-- Ensure `prisma.$disconnect()` is not called (destroys connection cache, causing CPU spikes)
+### Admin Panel 404 After Deploy
 
-### D1 Connection Issues
-
-Verify:
-
-- `database_id` in `wrangler.toml` is correct
-- Worker env var `DB_TYPE = "d1"` is set
-- No `DATABASE_URL` is used (D1 connects via Binding, not URL)
-
-### Streaming Response Interruption
-
-If SSE streaming frequently drops:
-
-- Check that `ctx.waitUntil()` properly protects async writes in the Worker
-- Request timeout settings (default 120 seconds)
+With Option 2, check that you deployed the `.open-next` directory (not `.open-next/assets`).
 
 ## Related Docs
 
-- [Architecture](/en/deployment/architecture) — Dual-mode build architecture
-- [Environment Variables](/en/deployment/env) — Complete env var reference
-- [Wrangler Configuration](https://developers.cloudflare.com/workers/wrangler/)
+- [Architecture](/en/deployment/architecture)
+- [Environment Variables](/en/deployment/env)
+- [Wrangler docs](https://developers.cloudflare.com/workers/wrangler/)

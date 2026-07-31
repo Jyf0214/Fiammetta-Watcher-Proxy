@@ -1,117 +1,76 @@
 # Node.js Standalone Deployment
 
-This guide covers deploying FWP on your own server or VPS using Node.js directly. Suitable for scenarios requiring full control over the runtime environment.
+Run FWP as a full service on your own server / VPS. Suitable when you need full control over the runtime environment or prefer not to use Serverless.
 
-::: tip Recommended
-If self-hosting isn't required, [Cloudflare Deployment](/en/deployment/cloudflare) or [Vercel Deployment](/en/deployment/vercel) offer zero operational cost.
+::: tip Branch note
+This guide matches the `canary` branch. The `main` / `stable` branches are older versions and do not match this series of docs — use `canary`.
 :::
 
 ## Requirements
 
-| Dependency | Minimum | Recommended |
-|------------|---------|-------------|
-| Node.js | 18.0 | 22.x LTS |
-| npm | 8.0 | 10.x |
-| Database | See below | See below |
+| Dependency | Notes |
+|------------|-------|
+| Node.js | 22.x |
+| Database | TiDB (`tidb`) or PostgreSQL (`pg`), remotely accessible |
 
-Supported databases (selected via `DB_TYPE` environment variable):
-
-| Database | DB_TYPE | Notes |
-|----------|---------|-------|
-| TiDB Cloud | `tidb` | Free serverless MySQL, recommended |
-| PostgreSQL | `pg` | Full features, self-hosted |
-| Cloudflare D1 | `d1` | Cloudflare deployments only |
+> `DB_TYPE=d1` is **not supported** for self-hosting (D1 exists only in the Cloudflare runtime).
 
 ## Step 1: Clone the Project
 
 ```bash
-git clone https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
+git clone -b canary https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
 cd Fiammetta-Watcher-Proxy
-git checkout feat/cloudflare-workers
 ```
 
 ## Step 2: Install Dependencies
 
 ```bash
-npm install
+npm install --legacy-peer-deps
 ```
 
-The `postinstall` script automatically generates the Prisma Client.
+> No manual database-client preparation needed — the build does it automatically.
 
 ## Step 3: Configure Environment Variables
 
-There is no `.env.example` file. Create `.env` manually:
+There is no `.env.example` — create `.env` manually:
 
 ```bash
 cat > .env << 'EOF'
 # ===== Database =====
-DB_TYPE=tidb
-DATABASE_URL=mysql://user:password@host:4000/dbname?sslaccept=accept_invalid_certs
+DB_TYPE=pg
+DATABASE_URL=postgresql://user:pass@host:port/dbname
+
+# ===== Admin login =====
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your-password
 
 # ===== Security =====
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-admin-password
-
-# ===== JWT (leave empty for auto-generation) =====
-JWT_SECRET=
+JWT_SECRET=random-secret-32+chars
 
 # ===== Service =====
 PORT=3000
 NODE_ENV=production
 
-# ===== Cron Auth (optional) =====
-CRON_SECRET=random-secret-string
+# ===== Cron auth (optional) =====
+CRON_SECRET=random-secret
 EOF
 ```
 
-::: warning Important
-- `DB_TYPE` must be set — determines which Prisma adapter to use
-- `DATABASE_URL` must match `DB_TYPE` (`tidb` → MySQL URL, `pg` → PostgreSQL URL)
-- `ADMIN_PASSWORD` is required
-- `JWT_SECRET` left empty auto-generates a random key
+::: warning Key points
+- If `DB_TYPE` is omitted it is inferred from `DATABASE_URL` (`mysql://` → `tidb`, `postgresql://` → `pg`), but setting it explicitly is recommended
+- `JWT_SECRET` must be set explicitly and be at least 32 chars — login fails without it
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` are the login credentials themselves
 :::
 
-## Step 4: Database Migration
-
-FWP uses multiple schema files, automatically selected based on `DB_TYPE`:
-
-| DB_TYPE | Schema File | Database Command |
-|---------|------------|------------------|
-| `tidb` | `prisma/schema.mysql.prisma` | MySQL syntax |
-| `pg` | `prisma/schema.pg.prisma` | PostgreSQL syntax |
-| `d1` | `prisma/schema.d1.prisma` | Cloudflare D1 |
-
-The project provides an automatic preparation script:
+## Step 4: Build and Start
 
 ```bash
-node scripts/prepare-db.mjs
+npm run build
+npx next start
 ```
 
-This script automatically:
-
-1. Selects the correct Prisma schema based on `DB_TYPE`
-2. Generates Prisma Client
-3. Pushes database structure (`prisma db push`)
-
-Manual operations:
-
-```bash
-# TiDB / MySQL
-npx prisma db push --schema=prisma/schema.mysql.prisma
-
-# PostgreSQL
-npx prisma db push --schema=prisma/schema.pg.prisma
-```
-
-## Step 5: Initialize Admin
-
-FWP automatically creates the admin account from `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables on startup. No manual steps needed.
-
-- If no admin exists, one is created from env vars
-- If an admin already exists, creation is skipped
-- Passwords are hashed with PBKDF2-SHA256 (600,000 iterations)
-
-## Step 6: Start the Service
+- Port is controlled by `PORT` (default `3000`)
+- Start with `npx next start` (`npm start` does not work)
 
 ### Development Mode
 
@@ -119,75 +78,59 @@ FWP automatically creates the admin account from `ADMIN_USERNAME` and `ADMIN_PAS
 npm run dev
 ```
 
-Hot reload enabled, defaults to `http://localhost:3000`.
-
-### Production Mode
-
-```bash
-npm run build
-npm start
-```
-
-## Step 7: Access the Admin Panel
+## Step 5: Access the Admin Panel
 
 ```
 http://localhost:3000/admin
 ```
 
-Log in with the credentials configured in Step 3.
-
-## First-Time Setup Wizard
-
-If `DATABASE_URL` is not configured at startup, the system redirects to `/setup` for web-based database and admin configuration. Useful for quick trials.
+Log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
 
 ## Configure Cron Tasks
 
-Non-Cloudflare mode exposes cron tasks as HTTP endpoints:
+Scheduled tasks are exposed as HTTP endpoints. Call them via system cron (`crontab -e`) or an external service:
 
 | Endpoint | Function | Suggested Frequency |
 |----------|----------|---------------------|
-| `GET /api/cron/model-fetch` | Model discovery | Every 10 minutes |
-| `GET /api/cron/key-reset` | Key reset | Daily |
-| `GET /api/cron/log-archive` | Log archival | Daily |
+| `/api/cron/model-fetch` | Model discovery | every 6h |
+| `/api/cron/key-reset` | Key usage reset | hourly |
+| `/api/cron/log-archive` | Log archival | daily 03:00 |
 
-If `CRON_SECRET` is set, requests need auth headers:
+With `CRON_SECRET` set, requests must carry the auth header:
 
 ```bash
-curl -H "Authorization: Bearer your-CRON_SECRET" \
-  http://localhost:3000/api/cron/model-fetch
+curl -X GET http://localhost:3000/api/cron/model-fetch \
+  -H "Authorization: Bearer your-CRON_SECRET"
 ```
 
-Use system cron or external services to call these endpoints periodically.
+**crontab example**:
+
+```
+0 */6 * * * curl -fsS http://localhost:3000/api/cron/model-fetch -H "Authorization: Bearer your-CRON_SECRET"
+0 * * * *   curl -fsS http://localhost:3000/api/cron/key-reset   -H "Authorization: Bearer your-CRON_SECRET"
+0 3 * * *   curl -fsS http://localhost:3000/api/cron/log-archive -H "Authorization: Bearer your-CRON_SECRET"
+```
 
 ## Troubleshooting
 
 ### Database Connection Failed
 
-**Error**: `P1001: Can't reach database server`
+Error `P1001: Can't reach database server`:
 
-1. Verify the database service is running
+1. Confirm the database is running and remotely accessible
 2. Check host, port, username, and password in `DATABASE_URL`
-3. Ensure the database allows remote connections
-4. Check firewall rules for the database port
+3. Check firewall rules for the database port (MySQL: also check `bind-address`)
 
 ### Port Already in Use
 
-**Error**: `EADDRINUSE: address already in use :::3000`
-
 ```bash
 lsof -i :3000
-PORT=3001 npm start
+PORT=3001 npx next start
 ```
 
-### Prisma Client Not Generated
+### Low Memory
 
-```bash
-npx prisma generate
-```
-
-### Memory Optimization
-
-For environments with less than 1GB RAM, add connection pool parameters to `DATABASE_URL`:
+On hosts with less than 1GB RAM, append pool parameters to `DATABASE_URL`:
 
 ```
 ?connection_limit=5&pool_timeout=10
@@ -195,6 +138,6 @@ For environments with less than 1GB RAM, add connection pool parameters to `DATA
 
 ## Related Docs
 
-- [Environment Variables](/en/deployment/env) — Complete env var reference
-- [Nginx Configuration](/en/deployment/nginx) — Reverse proxy and HTTPS
-- [Cloudflare Deployment](/en/deployment/cloudflare) — Recommended serverless option
+- [Environment Variables](/en/deployment/env)
+- [Nginx](/en/deployment/nginx) — reverse proxy and HTTPS
+- [Docker](/en/deployment/docker) — containerized deployment

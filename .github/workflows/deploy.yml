@@ -2,11 +2,11 @@ name: Deploy
 
 on:
   push:
-    branches: [canary, main]
+    branches: [canary]
   workflow_dispatch:
     inputs:
       deploy_platform:
-        description: 部署平台（push 触发时自动按分支路由：canary→Cloudflare，main→EdgeOne；EdgeOne 需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，且 DB_TYPE 建议 tidb/pg）
+        description: 部署平台（push canary 自动部署 Cloudflare；EdgeOne 仅手动触发，需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，且 DB_TYPE 建议 tidb/pg）
         type: choice
         options:
           - cf
@@ -151,7 +151,6 @@ jobs:
   deploy-edgeone:
     name: Deploy EdgeOne Makers
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && (inputs.deploy_platform == 'edgeone' || inputs.deploy_platform == 'both'))
     runs-on: ubuntu-latest
     env:
