@@ -1,14 +1,29 @@
-name: Deploy to Cloudflare
+name: Deploy
 
 on:
   push:
-    branches: [canary]
+    branches: [canary, main]
   workflow_dispatch:
+    inputs:
+      deploy_platform:
+        description: 部署平台（push 触发时自动按分支路由：canary→Cloudflare，main→EdgeOne；EdgeOne 需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，且 DB_TYPE 建议 tidb/pg）
+        type: choice
+        options:
+          - cf
+          - edgeone
+          - both
+        default: cf
 
 jobs:
-  deploy:
+  # ==================== Cloudflare 部署 ====================
+  deploy-cf:
+    name: Deploy Cloudflare
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/canary') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.deploy_platform == 'cf' || inputs.deploy_platform == 'both'))
     runs-on: ubuntu-latest
     env:
+      DEPLOY_PLATFORM: cf
       DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
       DB_TYPE: ${{ secrets.DB_TYPE || 'd1' }}
     steps:
@@ -130,4 +145,40 @@ jobs:
       # ==================== 完成 ====================
 
       - name: Done
-        run: echo "🎉 部署完成"
+        run: echo "🎉 Cloudflare 部署完成"
+
+  # ==================== EdgeOne Makers 部署 ====================
+  deploy-edgeone:
+    name: Deploy EdgeOne Makers
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.deploy_platform == 'edgeone' || inputs.deploy_platform == 'both'))
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_PLATFORM: edgeone
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
+      DB_TYPE: ${{ secrets.DB_TYPE || 'd1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ==================== 环境准备 ====================
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      # ==================== 部署（EdgeOne CLI 自动构建并上传） ====================
+
+      - name: Deploy to EdgeOne Makers
+        run: |
+          # pin 版本防止 CLI 行为漂移
+          npm install -g edgeone@1.6.19
+          edgeone makers deploy \
+            -n ${{ secrets.EO_PROJECT_NAME }} \
+            -t ${{ secrets.EO_API_TOKEN }} \
+            -e production

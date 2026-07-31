@@ -96,10 +96,10 @@ Worker 的环境变量需要在 Cloudflare Dashboard 中配置，不是 GitHub S
 
 ### 4. 触发部署
 
-推送代码到 `main` 分支即可自动触发部署：
+推送代码到 `canary` 分支即可自动触发 Cloudflare 部署（`main` 分支触发 EdgeOne 部署，也可在 Actions 页面手动选择平台）：
 
 ```bash
-git push origin main
+git push origin canary
 ```
 
 部署流程：

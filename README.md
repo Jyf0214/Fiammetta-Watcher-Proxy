@@ -46,7 +46,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 
 ### 方式一：GitHub Actions 自动部署（推荐）
 
-推送到 `feat/cloudflare-workers` 分支自动触发部署。工作流步骤：
+推送到 `canary` 分支自动触发 Cloudflare 部署；推送到 `main` 分支触发 EdgeOne 部署；也可在 Actions 页面手动选择部署平台（cf / edgeone / both）。工作流步骤：
 
 1. **初始化资源（pre）** — `deploy/init.py pre` 创建 D1/KV + 替换配置占位符 + 写入 DB_TYPE
 2. **安装依赖** — `npm install` + 生成三方言 Prisma Client
@@ -66,6 +66,8 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 | `ADMIN_PASSWORD` | 管理员密码 |
 | `DB_TYPE` | 数据库类型（`d1` / `tidb` / `pg` / `hyperdrive`，默认 `d1`） |
 | `DATABASE_URL` | 外部数据库 URL（TiDB/PG 时必需，D1 无需设置） |
+| `EO_PROJECT_NAME` | EdgeOne Makers 项目名（EdgeOne 部署时需要） |
+| `EO_API_TOKEN` | EdgeOne API Token（EdgeOne 部署时需要） |
 
 ### 方式二：手动部署
 

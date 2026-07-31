@@ -46,7 +46,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 
 ### Option 1: GitHub Actions (Recommended)
 
-Push to `feat/cloudflare-workers` branch triggers automatic deployment:
+Push to the `canary` branch triggers Cloudflare deployment; push to `main` triggers EdgeOne deployment. You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
 
 1. **Init resources (pre)** — `deploy/init.py pre` creates D1/KV + replaces placeholders + writes DB_TYPE
 2. **Install deps** — `npm install` + generate multi-dialect Prisma Client
@@ -66,6 +66,8 @@ Configure these in GitHub repo Settings → Secrets:
 | `ADMIN_PASSWORD` | Admin password |
 | `DB_TYPE` | Database type (`d1` / `tidb` / `pg` / `hyperdrive`, default `d1`) |
 | `DATABASE_URL` | External database URL (required for TiDB/PG, not needed for D1) |
+| `EO_PROJECT_NAME` | EdgeOne Makers project name (required for EdgeOne deployments) |
+| `EO_API_TOKEN` | EdgeOne API Token (required for EdgeOne deployments) |
 
 ### Option 2: Manual Deployment
 

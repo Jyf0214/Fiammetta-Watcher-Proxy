@@ -42,6 +42,9 @@ tsconfig.tsbuildinfo
 # OpenNext build output
 .open-next/
 
+# EdgeOne CLI build output
+.edgeone/
+
 # 本地数据库文件（placeholder.db / local.db 等，禁止提交）
 *.db
 *.sqlite
