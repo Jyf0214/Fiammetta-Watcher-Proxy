@@ -8,7 +8,7 @@
     ],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": true, // TODO: 前端页面 res.json() 返回 unknown 需逐个添加类型注解，后续修复
+    "strict": true, 
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
