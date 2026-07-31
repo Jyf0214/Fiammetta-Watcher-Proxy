@@ -78,12 +78,9 @@ jobs:
 
       - name: Build Pages
         run: |
-          npx opennextjs-cloudflare build
-          mv .open-next/worker.js .open-next/_worker.js
-          cp -r .open-next/assets/* .open-next/
-          cp public/_headers .open-next/_headers
-          node -e "require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))"
-          echo "✅ _routes.json 已生成"
+          # 复用 build:cf：含 DEPLOY_PLATFORM=cf 构建门控（临时移除 v1/cron 路由）+ prepare-db + 产物处理
+          npm run build:cf
+          echo "✅ Pages 构建完成（build-gate 已移除 v1/cron 路由）"
 
       # ==================== 部署 Worker ====================
 

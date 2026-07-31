@@ -15,7 +15,7 @@ FWP 支持多种部署方式，可根据实际需求灵活选择。
 
 FWP 采用**双模式构建架构**，根据部署平台自动切换：
 
-### Cloudflare 模式（`CF_DEPLOY=true`）
+### Cloudflare 模式（`DEPLOY_PLATFORM=cf`）
 
 ```
 用户请求 → Cloudflare Worker (/v1/* + Cron)

@@ -2,10 +2,11 @@
 # ================================================================
 # 构建还原脚本
 #
-# CF 构建完成后，将 build-gate.sh 移走的路由还原回来。
+# DEPLOY_PLATFORM=cf 的 CF 构建完成后，将 build-gate.sh 移走的
+# 路由还原回来。
 #
 # 使用方式：
-#   CF_DEPLOY=true bash scripts/build-gate-restore.sh
+#   DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh
 # ================================================================
 
 set -eo pipefail
@@ -17,7 +18,7 @@ cd "$PROJECT_ROOT"
 
 GATE_TMP=".build-gate-tmp"
 
-if [ "${CF_DEPLOY:-}" = "true" ] && [ -d "$GATE_TMP" ]; then
+if [ "${DEPLOY_PLATFORM:-}" = "cf" ] && [ -d "$GATE_TMP" ]; then
   echo "🔄 还原被临时移除的 Pages API 路由..."
 
   if [ -d "$GATE_TMP/v1" ]; then

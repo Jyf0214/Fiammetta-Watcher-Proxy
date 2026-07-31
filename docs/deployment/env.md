@@ -11,6 +11,11 @@
 | `ADMIN_USERNAME` | 管理员用户名 | 是 | `admin` |
 | `ADMIN_PASSWORD` | 管理员密码 | 是 | — |
 | `JWT_SECRET` | JWT 签名密钥（留空自动生成） | 否 | 自动生成 |
+| `DEPLOY_PLATFORM` | 部署平台：`cf` / `vercel` / `edgeone`（`cf` 时构建临时移除 v1/cron 路由，由 Worker 处理） | 否 | 未设置（非 CF 模式） |
+
+::: tip 部署平台
+`DEPLOY_PLATFORM=cf` 时，构建（`build:cf`）会临时移除 `pages/api/v1/` 和 `pages/api/cron/`，由独立 Worker 处理 `/v1/*` 与定时任务。`vercel` / `edgeone` / 未设置时保留这些路由，由 Pages API / Next.js Server 处理。
+:::
 
 ::: warning 重要
 - `DB_TYPE` 是核心环境变量，决定了使用哪种 Prisma 适配器。必须与实际数据库匹配。

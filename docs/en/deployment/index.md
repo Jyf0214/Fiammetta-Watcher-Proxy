@@ -15,7 +15,7 @@ FWP supports multiple deployment methods. Choose the one that best fits your nee
 
 FWP uses a **dual-mode build architecture** that automatically switches based on the deployment platform.
 
-### Cloudflare Mode (`CF_DEPLOY=true`)
+### Cloudflare Mode (`DEPLOY_PLATFORM=cf`)
 
 ```
 Requests → Cloudflare Worker (/v1/* + Cron)

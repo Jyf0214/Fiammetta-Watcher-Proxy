@@ -6,7 +6,7 @@ FWP 采用**双模式构建架构**，同一套代码库可根据部署平台自
 
 ### Cloudflare 模式
 
-当 `CF_DEPLOY=true` 环境变量存在时，构建系统自动切换到 Cloudflare 模式：
+当 `DEPLOY_PLATFORM=cf` 环境变量存在时，构建系统自动切换到 Cloudflare 模式：
 
 ```
 ┌─────────────────────────────────────────┐
@@ -54,7 +54,7 @@ FWP 采用**双模式构建架构**，同一套代码库可根据部署平台自
 ### build-gate.sh（构建前）
 
 ```
-CF_DEPLOY=true → 将 pages/api/v1/ 和 pages/api/cron/ 移到 .build-gate-tmp/
+DEPLOY_PLATFORM=cf → 将 pages/api/v1/ 和 pages/api/cron/ 移到 .build-gate-tmp/
 ```
 
 这确保 Cloudflare 构建时不会将 v1 和 cron 路由打包到 Pages 中（这些由 Worker 处理）。
@@ -63,16 +63,16 @@ CF_DEPLOY=true → 将 pages/api/v1/ 和 pages/api/cron/ 移到 .build-gate-tmp/
 
 ```bash
 # package.json 中的 build:cf 脚本
-CF_DEPLOY=true bash scripts/build-gate.sh &&
+DEPLOY_PLATFORM=cf bash scripts/build-gate.sh &&
 node scripts/prepare-db.mjs &&
 opennextjs-cloudflare build &&
-CF_DEPLOY=true bash scripts/build-gate-restore.sh
+DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh
 ```
 
 ### build-gate-restore.sh（构建后）
 
 ```
-CF_DEPLOY=true → 将 .build-gate-tmp/ 中的文件还原到原位
+DEPLOY_PLATFORM=cf → 将 .build-gate-tmp/ 中的文件还原到原位
 ```
 
 ::: warning 注意

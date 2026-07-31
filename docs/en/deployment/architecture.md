@@ -6,7 +6,7 @@ FWP uses a **dual-mode build architecture** — a single codebase automatically 
 
 ### Cloudflare Mode
 
-When `CF_DEPLOY=true` environment variable is present, the build system switches to Cloudflare mode:
+When `DEPLOY_PLATFORM=cf` environment variable is present, the build system switches to Cloudflare mode:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -54,7 +54,7 @@ Shell scripts automatically handle route switching during build:
 ### build-gate.sh (Pre-Build)
 
 ```
-CF_DEPLOY=true → Moves pages/api/v1/ and pages/api/cron/ to .build-gate-tmp/
+DEPLOY_PLATFORM=cf → Moves pages/api/v1/ and pages/api/cron/ to .build-gate-tmp/
 ```
 
 This ensures Cloudflare builds don't package v1 and cron routes into Pages (Worker handles them).
@@ -63,16 +63,16 @@ This ensures Cloudflare builds don't package v1 and cron routes into Pages (Work
 
 ```bash
 # build:cf script in package.json
-CF_DEPLOY=true bash scripts/build-gate.sh &&
+DEPLOY_PLATFORM=cf bash scripts/build-gate.sh &&
 node scripts/prepare-db.mjs &&
 opennextjs-cloudflare build &&
-CF_DEPLOY=true bash scripts/build-gate-restore.sh
+DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh
 ```
 
 ### build-gate-restore.sh (Post-Build)
 
 ```
-CF_DEPLOY=true → Restores files from .build-gate-tmp/ to original locations
+DEPLOY_PLATFORM=cf → Restores files from .build-gate-tmp/ to original locations
 ```
 
 ::: warning

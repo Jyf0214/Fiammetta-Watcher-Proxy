@@ -11,6 +11,11 @@ All environment variables are configured in the `.env` file (self-hosted) or in 
 | `ADMIN_USERNAME` | Admin username | Yes | `admin` |
 | `ADMIN_PASSWORD` | Admin password | Yes | — |
 | `JWT_SECRET` | JWT signing secret (leave empty for auto-generation) | No | Auto-generated |
+| `DEPLOY_PLATFORM` | Deployment platform: `cf` / `vercel` / `edgeone` (`cf` removes v1/cron routes at build time, handled by Worker) | No | Unset (non-CF mode) |
+
+::: tip Deployment Platform
+With `DEPLOY_PLATFORM=cf`, the build (`build:cf`) temporarily removes `pages/api/v1/` and `pages/api/cron/` — the standalone Worker handles `/v1/*` and scheduled tasks. With `vercel` / `edgeone` / unset, these routes are kept and handled by Pages API / Next.js Server.
+:::
 
 ::: warning Important
 - `DB_TYPE` is a core environment variable that determines which Prisma adapter to use. Must match your actual database.

@@ -182,8 +182,10 @@ wrangler deploy
 ### 6. Deploy Pages
 
 ```bash
-CF_DEPLOY=true npm run build:cf
-npx wrangler pages deploy .open-next/assets --project-name=your-pages-project
+# Cloudflare mode build (build:cf sets DEPLOY_PLATFORM=cf internally)
+npm run build:cf
+# Deploy to Pages (deploy the .open-next dir, not assets — otherwise it degrades to a static site)
+npx wrangler pages deploy .open-next --project-name=your-pages-project
 ```
 
 ## Cron Task Configuration
@@ -214,7 +216,7 @@ Verify `package.json` `build:cf` script is complete:
 ```json
 {
   "scripts": {
-    "build:cf": "CF_DEPLOY=true bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && CF_DEPLOY=true bash scripts/build-gate-restore.sh"
+    "build:cf": "DEPLOY_PLATFORM=cf bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\" && DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh"
   }
 }
 ```

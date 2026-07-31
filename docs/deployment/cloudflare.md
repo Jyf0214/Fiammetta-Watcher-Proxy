@@ -183,11 +183,11 @@ wrangler deploy
 ### 6. 部署 Pages
 
 ```bash
-# Cloudflare 模式构建
-CF_DEPLOY=true npm run build:cf
+# Cloudflare 模式构建（build:cf 内部已设置 DEPLOY_PLATFORM=cf）
+npm run build:cf
 
-# 部署到 Pages
-npx wrangler pages deploy .open-next/assets --project-name=你的-pages项目名
+# 部署到 Pages（部署 .open-next 目录而非 assets，否则会退化为纯静态站点）
+npx wrangler pages deploy .open-next --project-name=你的-pages项目名
 ```
 
 ## 定时任务配置
@@ -218,7 +218,7 @@ crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
 ```json
 {
   "scripts": {
-    "build:cf": "CF_DEPLOY=true bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && CF_DEPLOY=true bash scripts/build-gate-restore.sh"
+    "build:cf": "DEPLOY_PLATFORM=cf bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\" && DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh"
   }
 }
 ```
