@@ -53,6 +53,10 @@ const nextConfig: NextConfig = {
   },
   // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析
   turbopack: {},
+  // i18next 在 Turbopack 下会被 external 化并在运行时 import("<包名>-<hash>")，
+  // 非 CF 平台（EdgeOne/Vercel/纯 Node）运行时无法解析该 ID 导致 500。
+  // 强制转译打包，避免运行时外部依赖。
+  transpilePackages: ["i18next", "react-i18next", "i18next-browser-languagedetector"],
   // Webpack（--webpack 模式）：alias 未使用的方言到空 stub
   webpack: (config) => {
     const alias = getPrismaAlias();

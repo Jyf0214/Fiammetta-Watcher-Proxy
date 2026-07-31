@@ -8,7 +8,6 @@
  */
 
 import type { NextApiResponse } from "next";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS = 100;
@@ -29,8 +28,11 @@ export async function checkAdminRateLimit(
   adminId: string,
   res: NextApiResponse
 ): Promise<boolean> {
+  // 动态加载 CF 运行时 API：仅 Cloudflare 平台（Pages/本地 CF 模拟）启用 KV 限流，
+  // 其他平台（EdgeOne/Vercel/纯 Node）没有 @opennextjs/cloudflare 运行时依赖，降级为不限流
   let kv: KVNamespace | undefined;
   try {
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const { env } = getCloudflareContext();
     kv = env.KV;
   } catch { /* 本地开发或非 CF 环境 */ }

@@ -10,7 +10,6 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
 import { getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
@@ -117,6 +116,9 @@ async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string }): Prom
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   let kv: KVNamespace | undefined;
   try {
+    // 动态加载 CF 运行时 API：仅 Cloudflare 平台启用 KV 登录限流，
+    // 非 CF 平台（EdgeOne/Vercel/纯 Node）降级为不限流，避免运行时依赖缺失
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const { env } = getCloudflareContext();
     kv = env.KV;
   } catch { /* 本地开发或非 CF 环境下 getCloudflareContext 可能抛异常 */ }
