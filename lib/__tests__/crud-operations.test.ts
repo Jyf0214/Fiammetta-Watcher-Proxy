@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "../../src/generated/client";
+import { PrismaClient } from "../../src/generated/d1/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 
 let prisma: PrismaClient;

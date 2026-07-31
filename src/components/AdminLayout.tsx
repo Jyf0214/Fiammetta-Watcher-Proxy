@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   Server,
   Key,
-  ArrowLeftRight,
   FileText,
   ScrollText,
   Settings,
@@ -345,7 +344,7 @@ export default function AdminLayout({
       try {
         const res = await fetch("/api/health", { signal: controller.signal });
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as { status: string; dbType?: string };
           setHealthStatus({ status: data.status, dbType: data.dbType || "D1" });
         }
       } catch {

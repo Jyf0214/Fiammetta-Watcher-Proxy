@@ -1,4 +1,5 @@
 import type { AppProps } from 'next/app'
+import Head from 'next/head'
 import '../styles/globals.css'
 import '@/lib/i18n'
 import { message } from 'antd'
@@ -7,5 +8,13 @@ import { message } from 'antd'
 message.config({ top: 60 })
 
 export default function App({ Component, pageProps }: AppProps) {
-  return <Component {...pageProps} />
+  return (
+    <>
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Fiammetta Watcher Proxy</title>
+      </Head>
+      <Component {...pageProps} />
+    </>
+  )
 }

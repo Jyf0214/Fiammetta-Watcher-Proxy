@@ -11,8 +11,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "../_auth";
-import { checkCsrfOrigin } from "../_security";
+import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);

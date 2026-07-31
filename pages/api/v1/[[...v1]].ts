@@ -15,7 +15,7 @@ import { recordSuccess, recordFailure } from "../../../worker/src/load-balancer"
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
-import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "./_lib/rate-limit";
+import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -152,7 +152,11 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (isStream) upstreamBody.stream_options = { include_usage: true };
 
     const fwd: Record<string, string> = {};
-    for (const [k, v] of Object.entries(extractForwardableHeaders(req.headers as Record<string, string>, cur.forwardHeaders)))
+    // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），
+    // 转成 Headers 以匹配 Worker 版 extractForwardableHeaders 签名
+    const downstreamHeaders = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") downstreamHeaders.set(k, v);
+    for (const [k, v] of Object.entries(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders)))
       if (/^[a-zA-Z0-9-]+$/.test(k)) fwd[k] = v;
 
     const url = `${cur.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
@@ -160,7 +164,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (!check.safe) { res.status(400).json({ error: { message: `上游 URL 不安全: ${check.reason}`, type: "invalid_request_error" } }); return; }
 
     let upRes: Response;
-    try { const c = new AbortController(); const t = setTimeout(() => c.abort(), 120_000); upRes = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd }, body: JSON.stringify(upstreamBody), signal: c.signal }); clearTimeout(t); }
+    try { const c = new AbortController(); const t = setTimeout(() => c.abort(), 120_000); upRes = await fetch(url, { method: "POST", headers: new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd }), body: JSON.stringify(upstreamBody), signal: c.signal }); clearTimeout(t); }
     catch (e) { if (e instanceof DOMException && e.name === "AbortError") { res.status(504).json({ error: { message: "上游请求超时", type: "timeout_error" } }); return; } throw e; }
 
     if (upRes.status !== 429) { await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, logTag, res); return; }

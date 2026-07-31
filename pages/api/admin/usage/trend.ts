@@ -12,7 +12,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest } from "@/lib/admin-auth";
 
 export default async function handler(
   req: NextApiRequest,

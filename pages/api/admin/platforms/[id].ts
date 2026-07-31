@@ -8,8 +8,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "../_auth";
-import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "../_security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
 
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */

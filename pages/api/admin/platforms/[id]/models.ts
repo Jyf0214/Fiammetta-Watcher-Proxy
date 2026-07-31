@@ -9,8 +9,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "../../_auth";
-import { checkCsrfOrigin } from "../../_security";
+import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 
 /** 生成唯一 ID（cuid 风格） */

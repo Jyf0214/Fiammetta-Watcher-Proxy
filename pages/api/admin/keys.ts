@@ -10,9 +10,9 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "./_auth";
-import { checkAdminRateLimit } from "./_rate-limit";
-import { checkCsrfOrigin } from "./_security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);

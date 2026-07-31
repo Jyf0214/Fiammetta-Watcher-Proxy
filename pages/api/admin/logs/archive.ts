@@ -13,7 +13,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Prisma } from "@/lib/prisma";
-import { getAdminFromRequest } from "../_auth";
+import { getAdminFromRequest } from "@/lib/admin-auth";
 
 /**
  * 将 YYYY-MM-DD 日期字符串转换为当天结束时的 Unix 时间戳（23:59:59）

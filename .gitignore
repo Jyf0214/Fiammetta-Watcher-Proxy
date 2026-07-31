@@ -42,8 +42,10 @@ tsconfig.tsbuildinfo
 # OpenNext build output
 .open-next/
 
-# Drizzle
-local.db
+# 本地数据库文件（placeholder.db / local.db 等，禁止提交）
+*.db
+*.sqlite
+*.sqlite3
 
 # data directory (contains sensitive config)
 data/

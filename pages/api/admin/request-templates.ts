@@ -13,8 +13,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "./_auth";
-import { checkCsrfOrigin } from "./_security";
+import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";

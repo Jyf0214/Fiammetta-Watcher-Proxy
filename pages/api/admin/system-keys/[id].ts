@@ -7,8 +7,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "../_auth";
-import { checkCsrfOrigin } from "../_security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 function generateId(): string {
   return crypto.randomUUID();

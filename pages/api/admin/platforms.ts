@@ -7,9 +7,9 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "./_auth";
-import { checkAdminRateLimit } from "./_rate-limit";
-import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "./_security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
 
 /**
  * GET /api/admin/platforms — 获取平台列表

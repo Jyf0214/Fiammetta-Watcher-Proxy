@@ -14,7 +14,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "./_auth";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 
 /** 导出类型 */
 type ExportType = "system" | "data" | "all";

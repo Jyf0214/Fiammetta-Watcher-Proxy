@@ -16,9 +16,9 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest, getAuditAdminId } from "./_auth";
-import { checkAdminRateLimit } from "./_rate-limit";
-import { isSafeUrl } from "./_security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { isSafeUrl } from "@/lib/admin-security";
 
 /** 每类导入的结果统计 */
 interface ImportResult {

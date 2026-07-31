@@ -7,8 +7,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "./_auth";
-import { checkCsrfOrigin } from "./_security";
+import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 export default async function handler(
   req: NextApiRequest,

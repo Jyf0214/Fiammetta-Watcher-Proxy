@@ -151,11 +151,11 @@ async function createPrismaInstance(
  *   createDb(env)        — Worker 环境（传入完整 env 对象）
  *   createDb({ DB: d1 }) — 直接传入 D1Database binding（兼容旧代码）
  *
- * @returns any 类型的 PrismaClient（三个方言 API 完全一致）
+ * @returns 类型化的 PrismaClient（三个方言 API 完全一致）
  */
 export async function createDb(
   env?: Record<string, unknown> | { DB: unknown }
-): Promise<any> {
+): Promise<Database> {
   // 兼容：如果直接传入了 D1Database binding（不是 env 对象）
   let resolvedEnv: Record<string, unknown> | undefined;
   if (env && typeof env === "object" && "DB" in env && typeof env.DB === "object" && env.DB !== null && !("DB_TYPE" in env)) {
@@ -209,7 +209,9 @@ export async function disconnectDb(): Promise<void> {
 // 三份 Schema 的表结构完全一致，导出 D1 版本的类型作为通用类型。
 // 业务代码通过 import type { Xxx } from "@/lib/prisma" 使用。
 
+import type { PrismaClient } from "../src/generated/d1/client";
+
 /** PrismaClient 类型（用于函数返回值类型标注） */
-export type Database = any;
+export type Database = PrismaClient;
 
 export type { Prisma } from "../src/generated/d1/client";

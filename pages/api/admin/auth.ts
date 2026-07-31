@@ -13,7 +13,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
-import { getAuditAdminId, type AuthResult } from "./_auth";
+import { getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
 
 const COOKIE_NAME = "admin_token";
 

@@ -8,7 +8,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Prisma } from "@/lib/prisma";
-import { getAdminFromRequest } from "./_auth";
+import { getAdminFromRequest } from "@/lib/admin-auth";
 
 /**
  * 掩码处理密钥值
@@ -62,7 +62,7 @@ export default async function handler(
     });
 
     // 构建 Prisma where 条件（createdAt 是 Int Unix 时间戳）
-    const where: Record<string, unknown> = {};
+    const where: Prisma.requestLogsWhereInput = {};
     if (startTimestamp !== undefined) {
       where.createdAt = { gte: startTimestamp };
     }
@@ -71,9 +71,10 @@ export default async function handler(
     }
 
     // 用 groupBy 在数据库层面完成聚合，避免全量拉取日志到内存
-    const grouped: any[] = await orm.requestLogs.groupBy({
+    // 注意：不能标注 any[]，否则会干扰 Prisma groupBy 泛型推断（参数被推断成 any[] 交叉类型）
+    const grouped = await orm.requestLogs.groupBy({
       by: ["keyId"],
-      where: where as Prisma.requestLogsWhereInput,
+      where,
       _count: { id: true },
       _sum: {
         tokens: true,

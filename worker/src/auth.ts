@@ -8,10 +8,7 @@
 
 import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "./config";
-import {
-  checkAndResetApiKey,
-  getPeriodStart,
-} from "./key-reset";
+import { getPeriodStart } from "./key-reset";
 
 /**
  * API Key 查询结果类型
@@ -99,13 +96,6 @@ export async function validateApiKey(
         { status: 401 }
       ),
     };
-  }
-
-  // 检查是否需要重置用量（调用 key-reset.ts 的统一实现）
-  // 注意：checkAndResetApiKey 会执行额外的数据库查询，为减少 CPU 开销，
-  // 仅在 Key 状态异常时才调用（避免每次都查询）
-  if (apiKey.status === "disabled") {
-    await checkAndResetApiKey(db, apiKey.id, env);
   }
 
   // 检查调用次数限制（D1 无 plans 表，直接使用 Key 级别 callLimit）
