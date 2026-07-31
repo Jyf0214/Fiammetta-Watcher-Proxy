@@ -21,10 +21,8 @@ EdgeOne Makers 较新，本文基于当前部署流程编写。首次部署后�
 |--------|------|
 | `EO_PROJECT_NAME` | EdgeOne Makers 项目名 |
 | `EO_API_TOKEN` | EdgeOne API Token |
-| `DB_TYPE` | **必须设为 `tidb` 或 `pg`**（不能是默认的 `d1`） |
-| `DATABASE_URL` | 远程数据库连接串 |
 
-> Secrets 只用于构建期；运行时环境变量需在 Makers 控制台配置（见第 3 步）。
+> `DB_TYPE` 与 `DATABASE_URL` **不需要**配置为 GitHub Secrets——构建期由 EdgeOne CLI 从 Makers 项目环境变量拉取（写入 `.env`），运行时也使用同一组变量。
 
 ## 2. 触发部署
 
@@ -32,11 +30,11 @@ Fork 项目到你的 GitHub 账号后，在 Actions 页面手动运行工作流�
 
 Actions → Deploy 工作流 → Run workflow → **分支选择 `canary`**（Fork 后的默认分支不是 `canary`，务必手动选择）→ 平台选择 `edgeone` 或 `both` → 点击 Run workflow。
 
-运行后自动构建并上传，无需其他操作。
+运行后自动构建并上传，无需其他操作。构建期间 CLI 自动执行依赖安装与 `prisma generate`；非 D1 数据库（tidb/pg）时自动执行 `prisma db push` 同步表结构（CI 环境自动触发）。
 
 ## 3. 配置运行时环境变量
 
-Makers 控制台 → 项目 → 运行时环境变量：
+Makers 控制台 → 项目 → 运行时环境变量（**部署前必须配置好**，构建期与运行时共用）：
 
 ```env
 DB_TYPE=tidb                        # 或 pg，不能是 d1

@@ -4,8 +4,10 @@
  * 功能：
  *   1. 根据 DB_TYPE 只生成需要的 Prisma Client（避免打包多余 WASM）
  *   2. 为未使用的方言生成空 stub 文件（webpack 静态分析需要 import 路径存在）
- *   3. MySQL/PG 方言额外执行 prisma db push 同步表结构
- *   4. D1 由 Python 部署脚本单独处理建表，不在此处 push
+ *   3. 自动读取 .env（不覆盖已有环境变量；EdgeOne CLI 构建期会把项目环境变量拉取到 .env）
+ *   4. MySQL/PG 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/CF 构建）且 DATABASE_URL 协议匹配时
+ *      自动执行 prisma db push 同步表结构；本地默认不 push，需要时设置 DB_PUSH=1
+ *   5. D1 由 Python 部署脚本单独处理建表，不在此处 push
  *
  * 生成目录：
  *   - prisma/schema.d1.prisma    → src/generated/d1/   （或 stub）
@@ -19,7 +21,7 @@
 import { execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -33,7 +35,27 @@ const DIALECTS = {
   hyperdrive: { name: "PostgreSQL", file: "prisma/schema.pg.prisma", dir: "pg", needsPush: true },
 };
 
-// ==================== 1. 推断 DB_TYPE ====================
+// ==================== 1. 加载 .env + 推断 DB_TYPE ====================
+
+/**
+ * 读取项目根目录 .env（不覆盖已存在的环境变量，与 dotenv 行为一致）。
+ * EdgeOne CLI 部署时会把项目环境变量拉取到 .env，构建期依赖它拿到 DB_TYPE/DATABASE_URL。
+ */
+function loadDotEnv() {
+  const envFile = resolve(ROOT, ".env");
+  if (!existsSync(envFile)) return;
+  for (const line of readFileSync(envFile, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+loadDotEnv();
 
 function resolveDbType() {
   const dbType = process.env.DB_TYPE || "";
@@ -48,6 +70,15 @@ function resolveDbType() {
 
 const dbType = resolveDbType();
 const dialect = DIALECTS[dbType];
+
+if (
+  dbType === "d1" &&
+  !process.env.DB_TYPE &&
+  !process.env.DATABASE_URL &&
+  (process.env.DEPLOY_PLATFORM === "edgeone" || process.env.DEPLOY_PLATFORM === "vercel")
+) {
+  console.warn("⚠️  未检测到 DB_TYPE/DATABASE_URL，已默认 d1——EdgeOne/Vercel 部署必须配置 DB_TYPE 与 DATABASE_URL，否则运行时无法连接数据库");
+}
 
 console.log(`🔧 DB_TYPE: ${dbType}`);
 
@@ -105,7 +136,13 @@ for (const [key, d] of Object.entries(DIALECTS)) {
 
 if (dialect.needsPush) {
   const url = process.env.DATABASE_URL || "";
-  if (url) {
+  // 仅当 DATABASE_URL 协议与方言匹配时才 push，防止占位串（file:./placeholder.db）误推
+  const schemes = dbType === "tidb" ? ["mysql://", "mysqls://"] : ["postgresql://", "postgres://"];
+  const isRemote = schemes.some((scheme) => url.startsWith(scheme));
+  // CI 环境（EdgeOne/Vercel/GitHub Actions 均带 CI=true）自动 push；本地默认不 push，
+  // 防止开发者 npm install 时意外对真实数据库执行破坏性 --accept-data-loss
+  const shouldPush = isRemote && (process.env.CI === "true" || process.env.DB_PUSH === "1");
+  if (shouldPush) {
     console.log(`⚙️  执行 prisma db push（${dialect.name}）...`);
     execSync(`npx prisma db push --schema=${dialect.file} --accept-data-loss`, {
       cwd: ROOT,
@@ -113,6 +150,10 @@ if (dialect.needsPush) {
       env: { ...process.env, DATABASE_URL: url },
     });
     console.log(`✅ ${dialect.name} db push 完成`);
+  } else if (isRemote) {
+    console.warn(`⚠️  ${dialect.name} 模式且 DATABASE_URL 匹配，但非 CI 环境且未设置 DB_PUSH=1，跳过 db push（CI 自动执行；本地如需同步表结构请设置 DB_PUSH=1）`);
+  } else if (url) {
+    console.warn(`⚠️  ${dialect.name} 模式但 DATABASE_URL 协议不是 ${schemes.join(" / ")}，跳过 db push`);
   } else {
     console.warn(`⚠️  ${dialect.name} 模式但未设置 DATABASE_URL，跳过 db push`);
   }

@@ -16,7 +16,7 @@
     "db:remote": "npx wrangler d1 execute fiammetta_d1 --file=init.sql --remote",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks && node scripts/prepare-db.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

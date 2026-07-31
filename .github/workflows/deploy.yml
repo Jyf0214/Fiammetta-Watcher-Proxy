@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_platform:
-        description: 部署平台（push canary 自动部署 Cloudflare；EdgeOne 仅手动触发，需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，且 DB_TYPE 建议 tidb/pg）
+        description: 部署平台（push canary 自动部署 Cloudflare；EdgeOne 仅手动触发，需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，DB_TYPE 与 DATABASE_URL 在 Makers 控制台项目环境变量中配置，需为 tidb/pg）
         type: choice
         options:
           - cf
@@ -155,8 +155,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DEPLOY_PLATFORM: edgeone
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
-      DB_TYPE: ${{ secrets.DB_TYPE || 'd1' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -166,12 +164,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
-
-      # ==================== 部署（EdgeOne CLI 自动构建并上传） ====================
+      # ==================== 部署（EdgeOne CLI 自动安装依赖、构建并上传） ====================
 
       - name: Deploy to EdgeOne Makers
         run: |
