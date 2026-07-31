@@ -18,6 +18,16 @@ import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "./_lib/rate-limit";
 import type { WorkerEnv } from "../../../worker/src/config";
 
+/**
+ * 禁用默认 bodyParser：本路由需读取原始请求体文本（与 Worker 版一致），
+ * 否则 Next.js 会先消费 JSON 流，parseRequestBody 读到空串导致 400。
+ */
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 interface ProxyConfig { upstreamPath: string; supportsStreaming?: boolean; }
 
 const PRIVATE_IP_PATTERNS = [/^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^169\.254\./, /^127\./, /^0\./];
