@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "name" TEXT NOT NULL,
     "base_url" TEXT NOT NULL,
     "api_key" TEXT NOT NULL,
-    "api_keys" TEXT NOT NULL DEFAULT '[]',
+    "api_keys" TEXT NOT NULL,
     "type" TEXT NOT NULL DEFAULT 'openai',
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "priority" INTEGER NOT NULL DEFAULT 0,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "fail_count" INTEGER NOT NULL DEFAULT 0,
     "last_fail_at" INTEGER,
     "cooldown_end" INTEGER,
-    "forward_headers" TEXT NOT NULL DEFAULT '[]',
+    "forward_headers" TEXT NOT NULL,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS "request_templates" (
     "description" TEXT,
     "method" TEXT NOT NULL DEFAULT 'POST',
     "endpoint" TEXT NOT NULL DEFAULT 'all',
-    "headers" TEXT NOT NULL DEFAULT '{}',
+    "headers" TEXT NOT NULL,
     "body_template" TEXT,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "created_at" INTEGER NOT NULL DEFAULT 0,

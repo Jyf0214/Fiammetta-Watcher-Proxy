@@ -33,7 +33,7 @@ model platforms {
   name           String
   baseUrl        String  @map("base_url")
   apiKey         String  @map("api_key")
-  apiKeys        String  @default("[]") @map("api_keys")
+  apiKeys        String  @map("api_keys")
   type           String  @default("openai")
   enabled        Boolean @default(true)
   priority       Int     @default(0)
@@ -44,7 +44,7 @@ model platforms {
   failCount      Int     @default(0) @map("fail_count")
   lastFailAt     Int?    @map("last_fail_at")
   cooldownEnd    Int?    @map("cooldown_end")
-  forwardHeaders String  @default("[]") @map("forward_headers")
+  forwardHeaders String  @map("forward_headers")
   createdAt      Int     @default(0) @map("created_at")
   updatedAt      Int     @default(0) @map("updated_at")
 
@@ -247,7 +247,7 @@ model requestTemplates {
   description  String?
   method       String  @default("POST")
   endpoint     String  @default("all")
-  headers      String  @default("{}")
+  headers      String
   bodyTemplate String? @map("body_template")
   enabled      Boolean @default(true)
   createdAt    Int     @default(0) @map("created_at")
