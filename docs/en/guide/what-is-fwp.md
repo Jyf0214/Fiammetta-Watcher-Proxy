@@ -22,7 +22,6 @@ Client → FWP → OpenAI / Anthropic / Google / ...
 - **Platform**: Backend AI service provider
 - **API Key**: Authentication key used by clients
 - **Model Map**: Maps one model name to another
-- **Proxy Pool**: HTTP proxies used to access platforms
 - **Plan**: Defines key quotas and limits
 
 ## Next Steps

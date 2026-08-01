@@ -16,7 +16,7 @@ LLM API proxy with multi-platform load balancing, circuit breaker recovery, and 
 - **SSE streaming** — Full support for streaming responses from major LLM platforms
 - **Admin dashboard** — Visual management for platforms, keys, model mappings, logs, and audit trails
 - **Scheduled tasks** — Auto-reset key usage, auto-discover platform models, auto-archive logs
-- **Multi-database support** — D1 / TiDB Cloud / MariaDB / PostgreSQL / Hyperdrive, runtime auto-switching
+- **Multi-database support** — D1 / TiDB Cloud / MariaDB / PostgreSQL, runtime auto-switching
 
 ## Architecture
 
@@ -37,9 +37,6 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | All |
 | `mariadb` | MariaDB / pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-CF only (EdgeOne/Vercel/Node) |
 | `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
-| `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP (pooled)~~ | CF |
-
-> ! `hyperdrive` deprecated — `pg.Pool` is incompatible with Hyperdrive's transaction mode, causing requests to alternate strictly between success/failure. The recommended `postgres.js` driver cannot be bundled by OpenNext.
 
 > **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-CF platforms** (CF builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 
@@ -47,7 +44,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 
 ### Option 1: GitHub Actions (Recommended)
 
-Push to the `canary` branch triggers Cloudflare deployment; push to `main` triggers EdgeOne deployment. You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
+Push to the `canary` branch triggers Cloudflare deployment; EdgeOne deployments are manual only (requires `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets). You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
 
 1. **Init resources (pre)** — `deploy/init.py pre` creates D1/KV + replaces placeholders + writes DB_TYPE
 2. **Install deps** — `npm install` + generate multi-dialect Prisma Client
@@ -65,7 +62,7 @@ Configure these in GitHub repo Settings → Secrets:
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID |
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
-| `DB_TYPE` | Database type (`d1` / `tidb` / `pg` / `hyperdrive`, default `d1`) |
+| `DB_TYPE` | Database type (`d1` / `tidb` / `pg`, default `d1`) |
 | `DATABASE_URL` | External database URL (required for TiDB/PG, not needed for D1) |
 | `EO_PROJECT_NAME` | EdgeOne Makers project name (required for EdgeOne deployments) |
 | `EO_API_TOKEN` | EdgeOne API Token (required for EdgeOne deployments) |
@@ -112,8 +109,8 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 |----------|-------------|
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
-| `JWT_SECRET` | JWT signing secret (auto-generated if empty) |
-| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` / `hyperdrive` (CF deployments); `mariadb` for non-CF platforms only |
+| `JWT_SECRET` | JWT signing secret (min 32 chars; auto-generated on Cloudflare CI deployments, must be set manually elsewhere) |
+| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` (CF deployments); `mariadb` for non-CF platforms only |
 | `DATABASE_URL` | External database URL (required for TiDB/MariaDB/PG, D1 connects via binding) |
 
 ## Development

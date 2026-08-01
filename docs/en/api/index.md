@@ -107,11 +107,7 @@ Admin APIs require JWT authentication (via `admin_token` cookie).
 
 ### Model Mapping
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/admin/models` | GET | List all model maps |
-| `/api/admin/models` | POST | Create model map |
-| `/api/admin/models/{id}` | DELETE | Delete model map |
+Model mappings (`model_maps`) have no dedicated admin API in the current version — maintain them via [Export/Import](/en/guide/model-map).
 
 ### Request Templates
 
@@ -158,5 +154,3 @@ Admin APIs require JWT authentication (via `admin_token` cookie).
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/config` | GET | Get public config |
-| `/api/setup/status` | GET | Check initialization status |
-| `/api/setup/configure` | POST | First-time setup (database + admin) |

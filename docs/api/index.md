@@ -105,13 +105,9 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/admin/keys/{id}` | PUT | 更新 Key 配置 |
 | `/api/admin/keys/{id}` | DELETE | 删除 Key |
 
-### 模型映射 API
+### 模型映射
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/admin/models` | GET | 获取所有模型映射 |
-| `/api/admin/models` | POST | 创建模型映射 |
-| `/api/admin/models/{id}` | DELETE | 删除模型映射 |
+模型映射（`model_maps`）当前版本没有独立的管理 API，通过[导出/导入](/guide/model-map)维护。
 
 ### 请求模板 API
 
@@ -158,5 +154,3 @@ curl -X POST https://your-domain/v1/chat/completions \
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/config` | GET | 获取公开配置 |
-| `/api/setup/status` | GET | 检查初始化状态 |
-| `/api/setup/configure` | POST | 首次配置（设置数据库和管理员） |

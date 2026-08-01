@@ -120,58 +120,11 @@ Map client-requested model names to actual upstream model names.
 
 Auto Model is an advanced routing feature:
 
-1. System discovers available models from each platform every 10 minutes
+1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron)
 2. View discovery results on the "Auto Model" page
 3. Select specific models to include in the auto-routing pool
 4. System generates an auto-model ID — when clients use this ID, FWP automatically selects the best platform and model
 5. Failed auto-model requests are temporarily frozen for 3 minutes to prevent repeated failures
-
-## Proxy Management
-
-### Proxy Pools
-
-Proxy pools are grouping units for HTTP proxy management.
-
-| Field | Description |
-|-------|-------------|
-| Name | Unique pool identifier |
-| Enabled | Whether the pool is active |
-
-### Adding Proxies
-
-| Field | Description |
-|-------|-------------|
-| Address | Proxy address, supports HTTP and SOCKS5 |
-| Pool | Which pool to assign to |
-| Enabled | Whether the proxy is active |
-
-Address formats:
-- HTTP: `http://user:pass@host:port`
-- SOCKS5: `socks5://user:pass@host:port`
-
-### Batch Import
-
-Import multiple proxy addresses via text format, one per line.
-
-### Proxy Health Check
-
-| Status | Description | Routing Behavior |
-|--------|-------------|-----------------|
-| healthy | Working normally | Used normally |
-| degraded | Performance degraded | 50% random skip |
-| down | Unavailable | Completely skipped |
-
-**Ban escalation**:
-- 1st ban: 15 minutes cooldown
-- 2nd ban: 5 hours cooldown
-- 3rd+ ban: 24 hours cooldown
-
-### Proxy Routing
-
-1. Only healthy or degraded proxies are selected
-2. Concurrent-aware rotation: different keys for the same platform prefer different proxies
-3. Auto-retry on proxy failure (up to 2 different proxies)
-4. Falls back to direct connection if all proxies fail
 
 ## Usage Monitoring
 
@@ -200,7 +153,6 @@ Every API request is logged with:
 | Token Usage | Total tokens (prompt + completion) |
 | TTFT | Time to first token (streaming only) |
 | Duration | Total request duration |
-| Proxy | Proxy ID used (empty if direct) |
 | Error Message | Error details on failure |
 
 ### Log Archival
@@ -233,7 +185,7 @@ Events are classified by severity:
 ### Export
 
 Three export types:
-- **System Config**: Platforms, API keys, model maps, proxies, plans
+- **System Config**: Platforms, API keys, model maps, plans
 - **Business Data**: Request logs, daily stats, audit logs, system events
 - **All**: Everything above
 

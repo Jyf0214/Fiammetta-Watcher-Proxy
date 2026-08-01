@@ -6,9 +6,9 @@ FWP 提供 3 个定时任务端点，用于系统维护。这些端点通过外�
 
 | 端点 | 功能 | 建议频率 | 说明 |
 |------|------|----------|------|
-| `GET/POST /api/cron/model-fetch` | 模型发现 | 每 10 分钟 | 自动发现各平台支持的模型列表 |
-| `GET/POST /api/cron/key-reset` | Key 重置 | 每天凌晨 | 重置 Key 的月度/日度用量计数器 |
-| `GET/POST /api/cron/log-archive` | 日志归档 | 每天凌晨 | 将 30 天前的详细日志聚合为统计数据 |
+| `GET/POST /api/cron/model-fetch` | 模型发现 | 每 6 小时 | 自动发现各平台支持的模型列表 |
+| `GET/POST /api/cron/key-reset` | Key 用量重置 | 每小时 | 按周期重置 Key 的月度/日度用量计数器（仅在周期开始时实际清零） |
+| `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据 |
 
 ## 认证
 
@@ -77,8 +77,10 @@ curl -X GET https://your-domain/api/cron/log-archive \
 
 ```toml
 [triggers]
-crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
+
+（Cloudflare 部署时 `worker/wrangler.toml` 已内置以上配置，无需手动修改。）
 
 ### Vercel Cron
 
@@ -87,9 +89,9 @@ crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
 ```json
 {
   "crons": [
-    { "path": "/api/cron/model-fetch", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/key-reset", "schedule": "0 0 * * *" },
-    { "path": "/api/cron/log-archive", "schedule": "0 1 * * *" }
+    { "path": "/api/cron/model-fetch", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/key-reset",   "schedule": "0 */1 * * *" },
+    { "path": "/api/cron/log-archive", "schedule": "0 3 * * *" }
   ]
 }
 ```
@@ -100,7 +102,9 @@ crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
 name: Cron Tasks
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 */6 * * *'   # 模型发现
+    - cron: '0 * * * *'     # Key 用量重置
+    - cron: '0 3 * * *'     # 日志归档
   workflow_dispatch:
 
 jobs:
@@ -122,7 +126,7 @@ jobs:
 1. 创建定时任务
 2. URL 设置为 `https://your-domain/api/cron/model-fetch`
 3. 如果启用了认证，在 Header 中添加 `Authorization: Bearer your-CRON_SECRET`
-4. 设置执行频率（模型发现建议每 10 分钟，其余每天一次）
+4. 设置执行频率（模型发现每 6 小时、Key 用量重置每小时、日志归档每天 3:00）
 
 ## 任务详细说明
 
@@ -143,5 +147,5 @@ jobs:
 ### 日志归档（log-archive）
 
 - 将 30 天前的详细请求日志（`request_logs` 表）聚合为每日统计数据（`daily_stats` 表）
-- 聚合维度：日期 + API Key + 平台 + 模型
+- 聚合维度：日期 + API Key + 模型
 - 归档后删除原始详细日志，节省存储空间

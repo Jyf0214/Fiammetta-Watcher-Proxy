@@ -6,9 +6,9 @@ FWP provides 3 scheduled task endpoints for system maintenance. These are called
 
 | Endpoint | Function | Suggested Frequency | Description |
 |----------|----------|---------------------|-------------|
-| `GET/POST /api/cron/model-fetch` | Model Discovery | Every 10 minutes | Auto-discover platform-supported models |
-| `GET/POST /api/cron/key-reset` | Key Reset | Daily at midnight | Reset key monthly/daily usage counters |
-| `GET/POST /api/cron/log-archive` | Log Archival | Daily at midnight | Aggregate old logs into daily statistics |
+| `GET/POST /api/cron/model-fetch` | Model Discovery | Every 6 hours | Auto-discover platform-supported models |
+| `GET/POST /api/cron/key-reset` | Key Usage Reset | Hourly | Reset key monthly/daily usage counters (only cleared when the period starts) |
+| `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics |
 
 ## Authentication
 
@@ -68,8 +68,10 @@ In `worker/wrangler.toml`:
 
 ```toml
 [triggers]
-crons = ["*/10 * * * *", "0 0 * * *", "0 1 * * *"]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
+
+(The Cloudflare deployment already ships with these crons in `worker/wrangler.toml` — no manual edit needed.)
 
 ### Vercel Cron
 
@@ -78,9 +80,9 @@ Create `vercel.json` in project root:
 ```json
 {
   "crons": [
-    { "path": "/api/cron/model-fetch", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/key-reset", "schedule": "0 0 * * *" },
-    { "path": "/api/cron/log-archive", "schedule": "0 1 * * *" }
+    { "path": "/api/cron/model-fetch", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/key-reset",   "schedule": "0 */1 * * *" },
+    { "path": "/api/cron/log-archive", "schedule": "0 3 * * *" }
   ]
 }
 ```
@@ -91,7 +93,9 @@ Create `vercel.json` in project root:
 name: Cron Tasks
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 */6 * * *'   # Model discovery
+    - cron: '0 * * * *'     # Key usage reset
+    - cron: '0 3 * * *'     # Log archival
   workflow_dispatch:
 
 jobs:
@@ -113,7 +117,7 @@ Using [Cron-job.org](https://cron-job.org), [UptimeRobot](https://uptimerobot.co
 1. Create a scheduled task
 2. Set URL to `https://your-domain/api/cron/model-fetch`
 3. If auth is enabled, add header: `Authorization: Bearer your-CRON_SECRET`
-4. Set frequency (model discovery: every 10 min; others: daily)
+4. Set frequency (model discovery every 6 hours, key reset hourly, log archival daily at 3:00)
 
 ## Task Details
 
@@ -134,5 +138,5 @@ Using [Cron-job.org](https://cron-job.org), [UptimeRobot](https://uptimerobot.co
 ### Log Archival (log-archive)
 
 - Aggregates request logs older than 30 days from `request_logs` into `daily_stats`
-- Aggregation dimensions: date + API Key + platform + model
+- Aggregation dimensions: date + API Key + model
 - Original detailed logs are deleted after archival to save storage
