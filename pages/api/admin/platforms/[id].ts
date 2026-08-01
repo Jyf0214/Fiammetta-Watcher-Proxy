@@ -133,14 +133,6 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       errors.push("平台名称不能超过 100 个字符");
     }
 
-    if (
-      body.apiKey !== undefined &&
-      typeof body.apiKey === "string" &&
-      body.apiKey.length > 500
-    ) {
-      errors.push("API Key 不能超过 500 个字符");
-    }
-
     if (errors.length > 0) {
       return res.status(400).json({ success: false, error: errors.join("; ") });
     }
@@ -226,21 +218,17 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
-    // apiKey 在编辑时可选（不提供则保留原值）
-    if (body.apiKey === undefined || body.apiKey === null || body.apiKey === "") {
-      // 不更新 apiKey
-    } else {
-      updateData.apiKey = body.apiKey;
-    }
-
     // apiKeys 在编辑时可选（不提供则保留原值）
-    // 支持两种格式：字符串数组 ["key1", "key2"] 或对象数组 [{name, key}]
+    // 支持两种格式：字符串数组 ["key1", "key2"] 或对象数组 [{name, key, whitelisted}]
     if (body.apiKeys !== undefined && body.apiKeys !== null) {
-      if (body.apiKeys === "") {
+      // 兼容直接传数组的客户端：统一转 JSON 字符串后解析
+      const rawApiKeys =
+        typeof body.apiKeys === "string" ? body.apiKeys : JSON.stringify(body.apiKeys);
+      if (rawApiKeys === "") {
         updateData.apiKeys = "[]";
-      } else if (typeof body.apiKeys === "string") {
+      } else {
         try {
-          const parsed = JSON.parse(body.apiKeys);
+          const parsed = JSON.parse(rawApiKeys);
           if (Array.isArray(parsed)) {
             // 检查是否为对象数组格式 [{name, key}]
             if (
@@ -290,10 +278,23 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 
     await db.platforms.update({ where: { id }, data: updateData });
 
-    // 审计日志（脱敏处理）
+    // 审计日志（脱敏处理：密钥只记录数量，绝不记录任何内容）
     const sanitized = { ...body };
-    if (sanitized.apiKey)
-      sanitized.apiKey = sanitized.apiKey.substring(0, 6) + "***";
+    // 旧客户端可能仍提交 apiKey 字段：丢弃，防止明文写入审计日志
+    delete sanitized.apiKey;
+    if (sanitized.apiKeys !== undefined && sanitized.apiKeys !== null) {
+      let keyCount = 0;
+      try {
+        const arr =
+          typeof sanitized.apiKeys === "string"
+            ? JSON.parse(sanitized.apiKeys)
+            : sanitized.apiKeys;
+        if (Array.isArray(arr)) keyCount = arr.length;
+      } catch {
+        keyCount = 0;
+      }
+      sanitized.apiKeys = `${keyCount} 个密钥（内容脱敏）`;
+    }
 
     const now = Math.floor(Date.now() / 1000);
     await db.auditLogs.create({

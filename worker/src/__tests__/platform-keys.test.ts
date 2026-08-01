@@ -25,7 +25,6 @@ function makePlatform(overrides: Partial<PlatformConfig> = {}): PlatformConfig {
     id: "test-platform",
     name: "Test",
     baseUrl: "https://api.test.com/v1",
-    apiKey: "",
     apiKeys: [],
     type: "openai",
     enabled: true,
@@ -46,36 +45,34 @@ function makePlatform(overrides: Partial<PlatformConfig> = {}): PlatformConfig {
 
 describe("getAllKeys", () => {
   it("无密钥时返回空数组", () => {
-    const keys = getAllKeys(makePlatform({ apiKey: "", apiKeys: [] }));
+    const keys = getAllKeys(makePlatform({ apiKeys: [] }));
     expect(keys).toEqual([]);
   });
 
-  it("仅主密钥时返回单元素数组", () => {
-    const keys = getAllKeys(makePlatform({ apiKey: "sk-main", apiKeys: [] }));
+  it("单密钥时返回单元素数组", () => {
+    const keys = getAllKeys(makePlatform({ apiKeys: ["sk-main"] }));
     expect(keys).toEqual(["sk-main"]);
   });
 
-  it("主密钥 + 附加密钥全部返回", () => {
+  it("多密钥全部返回", () => {
     const keys = getAllKeys(makePlatform({
-      apiKey: "sk-main",
-      apiKeys: ["sk-extra1", "sk-extra2"],
+      apiKeys: ["sk-main", "sk-extra1", "sk-extra2"],
     }));
     expect(keys).toEqual(["sk-main", "sk-extra1", "sk-extra2"]);
   });
 
   it("跳过空字符串密钥", () => {
     const keys = getAllKeys(makePlatform({
-      apiKey: "sk-main",
       apiKeys: ["", "sk-extra", ""],
     }));
-    expect(keys).toEqual(["sk-main", "sk-extra"]);
+    expect(keys).toEqual(["sk-extra"]);
   });
 
-  it("跳过非字符串密钥", () => {
-    const platform = makePlatform({ apiKey: "sk-ok", apiKeys: [] });
-    // getAllKeys 内部用 filter(k => typeof k === "string" && k.trim().length > 0)
-    // 传入空数组即可验证过滤逻辑
-    expect(getAllKeys(platform)).toEqual(["sk-ok"]);
+  it("重复密钥去重（防止旧数据主密钥重复导致的失衡轮询）", () => {
+    const keys = getAllKeys(makePlatform({
+      apiKeys: ["sk-main", "sk-main", "sk-extra", "sk-extra"],
+    }));
+    expect(keys).toEqual(["sk-main", "sk-extra"]);
   });
 });
 
@@ -88,12 +85,12 @@ describe("getNextKey", () => {
   });
 
   it("无密钥时返回 null", () => {
-    const key = getNextKey(makePlatform({ id: "empty", apiKey: "", apiKeys: [] }));
+    const key = getNextKey(makePlatform({ id: "empty", apiKeys: [] }));
     expect(key).toBeNull();
   });
 
   it("单密钥时始终返回该密钥", () => {
-    const platform = makePlatform({ id: "single", apiKey: "sk-only", apiKeys: [] });
+    const platform = makePlatform({ id: "single", apiKeys: ["sk-only"] });
     expect(getNextKey(platform)).toBe("sk-only");
     expect(getNextKey(platform)).toBe("sk-only");
     expect(getNextKey(platform)).toBe("sk-only");
@@ -102,8 +99,7 @@ describe("getNextKey", () => {
   it("多密钥按 round-robin 轮询", () => {
     const platform = makePlatform({
       id: "round-robin",
-      apiKey: "sk-a",
-      apiKeys: ["sk-b", "sk-c"],
+      apiKeys: ["sk-a", "sk-b", "sk-c"],
     });
     // 轮询顺序：sk-a → sk-b → sk-c → sk-a → ...
     expect(getNextKey(platform)).toBe("sk-a");
@@ -114,8 +110,8 @@ describe("getNextKey", () => {
   });
 
   it("不同平台独立轮询", () => {
-    const p1 = makePlatform({ id: "p1", apiKey: "sk-1a", apiKeys: ["sk-1b"] });
-    const p2 = makePlatform({ id: "p2", apiKey: "sk-2a", apiKeys: ["sk-2b"] });
+    const p1 = makePlatform({ id: "p1", apiKeys: ["sk-1a", "sk-1b"] });
+    const p2 = makePlatform({ id: "p2", apiKeys: ["sk-2a", "sk-2b"] });
 
     expect(getNextKey(p1)).toBe("sk-1a");
     expect(getNextKey(p2)).toBe("sk-2a");

@@ -1,7 +1,7 @@
 /**
  * 平台多密钥管理 — 轮询选择上游 API Key
  *
- * 每个平台可配置一个主密钥（apiKey）和多个附加密钥（apiKeys JSON 数组）。
+ * 每个平台配置多个密钥（apiKeys JSON 数组，命名对象 [{name, key, whitelisted}]）。
  * 请求时按 round-robin 轮询，确保各密钥均匀分摊调用量。
  */
 
@@ -164,7 +164,7 @@ export async function loadKeyStatusFromKV(
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
     const platforms = await prisma.platforms.findMany({
-      select: { id: true, apiKey: true, apiKeys: true },
+      select: { id: true, apiKeys: true },
     });
 
     let loaded = 0;
@@ -173,7 +173,7 @@ export async function loadKeyStatusFromKV(
       if (Object.keys(statuses).length === 0) continue;
 
       const keys = getAllKeys({
-        apiKey: p.apiKey,
+        id: p.id,
         apiKeys: parseApiKeys(p.apiKeys),
       } as PlatformConfig);
 
@@ -198,12 +198,17 @@ export async function loadKeyStatusFromKV(
 }
 
 /**
- * 获取平台全部可用密钥（主密钥 + 附加密钥，去空值）
+ * 获取平台全部可用密钥（去空值、去重）
  */
 export function getAllKeys(platform: PlatformConfig): string[] {
-  const keys = [platform.apiKey, ...platform.apiKeys].filter(
-    (k) => typeof k === "string" && k.trim().length > 0
-  );
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const k of platform.apiKeys) {
+    if (typeof k === "string" && k.trim().length > 0 && !seen.has(k)) {
+      seen.add(k);
+      keys.push(k);
+    }
+  }
   return keys;
 }
 

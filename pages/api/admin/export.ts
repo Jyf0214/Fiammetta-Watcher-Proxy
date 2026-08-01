@@ -56,14 +56,13 @@ export default async function handler(
 
     // ==================== 系统级导出 ====================
     if (exportType === "system" || exportType === "all") {
-      // 平台配置（保留 apiKey 明文，用于跨环境迁移）
+      // 平台配置（保留密钥明文，用于跨环境迁移）
       const platforms = await db.platforms.findMany();
 
       exportData.platforms = platforms.map((p) => ({
         id: p.id,
         name: p.name,
         baseUrl: p.baseUrl,
-        apiKey: p.apiKey,
         apiKeys: p.apiKeys,
         type: p.type,
         enabled: p.enabled,

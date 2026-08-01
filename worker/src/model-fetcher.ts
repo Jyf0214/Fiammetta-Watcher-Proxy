@@ -28,19 +28,17 @@ interface UpstreamModel {
 async function fetchPlatformModels(platform: {
   id: string;
   baseUrl: string;
-  apiKey: string;
   apiKeys: string;
   name: string;
 }): Promise<UpstreamModel[] | null> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
-  const extraKeys = parseApiKeys(platform.apiKeys);
+  const parsedKeys = parseApiKeys(platform.apiKeys);
   const platformConfig: PlatformConfig = {
     id: platform.id,
     name: platform.name,
     baseUrl: platform.baseUrl,
-    apiKey: platform.apiKey,
-    apiKeys: extraKeys,
+    apiKeys: parsedKeys,
     type: "openai",
     enabled: true,
     priority: 0,
@@ -128,7 +126,6 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
       id: true,
       name: true,
       baseUrl: true,
-      apiKey: true,
       apiKeys: true,
     },
   });
@@ -138,7 +135,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
   let totalModels = 0;
   let successCount = 0;
 
-  type PlatformSelect = { id: string; name: string; baseUrl: string; apiKey: string; apiKeys: string };
+  type PlatformSelect = { id: string; name: string; baseUrl: string; apiKeys: string };
   type ExistingModel = { modelId: string; enabled: boolean; source: string };
 
   const results = await Promise.allSettled(

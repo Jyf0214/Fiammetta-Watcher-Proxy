@@ -18,6 +18,26 @@ function generateId(): string {
   return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 解析平台 apiKeys JSON 为密钥列表（兼容命名对象与字符串数组格式） */
+function parsePlatformKeys(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item: unknown) => {
+        if (typeof item === "string") return item;
+        if (typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).key === "string") {
+          return (item as Record<string, unknown>).key as string;
+        }
+        return "";
+      })
+      .filter((k: string) => k.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * GET /api/admin/platforms/:id/models — 获取平台的模型列表
  */
@@ -206,8 +226,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       return res.status(400).json({ success: false, error: "平台已禁用，无法刷新模型" });
     }
 
-    // 获取 API Key（优先使用 apiKey 字段）
-    const apiKey = platform.apiKey;
+    // 获取 API Key（平台密钥数组中的第一个可用密钥）
+    const apiKeys = parsePlatformKeys(platform.apiKeys);
+    const apiKey = apiKeys[0] ?? null;
     if (!apiKey) {
       return res.status(400).json({ success: false, error: "平台未配置 API Key，无法刷新" });
     }

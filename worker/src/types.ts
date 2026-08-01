@@ -11,7 +11,7 @@ export interface PlatformConfig {
   id: string;
   name: string;
   baseUrl: string;
-  apiKey: string;
+  /** 平台 API 密钥数组（命名对象 [{name, key, whitelisted}] 的 key 值），round-robin 轮询 */
   apiKeys: string[];
   type: "openai" | "azure" | "custom";
   enabled: boolean;

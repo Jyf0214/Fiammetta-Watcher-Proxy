@@ -151,6 +151,13 @@ if (dialect.needsPush) {
   // 防止开发者 npm install 时意外对真实数据库执行破坏性 --accept-data-loss
   const shouldPush = isRemote && (process.env.CI === "true" || process.env.DB_PUSH === "1");
   if (shouldPush) {
+    // 平台密钥迁移：db push 会 drop api_key 列，必须先合并主密钥到 apiKeys
+    console.log("执行平台密钥迁移（合并 api_key → apiKeys）...");
+    execSync(`node scripts/migrate-platform-keys.mjs`, {
+      cwd: ROOT,
+      stdio: "inherit",
+      env: { ...process.env },
+    });
     console.log(` 执行 prisma db push（${dialect.name}）...`);
     execSync(`npx prisma db push --schema=${dialect.file} --accept-data-loss`, {
       cwd: ROOT,

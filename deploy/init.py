@@ -11,6 +11,7 @@ Cloudflare 资源统一初始化脚本 (严谨修复版)
 import os
 import sys
 import re
+import json
 import secrets
 import subprocess
 from urllib.parse import urlparse
@@ -223,8 +224,90 @@ def init_d1() -> str:
             if failed_stmts:
                 fail(f"D1 Schema 建表有 {len(failed_stmts)} 条 SQL 失败，中止部署！")
 
+    migrate_platform_keys_d1(d1_id)
+
     output_github("D1_ID", d1_id)
     return d1_id
+
+
+def migrate_platform_keys_d1(d1_id: str):
+    """合并 platforms.api_key 主字段到 api_keys JSON 数组（删除双密钥格式前的数据迁移）
+
+    幂等容错：
+    - 全新库没有 api_key 列 → 查询报 no such column（7500）→ 跳过
+    - 已迁移过的库同样跳过
+    - 数据合并后执行 DROP COLUMN api_key，失败不影响部署（打印提示）
+    """
+    print("正在迁移平台密钥（合并 api_key → api_keys）...")
+
+    res, code, msg = cf_api(
+        "POST", f"/d1/database/{d1_id}/query",
+        {"sql": "SELECT id, api_key, api_keys FROM platforms"},
+        ok_codes=[7500],
+    )
+    if not res.get("success"):
+        print("  - api_key 列不存在（全新库或已迁移），跳过合并")
+        return
+
+    results = res.get("result", [])
+    rows = results[0].get("results", []) if results else []
+
+    def normalize_keys(raw: str, legacy_key: str):
+        """规范化平台密钥为命名对象数组；无有效密钥返回 None"""
+        named = []
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, str) and item.strip():
+                            named.append({"name": f"密钥{len(named) + 1}", "key": item.strip()})
+                        elif isinstance(item, dict) and isinstance(item.get("key"), str):
+                            key = item["key"].strip()
+                            if key:
+                                entry = {
+                                    "name": (item.get("name") or "").strip() or f"密钥{len(named) + 1}",
+                                    "key": key,
+                                }
+                                if item.get("whitelisted") is True:
+                                    entry["whitelisted"] = True
+                                named.append(entry)
+            except (ValueError, TypeError):
+                pass
+        if legacy_key and legacy_key.strip() and not any(n["key"] == legacy_key for n in named):
+            named.insert(0, {"name": "主密钥", "key": legacy_key.strip()})
+        if not named:
+            return None
+        return json.dumps(named, ensure_ascii=False)
+
+    updated = 0
+    for row in rows:
+        raw = row.get("api_keys") or ""
+        legacy_key = row.get("api_key") or ""
+        new_raw = normalize_keys(raw, legacy_key)
+        if new_raw is None or new_raw == raw:
+            continue
+        esc_key = new_raw.replace("'", "''")
+        esc_id = str(row.get("id", "")).replace("'", "''")
+        cf_api(
+            "POST", f"/d1/database/{d1_id}/query",
+            {"sql": f"UPDATE platforms SET api_keys = '{esc_key}' WHERE id = '{esc_id}'"},
+        )
+        updated += 1
+
+    print(f"  ✓ 平台密钥合并完成（更新 {updated} 条）")
+
+    res, code, msg = cf_api(
+        "POST", f"/d1/database/{d1_id}/query",
+        {"sql": "ALTER TABLE platforms DROP COLUMN api_key"},
+        ok_codes=[7500],
+    )
+    if res.get("success"):
+        print("  ✓ 已删除 api_key 列")
+    elif code == 7500:
+        print("  - api_key 列不存在（全新库），跳过删除")
+    else:
+        print(f"  ✗ DROP COLUMN api_key 失败: {msg}（不影响部署，请手动处理）")
 
 
 def init_kv() -> str:

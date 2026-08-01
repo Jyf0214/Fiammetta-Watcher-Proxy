@@ -264,9 +264,63 @@ function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
 }
 
 /**
+ * 规范化平台密钥为命名对象数组 JSON（兼容对象/字符串数组格式）
+ *
+ * 兼容旧导出格式：apiKey 主字段并入 apiKeys 数组（不在其中时插入到首位）。
+ * 密钥含脱敏标记（***）时视为无效；无有效密钥返回 null。
+ */
+function normalizePlatformKeys(p: Record<string, unknown>): string | null {
+  const raw = p.apiKeys as string | undefined;
+  const legacyKey = p.apiKey as string | undefined;
+
+  const named: { name: string; key: string; whitelisted?: boolean }[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string") {
+            if (item.trim()) {
+              named.push({ name: `密钥${named.length + 1}`, key: item.trim() });
+            }
+          } else if (
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as Record<string, unknown>).key === "string"
+          ) {
+            const k = item as Record<string, unknown>;
+            const keyStr = (k.key as string).trim();
+            if (keyStr) {
+              named.push({
+                name:
+                  typeof k.name === "string" && k.name.trim()
+                    ? k.name.trim()
+                    : `密钥${named.length + 1}`,
+                key: keyStr,
+                ...(k.whitelisted === true ? { whitelisted: true } : {}),
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // 无效 JSON，忽略
+    }
+  }
+  if (legacyKey && typeof legacyKey === "string" && legacyKey.trim()) {
+    if (!named.some((n) => n.key === legacyKey)) {
+      named.unshift({ name: "主密钥", key: legacyKey });
+    }
+  }
+
+  if (named.length === 0 || named.some((n) => n.key.includes("***"))) return null;
+  return JSON.stringify(named);
+}
+
+/**
  * 导入平台配置
  *
- * 按名称去重，apiKey 含脱敏标记（***）时跳过
+ * 按名称去重，密钥含脱敏标记（***）时跳过
  */
 async function importPlatforms(
   db: DbClient,
@@ -281,18 +335,19 @@ async function importPlatforms(
   const existingNameSet = new Set(existingNames.map((r) => r.name));
 
   // SSRF 防护（含 DNS Rebinding 检测）
-  const validPlatforms = [];
+  const validPlatforms: Array<Record<string, unknown>> = [];
   for (const p of platforms) {
     const name = p.name as string;
-    const apiKey = p.apiKey as string;
     const baseUrl = p.baseUrl as string;
-    if (!name || !apiKey) {
-      skipReasons["缺少必要字段 (name/apiKey)"] = (skipReasons["缺少必要字段 (name/apiKey)"] || 0) + 1;
+    if (!name) {
+      skipReasons["缺少必要字段 (name)"] = (skipReasons["缺少必要字段 (name)"] || 0) + 1;
       skipped++;
       continue;
     }
-    if (apiKey.includes("***")) {
-      skipReasons["API Key 已脱敏"] = (skipReasons["API Key 已脱敏"] || 0) + 1;
+    // 规范化密钥：apiKeys JSON（兼容对象/字符串数组），旧导出数据中的 apiKey 主字段并入
+    const normalizedKeys = normalizePlatformKeys(p);
+    if (normalizedKeys === null) {
+      skipReasons["缺少 API 密钥或已脱敏"] = (skipReasons["缺少 API 密钥或已脱敏"] || 0) + 1;
       skipped++;
       continue;
     }
@@ -309,7 +364,7 @@ async function importPlatforms(
         continue;
       }
     }
-    validPlatforms.push(p);
+    validPlatforms.push({ ...p, _normalizedApiKeys: normalizedKeys });
   }
 
   skipped += platforms.length - validPlatforms.length;
@@ -326,8 +381,8 @@ async function importPlatforms(
       id: generateId(),
       name: p.name as string,
       baseUrl: p.baseUrl as string,
-      apiKey: p.apiKey as string,
-      apiKeys: truncateStr(p.apiKeys, VARCHAR_MAX),
+      // apiKeys 列在各方言均为长文本（LongText/Text），不截断，避免切断 JSON 导致密钥失效
+      apiKeys: p._normalizedApiKeys as string,
       type: (p.type as string) || "openai",
       enabled: p.enabled !== false,
       priority: (p.priority as number) ?? 0,

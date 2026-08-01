@@ -32,7 +32,6 @@ model platforms {
   id             String  @id
   name           String
   baseUrl        String  @map("base_url")
-  apiKey         String  @map("api_key")
   apiKeys        String @db.Text @map("api_keys")
   type           String  @default("openai")
   enabled        Boolean @default(true)

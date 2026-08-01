@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const platforms = await db.platforms.findMany({
         orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
         select: {
-          id: true, name: true, baseUrl: true, apiKey: true, apiKeys: true,
+          id: true, name: true, baseUrl: true, apiKeys: true,
           type: true, enabled: true, priority: true, weight: true,
           rpmLimit: true, tpmLimit: true, forwardHeaders: true,
           status: true, failCount: true, lastFailAt: true, cooldownEnd: true,
@@ -82,7 +82,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const {
         name,
         baseUrl,
-        apiKey,
         apiKeys,
         type,
         priority,
@@ -109,48 +108,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      if (!apiKey || typeof apiKey !== "string" || apiKey.trim().length === 0) {
-        errors.push("API Key 不能为空");
-      }
-
       if (name && typeof name === "string" && name.length > 100) {
         errors.push("平台名称不能超过 100 个字符");
       }
 
-      if (apiKey && typeof apiKey === "string" && apiKey.length > 500) {
-        errors.push("API Key 不能超过 500 个字符");
-      }
-
-      // apiKeys 验证：JSON 数组格式，每个密钥不超过 500 字符
-      let parsedApiKeys: string[] = [];
-      if (apiKeys !== undefined && apiKeys !== null && apiKeys !== "") {
-        if (typeof apiKeys !== "string") {
-          errors.push("附加密钥必须为字符串数组格式");
-        } else {
-          try {
-            const parsed = JSON.parse(apiKeys);
-            if (!Array.isArray(parsed)) {
-              errors.push("附加密钥必须为数组格式");
-            } else {
-              // 兼容两种格式：纯字符串数组 ["key1"] 和对象数组 [{name, key}]
-              const filtered: string[] = [];
-              let invalidCount = 0;
-              for (const k of parsed) {
-                const keyStr = typeof k === "string" ? k : k?.key;
-                if (typeof keyStr === "string" && keyStr.trim().length > 0 && keyStr.length <= 500) {
-                  filtered.push(keyStr);
+      // apiKeys 验证：JSON 数组格式（命名对象 [{name, key, whitelisted}] 或字符串数组），
+      // 至少包含一个有效密钥，保留 name/whitelisted 标记
+      const parsedApiKeys: { name: string; key: string; whitelisted?: boolean }[] = [];
+      if (!apiKeys || typeof apiKeys !== "string" || apiKeys.trim().length === 0) {
+        errors.push("API 密钥不能为空");
+      } else {
+        try {
+          const parsed = JSON.parse(apiKeys);
+          if (!Array.isArray(parsed)) {
+            errors.push("API 密钥必须为数组格式");
+          } else {
+            let invalidCount = 0;
+            for (const k of parsed) {
+              if (typeof k === "string") {
+                if (k.trim().length > 0 && k.length <= 500) {
+                  parsedApiKeys.push({ name: `密钥${parsedApiKeys.length + 1}`, key: k.trim() });
                 } else {
                   invalidCount++;
                 }
-              }
-              parsedApiKeys = filtered;
-              if (invalidCount > 0) {
-                errors.push("部分附加密钥格式无效或超过 500 字符，已自动过滤");
+              } else if (typeof k === "object" && k !== null && typeof k.key === "string") {
+                if (k.key.trim().length > 0 && k.key.length <= 500) {
+                  parsedApiKeys.push({
+                    name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : `密钥${parsedApiKeys.length + 1}`,
+                    key: k.key.trim(),
+                    ...(k.whitelisted === true ? { whitelisted: true } : {}),
+                  });
+                } else {
+                  invalidCount++;
+                }
+              } else {
+                invalidCount++;
               }
             }
-          } catch {
-            errors.push("附加密钥 JSON 格式错误");
+            if (parsedApiKeys.length === 0) {
+              errors.push("API 密钥不能为空");
+            } else if (invalidCount > 0) {
+              errors.push("部分密钥格式无效或超过 500 字符，已自动过滤");
+            }
           }
+        } catch {
+          errors.push("API 密钥 JSON 格式错误");
         }
       }
 
@@ -244,7 +246,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           id,
           name: escapeHtml(name.trim()),
           baseUrl: baseUrl.trim(),
-          apiKey: apiKey.trim(),
           apiKeys: JSON.stringify(parsedApiKeys),
           type: platformType,
           enabled: true,

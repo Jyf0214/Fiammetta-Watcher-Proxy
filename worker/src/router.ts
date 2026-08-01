@@ -120,7 +120,6 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
     id: p.id,
     name: p.name,
     baseUrl: p.baseUrl,
-    apiKey: p.apiKey,
     apiKeys: parseApiKeys(p.apiKeys),
     type: p.type as PlatformConfig["type"],
     enabled: p.enabled,

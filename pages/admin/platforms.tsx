@@ -27,7 +27,6 @@ interface Platform {
   id: string;
   name: string;
   baseUrl: string;
-  apiKey: string;
   apiKeys: string;
   type: string;
   enabled: boolean;
@@ -55,7 +54,7 @@ const KEY_STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   deprioritized: { color: "orange", label: "降级" },
 };
 
-/** 解析平台密钥列表（主密钥 + 附加密钥，统一为 NamedApiKey 格式） */
+/** 解析平台密钥列表（统一为 NamedApiKey 格式） */
 function parseNamedKeys(platform: Platform): NamedApiKey[] {
   const parsed: NamedApiKey[] = [];
   if (platform.apiKeys) {
@@ -81,9 +80,6 @@ function parseNamedKeys(platform: Platform): NamedApiKey[] {
         }
       }
     } catch { /* ignore */ }
-  }
-  if (parsed.length === 0 && platform.apiKey && platform.apiKey.trim()) {
-    parsed.push({ name: "主密钥", key: platform.apiKey });
   }
   return parsed;
 }
@@ -664,11 +660,14 @@ export default function PlatformsPage() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      setSubmitting(true);
       const validKeys = namedKeys.filter((k) => k.key && k.key.trim());
+      if (validKeys.length === 0 && !editing) {
+        message.error("请至少填写一个 API 密钥");
+        return;
+      }
+      setSubmitting(true);
       if (validKeys.length > 0) {
-        values.apiKey = validKeys[0].key;
-        // 所有密钥（含主密钥）统一存入 apiKeys，保留 whitelisted 标记
+        // 所有密钥统一存入 apiKeys，保留 whitelisted 标记
         values.apiKeys = JSON.stringify(validKeys.map((k) => ({
           name: k.name,
           key: k.key,

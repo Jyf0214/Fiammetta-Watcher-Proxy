@@ -23,7 +23,6 @@ function makePlatform(id: string, name: string) {
     id,
     name,
     baseUrl: `https://api.${id}.test/v1`,
-    apiKey: `sk-${id}`,
     apiKeys: null,
     type: "openai",
     enabled: true,

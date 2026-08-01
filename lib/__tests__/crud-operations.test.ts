@@ -38,7 +38,7 @@ beforeAll(async () => {
       ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE TABLE IF NOT EXISTS platforms (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL,
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
       api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai',
       enabled INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
       weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
@@ -169,7 +169,7 @@ describe("CRUD: platforms 表", () => {
     const platform = await prisma.platforms.create({
       data: {
         id: "platform-1", name: "OpenAI", baseUrl: "https://api.openai.com",
-        apiKey: "sk-xxx", apiKeys: JSON.stringify([{ name: "default", key: "sk-xxx" }]),
+        apiKeys: JSON.stringify([{ name: "default", key: "sk-xxx" }]),
         type: "openai", enabled: true, priority: 0, weight: 1,
         status: "healthy", failCount: 0, forwardHeaders: "[]",
         createdAt: now, updatedAt: now,
