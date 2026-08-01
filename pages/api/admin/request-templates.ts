@@ -35,6 +35,8 @@ const MERGEBODY_ALLOWED_KEYS = new Set([
   "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
   "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
   "n", "logprobs", "top_logprobs", "response_format", "seed",
+  // 思考控制类参数（deepseek/qwen 等厂商透传）
+  "reasoning_effort", "chat_template_kwargs", "extra_body",
 ]);
 
 /** 校验 mergeBody 字段，过滤不在白名单中的键 */
@@ -208,13 +210,9 @@ export default async function handler(
     // ==================== DELETE — 删除模板 ====================
     if (req.method === "DELETE") {
       if (!checkCsrfOrigin(req, res)) return;
-      const body: { id?: string } = req.body;
-      if (!body || typeof body !== "object") {
-        res.status(400).json({ success: false, error: "请求格式错误" });
-        return;
-      }
-
-      const { id } = body;
+      // 兼容两种传参：query（?id=xxx）与 body（{ id }），前端使用 query 方式
+      const body: { id?: string } = req.body ?? {};
+      const id = (req.query.id as string) || body.id;
 
       if (!id) {
         res.status(400).json({ success: false, error: "缺少模板 ID" });
