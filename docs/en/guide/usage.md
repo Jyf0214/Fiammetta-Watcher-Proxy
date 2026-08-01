@@ -28,8 +28,7 @@ Click "Add Platform" and fill in:
 |-------|-------------|----------|
 | Name | Custom identifier | Yes |
 | Base URL | Platform API address (e.g. `https://api.openai.com`) | Yes |
-| API Key | Platform authentication key | Yes |
-| Additional Keys | Extra keys (JSON array), round-robin with main key | No |
+| API Keys | Auth keys, multiple allowed (one per line), rotated round-robin | Yes |
 | Platform Type | `openai` / `azure` / `custom` | Yes |
 | Priority | Higher value = higher priority | No (default 0) |
 | Weight | Load balancing weight, higher = more traffic | No (default 1) |
@@ -51,9 +50,9 @@ Click "Add Platform" and fill in:
 
 ### Key Rotation
 
-When multiple keys are configured (main + additional), FWP uses Round-Robin rotation to distribute requests evenly.
+A platform can have multiple keys (named-object JSON array). FWP uses Round-Robin rotation to distribute requests evenly across keys.
 
-Additional keys format:
+Key format:
 
 ```json
 [

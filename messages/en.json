@@ -197,7 +197,7 @@
     "fetch_failed": "Failed to fetch platform list",
     "api_key_edit_hint": "Leave empty to keep current",
     "additional_keys": "API Key (one per line)",
-    "additional_keys_tip": "First line is primary key, additional lines are secondary keys for round-robin load balancing",
+    "additional_keys_tip": "Supports multiple keys, automatically rotated (round-robin) to spread load",
     "additional_keys_placeholder": "One key per line (optional)",
     "models": "Model Management",
     "model_id": "Model ID",
