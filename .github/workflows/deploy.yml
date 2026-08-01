@@ -169,15 +169,7 @@ jobs:
 
       - name: Deploy to EdgeOne Makers
         env:
+          EO_PROJECT_NAME: ${{ secrets.EO_PROJECT_NAME }}
           EO_API_TOKEN: ${{ secrets.EO_API_TOKEN }}
-        run: |
-          # pin 版本防止 CLI 行为漂移
-          npm install -g edgeone@1.6.19
-          # 日志脱敏：token 走 env 注入，部署输出过滤含 token/https:// 的行，
-          # 防止 Token 与数据库连接串进入 GitHub Actions 日志
-          set +e
-          edgeone makers deploy \
-            -n "${{ secrets.EO_PROJECT_NAME }}" \
-            -t "$EO_API_TOKEN" \
-            -e production 2>&1 | grep -viE --line-buffered "token|https://"
-          exit ${PIPESTATUS[0]}
+        # 部署逻辑在脚本内（含日志脱敏过滤），避免 run 命令文本暴露变量名
+        run: bash .github/scripts/deploy-edgeone.sh
