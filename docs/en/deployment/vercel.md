@@ -130,6 +130,8 @@ With `CRON_SECRET` set, requests must carry `Authorization: Bearer <CRON_SECRET>
 - Confirm the database allows remote connections (TiDB Cloud does natively)
 - Check firewall / whitelist rules
 
+> More generic troubleshooting: [Troubleshooting](/en/deployment/troubleshooting).
+
 ## Related Docs
 
 - [Architecture](/en/deployment/architecture)

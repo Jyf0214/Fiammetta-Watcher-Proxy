@@ -22,6 +22,7 @@ The simplest deployment method — zero operational cost, global edge nodes.
 | `ADMIN_USERNAME` | Admin panel login username |
 | `ADMIN_PASSWORD` | Admin panel login password |
 | `DB_TYPE` | Database type, default `d1` — no database to provision |
+| `DATABASE_URL` | External database connection string (only needed when `DB_TYPE=tidb/pg`) |
 
 4. In the Actions tab, enable the workflow (approve the first run if prompted)
 5. Run the workflow manually: Actions → Deploy → Run workflow → branch `canary` → platform `cf` → Run workflow. Deployment completes automatically (database, Worker, Pages, and admin credentials are all configured for you)
@@ -50,13 +51,21 @@ JWT_SECRET=random-secret-32+chars
 EOF
 ```
 
-### 3. Start the Dev Server
+### 3. Initialize the Database
+
+```bash
+DB_PUSH=1 node scripts/prepare-db.mjs
+```
+
+`npm install` / `npm run dev` auto-generate the Prisma Client, but **the table schema is NOT pushed by default locally** (to protect real databases from accidental changes). On first setup, run the command above to sync the schema to the database in `DATABASE_URL` (`DB_TYPE` is inferred from the `DATABASE_URL` protocol).
+
+### 4. Start the Dev Server
 
 ```bash
 npm run dev
 ```
 
-### 4. Access the Admin Panel
+### 5. Access the Admin Panel
 
 Open `http://localhost:3000/admin` and log in with your admin credentials.
 

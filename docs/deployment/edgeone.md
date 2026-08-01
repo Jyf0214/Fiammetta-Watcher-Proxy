@@ -71,11 +71,15 @@ curl -X GET https://你的域名/api/cron/model-fetch \
 | 管理后台 | 浏览器访问 `/admin`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 |
 | 数据库 | 登录后台 → 模型/日志页面确认数据读写正常 |
 
+> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。
+
 ## 常见问题
 
 ### 流式响应/代理超时
 
 EdgeOne 首次部署性能未经充分验证，如遇流式中断或超时，检查平台文档确认函数超时与流式支持；必要时改用 Vercel 或 Cloudflare。
+
+> 更多通用排查见 [常见问题排查](/deployment/troubleshooting)。
 
 ## 相关文档
 

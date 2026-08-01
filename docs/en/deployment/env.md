@@ -6,7 +6,7 @@ On Serverless platforms (Cloudflare / Vercel / EdgeOne), environment variables a
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `DB_TYPE` | Database type: `d1` / `tidb` / `mariadb` / `pg` | Yes | `d1` |
+| `DB_TYPE` | Database type: `d1` / `tidb` / `mariadb` / `pg` | Yes | `d1` (**Cloudflare only**; Vercel/EdgeOne/Docker/Node must explicitly set `tidb`/`mariadb`/`pg`) |
 | `DATABASE_URL` | Database connection string (not needed for `d1`) | Required for `tidb`/`mariadb`/`pg` | — |
 | `ADMIN_USERNAME` | Admin login username | Yes | None |
 | `ADMIN_PASSWORD` | Admin login password | Yes | None |

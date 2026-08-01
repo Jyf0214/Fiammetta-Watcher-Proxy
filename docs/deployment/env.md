@@ -6,7 +6,7 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 
 | 变量 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `DB_TYPE` | 数据库类型：`d1` / `tidb` / `mariadb` / `pg` | 是 | `d1` |
+| `DB_TYPE` | 数据库类型：`d1` / `tidb` / `mariadb` / `pg` | 是 | `d1`（**仅 Cloudflare 适用**；Vercel/EdgeOne/Docker/Node 必须显式设置为 `tidb`/`mariadb`/`pg`） |
 | `DATABASE_URL` | 数据库连接串（`d1` 不需要） | `tidb`/`mariadb`/`pg` 必须 | — |
 | `ADMIN_USERNAME` | 管理后台登录用户名 | 是 | 无 |
 | `ADMIN_PASSWORD` | 管理后台登录密码 | 是 | 无 |

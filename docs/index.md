@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: 快速开始
-      link: /guide/what-is-fwp.md
+      link: /guide/what-is-fwp
     - theme: alt
       text: GitHub
       link: https://github.com/Jyf0214/Fiammetta-Watcher-Proxy

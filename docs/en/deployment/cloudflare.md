@@ -51,6 +51,8 @@ It automatically: creates the database and cache resources → builds → deploy
 
 > Worker/Pages domains are listed in Dashboard → Workers & Pages. For production, bind a custom domain (Dashboard → project → Custom domains).
 
+> The `<system-api-key>` above refers to a **System API Key** (`sk-sys-*`): after deployment, log in to the admin panel at `https://<project>.pages.dev/admin` → "System Keys" page on the left and generate one. It is used for Bearer auth on system-level endpoints and is independent of user API Keys.
+
 ## Option 2: Manual Deployment (Wrangler, for debugging)
 
 ### 1. Log In and Create Resources
@@ -157,6 +159,8 @@ Common on the free tier. Note the 120-second limit is the app's default upstream
 ### Admin Panel 404 After Deploy
 
 With Option 2, check that you deployed the `.open-next` directory (not `.open-next/assets`).
+
+> More generic troubleshooting: [Troubleshooting](/en/deployment/troubleshooting).
 
 ## Related Docs
 

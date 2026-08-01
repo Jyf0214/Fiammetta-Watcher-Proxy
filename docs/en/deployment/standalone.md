@@ -72,12 +72,6 @@ npx next start
 - Port is controlled by `PORT` (default `3000`)
 - Start with `npx next start` (`npm start` does not work)
 
-### Development Mode
-
-```bash
-npm run dev
-```
-
 ## Step 5: Access the Admin Panel
 
 ```
@@ -113,28 +107,7 @@ curl -X GET http://localhost:3000/api/cron/model-fetch \
 
 ## Troubleshooting
 
-### Database Connection Failed
-
-Error `P1001: Can't reach database server`:
-
-1. Confirm the database is running and remotely accessible
-2. Check host, port, username, and password in `DATABASE_URL`
-3. Check firewall rules for the database port (MySQL: also check `bind-address`)
-
-### Port Already in Use
-
-```bash
-lsof -i :3000
-PORT=3001 npx next start
-```
-
-### Low Memory
-
-On hosts with less than 1GB RAM, append pool parameters to `DATABASE_URL`:
-
-```
-?connection_limit=5&pool_timeout=10
-```
+Database connection failures, port conflicts, low memory, and other common issues are covered in [Troubleshooting](/en/deployment/troubleshooting).
 
 ## Related Docs
 

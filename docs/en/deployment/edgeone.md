@@ -73,11 +73,15 @@ Services: Cron-job.org, UptimeRobot, GitHub Actions `schedule` trigger (example 
 | Admin panel | `/admin`, log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` |
 | Database | Open Models / Logs pages in the admin panel and confirm reads/writes work |
 
+> The `<system-api-key>` above refers to a **System API Key** (`sk-sys-*`): after deployment, log in to the admin panel at `/admin` → "System Keys" page on the left and generate one. It is used for Bearer auth on system-level endpoints and is independent of user API Keys.
+
 ## Troubleshooting
 
 ### Streaming / Proxy Timeouts
 
 EdgeOne's first-deployment performance is not yet fully validated. If streaming breaks or times out, check the platform docs for function timeout and streaming support; if needed, switch to Vercel or Cloudflare.
+
+> More generic troubleshooting: [Troubleshooting](/en/deployment/troubleshooting).
 
 ## Related Docs
 

@@ -4,6 +4,10 @@
 An official pre-built image is published: `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` — pull and run directly. For production, prefer [Cloudflare](/en/deployment/cloudflare) or [Vercel](/en/deployment/vercel).
 :::
 
+::: tip Version Note
+The image is built from the **`stable` branch** (v1.0.x) of the repository and includes its own features such as auto table creation, admin initialization and the `/setup` onboarding page. The other deployment guides in these docs are based on the `canary` branch (v2.0.x) — feature sets differ. For the latest features use [Node.js Standalone](/en/deployment/standalone).
+:::
+
 ## Use the Pre-built Image
 
 The official image is published to GHCR — no local build needed:
@@ -24,7 +28,7 @@ docker run -d \
 
 - The database type is detected from the connection string (`postgresql://`, `mysql://` or `mariadb://`)
 - On first start it automatically creates the tables and initializes the admin — nothing else to do
-- `JWT_SECRET` is required, at least 32 chars — login fails without it
+- `JWT_SECRET` is required, at least 32 chars (see [Environment Variables](/en/deployment/env)) — login fails without it
 
 ### docker compose with the pre-built image
 
@@ -40,7 +44,6 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=secure-password
       - JWT_SECRET=random-secret-32+chars
-      - PORT=3000
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +65,8 @@ services:
 volumes:
   pgdata:
 ```
+
+> For database connection failures, port conflicts, etc., see [Troubleshooting](/en/deployment/troubleshooting).
 
 ## Related Docs
 

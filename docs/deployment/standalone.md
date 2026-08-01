@@ -58,7 +58,7 @@ EOF
 
 ::: warning 关键点
 - `DB_TYPE` 不填时会根据 `DATABASE_URL` 自动推断（`mysql://` → `tidb`，`mariadb://` → `mariadb`，`postgresql://` → `pg`），但建议显式设置
-- `JWT_SECRET` 必须显式设置且不少于 32 字符，未设置则无法登录
+- `JWT_SECRET` 必须显式设置且不少于 32 字符（规则见 [环境变量](/deployment/env)），未设置则无法登录
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` 就是登录账号密码本身
 :::
 
@@ -71,12 +71,6 @@ npx next start
 
 - 监听端口由 `PORT` 控制（默认 `3000`）
 - 启动命令用 `npx next start`（`npm start` 不可用）
-
-### 开发模式
-
-```bash
-npm run dev
-```
 
 ## 第五步：访问管理后台
 
@@ -113,28 +107,7 @@ curl -X GET http://localhost:3000/api/cron/model-fetch \
 
 ## 常见问题排查
 
-### 数据库连接失败
-
-错误 `P1001: Can't reach database server`：
-
-1. 确认数据库服务已启动且可远程连接
-2. 检查 `DATABASE_URL` 的主机、端口、用户名、密码
-3. 检查防火墙是否放行数据库端口（MySQL 还需检查 `bind-address`）
-
-### 端口被占用
-
-```bash
-lsof -i :3000
-PORT=3001 npx next start
-```
-
-### 内存不足
-
-内存小于 1GB 的环境在 `DATABASE_URL` 末尾追加连接池参数：
-
-```
-?connection_limit=5&pool_timeout=10
-```
+数据库连接失败、端口被占用、内存不足等通用问题的排查步骤见 [常见问题排查](/deployment/troubleshooting)。
 
 ## 相关文档
 

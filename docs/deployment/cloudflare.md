@@ -51,6 +51,8 @@ Actions 页面 → 左侧 Deploy 工作流 → Run workflow → **分支选择 `
 
 > Worker 与 Pages 的域名在 Dashboard → Workers & Pages 中查看。生产环境建议绑定自定义域名（Dashboard → 项目 → Custom domains）。
 
+> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `https://<项目名>.pages.dev/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。
+
 ## 方式二：手动部署（Wrangler，调试用）
 
 ### 1. 登录并创建资源
@@ -157,6 +159,8 @@ Workers 免费版单请求 CPU 上限 **10ms**，代理 AI 流式请求很容易
 ### 部署后管理后台 404
 
 方式二部署时检查是否部署了 `.open-next` 目录（不是 `.open-next/assets`）。
+
+> 更多通用排查见 [常见问题排查](/deployment/troubleshooting)。
 
 ## 相关文档
 

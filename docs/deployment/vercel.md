@@ -130,6 +130,8 @@ DATABASE_URL=postgresql://用户:密码@主机:端口/数据库名
 - 确认数据库允许远程连接（TiDB Cloud 天然支持）
 - 检查防火墙 / 白名单是否放行
 
+> 更多通用排查见 [常见问题排查](/deployment/troubleshooting)。
+
 ## 相关文档
 
 - [架构说明](/deployment/architecture)

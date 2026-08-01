@@ -22,6 +22,7 @@
 | `ADMIN_USERNAME` | 管理后台登录用户名 |
 | `ADMIN_PASSWORD` | 管理后台登录密码 |
 | `DB_TYPE` | 数据库类型，默认 `d1`，无需自备数据库 |
+| `DATABASE_URL` | 外部数据库连接串（仅 `DB_TYPE=tidb/pg` 时需要） |
 
 4. 在 Actions 页面启用工作流（首次按提示启用/批准）
 5. 手动运行工作流：Actions → Deploy → Run workflow → 分支选择 `canary` → 平台选择 `cf` → 点击 Run workflow。自动完成部署（数据库、Worker、Pages、后台登录凭据全部自动配置）
@@ -50,13 +51,21 @@ JWT_SECRET=至少32字符的随机密钥
 EOF
 ```
 
-### 3. 启动开发服务器
+### 3. 初始化数据库
+
+```bash
+DB_PUSH=1 node scripts/prepare-db.mjs
+```
+
+`npm install` / `npm run dev` 会自动生成 Prisma Client，但**本地默认不会同步表结构**（防止误操作真实数据库）。首次开发需手动执行上面的命令，将表结构推送到 `.env` 中 `DATABASE_URL` 指向的数据库（`DB_TYPE` 会按 `DATABASE_URL` 协议自动推断）。
+
+### 4. 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-### 4. 访问管理后台
+### 5. 访问管理后台
 
 打开 `http://localhost:3000/admin`，使用配置的管理员账号登录。
 
