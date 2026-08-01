@@ -329,8 +329,8 @@ export async function proxyV1Request(
     const allKeys = getAllKeys(currentPlatform);
     console.warn(
       `${logTag} 初始平台 "${currentPlatform.name}" (${currentPlatform.id}) 无可用 Key` +
-      `（共 ${allKeys.length} 个 Key，封禁: ${allKeys.filter(isKeyBanned).length}` +
-      `，降级: ${allKeys.filter(isKeyDeprioritized).length}` +
+      `（共 ${allKeys.length} 个 Key，封禁: ${allKeys.filter((k) => isKeyBanned(k, currentPlatform.id)).length}` +
+      `，降级: ${allKeys.filter((k) => isKeyDeprioritized(k, currentPlatform.id)).length}` +
       `，白名单: ${allKeys.filter(isKeyWhitelisted).length}）` +
       `，尝试切换到其他平台`
     );
@@ -381,8 +381,8 @@ export async function proxyV1Request(
         `${logTag} 平台 "${currentPlatform.name}" (${currentPlatform.id}) ` +
         `已无可用 Key（共 ${platformKeys.length} 个，` +
         `已尝试: ${triedKeys.size}，` +
-        `封禁: ${platformKeys.filter(isKeyBanned).length}，` +
-        `降级: ${platformKeys.filter(isKeyDeprioritized).length}）`
+        `封禁: ${platformKeys.filter((k) => isKeyBanned(k, currentPlatform.id)).length}，` +
+        `降级: ${platformKeys.filter((k) => isKeyDeprioritized(k, currentPlatform.id)).length}）`
       );
       return Response.json(
         {

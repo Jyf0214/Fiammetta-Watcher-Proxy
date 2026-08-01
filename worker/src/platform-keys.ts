@@ -82,13 +82,21 @@ export function getWhitelist(): string[] {
 /**
  * Key 封禁到期时间戳（内存态，重启归零）
  *
+ * 键为 `platformId:keyFingerprint` 复合键：同一密钥字符串配置在多个平台时，
+ * 某个平台收到 429 封禁不应连坐其它平台。
+ *
  * 已知限制：Worker 冷启动后封禁状态丢失，被封禁的 Key 可能立即恢复使用。
  * 这是 Cloudflare Workers 无状态架构的固有限制。
  * 如需持久化封禁状态，可使用 KV 存储（增加一次网络往返）。
  */
 const keyCooldowns = new Map<string, number>();
 
-const DEFAULT_KEY_BAN_MS = 5 * 60 * 1000; // 5 分钟
+const DEFAULT_KEY_BAN_MS = 5 * 60 * 1000;
+
+/** 平台维度封禁键：`platformId:keyFingerprint`（platformId 为空时兼容无平台调用） */
+function banKeyId(platformId: string | undefined, key: string): string {
+  return `${platformId ?? ""}:${keyFingerprint(key)}`;
+}
 
 /**
  * 封禁指定 Key（收到429时调用）
@@ -106,9 +114,9 @@ export async function banKey(
   const fp = keyFingerprint(key);
 
   if (isKeyWhitelisted(key)) {
-    // 白名单 Key：不封禁，只降级
+    // 白名单 Key：不封禁，只降级（降级同样按平台维度隔离）
     const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
-    whitelistedKeyCooldowns.set(key, expireAt);
+    whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
     if (platformId && kv) {
       await writePlatformKeyStatus(kv, platformId, fp, { status: "deprioritized", expireAt });
     }
@@ -116,7 +124,7 @@ export async function banKey(
   }
 
   const expireAt = Date.now() + durationMs;
-  keyCooldowns.set(key, expireAt);
+  keyCooldowns.set(banKeyId(platformId, key), expireAt);
   if (platformId && kv) {
     await writePlatformKeyStatus(kv, platformId, fp, { status: "banned", expireAt });
   }
@@ -124,14 +132,16 @@ export async function banKey(
 
 /**
  * 检查 Key 是否处于封禁状态（白名单 Key 永远不会被封禁）
+ *
+ * @param platformId - 封禁所属平台（同一密钥字符串在不同平台不互相连坐）
  */
-export function isKeyBanned(key: string): boolean {
+export function isKeyBanned(key: string, platformId?: string): boolean {
   if (isKeyWhitelisted(key)) return false;
 
-  const expireAt = keyCooldowns.get(key);
+  const expireAt = keyCooldowns.get(banKeyId(platformId, key));
   if (!expireAt) return false;
   if (Date.now() >= expireAt) {
-    keyCooldowns.delete(key);
+    keyCooldowns.delete(banKeyId(platformId, key));
     return false;
   }
   return true;
@@ -140,11 +150,11 @@ export function isKeyBanned(key: string): boolean {
 /**
  * 检查 Key 是否处于降级状态（白名单 Key 收到429后临时降低优先级）
  */
-export function isKeyDeprioritized(key: string): boolean {
-  const expireAt = whitelistedKeyCooldowns.get(key);
+export function isKeyDeprioritized(key: string, platformId?: string): boolean {
+  const expireAt = whitelistedKeyCooldowns.get(banKeyId(platformId, key));
   if (!expireAt) return false;
   if (Date.now() >= expireAt) {
-    whitelistedKeyCooldowns.delete(key);
+    whitelistedKeyCooldowns.delete(banKeyId(platformId, key));
     return false;
   }
   return true;
@@ -181,9 +191,9 @@ export async function loadKeyStatusFromKV(
         const st = statuses[keyFingerprint(k)];
         if (!st) continue;
         if (st.status === "banned") {
-          keyCooldowns.set(k, st.expireAt);
+          keyCooldowns.set(banKeyId(p.id, k), st.expireAt);
         } else {
-          whitelistedKeyCooldowns.set(k, st.expireAt);
+          whitelistedKeyCooldowns.set(banKeyId(p.id, k), st.expireAt);
         }
         loaded++;
       }
@@ -228,7 +238,11 @@ export function getNextKey(platform: PlatformConfig): string | null {
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (!isKeyWhitelisted(key) && !isKeyBanned(key) && !isKeyDeprioritized(key)) {
+    if (
+      !isKeyWhitelisted(key) &&
+      !isKeyBanned(key, platform.id) &&
+      !isKeyDeprioritized(key, platform.id)
+    ) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -238,7 +252,7 @@ export function getNextKey(platform: PlatformConfig): string | null {
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key)) {
+    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -248,7 +262,7 @@ export function getNextKey(platform: PlatformConfig): string | null {
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && isKeyDeprioritized(key)) {
+    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -273,19 +287,29 @@ export function getRandomKeyExcept(
 
   // 优先级1：非白名单、未封禁、未降级
   const tier1 = allKeys.filter(
-    (k) => !excludeKeys.has(k) && !isKeyWhitelisted(k) && !isKeyBanned(k) && !isKeyDeprioritized(k)
+    (k) =>
+      !excludeKeys.has(k) &&
+      !isKeyWhitelisted(k) &&
+      !isKeyBanned(k, platform.id) &&
+      !isKeyDeprioritized(k, platform.id)
   );
   if (tier1.length > 0) return tier1[Math.floor(Math.random() * tier1.length)];
 
   // 优先级2：白名单中未降级
   const tier2 = allKeys.filter(
-    (k) => !excludeKeys.has(k) && isKeyWhitelisted(k) && !isKeyDeprioritized(k)
+    (k) =>
+      !excludeKeys.has(k) &&
+      isKeyWhitelisted(k) &&
+      !isKeyDeprioritized(k, platform.id)
   );
   if (tier2.length > 0) return tier2[Math.floor(Math.random() * tier2.length)];
 
   // 优先级3：白名单中已降级
   const tier3 = allKeys.filter(
-    (k) => !excludeKeys.has(k) && isKeyWhitelisted(k) && isKeyDeprioritized(k)
+    (k) =>
+      !excludeKeys.has(k) &&
+      isKeyWhitelisted(k) &&
+      isKeyDeprioritized(k, platform.id)
   );
   if (tier3.length > 0) return tier3[Math.floor(Math.random() * tier3.length)];
 

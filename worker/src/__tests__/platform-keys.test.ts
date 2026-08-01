@@ -179,7 +179,7 @@ describe("banKey KV 持久化", () => {
     const kv = makeMockKv();
     await banKey("sk-banned", undefined, "platform-1", kv);
 
-    expect(isKeyBanned("sk-banned")).toBe(true);
+    expect(isKeyBanned("sk-banned", "platform-1")).toBe(true);
 
     const raw = kv.store.get(keyStatusKey("platform-1"));
     expect(raw).toBeTruthy();
@@ -198,8 +198,8 @@ describe("banKey KV 持久化", () => {
 
     await banKey("sk-whitelisted", undefined, "platform-1", kv);
 
-    expect(isKeyBanned("sk-whitelisted")).toBe(false);
-    expect(isKeyDeprioritized("sk-whitelisted")).toBe(true);
+    expect(isKeyBanned("sk-whitelisted", "platform-1")).toBe(false);
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
 
     const raw = kv.store.get(keyStatusKey("platform-1"));
     const parsed = JSON.parse(raw!);
@@ -210,5 +210,17 @@ describe("banKey KV 持久化", () => {
   it("不传 KV 时仅更新内存态（兼容旧调用）", async () => {
     await banKey("sk-memory-only");
     expect(isKeyBanned("sk-memory-only")).toBe(true);
+  });
+
+  it("同值密钥在不同平台隔离封禁（一个平台 429 不连坐其它平台）", async () => {
+    await banKey("sk-shared", undefined, "platform-a");
+    expect(isKeyBanned("sk-shared", "platform-a")).toBe(true);
+    expect(isKeyBanned("sk-shared", "platform-b")).toBe(false);
+
+    // platform-a 所有密钥被封禁 → 无可用 Key（原始 500 场景）
+    expect(getNextKey(makePlatform({ id: "platform-a", apiKeys: ["sk-shared"] }))).toBeNull();
+    // platform-b 同值密钥不受影响，仍可轮询
+    const key = getNextKey(makePlatform({ id: "platform-b", apiKeys: ["sk-shared"] }));
+    expect(key).toBe("sk-shared");
   });
 });
