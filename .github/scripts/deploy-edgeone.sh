@@ -10,12 +10,15 @@
 set -euo pipefail
 
 echo "pin 版本防止 CLI 行为漂移"
-npm install -g edgeone@1.6.19
-
 set +e
+npm install -g edgeone@1.6.19 2>&1 | grep -viE --line-buffered "token|https://"
+status=${PIPESTATUS[0]}
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+
 edgeone makers deploy \
   -n "$EO_PROJECT_NAME" \
   -t "$EO_API_TOKEN" \
   -e production 2>&1 | grep -viE --line-buffered "token|https://"
-status=${PIPESTATUS[0]}
-exit "$status"
+exit "${PIPESTATUS[0]}"
