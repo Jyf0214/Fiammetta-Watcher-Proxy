@@ -7,7 +7,7 @@
 
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络。
 
-📖 **部署教程请见：[https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
+**部署教程请见：[https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
 
 ## 功能特性
 
@@ -39,7 +39,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 | `pg` | PostgreSQL 直连 | `@prisma/adapter-pg` | TCP | 所有平台 |
 | `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP（连接池加速）~~ | CF |
 
-> ⚠️ `hyperdrive` 已弃用 — `pg.Pool` 与 Hyperdrive transaction 模式不兼容，请求严格交替成功/失败，且推荐的 `postgres.js` 驱动无法被 OpenNext 打包。
+> ! `hyperdrive` 已弃用 — `pg.Pool` 与 Hyperdrive transaction 模式不兼容，请求严格交替成功/失败，且推荐的 `postgres.js` 驱动无法被 OpenNext 打包。
 
 > **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。`mariadb` 驱动走 TCP，仅适用于 MariaDB/纯 MySQL 直连，且**仅支持非 CF 平台**（CF 构建会将 mariadb 驱动排除在产物外）。免费版 Workers 存在 CPU/请求限制，批量导入日志（多条记录写入）时 API 可能超时不可用。
 

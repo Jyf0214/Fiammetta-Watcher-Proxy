@@ -292,7 +292,7 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
     if db_type != "d1" and DATABASE_URL:
         set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
     else:
-        print(f"  ⏭️  跳过 Worker DATABASE_URL Secret（DB_TYPE={db_type}，非外部数据库模式）")
+        print(f"   跳过 Worker DATABASE_URL Secret（DB_TYPE={db_type}，非外部数据库模式）")
 
 
 def run_post(db_type: str):

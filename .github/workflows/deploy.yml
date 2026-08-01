@@ -60,13 +60,13 @@ jobs:
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" | jq -r '.result[0].id')
             if [[ -z "$ACCOUNT_ID" ]] || [[ "$ACCOUNT_ID" == "null" ]]; then
-              echo "❌ 无法获取账户 ID，请检查 CLOUDFLARE_API_TOKEN"
+              echo "✗ 无法获取账户 ID，请检查 CLOUDFLARE_API_TOKEN"
               exit 1
             fi
           fi
           echo "::add-mask::${ACCOUNT_ID}"
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
-          echo "✅ Account ID 已获取"
+          echo "✓ Account ID 已获取"
 
       # ==================== 部署前：初始化资源（D1/KV/Hyperdrive 按需） ====================
 
@@ -95,7 +95,7 @@ jobs:
         run: |
           # 复用 build:cf：含 DEPLOY_PLATFORM=cf 构建门控（临时移除 v1/cron 路由）+ prepare-db + 产物处理
           npm run build:cf
-          echo "✅ Pages 构建完成（build-gate 已移除 v1/cron 路由）"
+          echo "✓ Pages 构建完成（build-gate 已移除 v1/cron 路由）"
 
       # ==================== 部署 Worker ====================
 
@@ -106,7 +106,7 @@ jobs:
           set -o pipefail
           cd worker
           npx wrangler deploy --config wrangler.toml 2>&1 | grep -v "https://"
-          echo "✅ Worker 部署完成"
+          echo "✓ Worker 部署完成"
 
       # ==================== 部署后：Pages 绑定 + Secrets ====================
 
@@ -129,7 +129,7 @@ jobs:
         run: |
           set -o pipefail
           npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -v "https://"
-          echo "✅ Pages 部署完成"
+          echo "✓ Pages 部署完成"
 
       # ==================== 部署后：设置 Pages 环境变量（必须在 pages deploy 之后） ====================
 
@@ -145,7 +145,7 @@ jobs:
       # ==================== 完成 ====================
 
       - name: Done
-        run: echo "🎉 Cloudflare 部署完成"
+        run: echo "✓ Cloudflare 部署完成"
 
   # ==================== EdgeOne Makers 部署 ====================
   deploy-edgeone:

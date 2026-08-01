@@ -7,7 +7,7 @@ English | [简体中文](README.md)
 
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployed on Cloudflare's global edge network.
 
-📖 **Deployment guide: [https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
+**Deployment guide: [https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
 
 ## Features
 
@@ -39,7 +39,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 | `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
 | `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP (pooled)~~ | CF |
 
-> ⚠️ `hyperdrive` deprecated — `pg.Pool` is incompatible with Hyperdrive's transaction mode, causing requests to alternate strictly between success/failure. The recommended `postgres.js` driver cannot be bundled by OpenNext.
+> ! `hyperdrive` deprecated — `pg.Pool` is incompatible with Hyperdrive's transaction mode, causing requests to alternate strictly between success/failure. The recommended `postgres.js` driver cannot be bundled by OpenNext.
 
 > **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-CF platforms** (CF builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 

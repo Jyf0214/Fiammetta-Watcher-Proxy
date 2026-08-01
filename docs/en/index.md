@@ -14,22 +14,22 @@ hero:
       link: https://github.com/Jyf0214/Fiammetta-Watcher-Proxy
 
 features:
-  - icon: 🔄
+  - icon: ✓
     title: Multi-platform Access
     details: Support OpenAI, Anthropic, Google and more with a unified API format — one entry for all models
-  - icon: ⚖️
+  - icon: ✓
     title: Smart Load Balancing
     details: Intelligent routing based on priority, weight, and rate limits with automatic failover and circuit breaking
-  - icon: 📊
+  - icon: ✓
     title: Real-time Monitoring
     details: Detailed request logs, token usage tracking, TTFT latency, and platform comparison analytics
-  - icon: 🔑
+  - icon: ✓
     title: Flexible Key Management
     details: Multi-level quota control, plan templates, auto-reset, and expiry management for hundreds of API keys
-  - icon: 🛡️
+  - icon: ✓
     title: Security Built-in
     details: JWT authentication, rate limiting, CORS, CSP headers, and SQL injection protection
-  - icon: 🚀
+  - icon: ✓
     title: Multiple Deployment Options
     details: Cloudflare zero-cost deploy, Vercel/Netlify serverless, Docker containers, Node.js self-hosted
 ---

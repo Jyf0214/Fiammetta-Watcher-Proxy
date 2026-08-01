@@ -30,7 +30,7 @@ if [ -d "$GATE_TMP" ]; then
     if [ -d "$GATE_TMP/$route" ] && [ -n "$(ls -A "$GATE_TMP/$route" 2>/dev/null)" ] && [ -z "$(ls -A "pages/api/$route" 2>/dev/null)" ]; then
       rmdir "pages/api/$route" 2>/dev/null || true
       mv "$GATE_TMP/$route" "pages/api/$route"
-      echo "  ♻️  还原上次中断构建遗留的路由: pages/api/$route/"
+      echo "   还原上次中断构建遗留的路由: pages/api/$route/"
     fi
   done
   rm -rf "$GATE_TMP"

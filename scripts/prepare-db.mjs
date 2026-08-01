@@ -81,7 +81,7 @@ if (
   !process.env.DATABASE_URL &&
   (process.env.DEPLOY_PLATFORM === "edgeone" || process.env.DEPLOY_PLATFORM === "vercel")
 ) {
-  console.warn("⚠️  未检测到 DB_TYPE/DATABASE_URL，已默认 d1——EdgeOne/Vercel 部署必须配置 DB_TYPE 与 DATABASE_URL，否则运行时无法连接数据库");
+  console.warn("! 未检测到 DB_TYPE/DATABASE_URL，已默认 d1——EdgeOne/Vercel 部署必须配置 DB_TYPE 与 DATABASE_URL，否则运行时无法连接数据库");
 }
 
 console.log(`DB_TYPE: ${dbType}`);
@@ -151,7 +151,7 @@ if (dialect.needsPush) {
   // 防止开发者 npm install 时意外对真实数据库执行破坏性 --accept-data-loss
   const shouldPush = isRemote && (process.env.CI === "true" || process.env.DB_PUSH === "1");
   if (shouldPush) {
-    console.log(`⚙️  执行 prisma db push（${dialect.name}）...`);
+    console.log(` 执行 prisma db push（${dialect.name}）...`);
     execSync(`npx prisma db push --schema=${dialect.file} --accept-data-loss`, {
       cwd: ROOT,
       stdio: "inherit",
@@ -159,14 +159,14 @@ if (dialect.needsPush) {
     });
     console.log(`✓ ${dialect.name} db push 完成`);
   } else if (isRemote) {
-    console.warn(`⚠️  ${dialect.name} 模式且 DATABASE_URL 匹配，但非 CI 环境且未设置 DB_PUSH=1，跳过 db push（CI 自动执行；本地如需同步表结构请设置 DB_PUSH=1）`);
+    console.warn(`! ${dialect.name} 模式且 DATABASE_URL 匹配，但非 CI 环境且未设置 DB_PUSH=1，跳过 db push（CI 自动执行；本地如需同步表结构请设置 DB_PUSH=1）`);
   } else if (url) {
-    console.warn(`⚠️  ${dialect.name} 模式但 DATABASE_URL 协议不是 ${schemes.join(" / ")}，跳过 db push`);
+    console.warn(`! ${dialect.name} 模式但 DATABASE_URL 协议不是 ${schemes.join(" / ")}，跳过 db push`);
   } else {
-    console.warn(`⚠️  ${dialect.name} 模式但未设置 DATABASE_URL，跳过 db push`);
+    console.warn(`! ${dialect.name} 模式但未设置 DATABASE_URL，跳过 db push`);
   }
 } else {
-  console.log("ℹ️  D1 模式：跳过 db push（由 Python 部署脚本处理建表）");
+  console.log("D1 模式：跳过 db push（由 Python 部署脚本处理建表）");
 }
 
 console.log(`✓ Prisma Client 就绪（${dialect.name}，stub 覆盖未使用的方言）`);
