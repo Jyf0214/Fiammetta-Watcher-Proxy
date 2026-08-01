@@ -2,9 +2,11 @@
 set -o pipefail
 # Pre-push: ESLint + TypeScript + 测试 + 完整构建（零容忍）
 
-# 0. 所有 Schema 文件和 init.sql 必须同时提交
+# 0. D1 相关 Schema 和 init.sql 必须同时提交
+# init.sql 由 prisma/schema.prisma（D1 方言）生成，仅 D1 建表使用；
+# mysql/mariadb/pg 方言 schema（表结构与其他方言独立管理）不影响 init.sql。
 LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
-HAS_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep -E "^prisma/schema\..*\.prisma$|^prisma/schema\.prisma$")
+HAS_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep -E "^prisma/schema\.prisma$|^prisma/schema\.d1\.prisma$")
 HAS_INITSQL=$(echo "$LAST_COMMIT_FILES" | grep "^init.sql$")
 if [ -n "$HAS_PRISMA" ] && [ -z "$HAS_INITSQL" ]; then
   echo "❌ [pre-push] Schema 文件已修改但 init.sql 未同步提交"
