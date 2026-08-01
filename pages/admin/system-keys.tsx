@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Space, Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
+import { Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
 import { Plus, Trash2, Copy, Shield, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -141,12 +141,7 @@ export default function SystemKeysPage() {
       key: "key",
       width: 220,
       render: (key: string) => (
-        <Space size={4}>
-          <code className="text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">{key}</code>
-          <Button variant="link" size="sm" onClick={() => copyToClipboard(key)}>
-            <Copy size={14} />
-          </Button>
-        </Space>
+        <code className="text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">{key}</code>
       ),
     },
     {

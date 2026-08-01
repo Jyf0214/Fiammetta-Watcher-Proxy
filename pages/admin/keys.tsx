@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Tag, Popconfirm, Tooltip, Modal, Form, Input, InputNumber, Select, Alert, message } from "antd";
+import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, message } from "antd";
 import { Plus, Trash2, Copy, Key, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -43,15 +43,6 @@ function ApiKeyCard({
   const statusColor = apiKey.status === "active" ? "green" : apiKey.status === "disabled" ? "red" : "orange";
   const isActive = apiKey.status === "active";
 
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success(t("common.copied"));
-    } catch {
-      message.error(t("common.copy_failed") || "复制失败");
-    }
-  };
-
   const createdDate = formatDate(apiKey.createdAt);
 
   return (
@@ -72,19 +63,9 @@ function ApiKeyCard({
       <div className="px-4 pb-2 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-14 shrink-0">API Key</span>
-          <div className="flex items-center gap-1 min-w-0 flex-1">
-            <span className="text-[11px] text-zinc-600 dark:text-zinc-300 font-mono truncate whitespace-nowrap overflow-hidden text-ellipsis">
-              {apiKey.key}
-            </span>
-            <Tooltip title={t("common.copy")}>
-              <button
-                onClick={() => copyToClipboard(apiKey.key)}
-                className="shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-              >
-                <Copy size={12} />
-              </button>
-            </Tooltip>
-          </div>
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 font-mono truncate whitespace-nowrap overflow-hidden text-ellipsis">
+            {apiKey.key}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-14 shrink-0">创建时间</span>
@@ -94,13 +75,6 @@ function ApiKeyCard({
 
       {/* 卡片底部操作栏 */}
       <div className="flex border-t border-zinc-100 dark:border-zinc-800">
-        <button
-          onClick={() => copyToClipboard(apiKey.key)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-        >
-          <Copy size={13} /> 复制 Key
-        </button>
-        <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
         <button
           onClick={() => onEdit(apiKey)}
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
@@ -120,6 +94,8 @@ function ApiKeyCard({
 
 export default function KeysPage() {
   const { t } = useTranslation();
+  /** 构建期内联的部署平台（cf / edgeone / vercel / 空=自托管或本地） */
+  const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -267,17 +243,7 @@ export default function KeysPage() {
       key: "key",
       ellipsis: true,
       render: (v: string) => (
-        <div className="flex items-center gap-1">
-          <span className="font-mono text-xs whitespace-nowrap overflow-hidden text-ellipsis">{v}</span>
-          <Tooltip title={t("common.copy")}>
-            <button
-              onClick={() => copyToClipboard(v)}
-              className="shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600 transition-colors"
-            >
-              <Copy size={12} />
-            </button>
-          </Tooltip>
-        </div>
+        <span className="font-mono text-xs whitespace-nowrap overflow-hidden text-ellipsis">{v}</span>
       ),
     },
     {
@@ -331,7 +297,11 @@ export default function KeysPage() {
         <Alert
           type="info"
           showIcon
-          message="使用此密钥时，Base URL 请填写系统配套的 Cloudflare Workers 地址（如 https://your-worker.workers.dev），而非上游平台地址。"
+          message={
+            deployPlatform === "cf"
+              ? "使用此密钥时，Base URL 请填写系统配套的 Cloudflare Workers 地址（如 https://your-worker.workers.dev），而非上游平台地址。"
+              : "使用此密钥时，Base URL 请填写本系统部署地址（如 https://your-domain.com），而非上游平台地址。"
+          }
           className="mb-3"
         />
 

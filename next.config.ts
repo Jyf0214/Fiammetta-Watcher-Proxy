@@ -41,6 +41,11 @@ const prismaStack = [
 const mariadbStack = ["@prisma/adapter-mariadb", "mariadb"];
 
 const nextConfig: NextConfig = {
+  // 构建期内联部署平台（DEPLOY_PLATFORM 构建期变量 → 前端可读），
+  // 用于平台相关的 UI 文案（如 keys 页 Base URL 提示）。未设置时为空串。
+  env: {
+    NEXT_PUBLIC_DEPLOY_PLATFORM: process.env.DEPLOY_PLATFORM || "",
+  },
   // Cloudflare Pages 不支持图片优化
   images: {
     unoptimized: true,
