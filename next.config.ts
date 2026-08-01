@@ -13,6 +13,23 @@ function getPrismaAlias() {
   return alias;
 }
 
+// Cloudflare Pages 构建（opennextjs-cloudflare）按 workerd 条件解析 external 包：
+// @prisma/client 的 WASM 引擎、pg-cloudflare 的真实 Socket 实现都能正确打包。
+// 非 CF 平台（EdgeOne/Vercel/纯 Node）没有该打包器，Turbopack external 化后运行时
+// import("<包名>-<hash>") 依赖 .next/node_modules symlink，上传部署时 symlink 丢失
+// → ERR_MODULE_NOT_FOUND（@prisma/client 是所有方言必经模块）。
+// 因此数据库栈在 CF 构建保持 external（恢复已验证行为），非 CF 构建强制转译内联。
+const isCFDeploy = process.env.DEPLOY_PLATFORM === "cf";
+
+const prismaStack = [
+  "@prisma/client",
+  ".prisma/client",
+  "@prisma/adapter-d1",
+  "@prisma/adapter-pg",
+  "@tidbcloud/prisma-adapter",
+  "pg",
+];
+
 const nextConfig: NextConfig = {
   // Cloudflare Pages 不支持图片优化
   images: {
@@ -53,15 +70,18 @@ const nextConfig: NextConfig = {
   },
   // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析
   turbopack: {},
-  // Turbopack 会把部分包 external 化并在运行时 import("<包名>-<hash>")，
-  // 非 CF 平台（EdgeOne/Vercel/纯 Node）运行时无法解析该 ID 导致 500。
-  // 强制转译打包，避免运行时外部依赖。
+  // Turbopack（Next.js 16 默认）会把部分包 external 化并在运行时 import("<包名>-<hash>")，
+  // 该 ID 依赖 .next/node_modules symlink 解析，EdgeOne 上传部署时 symlink 丢失 → 500。
+  // 通用库无条件内联（CF 侧内联无副作用）；数据库栈仅非 CF 内联（见 prismaStack 注释）。
   transpilePackages: [
     "i18next",
     "react-i18next",
     "i18next-browser-languagedetector",
     "jose",
     "clsx",
+    "motion",
+    "tailwind-merge",
+    ...(isCFDeploy ? [] : prismaStack),
   ],
   // Webpack（--webpack 模式）：alias 未使用的方言到空 stub
   webpack: (config) => {
@@ -72,15 +92,13 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  // MySQL/PG 驱动仅在切换数据库时需要，标记为外部避免 Turbopack 打包
-  // Prisma 7 WASM 引擎必须排除在 Next.js 打包之外，否则报 fs.readdir is not implemented
+  // mysql2 为 prisma CLI 依赖（构建期 db push 用），运行时无 import；
+  // pg-cloudflare 由 pg 内部按 workerd 条件引用，非 workerd 环境解析为空模块。
+  // CF 构建额外将数据库栈保持 external，由 opennextjs-cloudflare 按 workerd 条件打包。
   serverExternalPackages: [
     "mysql2",
-    "pg",
     "pg-cloudflare",
-    "@prisma/client",
-    ".prisma/client",
-    "@prisma/adapter-d1",
+    ...(isCFDeploy ? prismaStack : []),
   ],
   experimental: {
     serverActions: {
