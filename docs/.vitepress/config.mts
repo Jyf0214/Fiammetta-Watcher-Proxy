@@ -8,7 +8,7 @@ export default defineConfig({
   ignoreDeadLinks: true,
 
   head: [
-    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ['link', { rel: 'icon', href: '/Fiammetta-Watcher-Proxy/favicon.svg', type: 'image/svg+xml' }],
   ],
 
   locales: {
@@ -37,7 +37,6 @@ export default defineConfig({
                 { text: '平台配置', link: '/guide/platform' },
                 { text: 'API Key 管理', link: '/guide/api-key' },
                 { text: '模型映射', link: '/guide/model-map' },
-                { text: '代理池', link: '/guide/proxy' },
                 { text: '自动分流', link: '/guide/auto-model' },
               ]
             },
@@ -77,12 +76,13 @@ export default defineConfig({
                 { text: 'Docker 部署', link: '/deployment/docker' },
                 { text: '环境变量', link: '/deployment/env' },
                 { text: 'Nginx 配置', link: '/deployment/nginx' },
+                { text: '常见问题排查', link: '/deployment/troubleshooting' },
               ]
             },
           ],
         },
         editLink: {
-          pattern: 'https://github.com/Jyf0214/Fiammetta-Watcher-Proxy/edit/main/docs/:path'
+          pattern: 'https://github.com/Jyf0214/Fiammetta-Watcher-Proxy/edit/canary/docs/:path'
         },
       },
     },
@@ -113,7 +113,6 @@ export default defineConfig({
                 { text: 'Platform Config', link: '/en/guide/platform' },
                 { text: 'API Key Management', link: '/en/guide/api-key' },
                 { text: 'Model Mapping', link: '/en/guide/model-map' },
-                { text: 'Proxy Pool', link: '/en/guide/proxy' },
                 { text: 'Auto Routing', link: '/en/guide/auto-model' },
               ]
             },
@@ -153,12 +152,13 @@ export default defineConfig({
                 { text: 'Docker', link: '/en/deployment/docker' },
                 { text: 'Environment', link: '/en/deployment/env' },
                 { text: 'Nginx', link: '/en/deployment/nginx' },
+                { text: 'Troubleshooting', link: '/en/deployment/troubleshooting' },
               ]
             },
           ],
         },
         editLink: {
-          pattern: 'https://github.com/Jyf0214/Fiammetta-Watcher-Proxy/edit/main/docs/:path'
+          pattern: 'https://github.com/Jyf0214/Fiammetta-Watcher-Proxy/edit/canary/docs/:path'
         },
       },
     },
