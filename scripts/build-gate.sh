@@ -22,8 +22,19 @@ cd "$PROJECT_ROOT"
 
 GATE_TMP=".build-gate-tmp"
 
-# 清理上次中断构建可能遗留的临时目录，防止二次构建时路由嵌套（.build-gate-tmp/v1/v1）
-rm -rf "$GATE_TMP"
+# 上次构建若中断（如 Turbopack 报错）路由可能还留在临时目录，先还原再清理，
+# 防止 rm -rf 把 v1/cron 路由直接删掉（线上事故级隐患）。
+# 注意：mv 走目录后原目录仍在，必须按"临时目录非空 + 目标目录为空"判断，不能只看目录存在性。
+if [ -d "$GATE_TMP" ]; then
+  for route in v1 cron; do
+    if [ -d "$GATE_TMP/$route" ] && [ -n "$(ls -A "$GATE_TMP/$route" 2>/dev/null)" ] && [ -z "$(ls -A "pages/api/$route" 2>/dev/null)" ]; then
+      rmdir "pages/api/$route" 2>/dev/null || true
+      mv "$GATE_TMP/$route" "pages/api/$route"
+      echo "  ♻️  还原上次中断构建遗留的路由: pages/api/$route/"
+    fi
+  done
+  rm -rf "$GATE_TMP"
+fi
 
 if [ "${DEPLOY_PLATFORM:-}" = "cf" ]; then
   echo "🏗️  CF 模式：临时移除 Pages API v1 和 cron 路由"

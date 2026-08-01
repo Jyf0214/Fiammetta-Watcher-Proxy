@@ -3,7 +3,7 @@
 ## Prerequisites
 
 1. [Vercel account](https://vercel.com/signup)
-2. Remote database: [TiDB Cloud](https://tidbcloud.com/) (free) or PostgreSQL
+2. Remote database: [TiDB Cloud](https://tidbcloud.com/) (free), MariaDB or PostgreSQL
 3. GitHub repository
 
 ## 1. Import the Project
@@ -15,7 +15,7 @@ Vercel Dashboard → Add New → Project → import the repository from GitHub. 
 Settings → Environment Variables:
 
 ```env
-DB_TYPE=tidb                        # or pg — never d1
+DB_TYPE=tidb                        # or pg / mariadb — never d1
 DATABASE_URL=mysql://user:pass@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-password
@@ -94,6 +94,15 @@ mysql://user:pass@gateway01.xxxx.prod.aws.tidbcloud.com:4000/dbname?sslaccept=ac
 ```
 
 `DB_TYPE=tidb`.
+
+### MariaDB / Pure MySQL
+
+Any remotely accessible MariaDB or MySQL (cloud RDS / self-hosted):
+
+```
+DB_TYPE=mariadb
+DATABASE_URL=mariadb://user:pass@host:port/dbname
+```
 
 ### PostgreSQL
 

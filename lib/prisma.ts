@@ -4,9 +4,10 @@
 // 本文件是整个项目中唯一知道 generated client 的文件。
 // 所有业务代码只从此处导入 createDb / disconnectDb / 类型。
 //
-// 支持三种数据库方言（通过 DB_TYPE 环境变量选择）：
+// 支持四种数据库方言（通过 DB_TYPE 环境变量选择）：
 //   - d1：Cloudflare D1（SQLite 方言）
 //   - tidb：TiDB Cloud（MySQL 方言）
+//   - mariadb：MariaDB / 纯 MySQL（mariadb 驱动，仅非 CF 平台）
 //   - pg / hyperdrive：PostgreSQL（直连或 Hyperdrive 加速）
 //
 // 运行环境自动检测：
@@ -20,7 +21,7 @@
 // ================================================================
 
 /** 数据库类型 */
-export type DbKind = "d1" | "tidb" | "pg" | "hyperdrive";
+export type DbKind = "d1" | "tidb" | "mariadb" | "pg" | "hyperdrive";
 
 /** 全局 PrismaClient 实例缓存（Worker 生命周期内复用） */
 let cachedPrisma: any = null;
@@ -36,6 +37,7 @@ function resolveDbKind(env?: Record<string, unknown>): DbKind {
   // 优先读 DB_TYPE
   const dbType = (env?.DB_TYPE as string) || process.env.DB_TYPE;
   if (dbType === "tidb" || dbType === "mysql") return "tidb";
+  if (dbType === "mariadb") return "mariadb";
   if (dbType === "pg") return "pg";
   if (dbType === "hyperdrive") return "hyperdrive";
   if (dbType === "d1") return "d1";
@@ -43,6 +45,7 @@ function resolveDbKind(env?: Record<string, unknown>): DbKind {
   // 回退到 DATABASE_URL 推断（Pages 环境中 DATABASE_URL 在 env 对象中而非 process.env）
   const url = (env?.DATABASE_URL as string) || process.env.DATABASE_URL || "";
   if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("mariadb://")) return "mariadb";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
   return "d1";
 }
@@ -103,6 +106,18 @@ async function createPrismaInstance(
       if (!url) throw new Error("TIDB_URL 或 DATABASE_URL 未配置");
 
       const adapter = new PrismaTiDBCloud({ url });
+      return new PrismaClient({ adapter });
+    }
+
+    // ── MariaDB / 纯 MySQL（mariadb 驱动，TCP；仅非 CF 平台）──
+    case "mariadb": {
+      const { PrismaClient } = await import("../src/generated/mariadb/client");
+      const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
+
+      const url = (env?.MARIADB_URL as string) || process.env.MARIADB_URL || process.env.DATABASE_URL;
+      if (!url) throw new Error("MARIADB_URL 或 DATABASE_URL 未配置");
+
+      const adapter = new PrismaMariaDb(url);
       return new PrismaClient({ adapter });
     }
 

@@ -1,9 +1,11 @@
 #!/bin/sh
 # Pre-commit: ESLint + TypeScript 类型检查（零容忍：零 error 零 warning）
 
-# 0. 所有 Schema 文件和 init.sql 必须同时提交
+# 0. D1 相关 Schema 和 init.sql 必须同时提交
+# init.sql 由 prisma/schema.prisma（D1 方言）生成，仅 D1 建表使用；
+# mysql/mariadb/pg 方言 schema（表结构与其他方言独立管理）不影响 init.sql。
 STAGED_FILES=$(git diff --cached --name-only)
-STAGED_PRISMA=$(echo "$STAGED_FILES" | grep -E "^prisma/schema\..*\.prisma$|^prisma/schema\.prisma$")
+STAGED_PRISMA=$(echo "$STAGED_FILES" | grep -E "^prisma/schema\.prisma$|^prisma/schema\.d1\.prisma$")
 STAGED_INITSQL=$(echo "$STAGED_FILES" | grep "^init.sql$")
 if [ -n "$STAGED_PRISMA" ] && [ -z "$STAGED_INITSQL" ]; then
   echo "❌ [pre-commit] Schema 文件已修改但 init.sql 未同步提交"

@@ -27,11 +27,11 @@ FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对�
      ├── 管理后台
      └── 前端页面
               ↓
-         TiDB / PostgreSQL（远程数据库）
+         TiDB / MariaDB / PostgreSQL（远程数据库）
 ```
 
 - 整个应用运行在一个服务里（Vercel / EdgeOne 的 Serverless 函数，或你自己的服务器）
-- 数据库需要自己准备：TiDB Cloud（免费档）或 PostgreSQL，通过连接串连接
+- 数据库需要自己准备：TiDB Cloud（免费档）、MariaDB 或 PostgreSQL，通过连接串连接
 - 定时任务没有内置调度，需用外部服务定时调用各端点（见各平台文档）
 - 服务重启（冷启动）后限流计数会清零，属正常现象，不影响功能
 
@@ -39,7 +39,7 @@ FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对�
 
 | 项目 | Cloudflare | Vercel / EdgeOne | 自有服务器 |
 |------|-----------|------------------|-----------|
-| 数据库 | D1 内置（免费） | 自备 TiDB / PostgreSQL | 自备 |
+| 数据库 | D1 内置（免费） | 自备 TiDB / MariaDB / PostgreSQL | 自备 |
 | 定时任务 | 内置免费 | 外部调度（Vercel Cron 需付费版） | 系统 cron |
 | 登录限流 | 重启后依然生效 | 重启后清零 | 重启后清零 |
 

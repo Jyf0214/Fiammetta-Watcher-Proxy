@@ -27,11 +27,11 @@ Requests → Next.js service
      ├── admin panel
      └── frontend pages
               ↓
-         TiDB / PostgreSQL (remote database)
+         TiDB / MariaDB / PostgreSQL (remote database)
 ```
 
 - The whole application runs in one service (serverless functions on Vercel / EdgeOne, or your own server)
-- You provide the database yourself: TiDB Cloud (free tier) or PostgreSQL, connected via a connection string
+- You provide the database yourself: TiDB Cloud (free tier), MariaDB or PostgreSQL, connected via a connection string
 - Scheduled tasks have no built-in scheduler — an external service must call the endpoints on schedule (see each platform's guide)
 - Rate-limit counters reset on service restarts (cold start) — expected, and it does not affect functionality
 
@@ -39,7 +39,7 @@ Requests → Next.js service
 
 | Item | Cloudflare | Vercel / EdgeOne | Own server |
 |------|-----------|------------------|-----------|
-| Database | built-in D1 (free) | self-provided TiDB / PostgreSQL | self-provided |
+| Database | built-in D1 (free) | self-provided TiDB / MariaDB / PostgreSQL | self-provided |
 | Scheduled tasks | built-in, free | external scheduler (Vercel Cron needs Pro) | system cron |
 | Login rate limit | survives restarts | resets on restart | resets on restart |
 

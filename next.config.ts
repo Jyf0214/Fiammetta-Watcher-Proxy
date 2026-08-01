@@ -4,10 +4,13 @@ import { resolve } from "path";
 /** 按 DB_TYPE 只生成一个方言的 Prisma Client，其他方言用空 stub 代替 */
 function getPrismaAlias() {
   const dbType = process.env.DB_TYPE || "d1";
-  const dialects = ["d1", "mysql", "pg"];
+  const dialects = ["d1", "mysql", "mariadb", "pg"];
   const alias: Record<string, string> = {};
   for (const d of dialects) {
-    if (d === dbType || (dbType === "hyperdrive" && d === "pg")) continue;
+    // 跳过实际使用的方言：tidb 使用 mysql 目录，hyperdrive 使用 pg 目录
+    if (d === dbType) continue;
+    if (dbType === "tidb" && d === "mysql") continue;
+    if (dbType === "hyperdrive" && d === "pg") continue;
     alias[`../src/generated/${d}/client`] = resolve(__dirname, "scripts/empty-client.ts");
   }
   return alias;
@@ -21,6 +24,8 @@ function getPrismaAlias() {
 // 因此数据库栈在 CF 构建保持 external（恢复已验证行为），非 CF 构建强制转译内联。
 const isCFDeploy = process.env.DEPLOY_PLATFORM === "cf";
 
+// CF 平台可用的数据库栈（d1/tidb/pg/hyperdrive）——CF 构建保持 external，
+// 由 opennextjs-cloudflare 按 workerd 条件打包。
 const prismaStack = [
   "@prisma/client",
   ".prisma/client",
@@ -29,6 +34,11 @@ const prismaStack = [
   "@tidbcloud/prisma-adapter",
   "pg",
 ];
+
+// MariaDB/纯 MySQL（mariadb 驱动，TCP）仅支持非 CF 平台：
+// - 非 CF 构建强制转译内联（EdgeOne/纯 Node 可运行）
+// - CF 构建通过 turbopack.resolveAlias 指向空 stub，不打包 TCP 驱动（体积 + workerd 兼容）
+const mariadbStack = ["@prisma/adapter-mariadb", "mariadb"];
 
 const nextConfig: NextConfig = {
   // Cloudflare Pages 不支持图片优化
@@ -68,8 +78,19 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析
-  turbopack: {},
+  // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析；
+  // CF 构建时 mariadb（TCP 驱动）alias 到空 stub（CF 不支持 mariadb）。
+  // 注意 resolveAlias 值为字符串，本地文件用相对项目根的路径（绝对路径会被当成 relative import）。
+  turbopack: {
+    ...(isCFDeploy
+      ? {
+          resolveAlias: {
+            mariadb: "./scripts/empty-mariadb.ts",
+            "@prisma/adapter-mariadb": "./scripts/empty-mariadb.ts",
+          },
+        }
+      : {}),
+  },
   // Turbopack（Next.js 16 默认）会把部分包 external 化并在运行时 import("<包名>-<hash>")，
   // 该 ID 依赖 .next/node_modules symlink 解析，EdgeOne 上传部署时 symlink 丢失 → 500。
   // 通用库无条件内联（CF 侧内联无副作用）；数据库栈仅非 CF 内联（见 prismaStack 注释）。
@@ -81,7 +102,7 @@ const nextConfig: NextConfig = {
     "clsx",
     "motion",
     "tailwind-merge",
-    ...(isCFDeploy ? [] : prismaStack),
+    ...(isCFDeploy ? [] : [...prismaStack, ...mariadbStack]),
   ],
   // Webpack（--webpack 模式）：alias 未使用的方言到空 stub
   webpack: (config) => {

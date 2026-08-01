@@ -50,6 +50,8 @@ def get_db_type() -> str:
     if DATABASE_URL:
         if DATABASE_URL.startswith(("mysql://", "mysqls://")):
             return "tidb"
+        if DATABASE_URL.startswith("mariadb://"):
+            fail("Cloudflare 平台不支持 MariaDB/纯 MySQL（mariadb 驱动走 TCP，workerd 运行时不可用），请使用 d1/tidb/pg")
         if DATABASE_URL.startswith(("postgresql://", "postgres://")):
             return "pg"
     return "d1"

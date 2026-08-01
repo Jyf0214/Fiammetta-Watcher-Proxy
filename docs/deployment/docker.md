@@ -22,7 +22,7 @@ docker run -d \
   ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
 ```
 
-- 数据库类型由连接串自动识别（`postgresql://` 或 `mysql://`）
+- 数据库类型由连接串自动识别（`postgresql://`、`mysql://` 或 `mariadb://`）
 - 首次启动自动完成建表与管理员初始化，无需额外操作
 - `JWT_SECRET` 必填且不少于 32 字符，未设置则无法登录
 

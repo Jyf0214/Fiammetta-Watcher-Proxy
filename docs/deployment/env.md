@@ -6,14 +6,14 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 
 | 变量 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `DB_TYPE` | 数据库类型：`d1` / `tidb` / `pg` | 是 | `d1` |
-| `DATABASE_URL` | 数据库连接串（`d1` 不需要） | `tidb`/`pg` 必须 | — |
+| `DB_TYPE` | 数据库类型：`d1` / `tidb` / `mariadb` / `pg` | 是 | `d1` |
+| `DATABASE_URL` | 数据库连接串（`d1` 不需要） | `tidb`/`mariadb`/`pg` 必须 | — |
 | `ADMIN_USERNAME` | 管理后台登录用户名 | 是 | 无 |
 | `ADMIN_PASSWORD` | 管理后台登录密码 | 是 | 无 |
 | `JWT_SECRET` | 登录签名密钥，至少 32 字符 | 是 | 无（Cloudflare CI 自动生成，其他平台需手动设置） |
 
 ::: warning
-`DB_TYPE` 必须与实际数据库一致：`tidb` 配 MySQL 协议连接串，`pg` 配 PostgreSQL 协议连接串
+`DB_TYPE` 必须与实际数据库一致：`tidb` 配 MySQL 协议连接串，`mariadb` 配 `mariadb://` 连接串，`pg` 配 PostgreSQL 协议连接串
 :::
 
 ## 服务（自托管）
@@ -50,7 +50,7 @@ CLOUDFLARE_ACCOUNT_ID=xxx
 Vercel：Settings → Environment Variables；EdgeOne：Makers 控制台运行时环境变量。
 
 ```env
-DB_TYPE=tidb                        # 或 pg，不能是 d1
+DB_TYPE=tidb                        # 或 pg / mariadb，不能是 d1
 DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=你的密码
@@ -61,7 +61,7 @@ CRON_SECRET=随机密钥                # 可选
 ### 自托管（Node.js / Docker）
 
 ```env
-DB_TYPE=pg
+DB_TYPE=pg                          # 或 tidb / mariadb
 DATABASE_URL=postgresql://用户:密码@主机:端口/数据库名
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=你的密码
@@ -77,6 +77,12 @@ CRON_SECRET=随机密钥                # 可选
 
 ```
 mysql://用户名:密码@gateway01.xxxx.prod.aws.tidbcloud.com:4000/dbname?sslaccept=accept_invalid_certs
+```
+
+**MariaDB / 纯 MySQL（mariadb 驱动）**：
+
+```
+mariadb://用户名:密码@主机:端口/数据库名
 ```
 
 **PostgreSQL**：

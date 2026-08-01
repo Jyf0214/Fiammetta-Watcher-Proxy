@@ -22,7 +22,7 @@ docker run -d \
   ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
 ```
 
-- The database type is detected from the connection string (`postgresql://` or `mysql://`)
+- The database type is detected from the connection string (`postgresql://`, `mysql://` or `mariadb://`)
 - On first start it automatically creates the tables and initializes the admin — nothing else to do
 - `JWT_SECRET` is required, at least 32 chars — login fails without it
 

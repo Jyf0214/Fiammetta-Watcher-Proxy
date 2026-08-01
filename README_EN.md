@@ -16,14 +16,14 @@ LLM API proxy with multi-platform load balancing, circuit breaker recovery, and 
 - **SSE streaming** — Full support for streaming responses from major LLM platforms
 - **Admin dashboard** — Visual management for platforms, keys, model mappings, logs, and audit trails
 - **Scheduled tasks** — Auto-reset key usage, auto-discover platform models, auto-archive logs
-- **Multi-database support** — D1 / TiDB Cloud / PostgreSQL, runtime auto-switching
+- **Multi-database support** — D1 / TiDB Cloud / MariaDB / PostgreSQL / Hyperdrive, runtime auto-switching
 
 ## Architecture
 
 ```
 User request → Cloudflare Worker (proxy v1/* + Cron tasks)
              → Cloudflare Pages (admin dashboard + API routes)
-             → D1 / TiDB / PostgreSQL (via lib/prisma.ts unified factory)
+             → D1 / TiDB / MariaDB / PostgreSQL (via lib/prisma.ts unified factory)
              → KV namespace (login rate limiting + circuit breaker state)
 ```
 
@@ -31,16 +31,17 @@ User request → Cloudflare Worker (proxy v1/* + Cron tasks)
 
 Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches adapters automatically:
 
-| DB_TYPE | Database | Adapter | Protocol |
-|---------|----------|---------|----------|
-| `d1` (default) | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding |
-| `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP |
-| `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP |
-| `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP (pooled)~~ |
+| DB_TYPE | Database | Adapter | Protocol | Platforms |
+|---------|----------|---------|----------|-----------|
+| `d1` (default) | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | CF |
+| `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | All |
+| `mariadb` | MariaDB / pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-CF only (EdgeOne/Vercel/Node) |
+| `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
+| `hyperdrive` | ~~PostgreSQL via Hyperdrive~~ | ~~`@prisma/adapter-pg`~~ | ~~TCP (pooled)~~ | CF |
 
 > ⚠️ `hyperdrive` deprecated — `pg.Pool` is incompatible with Hyperdrive's transaction mode, causing requests to alternate strictly between success/failure. The recommended `postgres.js` driver cannot be bundled by OpenNext.
 
-> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
+> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-CF platforms** (CF builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 
 ## Deployment
 
@@ -112,8 +113,8 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
 | `JWT_SECRET` | JWT signing secret (auto-generated if empty) |
-| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` / `hyperdrive` |
-| `DATABASE_URL` | External database URL (required for TiDB/PG, D1 connects via binding) |
+| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` / `hyperdrive` (CF deployments); `mariadb` for non-CF platforms only |
+| `DATABASE_URL` | External database URL (required for TiDB/MariaDB/PG, D1 connects via binding) |
 
 ## Development
 
@@ -129,7 +130,7 @@ npm run test         # Run tests
 
 - **Runtime**: Cloudflare Workers + Pages (OpenNext)
 - **Framework**: Next.js 16 + React 19
-- **Database**: Cloudflare D1 / TiDB Cloud / PostgreSQL (Prisma 7 ORM + Driver Adapters)
+- **Database**: Cloudflare D1 / TiDB Cloud / MariaDB / PostgreSQL (Prisma 7 ORM + Driver Adapters)
 - **Cache**: Cloudflare KV
 - **UI**: Ant Design 6 + Tailwind CSS
 - **Charts**: Recharts

@@ -3,7 +3,7 @@
 ## 前置条件
 
 1. [Vercel 账号](https://vercel.com/signup)
-2. 远程数据库：[TiDB Cloud](https://tidbcloud.com/)（免费）或 PostgreSQL
+2. 远程数据库：[TiDB Cloud](https://tidbcloud.com/)（免费）、MariaDB 或 PostgreSQL
 3. GitHub 仓库
 
 ## 1. 导入项目
@@ -15,7 +15,7 @@ Vercel Dashboard → Add New → Project → 从 GitHub 导入仓库。框架预
 Settings → Environment Variables：
 
 ```env
-DB_TYPE=tidb                        # 或 pg；不能是 d1
+DB_TYPE=tidb                        # 或 pg / mariadb；不能是 d1
 DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=你的密码
@@ -94,6 +94,15 @@ mysql://用户名:密码@gateway01.xxxx.prod.aws.tidbcloud.com:4000/dbname?sslac
 ```
 
 `DB_TYPE=tidb`。
+
+### MariaDB / 纯 MySQL
+
+任意可远程访问的 MariaDB 或 MySQL（云厂商 RDS / 自建）：
+
+```
+DB_TYPE=mariadb
+DATABASE_URL=mariadb://用户:密码@主机:端口/数据库名
+```
 
 ### PostgreSQL
 

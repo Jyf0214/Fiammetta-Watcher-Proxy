@@ -5,14 +5,15 @@
  *   1. 根据 DB_TYPE 只生成需要的 Prisma Client（避免打包多余 WASM）
  *   2. 为未使用的方言生成空 stub 文件（webpack 静态分析需要 import 路径存在）
  *   3. 自动读取 .env（不覆盖已有环境变量；EdgeOne CLI 构建期会把项目环境变量拉取到 .env）
- *   4. MySQL/PG 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/CF 构建）且 DATABASE_URL 协议匹配时
+ *   4. MySQL/MariaDB/PG 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/CF 构建）且 DATABASE_URL 协议匹配时
  *      自动执行 prisma db push 同步表结构；本地默认不 push，需要时设置 DB_PUSH=1
  *   5. D1 由 Python 部署脚本单独处理建表，不在此处 push
  *
  * 生成目录：
- *   - prisma/schema.d1.prisma    → src/generated/d1/   （或 stub）
- *   - prisma/schema.mysql.prisma → src/generated/mysql/ （或 stub）
- *   - prisma/schema.pg.prisma    → src/generated/pg/    （或 stub）
+ *   - prisma/schema.d1.prisma      → src/generated/d1/       （或 stub）
+ *   - prisma/schema.mysql.prisma   → src/generated/mysql/    （或 stub，TiDB）
+ *   - prisma/schema.mariadb.prisma → src/generated/mariadb/  （或 stub）
+ *   - prisma/schema.pg.prisma      → src/generated/pg/       （或 stub）
  *
  * 使用方式：
  *   DB_TYPE=d1 node scripts/prepare-db.mjs
@@ -31,6 +32,7 @@ const GENERATED_ROOT = resolve(ROOT, "src", "generated");
 const DIALECTS = {
   d1: { name: "D1", file: "prisma/schema.d1.prisma", dir: "d1", needsPush: false },
   tidb: { name: "MySQL", file: "prisma/schema.mysql.prisma", dir: "mysql", needsPush: true },
+  mariadb: { name: "MariaDB", file: "prisma/schema.mariadb.prisma", dir: "mariadb", needsPush: true },
   pg: { name: "PostgreSQL", file: "prisma/schema.pg.prisma", dir: "pg", needsPush: true },
   hyperdrive: { name: "PostgreSQL", file: "prisma/schema.pg.prisma", dir: "pg", needsPush: true },
 };
@@ -63,6 +65,8 @@ function resolveDbType() {
 
   const url = process.env.DATABASE_URL || "";
   if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("mariadb://")) return "mariadb";
+  if ((process.env.MARIADB_URL || "").startsWith("mariadb://")) return "mariadb";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
 
   return "d1";
@@ -132,12 +136,16 @@ for (const [key, d] of Object.entries(DIALECTS)) {
   }
 }
 
-// ==================== 5. MySQL / PostgreSQL db push ====================
+// ==================== 5. MySQL / MariaDB / PostgreSQL db push ====================
 
 if (dialect.needsPush) {
-  const url = process.env.DATABASE_URL || "";
+  // 运行时 lib/prisma.ts 的 url 取 MARIADB_URL || DATABASE_URL，建表必须保持一致
+  const url = process.env.MARIADB_URL || process.env.DATABASE_URL || "";
   // 仅当 DATABASE_URL 协议与方言匹配时才 push，防止占位串（file:./placeholder.db）误推
-  const schemes = dbType === "tidb" ? ["mysql://", "mysqls://"] : ["postgresql://", "postgres://"];
+  let schemes = [];
+  if (dbType === "tidb") schemes = ["mysql://", "mysqls://"];
+  else if (dbType === "mariadb") schemes = ["mariadb://"];
+  else schemes = ["postgresql://", "postgres://"];
   const isRemote = schemes.some((scheme) => url.startsWith(scheme));
   // CI 环境（EdgeOne/Vercel/GitHub Actions 均带 CI=true）自动 push；本地默认不 push，
   // 防止开发者 npm install 时意外对真实数据库执行破坏性 --accept-data-loss

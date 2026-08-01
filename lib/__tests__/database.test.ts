@@ -70,6 +70,13 @@ describe("getDbKind 推断", () => {
     expect(await getDbKind()).toBe("pg");
   });
 
+  it("DB_TYPE=mariadb 时返回 mariadb", async () => {
+    const { getDbKind } = await import("../prisma");
+    process.env.DB_TYPE = "mariadb";
+    delete process.env.DATABASE_URL;
+    expect(await getDbKind()).toBe("mariadb");
+  });
+
   it("DB_TYPE=mysql 别名时返回 tidb", async () => {
     const { getDbKind } = await import("../prisma");
     process.env.DB_TYPE = "mysql";
@@ -89,6 +96,9 @@ describe("getDbKind 推断", () => {
 
     process.env.DATABASE_URL = "postgresql://user:pass@host/db";
     expect(await getDbKind()).toBe("pg");
+
+    process.env.DATABASE_URL = "mariadb://user:pass@host/db";
+    expect(await getDbKind()).toBe("mariadb");
 
     process.env.DATABASE_URL = "file:./placeholder.db";
     expect(await getDbKind()).toBe("d1");

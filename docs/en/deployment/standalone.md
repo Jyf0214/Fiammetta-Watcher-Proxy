@@ -11,7 +11,7 @@ This guide matches the `canary` branch. The `main` / `stable` branches are older
 | Dependency | Notes |
 |------------|-------|
 | Node.js | 22.x |
-| Database | TiDB (`tidb`) or PostgreSQL (`pg`), remotely accessible |
+| Database | TiDB (`tidb`), MariaDB / pure MySQL (`mariadb`) or PostgreSQL (`pg`), remotely accessible |
 
 > `DB_TYPE=d1` is **not supported** for self-hosting (D1 exists only in the Cloudflare runtime).
 
@@ -57,7 +57,7 @@ EOF
 ```
 
 ::: warning Key points
-- If `DB_TYPE` is omitted it is inferred from `DATABASE_URL` (`mysql://` → `tidb`, `postgresql://` → `pg`), but setting it explicitly is recommended
+- If `DB_TYPE` is omitted it is inferred from `DATABASE_URL` (`mysql://` → `tidb`, `mariadb://` → `mariadb`, `postgresql://` → `pg`), but setting it explicitly is recommended
 - `JWT_SECRET` must be set explicitly and be at least 32 chars — login fails without it
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` are the login credentials themselves
 :::
