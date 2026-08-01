@@ -142,11 +142,21 @@ async function createPrismaInstance(
       const { Pool } = await import("pg");
 
       const hyperdrive = env?.HYPERDRIVE as { connectionString: string } | undefined;
-      if (!hyperdrive?.connectionString) {
+      // 兼容入口同步到 process.env 的场景（业务模块只把 { DB, DB_TYPE } 传给 createDb，
+      // Worker/Pages 入口会把完整 env（含 HYPERDRIVE binding）写入 process.env）
+      let resolved = hyperdrive;
+      if (!resolved?.connectionString && process.env.HYPERDRIVE) {
+        try {
+          resolved = JSON.parse(process.env.HYPERDRIVE);
+        } catch {
+          // 忽略损坏的 JSON，走下方报错
+        }
+      }
+      if (!resolved?.connectionString) {
         throw new Error("HYPERDRIVE binding 未配置（请检查 Cloudflare 绑定的名称是否叫 HYPERDRIVE）");
       }
 
-      const pool = new Pool({ connectionString: hyperdrive.connectionString, max: 1 });
+      const pool = new Pool({ connectionString: resolved.connectionString, max: 1 });
       const adapter = new PrismaPg(pool);
       return new PrismaClient({ adapter });
     }

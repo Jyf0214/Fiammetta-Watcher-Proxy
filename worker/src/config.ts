@@ -10,9 +10,14 @@
 
 import { createDb } from "@/lib/prisma";
 
-/** Worker 环境变量类型（仅需 DB_TYPE） */
+/** Worker 环境变量类型 */
 export interface WorkerEnv {
   DB_TYPE?: string;
+  DATABASE_URL?: string;
+  TIDB_URL?: string;
+  PG_URL?: string;
+  MARIADB_URL?: string;
+  HYPERDRIVE?: { connectionString: string };
 }
 
 /**

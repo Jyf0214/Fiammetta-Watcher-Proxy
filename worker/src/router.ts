@@ -10,7 +10,7 @@
 
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys } from "./platform-keys";
-import { selectPlatform, cleanupStaleBreakers } from "./load-balancer";
+import { selectPlatform, cleanupStaleBreakers, syncCircuitBreakersFromDatabase } from "./load-balancer";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
 import { getConfig } from "./config";
 import type { WorkerEnv } from "./config";
@@ -160,8 +160,10 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
   autoModelId = autoConfigValue;
   lastRefresh = Date.now();
 
-  // 清理已删除平台的断路器条目
+  // 清理已删除平台的断路器条目，并从数据库同步熔断器状态
+  // （管理后台手动恢复平台后，内存熔断条目在此被清除，避免与库不一致）
   cleanupStaleBreakers(platformRows.map((p: any) => p.id));
+  await syncCircuitBreakersFromDatabase(db, env);
   } catch (err) {
     console.error("[router] 缓存刷新失败:", err instanceof Error ? err.message : String(err));
   }

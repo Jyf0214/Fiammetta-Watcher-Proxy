@@ -12,6 +12,7 @@
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted } from "./platform-keys";
 import { recordSuccess, recordFailure } from "./load-balancer";
+import { keyFingerprint } from "@/lib/key-status";
 import {
   checkPlatformRpm,
   checkPlatformTpm,
@@ -35,15 +36,6 @@ const PRIVATE_IP_PATTERNS = [
   /^127\./,
   /^0\./,
 ];
-
-/** Key 哈希摘要（日志脱敏用） */
-function keyFingerprint(key: string): string {
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) {
-    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash).toString(16).padStart(8, "0");
-}
 
 /**
  * 校验上游 URL 是否安全（防 SSRF）
@@ -502,8 +494,8 @@ export async function proxyV1Request(
 
     // ── 429 响应：封禁当前 Key 并尝试切换 ──
     if (attempt < MAX_429_RETRIES) {
-      // 封禁该 Key 5 分钟
-      banKey(currentKey);
+      // 封禁该 Key 5 分钟（内存 + KV 持久化，管理后台可见）
+      await banKey(currentKey, undefined, currentPlatform.id, env.KV);
       console.log(
         `${logTag} 上游 429 (平台: ${currentPlatform.name}, key: fingerprint:${keyFingerprint(currentKey)}, attempt: ${attempt + 1}/${MAX_429_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
       );

@@ -10,6 +10,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
+import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 
 /**
  * GET /api/admin/platforms — 获取平台列表
@@ -34,9 +35,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
       });
 
+      // 读取 KV 中持久化的密钥状态（封禁/降级），非 CF 环境容错为空
+      let kv: KVNamespace | undefined;
+      try {
+        const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+        kv = getCloudflareContext().env.KV as KVNamespace | undefined;
+      } catch {
+        // 本地开发或非 CF 环境没有 KV binding
+      }
+
+      const keyStatusesByPlatform: Record<string, PlatformKeyStatus> = {};
+      if (kv) {
+        await Promise.all(
+          platforms.map(async (p) => {
+            keyStatusesByPlatform[p.id] = await readPlatformKeyStatus(kv, p.id);
+          })
+        );
+      }
+
+      const data = platforms.map((p) => ({
+        ...p,
+        keyStatuses: keyStatusesByPlatform[p.id] ?? {},
+      }));
+
       return res.status(200).json({
         success: true,
-        data: platforms,
+        data,
         total: platforms.length,
       });
     } catch (err) {

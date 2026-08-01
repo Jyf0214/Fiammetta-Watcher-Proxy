@@ -196,7 +196,11 @@ async function updatePlatformStatus(
 }
 
 /**
- * 启动时从数据库同步熔断器状态
+ * 从数据库同步熔断器状态（Worker 冷启动或缓存刷新时调用）
+ *
+ * - down：按 cooldownEnd 是否过期映射为 open / half-open
+ * - degraded：closed（半失败状态，仅记录失败计数）
+ * - healthy：清除内存中的熔断条目（手动恢复或熔断恢复后，避免与库不一致）
  */
 export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
@@ -215,7 +219,8 @@ export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: Work
 
     for (const p of platforms) {
       if (p.status === "down") {
-        const cooldownMs = p.cooldownEnd ?? 0;
+        // 库中 cooldownEnd 为秒级时间戳，先转为毫秒再比较
+        const cooldownMs = (p.cooldownEnd ?? 0) * 1000;
         const isExpired = cooldownMs <= now;
 
         breakers.set(p.id, {
@@ -236,6 +241,10 @@ export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: Work
           halfOpenAttempts: 0,
           halfOpenPending: 0,
         });
+        syncedCount++;
+      } else if (p.status === "healthy" && breakers.has(p.id)) {
+        // 库中已恢复健康（手动恢复/熔断恢复）→ 清除内存熔断状态
+        breakers.delete(p.id);
         syncedCount++;
       }
     }

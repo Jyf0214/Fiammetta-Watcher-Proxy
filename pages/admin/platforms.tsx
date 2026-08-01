@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
+import { keyFingerprint } from "@/lib/key-status";
 
 interface Platform {
   id: string;
@@ -36,12 +37,70 @@ interface Platform {
   tpmLimit: number | null;
   forwardHeaders: string;
   status: string;
+  failCount?: number;
+  /** 密钥状态映射（fingerprint → 状态），由 API 从 KV 读取 */
+  keyStatuses?: Record<string, { status: string; expireAt: number | null }>;
 }
 
 interface NamedApiKey {
   name: string;
   key: string;
   whitelisted?: boolean;
+}
+
+/** 密钥运行状态配置 */
+const KEY_STATUS_CONFIG: Record<string, { color: string; label: string }> = {
+  normal: { color: "green", label: "正常" },
+  banned: { color: "red", label: "封禁" },
+  deprioritized: { color: "orange", label: "降级" },
+};
+
+/** 解析平台密钥列表（主密钥 + 附加密钥，统一为 NamedApiKey 格式） */
+function parseNamedKeys(platform: Platform): NamedApiKey[] {
+  const parsed: NamedApiKey[] = [];
+  if (platform.apiKeys) {
+    try {
+      const arr = JSON.parse(platform.apiKeys);
+      if (Array.isArray(arr) && arr.length > 0) {
+        if (typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
+          arr.forEach((item: { name?: string; key: string; whitelisted?: boolean }) => {
+            if (item && typeof item.key === "string" && item.key.trim()) {
+              parsed.push({
+                name: item.name || `密钥${parsed.length + 1}`,
+                key: item.key,
+                whitelisted: !!item.whitelisted,
+              });
+            }
+          });
+        } else {
+          arr.forEach((key: string, idx: number) => {
+            if (typeof key === "string" && key.trim()) {
+              parsed.push({ name: `密钥${idx + 1}`, key });
+            }
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  if (parsed.length === 0 && platform.apiKey && platform.apiKey.trim()) {
+    parsed.push({ name: "主密钥", key: platform.apiKey });
+  }
+  return parsed;
+}
+
+/** 计算密钥运行状态（normal / banned / deprioritized） */
+function getKeyStatus(platform: Platform, key: string): "normal" | "banned" | "deprioritized" {
+  const st = platform.keyStatuses?.[keyFingerprint(key)];
+  if (!st) return "normal";
+  if (st.status === "banned") return "banned";
+  if (st.status === "deprioritized") return "deprioritized";
+  return "normal";
+}
+
+/** 单个密钥状态标签 */
+function KeyStatusTag({ status }: { status: "normal" | "banned" | "deprioritized" }) {
+  const cfg = KEY_STATUS_CONFIG[status];
+  return <Tag color={cfg.color} className="!text-[10px] !px-1.5 !py-0 !m-0">{cfg.label}</Tag>;
 }
 
 /** 移动端平台卡片 */
@@ -92,6 +151,23 @@ function PlatformCard({
             <span className="text-[11px] text-zinc-600 dark:text-zinc-300">优先级 {platform.priority} · 权重 {platform.weight}</span>
           </div>
         )}
+        {(() => {
+          const keys = parseNamedKeys(platform);
+          if (keys.length === 0) return null;
+          return (
+            <div className="flex items-start gap-2">
+              <span className="text-[11px] text-zinc-400 w-12 shrink-0">密钥</span>
+              <div className="flex flex-wrap gap-x-2 gap-y-1 min-w-0">
+                {keys.map((k, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 min-w-0">
+                    <span className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate max-w-[90px]">{k.name}</span>
+                    <KeyStatusTag status={getKeyStatus(platform, k.key)} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
       <div className="flex border-t border-zinc-100 dark:border-zinc-800">
         <button onClick={() => onModels(platform)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
@@ -547,38 +623,7 @@ export default function PlatformsPage() {
 
   const openEditForm = (platform: Platform) => {
     setEditing(platform);
-    const parsed: NamedApiKey[] = [];
-    // 优先从 apiKeys 读取（统一格式，含 whitelisted 标记）
-    if (platform.apiKeys) {
-      try {
-        const arr = JSON.parse(platform.apiKeys);
-        if (Array.isArray(arr) && arr.length > 0) {
-          // 对象数组格式 [{name, key, whitelisted?}]
-          if (typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
-            arr.forEach((item: { name?: string; key: string; whitelisted?: boolean }) => {
-              if (item && typeof item.key === "string" && item.key.trim()) {
-                parsed.push({
-                  name: item.name || `密钥${parsed.length + 1}`,
-                  key: item.key,
-                  whitelisted: !!item.whitelisted,
-                });
-              }
-            });
-          } else {
-            // 旧格式：字符串数组
-            arr.forEach((key: string, idx: number) => {
-              if (typeof key === "string" && key.trim()) {
-                parsed.push({ name: `密钥${idx + 1}`, key });
-              }
-            });
-          }
-        }
-      } catch { /* ignore */ }
-    }
-    // 兼容：如果 apiKeys 为空但 apiKey 存在（旧数据）
-    if (parsed.length === 0 && platform.apiKey && platform.apiKey.trim()) {
-      parsed.push({ name: "主密钥", key: platform.apiKey });
-    }
+    const parsed = parseNamedKeys(platform);
     if (parsed.length === 0) parsed.push({ name: "密钥1", key: "" });
     setNamedKeys(parsed);
     form.setFieldsValue(platform);
@@ -784,8 +829,34 @@ export default function PlatformsPage() {
 
   const columns: TableColumnsType<Platform> = [
     { title: t("platform.name"), dataIndex: "name", key: "name", width: 140, ellipsis: true },
+    {
+      title: t("common.status"), key: "status", width: 110, align: "center", responsive: ["md"],
+      render: (_: unknown, record: Platform) => (
+        <div className="flex items-center justify-center gap-1.5">
+          <Tag color={record.status === "healthy" ? "green" : record.status === "degraded" ? "orange" : "red"} className="!text-[10px] !px-1.5 !py-0 !m-0">{record.status}</Tag>
+          {(record.failCount ?? 0) > 0 && <span className="text-[10px] text-zinc-400">×{record.failCount}</span>}
+        </div>
+      ),
+    },
     { title: t("platform.base_url"), dataIndex: "baseUrl", key: "baseUrl", ellipsis: true, responsive: ["md"] },
     { title: t("platform.type"), dataIndex: "type", key: "type", width: 100, render: (v: string) => <Tag>{v}</Tag>, responsive: ["sm"] },
+    {
+      title: "密钥", key: "keys", width: 220, responsive: ["lg"],
+      render: (_: unknown, record: Platform) => {
+        const keys = parseNamedKeys(record);
+        if (keys.length === 0) return <span className="text-xs text-zinc-400">-</span>;
+        return (
+          <div className="flex flex-wrap gap-x-2 gap-y-1">
+            {keys.map((k, i) => (
+              <span key={i} className="inline-flex items-center gap-1 min-w-0">
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate max-w-[90px]">{k.name}</span>
+                <KeyStatusTag status={getKeyStatus(record, k.key)} />
+              </span>
+            ))}
+          </div>
+        );
+      },
+    },
     { title: t("platform.priority"), dataIndex: "priority", key: "priority", width: 80, align: "center", responsive: ["lg"] },
     { title: t("platform.weight"), dataIndex: "weight", key: "weight", width: 80, align: "center", responsive: ["lg"] },
     { title: t("platform.rpm_limit"), dataIndex: "rpmLimit", key: "rpmLimit", width: 100, align: "center", render: (v: number | null) => v ?? "-", responsive: ["xl"] },
@@ -846,7 +917,7 @@ export default function PlatformsPage() {
           <ProCard>
             <ResponsiveTable columns={columns} dataSource={platforms} rowKey="id" loading={loading}
               pagination={{ pageSize: 20, showTotal: (total) => t("common.pagination_total", { count: total }) }}
-              scroll={{ x: 900 }}
+              scroll={{ x: 1200 }}
             />
           </ProCard>
         </div>

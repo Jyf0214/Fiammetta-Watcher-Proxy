@@ -4,9 +4,21 @@
  * 测试 Round-robin 密钥轮询逻辑
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { getAllKeys, getNextKey, parseApiKeys } from "../platform-keys";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { getAllKeys, getNextKey, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist } from "../platform-keys";
+import { keyStatusKey } from "@/lib/key-status";
 import type { PlatformConfig } from "@/lib/types";
+
+// loadWhitelist / loadKeyStatusFromKV 内部通过 createDb 查库，这里替换为内存 mock
+vi.mock("@/lib/prisma", () => ({
+  createDb: vi.fn(async () => ({
+    platforms: {
+      findMany: async () => [
+        { apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]) },
+      ],
+    },
+  })),
+}));
 
 function makePlatform(overrides: Partial<PlatformConfig> = {}): PlatformConfig {
   return {
@@ -149,5 +161,58 @@ describe("parseApiKeys", () => {
 
   it("非数组 JSON 返回空数组", () => {
     expect(parseApiKeys('{"key":"value"}')).toEqual([]);
+  });
+});
+
+// ==================== banKey KV 持久化 ====================
+
+/** 内存版 KV mock（仅实现 get/put） */
+function makeMockKv(): KVNamespace & { store: Map<string, string> } {
+  const store = new Map<string, string>();
+  return {
+    store,
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+  } as unknown as KVNamespace & { store: Map<string, string> };
+}
+
+describe("banKey KV 持久化", () => {
+  it("普通 Key 封禁后写入 KV（指纹维度）", async () => {
+    const kv = makeMockKv();
+    await banKey("sk-banned", undefined, "platform-1", kv);
+
+    expect(isKeyBanned("sk-banned")).toBe(true);
+
+    const raw = kv.store.get(keyStatusKey("platform-1"));
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw!);
+    const entries = Object.entries(parsed);
+    expect(entries.length).toBe(1);
+    const [fp, value] = entries[0];
+    expect(fp).toMatch(/^[0-9a-f]{8}$/);
+    expect((value as any).status).toBe("banned");
+    expect((value as any).expireAt).toBeGreaterThan(Date.now());
+  });
+
+  it("白名单 Key 收到 429 后写入降级状态而非封禁", async () => {
+    const kv = makeMockKv();
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    await banKey("sk-whitelisted", undefined, "platform-1", kv);
+
+    expect(isKeyBanned("sk-whitelisted")).toBe(false);
+    expect(isKeyDeprioritized("sk-whitelisted")).toBe(true);
+
+    const raw = kv.store.get(keyStatusKey("platform-1"));
+    const parsed = JSON.parse(raw!);
+    const value = Object.values(parsed)[0] as any;
+    expect(value.status).toBe("deprioritized");
+  });
+
+  it("不传 KV 时仅更新内存态（兼容旧调用）", async () => {
+    await banKey("sk-memory-only");
+    expect(isKeyBanned("sk-memory-only")).toBe(true);
   });
 });

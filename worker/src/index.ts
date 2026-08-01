@@ -14,7 +14,7 @@ import { classifyCronExpression } from "./types";
 import { fetchAllPlatformModels } from "./model-fetcher";
 import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
-import { loadWhitelist } from "./platform-keys";
+import { loadWhitelist, loadKeyStatusFromKV } from "./platform-keys";
 import type { WorkerEnv } from "./config";
 
 export interface Env extends WorkerEnv {
@@ -25,23 +25,43 @@ export interface Env extends WorkerEnv {
 /** 白名单是否已加载（内存态，Worker 冷启动后首次请求时加载） */
 let whitelistLoaded = false;
 
+/**
+ * 将 Worker 环境变量同步到 process.env
+ *
+ * lib/prisma.ts 的数据库类型解析同时读取 env 对象与 process.env，
+ * 而各业务模块只把 { DB, DB_TYPE } 传给 createDb，DATABASE_URL 等
+ * Secret/Var 不会进入解析链，导致 Worker 永远推断为 d1（状态写入错误的库）。
+ * 在入口统一同步，保证所有 createDb 调用都能解析到正确的数据库类型。
+ */
+function syncWorkerEnv(env: Env): void {
+  if (env.DB_TYPE) process.env.DB_TYPE = env.DB_TYPE;
+  if (env.DATABASE_URL) process.env.DATABASE_URL = env.DATABASE_URL;
+  if (env.TIDB_URL) process.env.TIDB_URL = env.TIDB_URL;
+  if (env.PG_URL) process.env.PG_URL = env.PG_URL;
+  if (env.MARIADB_URL) process.env.MARIADB_URL = env.MARIADB_URL;
+  if (env.HYPERDRIVE) process.env.HYPERDRIVE = JSON.stringify(env.HYPERDRIVE);
+}
+
 export default {
   /**
    * HTTP 请求处理 — 代理 /v1/* 路由
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // 将 Worker 环境变量写入 process.env，供 lib/prisma.ts 工厂函数读取
-    if (env.DB_TYPE) process.env.DB_TYPE = env.DB_TYPE;
+    syncWorkerEnv(env);
 
     const url = new URL(request.url);
 
     try {
-      // 首次请求时加载白名单（懒初始化）
+      // 首次请求时加载白名单与 Key 封禁状态（懒初始化）
       if (!whitelistLoaded) {
         whitelistLoaded = true;
-        ctx.waitUntil(loadWhitelist(env.DB, env).catch((err) => {
-          console.error("[worker] 白名单加载失败:", err);
-        }));
+        ctx.waitUntil(
+          Promise.allSettled([
+            loadWhitelist(env.DB, env),
+            loadKeyStatusFromKV(env.DB, env.KV, env),
+          ])
+        );
       }
 
       // 健康检查端点
@@ -90,6 +110,9 @@ export default {
    * 日志归档（每天凌晨 3 点）
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    // 与 fetch 入口一致，先同步环境变量（Cron 触发时同样需要正确的数据库连接）
+    syncWorkerEnv(env);
+
     const task = classifyCronExpression(event.cron);
 
     switch (task) {

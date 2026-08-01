@@ -7,6 +7,7 @@
 
 import type { PlatformConfig } from "@/lib/types";
 import type { WorkerEnv } from "./config";
+import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus } from "@/lib/key-status";
 
 /** 命名密钥格式 */
 export interface NamedApiKey {
@@ -92,14 +93,33 @@ const DEFAULT_KEY_BAN_MS = 5 * 60 * 1000; // 5 分钟
 /**
  * 封禁指定 Key（收到429时调用）
  * 白名单 Key 不会被封禁，只会被临时降级
+ *
+ * 状态同时写入 KV（按平台维度持久化），供管理后台展示实时密钥状态；
+ * 内存 Map 为快速判断层，冷启动后通过 loadKeyStatusFromKV 从 KV 恢复。
  */
-export function banKey(key: string, durationMs: number = DEFAULT_KEY_BAN_MS): void {
+export async function banKey(
+  key: string,
+  durationMs: number = DEFAULT_KEY_BAN_MS,
+  platformId?: string,
+  kv?: KVNamespace
+): Promise<void> {
+  const fp = keyFingerprint(key);
+
   if (isKeyWhitelisted(key)) {
     // 白名单 Key：不封禁，只降级
-    whitelistedKeyCooldowns.set(key, Date.now() + WHITELISTED_KEY_COOLDOWN_MS);
+    const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
+    whitelistedKeyCooldowns.set(key, expireAt);
+    if (platformId && kv) {
+      await writePlatformKeyStatus(kv, platformId, fp, { status: "deprioritized", expireAt });
+    }
     return;
   }
-  keyCooldowns.set(key, Date.now() + durationMs);
+
+  const expireAt = Date.now() + durationMs;
+  keyCooldowns.set(key, expireAt);
+  if (platformId && kv) {
+    await writePlatformKeyStatus(kv, platformId, fp, { status: "banned", expireAt });
+  }
 }
 
 /**
@@ -128,6 +148,53 @@ export function isKeyDeprioritized(key: string): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * 从 KV 恢复 Key 封禁/降级状态到内存（冷启动后调用）
+ *
+ * KV 中只存密钥指纹，需要结合平台密钥明文计算指纹后才能映射回内存 Map。
+ */
+export async function loadKeyStatusFromKV(
+  db: D1Database,
+  kv: KVNamespace,
+  env?: WorkerEnv
+): Promise<void> {
+  try {
+    const { createDb } = await import("@/lib/prisma");
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const platforms = await prisma.platforms.findMany({
+      select: { id: true, apiKey: true, apiKeys: true },
+    });
+
+    let loaded = 0;
+    for (const p of platforms) {
+      const statuses = await readPlatformKeyStatus(kv, p.id);
+      if (Object.keys(statuses).length === 0) continue;
+
+      const keys = getAllKeys({
+        apiKey: p.apiKey,
+        apiKeys: parseApiKeys(p.apiKeys),
+      } as PlatformConfig);
+
+      for (const k of keys) {
+        const st = statuses[keyFingerprint(k)];
+        if (!st) continue;
+        if (st.status === "banned") {
+          keyCooldowns.set(k, st.expireAt);
+        } else {
+          whitelistedKeyCooldowns.set(k, st.expireAt);
+        }
+        loaded++;
+      }
+    }
+
+    if (loaded > 0) {
+      console.log(`[platform-keys] 已从 KV 恢复 ${loaded} 个 Key 状态`);
+    }
+  } catch (err) {
+    console.error("[platform-keys] 从 KV 加载 Key 状态失败:", err instanceof Error ? err.message : String(err));
+  }
 }
 
 /**

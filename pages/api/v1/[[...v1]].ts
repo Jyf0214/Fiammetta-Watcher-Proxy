@@ -47,7 +47,48 @@ function sanitizeUpstreamError(text: string, status: number): string {
   catch { return JSON.stringify({ error: { message: "上游服务返回未知错误", type: "upstream_error", upstream_status: status } }); }
 }
 
-function createPagesEnv(): WorkerEnv { return { DB_TYPE: process.env.DB_TYPE }; }
+/**
+ * 解析 Pages 运行时环境变量（含 DATABASE_URL 等 Secret）
+ *
+ * 之前只传 { DB_TYPE: process.env.DB_TYPE }，数据库连接 URL 永远不会进入
+ * lib/prisma.ts 的解析链，导致 Pages 侧 v1 代理被推断为 d1 并连接错误的库。
+ * 改为从 Cloudflare Context 取完整 env，并同步到 process.env（与 Worker 入口一致）。
+ */
+let pagesEnvPromise: Promise<WorkerEnv & { KV?: KVNamespace }> | null = null;
+
+async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
+  try {
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    const { env } = getCloudflareContext() as { env: Record<string, any> };
+    if (env.DB_TYPE) process.env.DB_TYPE = env.DB_TYPE;
+    if (env.DATABASE_URL) process.env.DATABASE_URL = env.DATABASE_URL;
+    if (env.TIDB_URL) process.env.TIDB_URL = env.TIDB_URL;
+    if (env.PG_URL) process.env.PG_URL = env.PG_URL;
+    if (env.MARIADB_URL) process.env.MARIADB_URL = env.MARIADB_URL;
+    return {
+      DB_TYPE: env.DB_TYPE,
+      DATABASE_URL: env.DATABASE_URL,
+      TIDB_URL: env.TIDB_URL,
+      PG_URL: env.PG_URL,
+      MARIADB_URL: env.MARIADB_URL,
+      KV: env.KV,
+    };
+  } catch {
+    // 本地开发或非 CF 环境：回退 process.env
+    return {
+      DB_TYPE: process.env.DB_TYPE,
+      DATABASE_URL: process.env.DATABASE_URL,
+      TIDB_URL: process.env.TIDB_URL,
+      PG_URL: process.env.PG_URL,
+      MARIADB_URL: process.env.MARIADB_URL,
+    };
+  }
+}
+
+function createPagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
+  if (!pagesEnvPromise) pagesEnvPromise = resolvePagesEnv();
+  return pagesEnvPromise;
+}
 const dummyDb = {} as D1Database;
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -82,7 +123,7 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
 }
 
 async function handleModelsList(res: NextApiResponse): Promise<void> {
-  const env = createPagesEnv();
+  const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
   const models: Array<{ id: string; object: string; owned_by: string }> = [];
   const pc = getPlatformCache(), pm = getPlatformModelCache();
@@ -94,7 +135,7 @@ async function handleModelsList(res: NextApiResponse): Promise<void> {
 }
 
 async function handleModelDetail(modelId: string, res: NextApiResponse): Promise<void> {
-  const env = createPagesEnv();
+  const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
   const pc = getPlatformCache(), pm = getPlatformModelCache();
   for (const [pid, ms] of pm) {
@@ -108,7 +149,7 @@ async function handleModelDetail(modelId: string, res: NextApiResponse): Promise
 
 async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, config: ProxyConfig, apiKey: ApiKeyRecord): Promise<void> {
   const startTime = Date.now();
-  const env = createPagesEnv();
+  const env = await createPagesEnv();
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
 
   const parseResult = await parseRequestBody<Record<string, unknown>>(req);
@@ -170,7 +211,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (upRes.status !== 429) { await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, logTag, res); return; }
 
     if (attempt < MAX_429) {
-      banKey(curKey);
+      await banKey(curKey, undefined, cur.id, env?.KV);
       const nk = getRandomKeyExcept(cur, tried);
       if (nk) { curKey = nk; continue; }
       const ops = getPlatformsForModel(tgt, triedP);
@@ -216,7 +257,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(decodeURIComponent(full.slice("/v1/models/".length)), res); }
     const cfg = getEndpointConfig(full);
     if (!cfg) { res.status(404).json({ error: { message: "不支持的 API 端点", type: "invalid_request_error" } }); return; }
-    const auth = await validateApiKey(req.headers.authorization || null, dummyDb, createPagesEnv());
+    const env = await createPagesEnv();
+    const auth = await validateApiKey(req.headers.authorization || null, dummyDb, env);
     if ("error" in auth) { const e = auth.error; res.status(e.status).json(await e.json()); return; }
     await proxyV1RequestPages(req, res, cfg, auth.apiKey);
   } catch (err) { console.error("[v1-proxy] 未捕获异常:", err); res.status(500).json({ error: { message: "服务器内部错误", type: "server_error" } }); }
