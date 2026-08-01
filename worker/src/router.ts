@@ -281,10 +281,12 @@ export async function routeRequest(
       ) ?? null;
   } else {
     // 收集所有支持该模型的平台，做负载均衡
+    // 用 targetModel 匹配：模型映射的别名（如 my-deepseek）不在平台模型缓存中，
+    // 缓存里存的是真实上游模型名（如 deepseek-chat），与 429 重试路径 getPlatformsForModel 一致
     const candidatePlatforms: PlatformConfig[] = [];
     for (const platform of platformCache) {
       const models = platformModelCache.get(platform.id);
-      if (models && models.has(requestedModel)) {
+      if (models && models.has(targetModel)) {
         candidatePlatforms.push(platform);
       }
     }
@@ -292,8 +294,8 @@ export async function routeRequest(
     if (candidatePlatforms.length > 0) {
       selectedPlatform = selectPlatform(candidatePlatforms);
     } else {
-      // 没有平台直接支持，使用加权轮询（可能触发上游报错）
-      selectedPlatform = selectPlatform(platformCache);
+      // 没有任何平台支持该模型（系统中不存在的模型）：不请求上游，直接视为无可用平台
+      selectedPlatform = null;
     }
   }
 

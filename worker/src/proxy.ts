@@ -227,8 +227,8 @@ export async function proxyV1Request(
 
   if (!route) {
     return Response.json(
-      { error: { message: "没有可用的上游平台", type: "server_error" } },
-      { status: 503 }
+      { error: { message: "此模型不存在", type: "server_error" } },
+      { status: 500 }
     );
   }
 

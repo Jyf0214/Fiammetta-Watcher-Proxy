@@ -159,7 +159,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const modelName = body.model as string | undefined;
   const requestedModel = modelName || "unknown";
   const route = modelName ? await routeRequest(modelName, dummyDb, env) : await routeRequest("__any__", dummyDb, env);
-  if (!route) { res.status(503).json({ error: { message: "没有可用的上游平台", type: "server_error" } }); return; }
+  if (!route) { res.status(500).json({ error: { message: "此模型不存在", type: "server_error" } }); return; }
 
   const pRpm = await checkPlatformRpm(route.platform.id, route.platform.rpmLimit);
   if (!pRpm.allowed) { res.status(429).json({ error: { message: "上游平台请求频率超限", type: "rate_limit_error", retry_after: Math.ceil((pRpm.resetAt - Date.now()) / 1000) } }); return; }
