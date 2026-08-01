@@ -52,6 +52,7 @@ function resolveDbType() {
   const url = process.env.DATABASE_URL || "";
   if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
   if (url.startsWith("mariadb://")) return "mariadb";
+  if ((process.env.MARIADB_URL || "").startsWith("mariadb://")) return "mariadb";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
   return "d1";
 }
@@ -139,15 +140,15 @@ async function main() {
 
   if (dbType === "tidb") {
     const { connect } = await import("@tidbcloud/serverless");
+    // connect() 返回无状态 Connection：无 close 方法（StatefulConnection 才有），
+    // 每次 execute 是独立 HTTP 请求，脚本退出即释放，无需显式关闭。
+    // execute 默认直接返回行数组（fullResult 时才是 { rows, ... }），两种形态都要兼容。
     const conn = await connect({ url });
-    try {
-      const res = await conn.execute("SELECT id, api_key, api_keys FROM platforms");
-      await migrateRows(res.rows || [], async (id, apiKeys) => {
-        await conn.execute("UPDATE platforms SET api_keys = ? WHERE id = ?", [apiKeys, id]);
-      });
-    } finally {
-      await conn.close();
-    }
+    const res = await conn.execute("SELECT id, api_key, api_keys FROM platforms");
+    const rows = Array.isArray(res) ? res : res.rows || [];
+    await migrateRows(rows, async (id, apiKeys) => {
+      await conn.execute("UPDATE platforms SET api_keys = ? WHERE id = ?", [apiKeys, id]);
+    });
   } else if (dbType === "mariadb") {
     const mariadb = await import("mariadb");
     const pool = await mariadb.createPool({ uri: url, connectionLimit: 1 });
@@ -184,7 +185,11 @@ main().catch((err) => {
     process.exit(0);
   }
   // platforms 表不存在（全新库，db push 尚未建表）：正常跳过
-  if (/doesn't exist|does not exist|no such table|not found/i.test(msg)) {
+  // 必须同时命中表/关系语义，避免把 pg 的 database "xxx" does not exist 误判为表缺失
+  if (
+    /no such table|doesn't exist|does not exist/i.test(msg) &&
+    /table|relation|platforms/i.test(msg)
+  ) {
     console.log("[migrate-platform-keys] platforms 表不存在，跳过迁移（全新库）");
     process.exit(0);
   }
