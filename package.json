@@ -70,6 +70,13 @@
     "wrangler": "^4.113.0"
   },
   "overrides": {
-    "cloudflare": "4.4.1"
+    "cloudflare": "4.4.1",
+    "next": {
+      "postcss": "8.5.25",
+      "sharp": "0.35.3"
+    },
+    "vitepress": {
+      "vite": "6.4.3"
+    }
   }
 }
