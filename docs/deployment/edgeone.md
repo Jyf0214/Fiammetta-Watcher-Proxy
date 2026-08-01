@@ -66,7 +66,7 @@ curl -X GET https://你的域名/api/cron/model-fetch \
 
 | 检查项 | 方法 |
 |--------|------|
-| 健康检查 | `https://你的域名/api/health` → `{"status":"ok",...}` |
+| 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://你的域名/api/health` → `{"status":"ok",...}`（需管理员认证） |
 | 代理可用 | `curl https://你的域名/v1/models`（无 API Key 返回 401 即正常） |
 | 管理后台 | 浏览器访问 `/admin`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 |
 | 数据库 | 登录后台 → 模型/日志页面确认数据读写正常 |

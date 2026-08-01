@@ -45,7 +45,7 @@ Actions 页面 → 左侧 Deploy 工作流 → Run workflow → **分支选择 `
 
 | 检查项 | 地址 |
 |--------|------|
-| 健康检查 | `https://<项目名>.pages.dev/api/health` → `{"status":"ok",...}` |
+| 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://<项目名>.pages.dev/api/health` → `{"status":"ok",...}`（需管理员认证） |
 | 代理可用 | `https://<worker名>.<账号>.workers.dev/v1/models`（无 API Key 返回 401 即正常） |
 | 管理后台 | `https://<项目名>.pages.dev/admin`，用 Secrets 里的账号密码登录 |
 

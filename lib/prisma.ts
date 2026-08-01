@@ -144,6 +144,46 @@ async function createPrismaInstance(
 // ==================== 公开 API ====================
 
 /**
+ * 解析有效环境变量对象
+ * - 直接传入 { DB } 视为 D1 binding（兼容旧代码）
+ * - 无参调用时从 Cloudflare 上下文获取完整 env（含 DB_TYPE、DATABASE_URL）
+ */
+async function resolveEffectiveEnv(
+  env?: Record<string, unknown> | { DB: unknown }
+): Promise<Record<string, unknown> | undefined> {
+  // 兼容：如果直接传入了 D1Database binding（不是 env 对象）
+  if (env && typeof env === "object" && "DB" in env && typeof env.DB === "object" && env.DB !== null && !("DB_TYPE" in env)) {
+    return { DB: env.DB };
+  }
+
+  const resolvedEnv = env as Record<string, unknown> | undefined;
+  if (resolvedEnv) return resolvedEnv;
+
+  // Pages 无参调用时：从 Cloudflare 上下文获取完整 env（含 DB_TYPE、DATABASE_URL）
+  try {
+    const detected = await detectEnvironment();
+    if (detected.kind === "pages" && detected.pagesEnv) {
+      return detected.pagesEnv;
+    }
+  } catch {
+    // 忽略
+  }
+  return undefined;
+}
+
+/**
+ * 获取当前数据库类型（与 createDb 使用完全相同的解析逻辑）
+ *
+ * @returns d1 / tidb / pg / hyperdrive
+ */
+export async function getDbKind(
+  env?: Record<string, unknown> | { DB: unknown }
+): Promise<DbKind> {
+  const effectiveEnv = await resolveEffectiveEnv(env);
+  return resolveDbKind(effectiveEnv);
+}
+
+/**
  * 获取 PrismaClient 实例（全局缓存，Worker 生命周期内复用）
  *
  * 支持两种调用方式：
@@ -156,28 +196,7 @@ async function createPrismaInstance(
 export async function createDb(
   env?: Record<string, unknown> | { DB: unknown }
 ): Promise<Database> {
-  // 兼容：如果直接传入了 D1Database binding（不是 env 对象）
-  let resolvedEnv: Record<string, unknown> | undefined;
-  if (env && typeof env === "object" && "DB" in env && typeof env.DB === "object" && env.DB !== null && !("DB_TYPE" in env)) {
-    // 直接传入 D1Database：{ DB: d1Binding }
-    resolvedEnv = { DB: env.DB };
-  } else {
-    resolvedEnv = env as Record<string, unknown> | undefined;
-  }
-
-  // Pages 无参调用时：从 Cloudflare 上下文获取完整 env（含 DB_TYPE、DATABASE_URL）
-  let effectiveEnv = resolvedEnv;
-  if (!effectiveEnv) {
-    try {
-      const detected = await detectEnvironment();
-      if (detected.kind === "pages" && detected.pagesEnv) {
-        effectiveEnv = detected.pagesEnv;
-      }
-    } catch {
-      // 忽略
-    }
-  }
-
+  const effectiveEnv = await resolveEffectiveEnv(env);
   const dbKind = resolveDbKind(effectiveEnv);
 
   // 命中缓存则直接复用

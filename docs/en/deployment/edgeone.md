@@ -68,7 +68,7 @@ Services: Cron-job.org, UptimeRobot, GitHub Actions `schedule` trigger (example 
 
 | Check | Method |
 |-------|--------|
-| Health | `https://your-domain.com/api/health` → `{"status":"ok",...}` |
+| Health | `curl -H "Authorization: Bearer <system-api-key>" https://your-domain.com/api/health` → `{"status":"ok",...}` (admin auth required) |
 | Proxy | `curl https://your-domain.com/v1/models` (401 without API Key is expected) |
 | Admin panel | `/admin`, log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` |
 | Database | Open Models / Logs pages in the admin panel and confirm reads/writes work |

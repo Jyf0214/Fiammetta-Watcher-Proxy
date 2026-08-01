@@ -151,12 +151,12 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/admin/config` | PUT | 更新系统配置 |
 | `/api/admin/export` | GET | 导出数据（支持 type 参数） |
 | `/api/admin/import` | POST | 导入数据 |
+| `/api/health` | GET | 健康检查（数据库类型与连接状态，需管理员认证） |
 
 ### 公开 API（无需认证）
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/health` | GET | 健康检查 |
 | `/api/config` | GET | 获取公开配置 |
 | `/api/setup/status` | GET | 检查初始化状态 |
 | `/api/setup/configure` | POST | 首次配置（设置数据库和管理员） |

@@ -45,7 +45,7 @@ It automatically: creates the database and cache resources → builds → deploy
 
 | Check | URL |
 |-------|-----|
-| Health | `https://<project>.pages.dev/api/health` → `{"status":"ok",...}` |
+| Health | `curl -H "Authorization: Bearer <system-api-key>" https://<project>.pages.dev/api/health` → `{"status":"ok",...}` (admin auth required) |
 | Proxy | `https://<worker>.<account>.workers.dev/v1/models` (401 without API Key is expected) |
 | Admin panel | `https://<project>.pages.dev/admin`, log in with the credentials from Secrets |
 

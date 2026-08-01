@@ -151,12 +151,12 @@ Admin APIs require JWT authentication (via `admin_token` cookie).
 | `/api/admin/config` | PUT | Update system config |
 | `/api/admin/export` | GET | Export data (supports type parameter) |
 | `/api/admin/import` | POST | Import data |
+| `/api/health` | GET | Health check (db type + connection status, admin auth required) |
 
 ### Public API (No Auth Required)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/health` | GET | Health check |
 | `/api/config` | GET | Get public config |
 | `/api/setup/status` | GET | Check initialization status |
 | `/api/setup/configure` | POST | First-time setup (database + admin) |
