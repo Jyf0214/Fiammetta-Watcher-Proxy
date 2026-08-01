@@ -8,57 +8,57 @@ STAGED_FILES=$(git diff --cached --name-only)
 STAGED_PRISMA=$(echo "$STAGED_FILES" | grep -E "^prisma/schema\.prisma$|^prisma/schema\.d1\.prisma$")
 STAGED_INITSQL=$(echo "$STAGED_FILES" | grep "^init.sql$")
 if [ -n "$STAGED_PRISMA" ] && [ -z "$STAGED_INITSQL" ]; then
-  echo "❌ [pre-commit] Schema 文件已修改但 init.sql 未同步提交"
+  echo "✗ [pre-commit] Schema 文件已修改但 init.sql 未同步提交"
   exit 1
 fi
 if [ -z "$STAGED_PRISMA" ] && [ -n "$STAGED_INITSQL" ]; then
-  echo "❌ [pre-commit] init.sql 已修改但 Schema 文件未同步提交"
+  echo "✗ [pre-commit] init.sql 已修改但 Schema 文件未同步提交"
   exit 1
 fi
 
-echo "🔍 [pre-commit] 代码质量检查..."
+echo "[pre-commit] 代码质量检查..."
 
 # 1. Worker TypeScript 类型检查
-echo "📝 [pre-commit] Worker TypeScript..."
+echo "[pre-commit] Worker TypeScript..."
 TSC_OUTPUT=$(cd worker && npx tsc --noEmit 2>&1)
 TSC_EXIT=$?
 echo "$TSC_OUTPUT" | head -20
 if [ $TSC_EXIT -ne 0 ]; then
-  echo "❌ [pre-commit] Worker TypeScript 类型错误，提交被阻止"
+  echo "✗ [pre-commit] Worker TypeScript 类型错误，提交被阻止"
   exit 1
 fi
-echo "✅ [pre-commit] Worker TypeScript 通过"
+echo "✓ [pre-commit] Worker TypeScript 通过"
 
 # 2. Frontend TypeScript 类型检查
 # 排除：.next/types（Next.js 16 自动生成误报）、antd（6.x 未自带类型声明）
-echo "📝 [pre-commit] Frontend TypeScript..."
+echo "[pre-commit] Frontend TypeScript..."
 TS_OUTPUT=$(npx tsc --noEmit --pretty 2>&1)
 TS_ERRORS=$(echo "$TS_OUTPUT" | grep -v "\.next/types/" | grep -v "Could not find a declaration file for module 'antd'" | grep "error TS")
 if [ -n "$TS_ERRORS" ]; then
   echo "$TS_ERRORS" | head -20
-  echo "❌ [pre-commit] Frontend TypeScript 类型错误，提交被阻止"
+  echo "✗ [pre-commit] Frontend TypeScript 类型错误，提交被阻止"
   exit 1
 fi
-echo "✅ [pre-commit] Frontend TypeScript 通过"
+echo "✓ [pre-commit] Frontend TypeScript 通过"
 
 # 3. Worker ESLint（零 warning）
-echo "🔍 [pre-commit] Worker ESLint..."
+echo "[pre-commit] Worker ESLint..."
 ESLINT_OUTPUT=$(cd worker && npx eslint src/ --max-warnings=0 2>&1)
 ESLINT_EXIT=$?
 echo "$ESLINT_OUTPUT" | head -20
 if [ $ESLINT_EXIT -ne 0 ]; then
-  echo "❌ [pre-commit] Worker ESLint 错误，提交被阻止"
+  echo "✗ [pre-commit] Worker ESLint 错误，提交被阻止"
   exit 1
 fi
-echo "✅ [pre-commit] Worker ESLint 通过"
+echo "✓ [pre-commit] Worker ESLint 通过"
 
 # 4. Frontend ESLint（零 warning）
-echo "🔍 [pre-commit] Frontend ESLint..."
+echo "[pre-commit] Frontend ESLint..."
 npx eslint pages/ lib/ --max-warnings=0 2>&1 | head -30
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-commit] Frontend ESLint 错误，提交被阻止"
+  echo "✗ [pre-commit] Frontend ESLint 错误，提交被阻止"
   exit 1
 fi
-echo "✅ [pre-commit] Frontend ESLint 通过"
+echo "✓ [pre-commit] Frontend ESLint 通过"
 
-echo "🎉 [pre-commit] 所有检查通过"
+echo "✓ [pre-commit] 所有检查通过"

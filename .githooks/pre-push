@@ -9,75 +9,75 @@ LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
 HAS_PRISMA=$(echo "$LAST_COMMIT_FILES" | grep -E "^prisma/schema\.prisma$|^prisma/schema\.d1\.prisma$")
 HAS_INITSQL=$(echo "$LAST_COMMIT_FILES" | grep "^init.sql$")
 if [ -n "$HAS_PRISMA" ] && [ -z "$HAS_INITSQL" ]; then
-  echo "❌ [pre-push] Schema 文件已修改但 init.sql 未同步提交"
+  echo "✗ [pre-push] Schema 文件已修改但 init.sql 未同步提交"
   exit 1
 fi
 if [ -z "$HAS_PRISMA" ] && [ -n "$HAS_INITSQL" ]; then
-  echo "❌ [pre-push] init.sql 已修改但 Schema 文件未同步提交"
+  echo "✗ [pre-push] init.sql 已修改但 Schema 文件未同步提交"
   exit 1
 fi
 
-echo "🚀 [pre-push] 完整构建验证..."
+echo "[pre-push] 完整构建验证..."
 
 # 1. Worker TypeScript 类型检查
-echo "📝 [pre-push] Worker TypeScript..."
+echo "[pre-push] Worker TypeScript..."
 TSC_OUTPUT=$(cd worker && npx tsc --noEmit 2>&1)
 TSC_EXIT=$?
 echo "$TSC_OUTPUT" | head -20
 if [ $TSC_EXIT -ne 0 ]; then
-  echo "❌ [pre-push] Worker TypeScript 失败，推送被阻止"
+  echo "✗ [pre-push] Worker TypeScript 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Worker TypeScript 通过"
+echo "✓ [pre-push] Worker TypeScript 通过"
 
 # 2. Frontend TypeScript 类型检查
 # 排除：.next/types（Next.js 16 自动生成误报）、antd（6.x 未自带类型声明）
-echo "📝 [pre-push] Frontend TypeScript..."
+echo "[pre-push] Frontend TypeScript..."
 TS_OUTPUT=$(npx tsc --noEmit --pretty 2>&1)
 TS_ERRORS=$(echo "$TS_OUTPUT" | grep -v "\.next/types/" | grep -v "Could not find a declaration file for module 'antd'" | grep "error TS")
 if [ -n "$TS_ERRORS" ]; then
   echo "$TS_ERRORS" | head -20
-  echo "❌ [pre-push] Frontend TypeScript 失败，推送被阻止"
+  echo "✗ [pre-push] Frontend TypeScript 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Frontend TypeScript 通过"
+echo "✓ [pre-push] Frontend TypeScript 通过"
 
 # 3. Worker ESLint（零 warning）
-echo "🔍 [pre-push] Worker ESLint..."
+echo "[pre-push] Worker ESLint..."
 ESLINT_OUTPUT=$(cd worker && npx eslint src/ --max-warnings=0 2>&1)
 ESLINT_EXIT=$?
 echo "$ESLINT_OUTPUT" | head -20
 if [ $ESLINT_EXIT -ne 0 ]; then
-  echo "❌ [pre-push] Worker ESLint 失败，推送被阻止"
+  echo "✗ [pre-push] Worker ESLint 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Worker ESLint 通过"
+echo "✓ [pre-push] Worker ESLint 通过"
 
 # 4. Frontend ESLint（零 warning）
-echo "🔍 [pre-push] Frontend ESLint..."
+echo "[pre-push] Frontend ESLint..."
 npx eslint pages/ lib/ --max-warnings=0 2>&1 | head -30
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] Frontend ESLint 失败，推送被阻止"
+  echo "✗ [pre-push] Frontend ESLint 失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Frontend ESLint 通过"
+echo "✓ [pre-push] Frontend ESLint 通过"
 
 # 5. Vitest 测试
-echo "🧪 [pre-push] 运行测试..."
+echo "[pre-push] 运行测试..."
 npx vitest run 2>&1 | tail -10
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] 测试失败，推送被阻止"
+  echo "✗ [pre-push] 测试失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] 测试通过"
+echo "✓ [pre-push] 测试通过"
 
 # 6. Next.js 完整构建
-echo "🔨 [pre-push] Next.js 构建..."
+echo "[pre-push] Next.js 构建..."
 npx next build 2>&1 | tail -10
 if [ $? -ne 0 ]; then
-  echo "❌ [pre-push] Next.js 构建失败，推送被阻止"
+  echo "✗ [pre-push] Next.js 构建失败，推送被阻止"
   exit 1
 fi
-echo "✅ [pre-push] Next.js 构建通过"
+echo "✓ [pre-push] Next.js 构建通过"
 
-echo "🎉 [pre-push] 所有验证通过，允许推送"
+echo "✓ [pre-push] 所有验证通过，允许推送"

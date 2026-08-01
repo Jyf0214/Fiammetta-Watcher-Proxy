@@ -84,18 +84,18 @@ if (
   console.warn("⚠️  未检测到 DB_TYPE/DATABASE_URL，已默认 d1——EdgeOne/Vercel 部署必须配置 DB_TYPE 与 DATABASE_URL，否则运行时无法连接数据库");
 }
 
-console.log(`🔧 DB_TYPE: ${dbType}`);
+console.log(`DB_TYPE: ${dbType}`);
 
 // ==================== 2. 清理旧的生成产物 ====================
 
 if (existsSync(GENERATED_ROOT)) {
   rmSync(GENERATED_ROOT, { recursive: true });
-  console.log(`🧹 已清理旧的生成目录: src/generated/`);
+  console.log(`已清理旧的生成目录: src/generated/`);
 }
 
 // ==================== 3. 生成 Prisma Client（仅需要的方言） ====================
 
-console.log(`📦 生成 ${dialect.name} Client (${dialect.file})`);
+console.log(`生成 ${dialect.name} Client (${dialect.file})`);
 
 try {
   execSync(
@@ -109,9 +109,9 @@ try {
       },
     }
   );
-  console.log(`✅ ${dialect.name} Client 生成完成`);
+  console.log(`✓ ${dialect.name} Client 生成完成`);
 } catch (err) {
-  console.error(`❌ ${dialect.name} Client 生成失败:`, err.message);
+  console.error(`✗ ${dialect.name} Client 生成失败:`, err.message);
   process.exit(1);
 }
 
@@ -132,7 +132,7 @@ for (const [key, d] of Object.entries(DIALECTS)) {
   if (!existsSync(stubDir)) {
     mkdirSync(stubDir, { recursive: true });
     writeFileSync(resolve(stubDir, "client.ts"), STUB_CONTENT);
-    console.log(`📎 已生成 stub: src/generated/${d.dir}/client.ts`);
+    console.log(`已生成 stub: src/generated/${d.dir}/client.ts`);
   }
 }
 
@@ -157,7 +157,7 @@ if (dialect.needsPush) {
       stdio: "inherit",
       env: { ...process.env, DATABASE_URL: url },
     });
-    console.log(`✅ ${dialect.name} db push 完成`);
+    console.log(`✓ ${dialect.name} db push 完成`);
   } else if (isRemote) {
     console.warn(`⚠️  ${dialect.name} 模式且 DATABASE_URL 匹配，但非 CI 环境且未设置 DB_PUSH=1，跳过 db push（CI 自动执行；本地如需同步表结构请设置 DB_PUSH=1）`);
   } else if (url) {
@@ -169,4 +169,4 @@ if (dialect.needsPush) {
   console.log("ℹ️  D1 模式：跳过 db push（由 Python 部署脚本处理建表）");
 }
 
-console.log(`🎉 Prisma Client 就绪（${dialect.name}，stub 覆盖未使用的方言）`);
+console.log(`✓ Prisma Client 就绪（${dialect.name}，stub 覆盖未使用的方言）`);

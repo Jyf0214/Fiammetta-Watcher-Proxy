@@ -37,19 +37,19 @@ if [ -d "$GATE_TMP" ]; then
 fi
 
 if [ "${DEPLOY_PLATFORM:-}" = "cf" ]; then
-  echo "🏗️  CF 模式：临时移除 Pages API v1 和 cron 路由"
+  echo " CF 模式：临时移除 Pages API v1 和 cron 路由"
 
   mkdir -p "$GATE_TMP"
 
   if [ -d "pages/api/v1" ]; then
     mv pages/api/v1 "$GATE_TMP/v1"
-    echo "  ✅ pages/api/v1/ → $GATE_TMP/v1"
+    echo "  ✓ pages/api/v1/ → $GATE_TMP/v1"
   fi
 
   if [ -d "pages/api/cron" ]; then
     mv pages/api/cron "$GATE_TMP/cron"
-    echo "  ✅ pages/api/cron/ → $GATE_TMP/cron"
+    echo "  ✓ pages/api/cron/ → $GATE_TMP/cron"
   fi
 else
-  echo "🌐 非 CF 模式：保留 Pages API v1 和 cron 路由"
+  echo "非 CF 模式：保留 Pages API v1 和 cron 路由"
 fi

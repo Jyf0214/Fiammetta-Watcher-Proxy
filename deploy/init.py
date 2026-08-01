@@ -38,7 +38,7 @@ WRANGLER_JSONC = os.path.join(PROJECT_ROOT, "wrangler.jsonc")
 # ==================== 工具函数 ====================
 
 def fail(msg: str):
-    print(f"❌ {msg}")
+    print(f"✗ {msg}")
     sys.exit(1)
 
 
@@ -166,7 +166,7 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"  ✅ 已更新配置文件: {os.path.relpath(path, PROJECT_ROOT)}")
+        print(f"  ✓ 已更新配置文件: {os.path.relpath(path, PROJECT_ROOT)}")
 
 
 def set_secret(key: str, value: str, extra_args: list):
@@ -176,7 +176,7 @@ def set_secret(key: str, value: str, extra_args: list):
         input=value.encode(), capture_output=True, timeout=60
     )
     if res.returncode == 0:
-        print(f"  🔐 Secret 已设置: {key}")
+        print(f"  Secret 已设置: {key}")
     else:
         fail(f"Secret {key} 设置失败: {res.stderr.decode().strip()}")
 
@@ -184,7 +184,7 @@ def set_secret(key: str, value: str, extra_args: list):
 # ==================== 阶段实现 ====================
 
 def init_d1() -> str:
-    print(f"\n📦 初始化 D1 数据库: {D1_NAME}")
+    print(f"\n初始化 D1 数据库: {D1_NAME}")
     cf_api("POST", "/d1/database", {"name": D1_NAME}, ok_codes=[7502])
     
     data, _, _ = cf_api("GET", "/d1/database?per_page=1000")
@@ -192,7 +192,7 @@ def init_d1() -> str:
     d1_id = next((db["uuid"] for db in dbs if db.get("name") == D1_NAME), None)
     if not d1_id:
         fail(f"无法找到 D1 数据库 '{D1_NAME}'")
-    print(f"  ✅ D1_ID: {d1_id}")
+    print(f"  ✓ D1_ID: {d1_id}")
 
     # 安全执行 SQL 语句并严格校验返回值
     if os.path.exists(INIT_SQL_PATH):
@@ -200,7 +200,7 @@ def init_d1() -> str:
             sql_content = f.read()
         statements = clean_sql_statements(sql_content)
         if statements:
-            print(f"📝 正在执行建表 SQL ({len(statements)} 条语句)...")
+            print(f"正在执行建表 SQL ({len(statements)} 条语句)...")
             success_count = 0
             skipped_count = 0
             failed_stmts = []
@@ -217,9 +217,9 @@ def init_d1() -> str:
                     skipped_count += 1
                 else:
                     failed_stmts.append((i, msg))
-                    print(f"  ❌ 语句 #{i} 执行出错: {msg}")
+                    print(f"  ✗ 语句 #{i} 执行出错: {msg}")
 
-            print(f"  ✅ Schema SQL 执行完成（成功 {success_count} 条，已存在跳过 {skipped_count} 条）")
+            print(f"  ✓ Schema SQL 执行完成（成功 {success_count} 条，已存在跳过 {skipped_count} 条）")
             if failed_stmts:
                 fail(f"D1 Schema 建表有 {len(failed_stmts)} 条 SQL 失败，中止部署！")
 
@@ -228,20 +228,20 @@ def init_d1() -> str:
 
 
 def init_kv() -> str:
-    print(f"\n📦 初始化 KV 命名空间: {KV_NAME}")
+    print(f"\n初始化 KV 命名空间: {KV_NAME}")
     data, _, _ = cf_api("GET", "/storage/kv/namespaces")
     namespaces = data.get("result", [])
     kv_id = next((ns["id"] for ns in namespaces if ns.get("title") == KV_NAME), None)
     if not kv_id:
         res, _, _ = cf_api("POST", "/storage/kv/namespaces", {"title": KV_NAME})
         kv_id = res["result"]["id"]
-    print(f"  ✅ KV_ID: {kv_id}")
+    print(f"  ✓ KV_ID: {kv_id}")
     output_github("KV_ID", kv_id)
     return kv_id
 
 
 def init_hyperdrive() -> str:
-    print(f"\n📦 初始化 Hyperdrive: {HYPERDRIVE_NAME}")
+    print(f"\n初始化 Hyperdrive: {HYPERDRIVE_NAME}")
     if not DATABASE_URL:
         fail("Hyperdrive 模式需要 DATABASE_URL 环境变量")
 
@@ -256,14 +256,14 @@ def init_hyperdrive() -> str:
     if not hd_id:
         res, _, _ = cf_api("POST", "/hyperdrive/configs", {"name": HYPERDRIVE_NAME, "origin": origin})
         hd_id = res["result"]["id"]
-    print(f"  ✅ HYPERDRIVE_ID: {hd_id}")
+    print(f"  ✓ HYPERDRIVE_ID: {hd_id}")
     output_github("HYPERDRIVE_ID", hd_id)
     return hd_id
 
 
 def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str):
     """统一同步 Pages 的绑定与环境变量（Worker 变量由 wrangler.toml 在部署时自动生效）"""
-    print(f"\n🔗 同步 Pages 部署配置 (DB_TYPE={db_type})...")
+    print(f"\n同步 Pages 部署配置 (DB_TYPE={db_type})...")
 
     db_vars = {"DB_TYPE": {"type": "plain_text", "value": db_type}}
     if db_type != "d1" and DATABASE_URL:
@@ -285,10 +285,10 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
         prod_config["hyperdrive_bindings"] = {"HYPERDRIVE": {"id": hyperdrive_id}}
 
     cf_api("PATCH", f"/pages/projects/{PAGES_PROJECT}", {"deployment_configs": {"production": prod_config}})
-    print("  ✅ Pages 绑定与环境变量同步成功")
+    print("  ✓ Pages 绑定与环境变量同步成功")
 
     # Worker Secret 同步（非 D1 外部数据库模式下需要设置 DATABASE_URL）
-    print(f"\n🔐 同步 Worker Secret (DB_TYPE={db_type})...")
+    print(f"\n同步 Worker Secret (DB_TYPE={db_type})...")
     if db_type != "d1" and DATABASE_URL:
         set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
     else:
@@ -298,20 +298,20 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
 def run_post(db_type: str):
     """设置 Pages 项目与 Secrets"""
     global JWT_SECRET
-    print(f"\n📦 配置 Pages 项目与 Secrets...")
+    print(f"\n配置 Pages 项目与 Secrets...")
     if not JWT_SECRET:
         JWT_SECRET = secrets.token_urlsafe(32)
-        print("  🔑 已自动生成 JWT_SECRET")
+        print("  已自动生成 JWT_SECRET")
     if not ADMIN_PASSWORD:
         fail("未设置 ADMIN_PASSWORD 环境变量")
 
     # 显式查询与创建，不靠误吞错误盲撞 API
     data, code, _ = cf_api("GET", f"/pages/projects/{PAGES_PROJECT}", ok_codes=[800001])
     if data.get("success"):
-        print(f"  ✅ Pages 项目已存在: {PAGES_PROJECT}")
+        print(f"  ✓ Pages 项目已存在: {PAGES_PROJECT}")
     else:
         cf_api("POST", "/pages/projects", {"name": PAGES_PROJECT, "production_branch": "main"})
-        print(f"  ✅ Pages 项目创建成功: {PAGES_PROJECT}")
+        print(f"  ✓ Pages 项目创建成功: {PAGES_PROJECT}")
 
     secrets_dict = {
         "ADMIN_USERNAME": ADMIN_USERNAME,
@@ -330,7 +330,7 @@ def run_post(db_type: str):
 
 def run_check():
     """部署前检查产物完整性"""
-    print(f"\n🔍 校验 Prisma Schema 与 Client 生成产物...")
+    print(f"\n校验 Prisma Schema 与 Client 生成产物...")
     errors = []
     for path in ["prisma/schema.d1.prisma", "prisma/schema.mysql.prisma", "prisma/schema.pg.prisma"]:
         if not os.path.exists(os.path.join(PROJECT_ROOT, path)):
@@ -342,9 +342,9 @@ def run_check():
 
     if errors:
         for err in errors:
-            print(f"  ❌ {err}")
+            print(f"  ✗ {err}")
         fail("部署前校验失败")
-    print("  ✅ 全部产物校验通过")
+    print("  ✓ 全部产物校验通过")
 
 
 # ==================== 程序主入口 ====================
@@ -366,7 +366,7 @@ def main():
     kv_id = os.environ.get("KV_ID", "")
     hyperdrive_id = os.environ.get("HYPERDRIVE_ID", "")
 
-    print(f"🚀 执行阶段: [{phase}] | 识别到的数据库类型: [{db_type}]")
+    print(f"执行阶段: [{phase}] | 识别到的数据库类型: [{db_type}]")
 
     if phase == "pre":
         d1_id = init_d1()
@@ -383,7 +383,7 @@ def main():
     elif phase == "post-deploy":
         sync_env_and_bindings(d1_id, kv_id, hyperdrive_id, db_type)
 
-    print(f"\n🎉 [{phase}] 阶段顺利完成！")
+    print(f"\n✓ [{phase}] 阶段顺利完成！")
 
 
 if __name__ == "__main__":
