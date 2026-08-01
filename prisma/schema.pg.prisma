@@ -33,7 +33,7 @@ model platforms {
   name           String
   baseUrl        String  @map("base_url")
   apiKey         String  @map("api_key")
-  apiKeys        String  @default("[]") @map("api_keys")
+  apiKeys        String @db.Text @default("[]") @map("api_keys")
   type           String  @default("openai")
   enabled        Boolean @default(true)
   priority       Int     @default(0)
@@ -44,7 +44,7 @@ model platforms {
   failCount      Int     @default(0) @map("fail_count")
   lastFailAt     Int?    @map("last_fail_at")
   cooldownEnd    Int?    @map("cooldown_end")
-  forwardHeaders String  @default("[]") @map("forward_headers")
+  forwardHeaders String @db.Text @default("[]") @map("forward_headers")
   createdAt      Int     @default(0) @map("created_at")
   updatedAt      Int     @default(0) @map("updated_at")
 
@@ -161,8 +161,8 @@ model requestLogs {
   cost             Float   @default(0)
   isError          Boolean @default(false) @map("is_error")
   ipAddress        String? @map("ip_address")
-  userAgent        String? @map("user_agent")
-  errorMessage     String? @map("error_message")
+  userAgent        String? @db.Text @map("user_agent")
+  errorMessage     String? @db.Text @map("error_message")
   createdAt        Int     @default(0) @map("created_at")
 
   @@index([createdAt])
@@ -204,7 +204,7 @@ model dailyStats {
 model configs {
   id        String @id
   key       String @unique
-  value     String
+  value     String @db.Text
   updatedAt Int    @default(0) @map("updated_at")
 
   @@map("configs")
@@ -215,8 +215,8 @@ model configs {
 model systemEvents {
   id        String @id
   level     String
-  message   String
-  detail    String?
+  message   String @db.Text
+  detail    String? @db.Text
   createdAt Int    @default(0) @map("created_at")
 
   @@index([level])
@@ -230,7 +230,7 @@ model auditLogs {
   id        String  @id
   adminId   String? @map("admin_id")
   action    String
-  detail    String?
+  detail    String? @db.Text
   ip        String?
   createdAt Int     @default(0) @map("created_at")
 
@@ -244,11 +244,11 @@ model auditLogs {
 model requestTemplates {
   id           String  @id
   name         String
-  description  String?
+  description  String? @db.Text
   method       String  @default("POST")
   endpoint     String  @default("all")
-  headers      String  @default("{}")
-  bodyTemplate String? @map("body_template")
+  headers      String @db.Text @default("{}")
+  bodyTemplate String? @db.Text @map("body_template")
   enabled      Boolean @default(true)
   createdAt    Int     @default(0) @map("created_at")
   updatedAt    Int     @default(0) @map("updated_at")
