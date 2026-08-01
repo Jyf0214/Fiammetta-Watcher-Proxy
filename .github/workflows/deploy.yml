@@ -168,10 +168,16 @@ jobs:
       # ==================== 部署（EdgeOne CLI 自动安装依赖、构建并上传） ====================
 
       - name: Deploy to EdgeOne Makers
+        env:
+          EO_API_TOKEN: ${{ secrets.EO_API_TOKEN }}
         run: |
           # pin 版本防止 CLI 行为漂移
           npm install -g edgeone@1.6.19
+          # 日志脱敏：token 走 env 注入，部署输出过滤含 token/https:// 的行，
+          # 防止 Token 与数据库连接串进入 GitHub Actions 日志
+          set +e
           edgeone makers deploy \
-            -n ${{ secrets.EO_PROJECT_NAME }} \
-            -t ${{ secrets.EO_API_TOKEN }} \
-            -e production
+            -n "${{ secrets.EO_PROJECT_NAME }}" \
+            -t "$EO_API_TOKEN" \
+            -e production 2>&1 | grep -viE --line-buffered "token|https://"
+          exit ${PIPESTATUS[0]}
