@@ -39,6 +39,7 @@ export default function PlatformDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [tab, setTab] = useState<"config" | "models">("config");
 
   // 模型状态
   const [models, setModels] = useState<ModelItem[]>([]);
@@ -54,6 +55,7 @@ export default function PlatformDetailPage() {
     setPrevId(id);
     setPlatform(null);
     setModels([]);
+    setTab("config");
   }
 
   // ---------- 数据加载 ----------
@@ -471,26 +473,54 @@ export default function PlatformDetailPage() {
                   </div>
                 </div>
 
-                {/* 配置表单 + 模型列表上下单页排列（对照 ProviderDetail 结构） */}
-                <div className="flex flex-col gap-8">
-                  {configForm}
-                  <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
-                    <ModelsPanel
-                      models={models}
-                      loading={modelsLoading}
-                      refreshing={refreshing}
-                      newModelId={newModelId}
-                      onNewModelIdChange={setNewModelId}
-                      onAddModel={handleAddModel}
-                      onRefreshModels={handleRefreshModels}
-                      onDeleteModel={handleDeleteModel}
-                      onToggleModel={handleToggleModel}
-                      onToggleAll={handleToggleAll}
-                      togglingAll={togglingAll}
-                      togglingModelId={togglingModelId}
-                    />
-                  </div>
+                {/* Tab 切换 */}
+                <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl mb-4" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "config"}
+                    onClick={() => setTab("config")}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                      tab === "config"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    {t("platform.config_tab")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "models"}
+                    onClick={() => setTab("models")}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                      tab === "models"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    {t("platform.models")} ({models.length})
+                  </button>
                 </div>
+
+                {tab === "config" ? (
+                  configForm
+                ) : (
+                  <ModelsPanel
+                    models={models}
+                    loading={modelsLoading}
+                    refreshing={refreshing}
+                    newModelId={newModelId}
+                    onNewModelIdChange={setNewModelId}
+                    onAddModel={handleAddModel}
+                    onRefreshModels={handleRefreshModels}
+                    onDeleteModel={handleDeleteModel}
+                    onToggleModel={handleToggleModel}
+                    onToggleAll={handleToggleAll}
+                    togglingAll={togglingAll}
+                    togglingModelId={togglingModelId}
+                  />
+                )}
               </>
             ) : null}
           </div>

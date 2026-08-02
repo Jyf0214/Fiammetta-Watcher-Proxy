@@ -213,6 +213,7 @@
     "back": "Back",
     "group_basic": "Basic Info",
     "group_params": "Parameters",
+    "config_tab": "Config",
     "add_key": "Add Key",
     "key_name": "Key name",
     "whitelist_add": "Whitelist",
