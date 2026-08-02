@@ -139,7 +139,26 @@ function PlatformCard({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-12 shrink-0">地址</span>
-          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate font-mono">{platform.baseUrl}</span>
+          <span
+            className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate font-mono flex-1 min-w-0"
+            title={platform.baseUrl}
+          >
+            {platform.baseUrl}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard
+                .writeText(platform.baseUrl)
+                .then(() => message.success("地址已复制"))
+                .catch(() => message.error("复制失败"));
+            }}
+            className="shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+            title="复制地址"
+            aria-label="复制地址"
+          >
+            <Copy size={12} />
+          </button>
         </div>
         {(platform.priority !== 0 || platform.weight !== 1) && (
           <div className="flex items-center gap-2">
@@ -153,10 +172,10 @@ function PlatformCard({
           return (
             <div className="flex items-start gap-2">
               <span className="text-[11px] text-zinc-400 w-12 shrink-0">密钥</span>
-              <div className="flex flex-wrap gap-x-2 gap-y-1 min-w-0">
+              <div className="flex flex-wrap gap-x-3 gap-y-1.5 min-w-0">
                 {keys.map((k, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 min-w-0">
-                    <span className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate max-w-[90px]">{k.name}</span>
+                  <span key={i} className="inline-flex items-center gap-1.5 min-w-0">
+                    <span className="text-[11px] text-zinc-600 dark:text-zinc-300 truncate max-w-[100px]">{k.name}</span>
                     <KeyStatusTag status={getKeyStatus(platform, k.key)} />
                   </span>
                 ))}

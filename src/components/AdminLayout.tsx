@@ -235,14 +235,13 @@ function TopHeader({
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";
   const breadcrumb = t(breadcrumbKey);
-  // 仪表盘页不显示第二级面包屑，避免"仪表盘 > 仪表盘"重复
-  const showSecondLevel = pathname !== "/admin";
+  const showSecondLevel = true;
 
   return (
     <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
       <button
         onClick={onToggleSidebar}
-        className="md:hidden p-2 -ml-2 mr-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        className="md:hidden p-2.5 -ml-2.5 mr-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
         aria-label={t("common.open_sidebar")}
       >
         <Menu size={20} />
@@ -260,10 +259,10 @@ function TopHeader({
           </>
         )}
       </nav>
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1.5">
         <button
           onClick={cycle}
-          className="p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          className="p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
           title={mode === "dark" ? t("theme.light") : t("theme.dark")}
           aria-label={mode === "dark" ? t("theme.light") : t("theme.dark")}
         >
@@ -271,7 +270,7 @@ function TopHeader({
         </button>
         <button
           onClick={toggleLanguage}
-          className="p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          className="p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
           aria-label={t("common.language")}
         >
           <Globe size={18} />
@@ -426,7 +425,7 @@ export default function AdminLayout({
         </Link>
         <button
           onClick={close}
-          className="md:hidden p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
+          className="md:hidden p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
           aria-label={t("common.close_sidebar")}
         >
           <X size={18} />

@@ -282,11 +282,12 @@ function DashboardContent() {
           </div>
         }
         extra={
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <Button
               variant="ghost"
               size="sm"
               iconOnly
+              className="max-sm:!w-9 max-sm:!h-9"
               icon={viewMode === "grid" ? <List size={14} /> : <Grid size={14} />}
               onClick={toggleViewMode}
             />
@@ -294,14 +295,15 @@ function DashboardContent() {
               variant="ghost"
               size="sm"
               iconOnly
+              className="max-sm:!w-9 max-sm:!h-9 text-zinc-500"
               icon={autoRefresh ? <Pause size={14} /> : <Play size={14} />}
               onClick={toggleAutoRefresh}
-              className="text-zinc-500"
             />
             <Button
               variant="ghost"
               size="sm"
               iconOnly
+              className="max-sm:!w-9 max-sm:!h-9"
               icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
               onClick={handleRefresh}
               disabled={refreshing}
