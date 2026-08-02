@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { Form, message } from "antd";
 import Switch from "@/components/ui/Switch";
@@ -49,8 +49,17 @@ export default function PlatformDetailPage() {
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
+  // id 变化时重置详情状态（渲染期调整，避免 effect 内同步 setState）
+  const [prevId, setPrevId] = useState(id);
+  if (prevId !== id) {
+    setPrevId(id);
+    setPlatform(null);
+    setModels([]);
+    setTab("config");
+  }
+
   // ---------- 数据加载 ----------
-  const fetchList = async (signal?: AbortSignal) => {
+  const fetchList = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/platforms", { signal });
       const data = (await res.json()) as Record<string, any>;
@@ -61,9 +70,9 @@ export default function PlatformDetailPage() {
     } finally {
       if (!signal?.aborted) setListLoading(false);
     }
-  };
+  }, [t]);
 
-  const fetchModels = async (platformId: string, signal?: AbortSignal) => {
+  const fetchModels = useCallback(async (platformId: string, signal?: AbortSignal) => {
     setModelsLoading(true);
     try {
       const res = await fetch(`/api/admin/platforms/${platformId}/models`, { signal });
@@ -75,15 +84,13 @@ export default function PlatformDetailPage() {
     } finally {
       if (!signal?.aborted) setModelsLoading(false);
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     if (!id) return;
     const controller = new AbortController();
     const { signal } = controller;
-    setPlatform(null);
-    setModels([]);
-    setTab("config");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async 数据获取在 await 后 setState，compiler lint 误报（facebook/react#34905）
     fetchList(signal);
     if (isNew) {
       setDetailLoading(false);
@@ -115,7 +122,7 @@ export default function PlatformDetailPage() {
       }
     })();
     return () => controller.abort();
-  }, [id]);
+  }, [id, fetchList, fetchModels, form, isNew, t]);
 
   // ---------- 密钥编辑 ----------
   const addNamedKey = () => {
@@ -401,7 +408,7 @@ export default function PlatformDetailPage() {
         <div className="flex-1 min-w-0 relative">
           
           {/* 使用 sticky 替代 fixed，使其相对于滚动容器吸顶，而非固定在系统屏幕级（视口） */}
-          <div className="lg:hidden sticky top-12 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
+          <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
@@ -430,7 +437,7 @@ export default function PlatformDetailPage() {
 
           {/* 表单主体 */}
           {/* 移动端 (lg 以下) 增加 pt-16 是为了给上方悬浮的导航栏留出 64px 的物理空间，防止内容被压住 */}
-          <div className="w-full max-w-2xl mx-auto pt-16 lg:pt-0 pb-10">
+          <div className="w-full max-w-2xl mx-auto pt-[130px] lg:pt-0 pb-10">
             {detailLoading ? (
               <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
                 <RefreshCw size={28} className="inline animate-spin" />
