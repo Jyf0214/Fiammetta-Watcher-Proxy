@@ -85,7 +85,7 @@ export function PlatformConfigForm({
                 value={namedKey.name}
                 onChange={(e) => onUpdateKeyName(index, e.target.value)}
                 placeholder={t("platform.key_name")}
-                className="!w-24 !min-w-0 shrink-0"
+                className="!w-20 sm:!w-24 !min-w-0 shrink-0"
                 size="small"
               />
               <Input.Password
@@ -100,14 +100,16 @@ export function PlatformConfigForm({
                 onClick={() => onToggleWhitelist(index)}
                 disabled={!namedKey.key}
                 title={namedKey.whitelisted ? t("platform.whitelist_remove_tip") : t("platform.whitelist_add_tip")}
-                className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                   namedKey.whitelisted
                     ? "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/30"
                     : "text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
                 }`}
               >
-                {namedKey.whitelisted ? <ShieldCheck size={12} className="inline mr-0.5 -mt-0.5" /> : <ShieldOff size={12} className="inline mr-0.5 -mt-0.5" />}
-                {namedKey.whitelisted ? t("platform.whitelist_remove") : t("platform.whitelist_add")}
+                {namedKey.whitelisted ? <ShieldCheck size={14} className="inline" /> : <ShieldOff size={14} className="inline" />}
+                <span className="hidden sm:inline ml-0.5">
+                  {namedKey.whitelisted ? t("platform.whitelist_remove") : t("platform.whitelist_add")}
+                </span>
               </button>
               <button
                 type="button"

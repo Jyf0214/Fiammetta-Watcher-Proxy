@@ -383,7 +383,8 @@ export default function PlatformDetailPage() {
 
   return (
     <AdminLayout>
-      <div className="lg:h-[calc(100vh-48px)] lg:overflow-hidden lg:-mx-6 lg:-my-6">
+      {/* 移动端 -mx-4/-my-4 抵消 main 的 p-4，返回条从顶栏正下方开始，消除顶部空白 */}
+      <div className="-mx-4 -my-4 md:-mx-6 md:-my-6 lg:h-[calc(100vh-48px)] lg:overflow-hidden">
         <div className="lg:flex lg:h-full">
           {/* 桌面端左侧平台列表栏 */}
           <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
@@ -397,21 +398,30 @@ export default function PlatformDetailPage() {
 
           {/* 详情区 */}
           <div className="flex-1 min-w-0 lg:overflow-y-auto">
-            {/* 移动端返回条 */}
-            <div className="lg:hidden sticky top-12 z-10 bg-zinc-50 dark:bg-zinc-950 px-2 py-2.5 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 mb-3">
+            {/* 移动端顶部导航：返回 + 品牌 + 名称 + 状态 + 启停（整合原头部，滚动不再遮挡内容） */}
+            <div className="lg:hidden sticky top-12 z-20 bg-white dark:bg-zinc-900 px-3 py-2 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 shadow-sm">
               <button
                 onClick={() => router.push("/admin/platforms")}
-                className="p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+                className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
                 aria-label={t("platform.back")}
               >
-                <ArrowLeft size={16} />
+                <ArrowLeft size={18} />
               </button>
-              <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+              {platform && !isNew && (
+                <BrandAvatar name={platform.name} type={platform.type} size="md" />
+              )}
+              <span className="flex-1 min-w-0 text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">
                 {isNew ? t("platform.create_platform") : (platform?.name ?? "…")}
               </span>
+              {platform && !isNew && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <StatusDot status={platform.status} enabled={platform.enabled} />
+                  <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+                </div>
+              )}
             </div>
 
-            <div className="max-w-2xl mx-auto px-3 py-3 lg:px-10 lg:py-8">
+            <div className="max-w-2xl mx-auto px-3 py-4 lg:px-10 lg:py-8">
               {detailLoading ? (
                 <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
                   <RefreshCw size={28} className="inline animate-spin" />
@@ -425,8 +435,8 @@ export default function PlatformDetailPage() {
                 </>
               ) : platform ? (
                 <>
-                  {/* 头部：品牌 + 名称 + 状态 + 启停 */}
-                  <div className="flex items-center gap-3 mb-5">
+                  {/* 桌面端头部：品牌 + 名称 + 状态 + 启停（移动端已整合进顶部导航，仅 lg+ 渲染避免重复） */}
+                  <div className="hidden lg:flex items-center gap-3 mb-5">
                     <BrandAvatar name={platform.name} type={platform.type} size="lg" />
                     <div className="flex-1 min-w-0">
                       <h1 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
