@@ -23,12 +23,6 @@ import {
   type NamedApiKey,
 } from "@/lib/platform";
 
-/**
- * 平台详情/新建页（独立路由）
- * - 桌面端（≥1024px）：左侧平台列表栏 + 右侧设置面板（三栏布局）
- * - 移动端：返回条 + 全屏设置页
- * - 支持 /admin/platforms/new 新建模式
- */
 export default function PlatformDetailPage() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -59,7 +53,7 @@ export default function PlatformDetailPage() {
   const fetchList = async (signal?: AbortSignal) => {
     try {
       const res = await fetch("/api/admin/platforms", { signal });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -73,7 +67,7 @@ export default function PlatformDetailPage() {
     setModelsLoading(true);
     try {
       const res = await fetch(`/api/admin/platforms/${platformId}/models`, { signal });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) setModels(data.data || []);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -87,7 +81,6 @@ export default function PlatformDetailPage() {
     if (!id) return;
     const controller = new AbortController();
     const { signal } = controller;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlatform(null);
     setModels([]);
     setTab("config");
@@ -103,7 +96,7 @@ export default function PlatformDetailPage() {
     (async () => {
       try {
         const res = await fetch(`/api/admin/platforms/${id}`, { signal });
-        const data = await res.json() as Record<string, any>;
+        const data = (await res.json()) as Record<string, any>;
         if (data.success && data.data) {
           const p = data.data as Platform;
           setPlatform(p);
@@ -122,7 +115,6 @@ export default function PlatformDetailPage() {
       }
     })();
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // ---------- 密钥编辑 ----------
@@ -134,7 +126,10 @@ export default function PlatformDetailPage() {
   };
 
   const removeNamedKey = (index: number) => {
-    if (namedKeys.length <= 1) { message.warning("至少保留一个密钥"); return; }
+    if (namedKeys.length <= 1) {
+      message.warning("至少保留一个密钥");
+      return;
+    }
     setNamedKeys(namedKeys.filter((_, i) => i !== index));
   };
 
@@ -176,11 +171,13 @@ export default function PlatformDetailPage() {
       }
       setSubmitting(true);
       if (validKeys.length > 0) {
-        values.apiKeys = JSON.stringify(validKeys.map((k) => ({
-          name: k.name,
-          key: k.key,
-          ...(k.whitelisted ? { whitelisted: true } : {}),
-        })));
+        values.apiKeys = JSON.stringify(
+          validKeys.map((k) => ({
+            name: k.name,
+            key: k.key,
+            ...(k.whitelisted ? { whitelisted: true } : {}),
+          }))
+        );
       }
       if (typeof values.forwardHeaders === "string") {
         const lines = values.forwardHeaders.split("\n").map((l: string) => l.trim()).filter(Boolean);
@@ -188,15 +185,18 @@ export default function PlatformDetailPage() {
       }
       const url = isNew ? "/api/admin/platforms" : `/api/admin/platforms/${id}`;
       const method = isNew ? "POST" : "PUT";
-      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-      const data = await res.json() as Record<string, any>;
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(data.message);
         if (isNew) {
           router.push("/admin/platforms");
           return;
         }
-        // 就地更新当前平台与列表栏
         const updated: Platform = {
           ...(platform as Platform),
           ...values,
@@ -220,7 +220,7 @@ export default function PlatformDetailPage() {
     setDeleting(true);
     try {
       const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(t("platform.delete_success") || "删除成功");
         router.push("/admin/platforms");
@@ -243,7 +243,7 @@ export default function PlatformDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         setPlatform((prev) => (prev ? { ...prev, enabled } : prev));
         setPlatforms((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
@@ -263,7 +263,7 @@ export default function PlatformDetailPage() {
     setRefreshing(true);
     try {
       const res = await fetch(`/api/admin/platforms/${id}/models`, { method: "PUT" });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(data.message);
         fetchModels(id);
@@ -285,7 +285,7 @@ export default function PlatformDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelId: newModelId.trim() }),
       });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(data.message);
         setNewModelId("");
@@ -301,10 +301,13 @@ export default function PlatformDetailPage() {
   const handleDeleteModel = async (modelId: string) => {
     if (!id || isNew) return;
     try {
-      const res = await fetch(`/api/admin/platforms/${id}/models?modelId=${encodeURIComponent(modelId)}`, { method: "DELETE" });
-      const data = await res.json() as Record<string, any>;
+      const res = await fetch(
+        `/api/admin/platforms/${id}/models?modelId=${encodeURIComponent(modelId)}`,
+        { method: "DELETE" }
+      );
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) fetchModels(id);
-      else message.error(data.error || t("common.error"));
+      else message.error(data.error || t("error.delete_failed"));
     } catch {
       message.error(t("common.error"));
     }
@@ -319,7 +322,7 @@ export default function PlatformDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelId, enabled }),
       });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         setModels((prev) => prev.map((m) => (m.modelId === modelId ? { ...m, enabled } : m)));
       } else {
@@ -341,7 +344,7 @@ export default function PlatformDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      const data = await res.json() as Record<string, any>;
+      const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         setModels((prev) => prev.map((m) => ({ ...m, enabled })));
       } else {
@@ -358,10 +361,10 @@ export default function PlatformDetailPage() {
   const statusLabel = !platform
     ? ""
     : platform.status === "healthy"
-      ? t("platform.status_healthy")
-      : platform.status === "degraded"
-        ? t("platform.status_degraded")
-        : t("platform.status_down");
+    ? t("platform.status_healthy")
+    : platform.status === "degraded"
+    ? t("platform.status_degraded")
+    : t("platform.status_down");
 
   const configForm = (
     <PlatformConfigForm
@@ -383,127 +386,134 @@ export default function PlatformDetailPage() {
 
   return (
     <AdminLayout>
-      {/* 移动端 -mx-4/-my-4 抵消 main 的 p-4，返回条从顶栏正下方开始，消除顶部空白 */}
-      <div className="-mx-4 -my-4 md:-mx-6 md:-my-6 lg:h-[calc(100vh-48px)] lg:overflow-hidden">
-        <div className="lg:flex lg:h-full">
-          {/* 桌面端左侧平台列表栏 */}
-          <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <PlatformList
-              platforms={platforms}
-              loading={listLoading}
-              activeId={typeof id === "string" ? id : undefined}
-              className="h-full"
-            />
-          </div>
+      <div className="flex flex-col lg:flex-row h-full">
+        {/* 左侧：桌面端平台列表栏 */}
+        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6 shadow-sm">
+          <PlatformList
+            platforms={platforms}
+            loading={listLoading}
+            activeId={typeof id === "string" ? id : undefined}
+            className="h-[calc(100vh-100px)] overflow-y-auto"
+          />
+        </div>
 
-          {/* 详情区 */}
-          <div className="flex-1 min-w-0 lg:overflow-y-auto">
-            {/* 移动端顶栏：sticky top-12 紧贴 TopHeader(h-12)，返回 + 名称 + 状态 + 启停 */}
-            <div className="lg:hidden sticky top-12 z-10 bg-white dark:bg-zinc-900 px-4 py-2.5 flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 shadow-sm">
-              <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
-                <button
-                  onClick={() => router.push("/admin/platforms")}
-                  className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
-                  aria-label={t("platform.back")}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                  {isNew ? t("platform.create_platform") : (platform?.name ?? "…")}
-                </span>
-              </div>
+        {/* 右侧：主内容区 */}
+        <div className="flex-1 min-w-0 relative">
+          
+          {/* 绝对无负边距方案：利用 fixed top-12 (48px) 让移动端吸顶条完全脱离文档流 */}
+          {/* 这样它会跨过 AdminLayout 的 Padding 束缚，强行贴在顶部 面包屑正下方 */}
+          <div className="lg:hidden fixed top-12 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+              <button
+                onClick={() => router.push("/admin/platforms")}
+                className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
+                aria-label={t("platform.back")}
+              >
+                <ArrowLeft size={18} />
+              </button>
               {platform && !isNew && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <StatusDot status={platform.status} enabled={platform.enabled} />
-                  <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+                <div className="shrink-0">
+                  <BrandAvatar name={platform.name} type={platform.type} size="sm" />
                 </div>
               )}
+              <span className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                {isNew ? t("platform.create_platform") : platform?.name ?? "…"}
+              </span>
             </div>
 
-            <div className="max-w-2xl mx-auto px-4 py-4 lg:px-10 lg:py-8">
-              {detailLoading ? (
-                <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
-                  <RefreshCw size={28} className="inline animate-spin" />
+            {platform && !isNew && (
+              <div className="flex items-center gap-2 shrink-0">
+                <StatusDot status={platform.status} enabled={platform.enabled} />
+                <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+              </div>
+            )}
+          </div>
+
+          {/* 表单主体 */}
+          {/* 移动端 (lg 以下) 增加 pt-16 是为了给上方 fixed 悬浮的导航栏留出 64px 的物理空间，防止内容被压住 */}
+          <div className="w-full max-w-2xl mx-auto pt-16 lg:pt-0 pb-10">
+            {detailLoading ? (
+              <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
+                <RefreshCw size={28} className="inline animate-spin" />
+              </div>
+            ) : isNew ? (
+              <>
+                <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-5">
+                  {t("platform.create_platform")}
+                </h1>
+                {configForm}
+              </>
+            ) : platform ? (
+              <>
+                {/* 桌面端头部 */}
+                <div className="hidden lg:flex items-center gap-3 mb-5">
+                  <BrandAvatar name={platform.name} type={platform.type} size="lg" />
+                  <div className="flex-1 min-w-0">
+                    <h1 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                      {platform.name}
+                    </h1>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <StatusDot status={platform.status} enabled={platform.enabled} />
+                      <span className="text-[11px] text-zinc-400">
+                        {platform.enabled ? statusLabel : t("common.disable")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+                  </div>
                 </div>
-              ) : isNew ? (
-                <>
-                  <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-5">
-                    {t("platform.create_platform")}
-                  </h1>
-                  {configForm}
-                </>
-              ) : platform ? (
-                <>
-                  {/* 桌面端头部：品牌 + 名称 + 状态 + 启停（移动端已整合进顶部导航，仅 lg+ 渲染避免重复） */}
-                  <div className="hidden lg:flex items-center gap-3 mb-5">
-                    <BrandAvatar name={platform.name} type={platform.type} size="lg" />
-                    <div className="flex-1 min-w-0">
-                      <h1 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                        {platform.name}
-                      </h1>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <StatusDot status={platform.status} enabled={platform.enabled} />
-                        <span className="text-[11px] text-zinc-400">
-                          {platform.enabled ? statusLabel : t("common.disable")}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
-                    </div>
-                  </div>
 
-                  {/* Tab 切换 */}
-                  <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl mb-4" role="tablist">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === "config"}
-                      onClick={() => setTab("config")}
-                      className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
-                        tab === "config"
-                          ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
-                          : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                      }`}
-                    >
-                      {t("platform.config_tab")}
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === "models"}
-                      onClick={() => setTab("models")}
-                      className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
-                        tab === "models"
-                          ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
-                          : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                      }`}
-                    >
-                      {t("platform.models")} ({models.length})
-                    </button>
-                  </div>
+                {/* Tab 切换 */}
+                <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl mb-4" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "config"}
+                    onClick={() => setTab("config")}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                      tab === "config"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    {t("platform.config_tab")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "models"}
+                    onClick={() => setTab("models")}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                      tab === "models"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    {t("platform.models")} ({models.length})
+                  </button>
+                </div>
 
-                  {tab === "config" ? (
-                    configForm
-                  ) : (
-                    <ModelsPanel
-                      models={models}
-                      loading={modelsLoading}
-                      refreshing={refreshing}
-                      newModelId={newModelId}
-                      onNewModelIdChange={setNewModelId}
-                      onAddModel={handleAddModel}
-                      onRefreshModels={handleRefreshModels}
-                      onDeleteModel={handleDeleteModel}
-                      onToggleModel={handleToggleModel}
-                      onToggleAll={handleToggleAll}
-                      togglingAll={togglingAll}
-                      togglingModelId={togglingModelId}
-                    />
-                  )}
-                </>
-              ) : null}
-            </div>
+                {tab === "config" ? (
+                  configForm
+                ) : (
+                  <ModelsPanel
+                    models={models}
+                    loading={modelsLoading}
+                    refreshing={refreshing}
+                    newModelId={newModelId}
+                    onNewModelIdChange={setNewModelId}
+                    onAddModel={handleAddModel}
+                    onRefreshModels={handleRefreshModels}
+                    onDeleteModel={handleDeleteModel}
+                    onToggleModel={handleToggleModel}
+                    onToggleAll={handleToggleAll}
+                    togglingAll={togglingAll}
+                    togglingModelId={togglingModelId}
+                  />
+                )}
+              </>
+            ) : null}
           </div>
         </div>
       </div>
