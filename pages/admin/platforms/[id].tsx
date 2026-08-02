@@ -400,6 +400,7 @@ export default function PlatformDetailPage() {
             platforms={platforms}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
+            columns={1}
             className="h-[calc(100vh-100px)] overflow-y-auto"
           />
         </div>
@@ -464,6 +465,9 @@ export default function PlatformDetailPage() {
                         {platform.enabled ? statusLabel : t("common.disable")}
                       </span>
                     </div>
+                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate font-mono mt-1">
+                      {platform.baseUrl}
+                    </p>
                   </div>
                   <div className="shrink-0">
                     <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />

@@ -3,9 +3,10 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
-import { Input } from "antd";
+import { Input, message } from "antd";
 import { Plus, Search, ChevronDown, Cloud } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import Switch from "@/components/ui/Switch";
 import { cn } from "@/lib/ui";
 
 /** 平台数据接口（与 API /api/admin/platforms 返回结构一致） */
@@ -78,38 +79,66 @@ export function StatusDot({ status, enabled }: { status: string; enabled: boolea
   return <span className={cn("w-2 h-2 rounded-full shrink-0", color)} />;
 }
 
-/** 单个列表行 — 整行点击进入独立路由 */
-function PlatformRow({
+/** 平台卡片 — 品牌图标 + 名称 + 描述 + 底部内嵌启停开关 */
+function PlatformCard({
   platform,
   active,
+  toggling,
+  onToggle,
   onClick,
 }: {
   platform: Platform;
   active: boolean;
+  toggling: boolean;
+  onToggle: (enabled: boolean) => void;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={platform.name}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
+        "group flex flex-col rounded-xl border bg-white dark:bg-zinc-900 p-3.5 cursor-pointer transition-all hover:shadow-sm",
         active
-          ? "bg-zinc-100 dark:bg-zinc-800"
-          : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+          ? "border-blue-500/60 ring-1 ring-blue-500/20"
+          : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
       )}
     >
-      <BrandAvatar name={platform.name} type={platform.type} />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-          {platform.name}
-        </p>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate font-mono">
-          {platform.baseUrl}
-        </p>
+      <div className="flex items-start gap-2.5 min-w-0">
+        <BrandAvatar name={platform.name} type={platform.type} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+              {platform.name}
+            </p>
+            <StatusDot status={platform.status} enabled={platform.enabled} />
+          </div>
+          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate font-mono mt-0.5">
+            {platform.baseUrl}
+          </p>
+        </div>
       </div>
-      <StatusDot status={platform.status} enabled={platform.enabled} />
-    </button>
+      <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Switch
+            checked={platform.enabled}
+            loading={toggling}
+            onChange={onToggle}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -118,26 +147,38 @@ interface PlatformListProps {
   loading?: boolean;
   /** 当前选中的平台 id（详情页桌面栏高亮用） */
   activeId?: string;
+  /** 网格列数：1=单列（详情页侧边栏），默认 3 列响应式 */
+  columns?: 1 | 2 | 3;
   className?: string;
 }
 
 /**
- * LobeChat 风格平台列表 — 顶部搜索+新建工具条 + 已启用/未启用两组折叠列表
- * 整行点击跳转独立路由 /admin/platforms/[id]
+ * LobeChat 风格平台列表 — 顶部搜索+新建工具条 + 已启用/未启用分组卡片网格
+ * 卡片整体点击跳转独立路由 /admin/platforms/[id]，卡片内启停开关直接切换
  */
 export function PlatformList({
   platforms,
   loading = false,
   activeId,
+  columns = 3,
   className,
 }: PlatformListProps) {
   const { t } = useTranslation();
   const router = useRouter();
+  const [items, setItems] = useState<Platform[]>(platforms);
+  const [prevPlatforms, setPrevPlatforms] = useState(platforms);
   const [searchText, setSearchText] = useState("");
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     enabled: false,
     disabled: false,
   });
+
+  // 外部数据变化时同步本地状态（渲染期调整，避免 effect 内同步 setState）
+  if (prevPlatforms !== platforms) {
+    setPrevPlatforms(platforms);
+    setItems(platforms);
+  }
 
   // 搜索时强制展开所有分组
   const searching = searchText.trim() !== "";
@@ -145,24 +186,53 @@ export function PlatformList({
   const { enabled, disabled } = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     const list = q
-      ? platforms.filter(
+      ? items.filter(
           (p) =>
             p.name.toLowerCase().includes(q) ||
             p.type.toLowerCase().includes(q) ||
             p.baseUrl.toLowerCase().includes(q)
         )
-      : platforms;
+      : items;
     return {
       enabled: list.filter((p) => p.enabled),
       disabled: list.filter((p) => !p.enabled),
     };
-  }, [platforms, searchText]);
+  }, [items, searchText]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  const gridClass =
+    columns === 1
+      ? "grid grid-cols-1 gap-2.5"
+      : columns === 2
+      ? "grid grid-cols-1 sm:grid-cols-2 gap-2.5"
+      : "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5";
+
   const goPlatform = (id: string) => router.push(`/admin/platforms/${id}`);
   const goCreate = () => router.push("/admin/platforms/new");
+
+  const togglePlatform = async (id: string, enabled: boolean) => {
+    if (togglingId) return;
+    setTogglingId(id);
+    try {
+      const res = await fetch(`/api/admin/platforms/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = (await res.json()) as Record<string, any>;
+      if (data.success) {
+        setItems((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
+      } else {
+        message.error(data.error || t("common.error"));
+      }
+    } catch {
+      message.error(t("common.error"));
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   const renderGroup = (key: "enabled" | "disabled", label: string, items: Platform[]) => {
     if (items.length === 0) return null;
@@ -189,12 +259,14 @@ export function PlatformList({
           </span>
         </button>
         {!isCollapsed && (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
+          <div className={cn("px-4 pb-3", gridClass)}>
             {items.map((p) => (
-              <PlatformRow
+              <PlatformCard
                 key={p.id}
                 platform={p}
                 active={activeId === p.id}
+                toggling={togglingId === p.id}
+                onToggle={(enabled) => togglePlatform(p.id, enabled)}
                 onClick={() => goPlatform(p.id)}
               />
             ))}
@@ -229,11 +301,11 @@ export function PlatformList({
       </div>
 
       {/* 列表区 */}
-      {loading && platforms.length === 0 ? (
+      {loading && items.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-zinc-300 dark:text-zinc-600">
           <Cloud size={36} className="animate-pulse" />
         </div>
-      ) : platforms.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="text-center py-16 text-zinc-400">
           <Cloud size={40} className="mx-auto mb-3 opacity-30" />
           <p className="text-sm">{t("platform.no_platforms")}</p>

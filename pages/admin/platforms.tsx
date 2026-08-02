@@ -42,7 +42,7 @@ export default function PlatformsPage() {
 
   return (
     <AdminLayout>
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <PlatformList
           platforms={platforms}
           loading={loading}
