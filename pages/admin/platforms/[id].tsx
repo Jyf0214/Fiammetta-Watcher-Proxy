@@ -398,21 +398,20 @@ export default function PlatformDetailPage() {
 
           {/* 详情区 */}
           <div className="flex-1 min-w-0 lg:overflow-y-auto">
-            {/* 移动端顶部导航：返回 + 品牌 + 名称 + 状态 + 启停（整合原头部，滚动不再遮挡内容） */}
-            <div className="lg:hidden sticky top-12 z-20 bg-white dark:bg-zinc-900 px-3 py-2 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 shadow-sm">
-              <button
-                onClick={() => router.push("/admin/platforms")}
-                className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
-                aria-label={t("platform.back")}
-              >
-                <ArrowLeft size={18} />
-              </button>
-              {platform && !isNew && (
-                <BrandAvatar name={platform.name} type={platform.type} size="md" />
-              )}
-              <span className="flex-1 min-w-0 text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                {isNew ? t("platform.create_platform") : (platform?.name ?? "…")}
-              </span>
+            {/* 移动端顶栏：sticky top-12 紧贴 TopHeader(h-12)，返回 + 名称 + 状态 + 启停 */}
+            <div className="lg:hidden sticky top-12 z-10 bg-white dark:bg-zinc-900 px-4 py-2.5 flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 shadow-sm">
+              <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                <button
+                  onClick={() => router.push("/admin/platforms")}
+                  className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
+                  aria-label={t("platform.back")}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                  {isNew ? t("platform.create_platform") : (platform?.name ?? "…")}
+                </span>
+              </div>
               {platform && !isNew && (
                 <div className="flex items-center gap-2 shrink-0">
                   <StatusDot status={platform.status} enabled={platform.enabled} />
@@ -421,7 +420,7 @@ export default function PlatformDetailPage() {
               )}
             </div>
 
-            <div className="max-w-2xl mx-auto px-3 py-4 lg:px-10 lg:py-8">
+            <div className="max-w-2xl mx-auto px-4 py-4 lg:px-10 lg:py-8">
               {detailLoading ? (
                 <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
                   <RefreshCw size={28} className="inline animate-spin" />
