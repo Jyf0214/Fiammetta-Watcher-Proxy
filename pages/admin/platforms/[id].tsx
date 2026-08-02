@@ -400,7 +400,6 @@ export default function PlatformDetailPage() {
             platforms={platforms}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
-            columns={1}
             className="h-[calc(100vh-100px)] overflow-y-auto"
           />
         </div>

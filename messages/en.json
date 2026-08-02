@@ -209,6 +209,7 @@
     "no_platforms": "No platforms yet",
     "group_enabled": "Enabled",
     "group_disabled": "Disabled",
+    "group_all": "All",
     "back": "Back",
     "group_basic": "Basic Info",
     "group_params": "Parameters",
