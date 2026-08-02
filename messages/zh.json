@@ -203,7 +203,19 @@
     "model_id": "模型 ID",
     "model_source": "来源",
     "model_placeholder": "输入模型 ID",
-    "refresh_models": "刷新"
+    "refresh_models": "刷新",
+    "search_placeholder": "搜索服务商…",
+    "search_no_result": "无匹配的平台",
+    "no_platforms": "暂无平台",
+    "group_enabled": "已启用",
+    "group_disabled": "未启用",
+    "back": "返回",
+    "group_basic": "基本信息",
+    "group_params": "参数设置",
+    "config_tab": "配置",
+    "add_key": "添加密钥",
+    "delete_platform": "删除服务商",
+    "delete_platform_desc": "删除后不可恢复，请谨慎操作"
   },
   "api_key": {
     "key": "API Key",

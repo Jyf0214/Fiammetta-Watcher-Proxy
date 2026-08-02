@@ -203,7 +203,19 @@
     "model_id": "Model ID",
     "model_source": "Source",
     "model_placeholder": "Enter model ID",
-    "refresh_models": "Refresh"
+    "refresh_models": "Refresh",
+    "search_placeholder": "Search providers…",
+    "search_no_result": "No matching platforms",
+    "no_platforms": "No platforms yet",
+    "group_enabled": "Enabled",
+    "group_disabled": "Disabled",
+    "back": "Back",
+    "group_basic": "Basic Info",
+    "group_params": "Parameters",
+    "config_tab": "Config",
+    "add_key": "Add Key",
+    "delete_platform": "Delete Provider",
+    "delete_platform_desc": "This action cannot be undone. Please proceed with caution."
   },
   "api_key": {
     "key": "API Key",

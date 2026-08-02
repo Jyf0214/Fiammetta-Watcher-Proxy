@@ -14,9 +14,6 @@ import {
   Settings,
   Bell,
   LogOut,
-  Sun,
-  Moon,
-  Globe,
   Menu,
   X,
   ChevronDown,
@@ -204,23 +201,16 @@ function SidebarUserMenu({
 function TopHeader({
   pathname,
   t,
-  isDark,
-  cycle,
-  mode,
-  toggleLanguage,
   onToggleSidebar,
 }: {
   pathname: string;
   t: (key: string) => string;
-  isDark: boolean;
-  cycle: () => void;
-  mode: string;
-  toggleLanguage: () => void;
   onToggleSidebar: () => void;
 }) {
   const breadcrumbMap: Record<string, string> = {
     "/admin": "admin.dashboard",
     "/admin/platforms": "admin.platforms",
+    "/admin/platforms/[id]": "admin.platforms",
     "/admin/keys": "admin.keys",
     "/admin/auto-model": "admin.auto_model",
     "/admin/request-templates": "admin.request_templates",
@@ -235,22 +225,21 @@ function TopHeader({
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";
   const breadcrumb = t(breadcrumbKey);
-  const showSecondLevel = true;
 
   return (
-    <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
+    <header className="h-12 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
       <button
         onClick={onToggleSidebar}
-        className="md:hidden p-2.5 -ml-2.5 mr-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        className="md:hidden p-2 -ml-2 mr-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
         aria-label={t("common.open_sidebar")}
       >
-        <Menu size={20} />
+        <Menu size={18} />
       </button>
       <nav className="flex items-center gap-1.5 text-sm text-zinc-400">
         <span className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
           {t("admin.system")}
         </span>
-        {showSecondLevel && breadcrumb && (
+        {breadcrumb && (
           <>
             <ChevronRight size={14} className="text-zinc-300 dark:text-zinc-600 shrink-0" />
             <span className="font-medium text-zinc-700 dark:text-zinc-200">
@@ -259,23 +248,6 @@ function TopHeader({
           </>
         )}
       </nav>
-      <div className="ml-auto flex items-center gap-1.5">
-        <button
-          onClick={cycle}
-          className="p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-          title={mode === "dark" ? t("theme.light") : t("theme.dark")}
-          aria-label={mode === "dark" ? t("theme.light") : t("theme.dark")}
-        >
-          {isDark ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-        <button
-          onClick={toggleLanguage}
-          className="p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-          aria-label={t("common.language")}
-        >
-          <Globe size={18} />
-        </button>
-      </div>
     </header>
   );
 }
@@ -286,10 +258,10 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const router = useRouter();
   const pathname = router.pathname;
-  const { mode, cycle, isDark } = useThemeMode();
+  const { isDark } = useThemeMode();
   const [username, setUsername] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -367,11 +339,6 @@ export default function AdminLayout({
     } finally {
       setLogoutLoading(false);
     }
-  };
-
-  const toggleLanguage = () => {
-    const newLang = i18n.language === "zh" ? "en" : "zh";
-    i18n.changeLanguage(newLang);
   };
 
   const isActive = (href: string) => {
@@ -504,10 +471,6 @@ export default function AdminLayout({
         <TopHeader
           pathname={pathname}
           t={t}
-          isDark={isDark}
-          cycle={cycle}
-          mode={mode}
-          toggleLanguage={toggleLanguage}
           onToggleSidebar={open}
         />
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden">{children}</main>

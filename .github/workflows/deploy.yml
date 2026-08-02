@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_platform:
-        description: 部署平台（push canary 自动部署 Cloudflare；EdgeOne 仅手动触发，需配置 EO_PROJECT_NAME/EO_API_TOKEN secrets，DB_TYPE 与 DATABASE_URL 在 Makers 控制台项目环境变量中配置，需为 tidb/pg）
+        description: 部署平台（push canary 自动部署 Cloudflare；若 EO_PROJECT_NAME/EO_API_TOKEN 均已配置则同时自动部署 EdgeOne。手动触发时可选平台，DB_TYPE 与 DATABASE_URL 在 Makers 控制台项目环境变量中配置，需为 tidb/pg）
         type: choice
         options:
           - cf
@@ -148,28 +148,40 @@ jobs:
         run: echo "✓ Cloudflare 部署完成"
 
   # ==================== EdgeOne Makers 部署 ====================
+  # push canary：若 EO_PROJECT_NAME 与 EO_API_TOKEN 均已配置，自动与 CF 同时部署（secrets 无法在 if 中判断，用 step 输出标记）
+  # workflow_dispatch：按 deploy_platform 选择（edgeone/both）部署
   deploy-edgeone:
     name: Deploy EdgeOne Makers
     if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/canary') ||
       (github.event_name == 'workflow_dispatch' && (inputs.deploy_platform == 'edgeone' || inputs.deploy_platform == 'both'))
     runs-on: ubuntu-latest
     env:
       DEPLOY_PLATFORM: edgeone
+      EO_PROJECT_NAME: ${{ secrets.EO_PROJECT_NAME }}
+      EO_API_TOKEN: ${{ secrets.EO_API_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check EdgeOne Secrets
+        id: eo_check
+        run: |
+          if [[ -n "$EO_PROJECT_NAME" && -n "$EO_API_TOKEN" ]]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠ EO_PROJECT_NAME / EO_API_TOKEN 未配置，跳过 EdgeOne 部署"
+          fi
 
-      # ==================== 环境准备 ====================
+      - uses: actions/checkout@v4
+        if: steps.eo_check.outputs.can_deploy == 'true'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+        if: steps.eo_check.outputs.can_deploy == 'true'
 
       # ==================== 部署（EdgeOne CLI 自动安装依赖、构建并上传） ====================
 
       - name: Deploy to EdgeOne Makers
-        env:
-          EO_PROJECT_NAME: ${{ secrets.EO_PROJECT_NAME }}
-          EO_API_TOKEN: ${{ secrets.EO_API_TOKEN }}
+        if: steps.eo_check.outputs.can_deploy == 'true'
         # 部署逻辑在脚本内（含日志脱敏过滤），避免 run 命令文本暴露变量名
         run: bash .github/scripts/deploy-edgeone.sh
