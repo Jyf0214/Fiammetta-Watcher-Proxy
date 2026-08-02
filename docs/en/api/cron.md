@@ -1,6 +1,6 @@
 # Cron Tasks
 
-FWP provides 3 scheduled task endpoints for system maintenance. These are called periodically by external services (Cloudflare Cron Triggers, Vercel Cron, GitHub Actions, or any HTTP scheduler).
+FWP provides 3 scheduled task endpoints for system maintenance. These are called periodically by external services (Cloudflare Cron Triggers, Vercel Cron, or any HTTP scheduler).
 
 ## Endpoint List
 
@@ -85,29 +85,6 @@ Create `vercel.json` in project root:
     { "path": "/api/cron/log-archive", "schedule": "0 3 * * *" }
   ]
 }
-```
-
-### GitHub Actions
-
-```yaml
-name: Cron Tasks
-on:
-  schedule:
-    - cron: '0 */6 * * *'   # Model discovery
-    - cron: '0 * * * *'     # Key usage reset
-    - cron: '0 3 * * *'     # Log archival
-  workflow_dispatch:
-
-jobs:
-  cron:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger all cron tasks
-        run: |
-          for task in model-fetch key-reset log-archive; do
-            curl -sf "https://your-domain/api/cron/$task" \
-              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
-          done
 ```
 
 ### External Cron Services

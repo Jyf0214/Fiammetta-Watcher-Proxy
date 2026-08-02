@@ -1,7 +1,7 @@
 /**
  * 定时任务路由 — 通用 HTTP 端点
  *
- * 通过外部服务（如 GitHub Actions、UptimeRobot 等）定时调用：
+ * 通过外部服务（如 Cron-job.org、UptimeRobot 等）定时调用：
  *   GET/POST /api/cron/model-fetch  → 拉取平台模型
  *   GET/POST /api/cron/key-reset    → 重置 Key 用量
  *   GET/POST /api/cron/log-archive  → 归档过期日志

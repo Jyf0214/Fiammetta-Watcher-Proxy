@@ -1,6 +1,6 @@
 # Cron 任务
 
-FWP 提供 3 个定时任务端点，用于系统维护。这些端点通过外部服务（如 Cloudflare Cron Triggers、Vercel Cron、GitHub Actions 或任何 HTTP 调度器）定时调用。
+FWP 提供 3 个定时任务端点，用于系统维护。这些端点通过外部服务（如 Cloudflare Cron Triggers、Vercel Cron 或任何 HTTP 调度器）定时调用。
 
 ## 端点列表
 
@@ -94,29 +94,6 @@ crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
     { "path": "/api/cron/log-archive", "schedule": "0 3 * * *" }
   ]
 }
-```
-
-### GitHub Actions
-
-```yaml
-name: Cron Tasks
-on:
-  schedule:
-    - cron: '0 */6 * * *'   # 模型发现
-    - cron: '0 * * * *'     # Key 用量重置
-    - cron: '0 3 * * *'     # 日志归档
-  workflow_dispatch:
-
-jobs:
-  cron:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger all cron tasks
-        run: |
-          for task in model-fetch key-reset log-archive; do
-            curl -sf "https://your-domain/api/cron/$task" \
-              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
-          done
 ```
 
 ### 外部 Cron 服务

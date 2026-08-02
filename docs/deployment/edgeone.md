@@ -38,7 +38,7 @@ Makers 控制台 → 项目 → 运行时环境变量（**部署前必须配置�
 
 ## 4. 定时任务
 
-EdgeOne 无内置定时任务，用外部调度服务定时请求 `/api/cron/*` 端点即可（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot、GitHub Actions `schedule` 触发器（示例见 [Vercel 部署](/deployment/vercel)）。
+EdgeOne 无内置定时任务，用外部调度服务定时请求 `/api/cron/*` 端点即可（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot。
 
 ## 5. 验证
 

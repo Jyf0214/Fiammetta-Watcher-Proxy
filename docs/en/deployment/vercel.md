@@ -40,28 +40,7 @@ With `CRON_SECRET` set, Vercel adds the auth header automatically.
 
 ### Option B: External Scheduler (free)
 
-Call the `/api/cron/*` endpoints on a schedule (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot, GitHub Actions (`schedule` trigger). GitHub Actions example:
-
-```yaml
-name: Cron Tasks
-on:
-  schedule:
-    - cron: '0 */6 * * *'   # model discovery
-    - cron: '0 * * * *'     # key reset
-    - cron: '0 3 * * *'     # log archival
-  workflow_dispatch:
-
-jobs:
-  cron:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Cron
-        run: |
-          for task in model-fetch key-reset log-archive; do
-            curl -fsS -X GET "https://${{ secrets.APP_URL }}/api/cron/$task" \
-              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" || true
-          done
-```
+Call the `/api/cron/*` endpoints on a schedule (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot.
 
 ## Database Options
 

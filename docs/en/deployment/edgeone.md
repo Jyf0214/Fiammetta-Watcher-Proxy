@@ -38,7 +38,7 @@ Makers console → project → runtime environment variables (**configure before
 
 ## 4. Scheduled Tasks
 
-EdgeOne has no built-in scheduled tasks — call the `/api/cron/*` endpoints from an external scheduler (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot, GitHub Actions `schedule` trigger (example in [Vercel](/en/deployment/vercel)).
+EdgeOne has no built-in scheduled tasks — call the `/api/cron/*` endpoints from an external scheduler (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot.
 
 ## 5. Verify
 

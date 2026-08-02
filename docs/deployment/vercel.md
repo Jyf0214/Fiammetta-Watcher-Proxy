@@ -40,28 +40,7 @@ Hobby 计划不支持。在项目根目录创建 `vercel.json`（仓库中没有
 
 ### 方式 B：外部调度（免费）
 
-用外部服务定时请求 `/api/cron/*` 端点（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot、GitHub Actions（schedule 触发器）。GitHub Actions 示例：
-
-```yaml
-name: Cron Tasks
-on:
-  schedule:
-    - cron: '0 */6 * * *'   # 模型发现
-    - cron: '0 * * * *'     # Key 重置
-    - cron: '0 3 * * *'     # 日志归档
-  workflow_dispatch:
-
-jobs:
-  cron:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Cron
-        run: |
-          for task in model-fetch key-reset log-archive; do
-            curl -fsS -X GET "https://${{ secrets.APP_URL }}/api/cron/$task" \
-              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" || true
-          done
-```
+用外部服务定时请求 `/api/cron/*` 端点（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot。
 
 ## 数据库选择
 
