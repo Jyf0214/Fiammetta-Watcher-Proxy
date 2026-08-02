@@ -31,45 +31,12 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 
 ## 按平台配置
 
-### Cloudflare（推送即部署）
+各平台的配置入口与完整示例见对应部署指南：
 
-在 GitHub 仓库 Secrets 中配置：
-
-```env
-DB_TYPE=d1
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的密码
-CLOUDFLARE_API_TOKEN=xxx
-CLOUDFLARE_ACCOUNT_ID=xxx
-```
-
-> `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET` 由部署脚本自动写入 Cloudflare，无需在 Cloudflare 控制台手动配置。用 TiDB/PG 时增加 `DB_TYPE` 与 `DATABASE_URL`。
-
-### Vercel / EdgeOne
-
-Vercel：Settings → Environment Variables；EdgeOne：Makers 控制台运行时环境变量。
-
-```env
-DB_TYPE=tidb                        # 或 pg / mariadb，不能是 d1
-DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的密码
-JWT_SECRET=至少32字符的随机密钥
-CRON_SECRET=随机密钥                # 可选
-```
-
-### 自托管（Node.js / Docker）
-
-```env
-DB_TYPE=pg                          # 或 tidb / mariadb
-DATABASE_URL=postgresql://用户:密码@主机:端口/数据库名
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的密码
-JWT_SECRET=至少32字符的随机密钥
-PORT=3000
-NODE_ENV=production
-CRON_SECRET=随机密钥                # 可选
-```
+- [Cloudflare 部署](/deployment/cloudflare) — 在 GitHub Secrets 配置；`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET` 由部署脚本自动写入 Cloudflare
+- [Vercel 部署](/deployment/vercel) — Settings → Environment Variables
+- [EdgeOne 部署](/deployment/edgeone) — Makers 控制台运行时环境变量
+- [Node.js 直接部署](/deployment/standalone) — `.env` 文件
 
 ## 数据库连接串格式
 

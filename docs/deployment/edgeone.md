@@ -34,33 +34,11 @@ Actions → Deploy 工作流 → Run workflow → **分支选择 `canary`**（Fo
 
 ## 3. 配置运行时环境变量
 
-Makers 控制台 → 项目 → 运行时环境变量（**部署前必须配置好**，构建期与运行时共用）：
-
-```env
-DB_TYPE=tidb                        # 或 pg / mariadb，不能是 d1
-DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的管理员密码
-JWT_SECRET=至少32字符的随机密钥      # 必填，未设置则无法登录
-CRON_SECRET=随机密钥                # 可选
-```
+Makers 控制台 → 项目 → 运行时环境变量（**部署前必须配置好**，构建期与运行时共用）。完整变量清单与说明见 [环境变量](/deployment/env)。
 
 ## 4. 定时任务
 
-EdgeOne 无内置定时任务，用外部调度服务定时调用：
-
-```bash
-curl -X GET https://你的域名/api/cron/model-fetch \
-  -H "Authorization: Bearer 你的CRON_SECRET"
-```
-
-| 端点 | 功能 | 建议频率 |
-|------|------|----------|
-| `/api/cron/model-fetch` | 模型发现 | 每 6 小时 |
-| `/api/cron/key-reset` | Key 用量重置 | 每小时 |
-| `/api/cron/log-archive` | 日志归档 | 每天 3:00 |
-
-可用服务：Cron-job.org、UptimeRobot、GitHub Actions `schedule` 触发器（示例见 [Vercel 部署](/deployment/vercel)）。
+EdgeOne 无内置定时任务，用外部调度服务定时请求 `/api/cron/*` 端点即可（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot、GitHub Actions `schedule` 触发器（示例见 [Vercel 部署](/deployment/vercel)）。
 
 ## 5. 验证
 

@@ -31,45 +31,12 @@ On Serverless platforms (Cloudflare / Vercel / EdgeOne), environment variables a
 
 ## By Platform
 
-### Cloudflare (push to deploy)
+Configuration entry points and full examples are on the corresponding deployment guides:
 
-Configure in GitHub repository Secrets:
-
-```env
-DB_TYPE=d1
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-password
-CLOUDFLARE_API_TOKEN=xxx
-CLOUDFLARE_ACCOUNT_ID=xxx
-```
-
-> `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `JWT_SECRET` are written into Cloudflare automatically by the deploy script — no manual configuration in the Cloudflare console. For TiDB/PG, add `DB_TYPE` and `DATABASE_URL`.
-
-### Vercel / EdgeOne
-
-Vercel: Settings → Environment Variables; EdgeOne: Makers console runtime environment variables.
-
-```env
-DB_TYPE=tidb                        # or pg / mariadb — never d1
-DATABASE_URL=mysql://user:pass@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-password
-JWT_SECRET=random-secret-32+chars
-CRON_SECRET=random-secret           # optional
-```
-
-### Self-hosted (Node.js / Docker)
-
-```env
-DB_TYPE=pg                          # or tidb / mariadb
-DATABASE_URL=postgresql://user:pass@host:port/dbname
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-password
-JWT_SECRET=random-secret-32+chars
-PORT=3000
-NODE_ENV=production
-CRON_SECRET=random-secret           # optional
-```
+- [Cloudflare](/en/deployment/cloudflare) — configure in GitHub Secrets; `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `JWT_SECRET` are written into Cloudflare automatically by the deploy script
+- [Vercel](/en/deployment/vercel) — Settings → Environment Variables
+- [EdgeOne](/en/deployment/edgeone) — Makers console runtime environment variables
+- [Node.js Standalone](/en/deployment/standalone) — `.env` file
 
 ## Connection String Formats
 

@@ -82,20 +82,7 @@ Log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
 
 ## Configure Cron Tasks
 
-Scheduled tasks are exposed as HTTP endpoints. Call them via system cron (`crontab -e`) or an external service:
-
-| Endpoint | Function | Suggested Frequency |
-|----------|----------|---------------------|
-| `/api/cron/model-fetch` | Model discovery | every 6h |
-| `/api/cron/key-reset` | Key usage reset | hourly |
-| `/api/cron/log-archive` | Log archival | daily 03:00 |
-
-With `CRON_SECRET` set, requests must carry the auth header:
-
-```bash
-curl -X GET http://localhost:3000/api/cron/model-fetch \
-  -H "Authorization: Bearer your-CRON_SECRET"
-```
+Scheduled tasks are exposed as HTTP endpoints — call them via system cron (`crontab -e`); endpoints, frequencies and auth: [Cron Tasks](/en/api/cron).
 
 **crontab example**:
 

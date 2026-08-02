@@ -12,22 +12,15 @@ Vercel Dashboard → Add New → Project → import the repository from GitHub. 
 
 ## 2. Configure Environment Variables
 
-Settings → Environment Variables:
-
-```env
-DB_TYPE=tidb                        # or pg / mariadb — never d1
-DATABASE_URL=mysql://user:pass@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-password
-JWT_SECRET=random-secret-32+chars
-CRON_SECRET=random-secret           # optional
-```
+Configure in Settings → Environment Variables (`DB_TYPE` cannot be `d1`). See [Environment Variables](/en/deployment/env) for the full list and descriptions.
 
 ## 3. Deploy
 
 Push the code — Vercel builds and deploys automatically. Note: you still need to set up the scheduled tasks afterwards (see the next section) — the free option requires an external scheduler.
 
 ## 4. Scheduled Tasks
+
+See [Cron Tasks](/en/api/cron) for the business logic and endpoints of the 3 scheduled tasks.
 
 ### Option A: Vercel Cron (Pro plan required)
 
@@ -47,20 +40,7 @@ With `CRON_SECRET` set, Vercel adds the auth header automatically.
 
 ### Option B: External Scheduler (free)
 
-Call the three endpoints on a schedule:
-
-```bash
-curl -X GET https://your-domain.com/api/cron/model-fetch \
-  -H "Authorization: Bearer your-CRON_SECRET"
-```
-
-| Endpoint | Function | Suggested Frequency |
-|----------|----------|---------------------|
-| `/api/cron/model-fetch` | Model discovery | every 6h |
-| `/api/cron/key-reset` | Key usage reset | hourly |
-| `/api/cron/log-archive` | Log archival | daily 03:00 |
-
-Services: Cron-job.org, UptimeRobot, GitHub Actions (`schedule` trigger). GitHub Actions example:
+Call the `/api/cron/*` endpoints on a schedule (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot, GitHub Actions (`schedule` trigger). GitHub Actions example:
 
 ```yaml
 name: Cron Tasks

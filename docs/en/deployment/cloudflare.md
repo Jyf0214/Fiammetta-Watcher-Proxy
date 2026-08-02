@@ -30,10 +30,8 @@ Repo Settings → Secrets and variables → Actions → New repository secret:
 |--------|-------------|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API Token (account-level Edit; [create here](https://dash.cloudflare.com/profile/api-tokens)) |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (Dashboard sidebar) |
-| `ADMIN_USERNAME` | Admin login username |
-| `ADMIN_PASSWORD` | Admin login password (**required** — deployment fails without it) |
-| `DB_TYPE` | Database type, default `d1`; set `tidb`/`pg` when using TiDB/PG |
-| `DATABASE_URL` | External database URL (only needed for `DB_TYPE=tidb/pg`) |
+
+> Generic variables (`DB_TYPE`, `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`) — see [Environment Variables](/en/deployment/env). Of these, `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `JWT_SECRET` are written into Cloudflare automatically by the deploy script; `ADMIN_PASSWORD` is required — deployment fails without it.
 
 ### 4. Trigger the Deployment
 
@@ -134,13 +132,7 @@ python3 deploy/init.py post-deploy
 
 ## Scheduled Tasks
 
-| Task | Cron | Frequency | Purpose |
-|------|------|-----------|---------|
-| Model discovery | `0 */6 * * *` | every 6h | Discover available models on each platform |
-| Key usage reset | `0 */1 * * *` | hourly | Reset key usage by period |
-| Log archival | `0 3 * * *` | daily 03:00 | Archive request logs older than 30 days |
-
-Deployed automatically with the Worker; also viewable/editable in Dashboard → Worker → Settings → Triggers → Cron Triggers.
+Scheduled tasks are deployed automatically with the Worker — no extra configuration needed. See [Cron Tasks](/en/api/cron) for the task list and business logic. View/edit frequencies in Dashboard → Worker → Settings → Triggers → Cron Triggers.
 
 ## Troubleshooting
 

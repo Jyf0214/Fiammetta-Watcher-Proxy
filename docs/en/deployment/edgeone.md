@@ -21,10 +21,8 @@ Repo Settings → Secrets and variables → Actions:
 |--------|-------------|
 | `EO_PROJECT_NAME` | EdgeOne Makers project name |
 | `EO_API_TOKEN` | EdgeOne API Token |
-| `DB_TYPE` | **Must be `tidb`, `mariadb` or `pg`** (not the default `d1`) |
-| `DATABASE_URL` | Remote database URL |
 
-> Secrets only apply at build time — the runtime environment variables must be configured in the Makers console (step 3).
+> `DB_TYPE` and `DATABASE_URL` do **not** need to be configured as GitHub Secrets — at build time the EdgeOne CLI pulls them from the Makers project environment variables (writes `.env`), and the runtime uses the same set.
 
 ## 2. Trigger the Deployment
 
@@ -36,33 +34,11 @@ The CLI builds and uploads automatically — nothing else to do.
 
 ## 3. Configure Runtime Environment Variables
 
-Makers console → project → runtime environment variables:
-
-```env
-DB_TYPE=tidb                        # or pg / mariadb — never d1
-DATABASE_URL=mysql://user:pass@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-admin-password
-JWT_SECRET=random-secret-32+chars   # required — login fails without it
-CRON_SECRET=random-secret           # optional
-```
+Makers console → project → runtime environment variables (**configure before deploying** — shared by build time and runtime). See [Environment Variables](/en/deployment/env) for the full list and descriptions.
 
 ## 4. Scheduled Tasks
 
-EdgeOne has no built-in scheduled tasks. Use an external scheduler:
-
-```bash
-curl -X GET https://your-domain.com/api/cron/model-fetch \
-  -H "Authorization: Bearer your-CRON_SECRET"
-```
-
-| Endpoint | Function | Suggested Frequency |
-|----------|----------|---------------------|
-| `/api/cron/model-fetch` | Model discovery | every 6h |
-| `/api/cron/key-reset` | Key usage reset | hourly |
-| `/api/cron/log-archive` | Log archival | daily 03:00 |
-
-Services: Cron-job.org, UptimeRobot, GitHub Actions `schedule` trigger (example in [Vercel](/en/deployment/vercel)).
+EdgeOne has no built-in scheduled tasks — call the `/api/cron/*` endpoints from an external scheduler (endpoints and suggested frequencies: [Cron Tasks](/en/api/cron)). Services: Cron-job.org, UptimeRobot, GitHub Actions `schedule` trigger (example in [Vercel](/en/deployment/vercel)).
 
 ## 5. Verify
 

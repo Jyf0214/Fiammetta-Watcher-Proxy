@@ -30,10 +30,8 @@ FWP 部署到 Cloudflare 后由两部分组成：**Worker** 处理 `/v1/*` 代�
 |--------|------|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（账号级 Edit 权限，[创建地址](https://dash.cloudflare.com/profile/api-tokens)） |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账号 ID（Dashboard 右侧栏） |
-| `ADMIN_USERNAME` | 管理后台登录用户名 |
-| `ADMIN_PASSWORD` | 管理后台登录密码（**必填**，缺失则部署失败） |
-| `DB_TYPE` | 数据库类型，默认 `d1`；用 TiDB/PG 时设为 `tidb`/`pg` |
-| `DATABASE_URL` | 外部数据库连接串（仅 `DB_TYPE=tidb/pg` 时需要） |
+
+> 通用变量（`DB_TYPE`、`DATABASE_URL`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET`）见 [环境变量](/deployment/env)。其中 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET` 由部署脚本自动写入 Cloudflare；`ADMIN_PASSWORD` 必填，缺失则部署失败。
 
 ### 4. 触发部署
 
@@ -134,13 +132,7 @@ python3 deploy/init.py post-deploy
 
 ## 定时任务
 
-| 任务 | Cron | 频率 | 功能 |
-|------|------|------|------|
-| 模型发现 | `0 */6 * * *` | 每 6 小时 | 自动发现各平台可用模型 |
-| Key 用量重置 | `0 */1 * * *` | 每小时 | 按周期重置 Key 用量 |
-| 日志归档 | `0 3 * * *` | 每天 3:00 | 归档 30 天前的请求日志 |
-
-已随 Worker 自动部署；也可在 Dashboard → Worker → Settings → Triggers → Cron Triggers 查看修改。
+定时任务已随 Worker 自动部署，无需额外配置；任务列表与业务逻辑见 [Cron 任务说明](/api/cron)。可在 Dashboard → Worker → Settings → Triggers → Cron Triggers 查看或修改频率。
 
 ## 常见问题
 

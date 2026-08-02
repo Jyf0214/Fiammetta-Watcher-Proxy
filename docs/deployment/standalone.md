@@ -82,20 +82,7 @@ http://localhost:3000/admin
 
 ## 配置定时任务
 
-定时任务通过 HTTP 端点暴露，用系统 cron（`crontab -e`）或外部服务定时调用：
-
-| 端点 | 功能 | 建议频率 |
-|------|------|----------|
-| `/api/cron/model-fetch` | 模型发现 | 每 6 小时 |
-| `/api/cron/key-reset` | Key 用量重置 | 每小时 |
-| `/api/cron/log-archive` | 日志归档 | 每天 3:00 |
-
-设置了 `CRON_SECRET` 时请求需带认证头：
-
-```bash
-curl -X GET http://localhost:3000/api/cron/model-fetch \
-  -H "Authorization: Bearer 你的CRON_SECRET"
-```
+定时任务通过 HTTP 端点暴露，用系统 cron（`crontab -e`）定时调用即可（端点、频率与认证见 [Cron 任务说明](/api/cron)）：
 
 **crontab 示例**：
 

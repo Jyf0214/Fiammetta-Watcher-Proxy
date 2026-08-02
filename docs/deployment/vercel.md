@@ -12,22 +12,15 @@ Vercel Dashboard → Add New → Project → 从 GitHub 导入仓库。框架预
 
 ## 2. 配置环境变量
 
-Settings → Environment Variables：
-
-```env
-DB_TYPE=tidb                        # 或 pg / mariadb；不能是 d1
-DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的密码
-JWT_SECRET=至少32字符的随机密钥
-CRON_SECRET=随机密钥                # 可选
-```
+Settings → Environment Variables 中配置（`DB_TYPE` 不能为 `d1`），完整变量清单与说明见 [环境变量](/deployment/env)。
 
 ## 3. 部署
 
 推送代码即自动部署。注意：部署后还需配置定时任务（见下一节），免费方案下需外部服务定时调用。
 
 ## 4. 定时任务
+
+3 个定时任务的业务逻辑与端点详见 [Cron 任务说明](/api/cron)。
 
 ### 方式 A：Vercel Cron（需 Pro 计划）
 
@@ -47,20 +40,7 @@ Hobby 计划不支持。在项目根目录创建 `vercel.json`（仓库中没有
 
 ### 方式 B：外部调度（免费）
 
-定时请求三个端点即可：
-
-```bash
-curl -X GET https://你的域名/api/cron/model-fetch \
-  -H "Authorization: Bearer 你的CRON_SECRET"
-```
-
-| 端点 | 功能 | 建议频率 |
-|------|------|----------|
-| `/api/cron/model-fetch` | 模型发现 | 每 6 小时 |
-| `/api/cron/key-reset` | Key 用量重置 | 每小时 |
-| `/api/cron/log-archive` | 日志归档 | 每天 3:00 |
-
-可用服务：Cron-job.org、UptimeRobot、GitHub Actions（schedule 触发器）。GitHub Actions 示例：
+用外部服务定时请求 `/api/cron/*` 端点（端点与建议频率见 [Cron 任务说明](/api/cron)）。可用服务：Cron-job.org、UptimeRobot、GitHub Actions（schedule 触发器）。GitHub Actions 示例：
 
 ```yaml
 name: Cron Tasks
