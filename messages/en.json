@@ -214,6 +214,13 @@
     "group_params": "Parameters",
     "config_tab": "Config",
     "add_key": "Add Key",
+    "key_name": "Key name",
+    "whitelist_add": "Whitelist",
+    "whitelist_remove": "Whitelisted",
+    "whitelist_add_tip": "Add to whitelist (not banned on 429)",
+    "whitelist_remove_tip": "Whitelisted (not banned on 429, click to remove)",
+    "copy_key_tip": "Copy key",
+    "remove_key_tip": "Remove this key",
     "delete_platform": "Delete Provider",
     "delete_platform_desc": "This action cannot be undone. Please proceed with caution."
   },

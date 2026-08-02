@@ -75,14 +75,6 @@ export function getModelBrand(modelId: string): string {
 
 // ---------- 表单 ----------
 
-/** Base URL 快捷填充胶囊 */
-export const BASE_URL_PRESETS = [
-  "https://api.openai.com/v1",
-  "https://api.anthropic.com/v1",
-  "https://generativelanguage.googleapis.com/v1beta",
-  "https://api.deepseek.com/v1",
-];
-
 /** forwardHeaders 数组/JSON 字符串 → 每行一个 Header 的文本 */
 export function parseForwardHeaders(raw: string | string[] | null | undefined): string {
   if (!raw) return "";

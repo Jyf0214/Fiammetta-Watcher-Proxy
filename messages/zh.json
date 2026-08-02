@@ -214,6 +214,13 @@
     "group_params": "参数设置",
     "config_tab": "配置",
     "add_key": "添加密钥",
+    "key_name": "密钥名",
+    "whitelist_add": "加白",
+    "whitelist_remove": "白名单",
+    "whitelist_add_tip": "加入白名单（429 时不封禁）",
+    "whitelist_remove_tip": "白名单（429 时不封禁，点击移除）",
+    "copy_key_tip": "复制密钥",
+    "remove_key_tip": "删除此密钥",
     "delete_platform": "删除服务商",
     "delete_platform_desc": "删除后不可恢复，请谨慎操作"
   },

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
-import { Form, Tabs, message } from "antd";
+import { Form, message } from "antd";
 import Switch from "@/components/ui/Switch";
 import {
   PlatformList,
@@ -398,7 +398,7 @@ export default function PlatformDetailPage() {
           {/* 详情区 */}
           <div className="flex-1 min-w-0 lg:overflow-y-auto">
             {/* 移动端返回条 */}
-            <div className="lg:hidden sticky top-12 z-10 bg-zinc-50 dark:bg-zinc-950/95 backdrop-blur px-2 py-2.5 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 mb-3">
+            <div className="lg:hidden sticky top-12 z-10 bg-zinc-50 dark:bg-zinc-950 px-2 py-2.5 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 mb-3">
               <button
                 onClick={() => router.push("/admin/platforms")}
                 className="p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
@@ -439,36 +439,59 @@ export default function PlatformDetailPage() {
                         </span>
                       </div>
                     </div>
-                    <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+                    <div className="shrink-0">
+                      <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
+                    </div>
                   </div>
 
-                  <Tabs
-                    activeKey={tab}
-                    onChange={(k) => setTab(k as "config" | "models")}
-                    items={[
-                      { key: "config", label: t("platform.config_tab"), children: configForm },
-                      {
-                        key: "models",
-                        label: `${t("platform.models")} (${models.length})`,
-                        children: (
-                          <ModelsPanel
-                            models={models}
-                            loading={modelsLoading}
-                            refreshing={refreshing}
-                            newModelId={newModelId}
-                            onNewModelIdChange={setNewModelId}
-                            onAddModel={handleAddModel}
-                            onRefreshModels={handleRefreshModels}
-                            onDeleteModel={handleDeleteModel}
-                            onToggleModel={handleToggleModel}
-                            onToggleAll={handleToggleAll}
-                            togglingAll={togglingAll}
-                            togglingModelId={togglingModelId}
-                          />
-                        ),
-                      },
-                    ]}
-                  />
+                  {/* Tab 切换 */}
+                  <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl mb-4" role="tablist">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === "config"}
+                      onClick={() => setTab("config")}
+                      className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                        tab === "config"
+                          ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                      }`}
+                    >
+                      {t("platform.config_tab")}
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === "models"}
+                      onClick={() => setTab("models")}
+                      className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
+                        tab === "models"
+                          ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                      }`}
+                    >
+                      {t("platform.models")} ({models.length})
+                    </button>
+                  </div>
+
+                  {tab === "config" ? (
+                    configForm
+                  ) : (
+                    <ModelsPanel
+                      models={models}
+                      loading={modelsLoading}
+                      refreshing={refreshing}
+                      newModelId={newModelId}
+                      onNewModelIdChange={setNewModelId}
+                      onAddModel={handleAddModel}
+                      onRefreshModels={handleRefreshModels}
+                      onDeleteModel={handleDeleteModel}
+                      onToggleModel={handleToggleModel}
+                      onToggleAll={handleToggleAll}
+                      togglingAll={togglingAll}
+                      togglingModelId={togglingModelId}
+                    />
+                  )}
                 </>
               ) : null}
             </div>
