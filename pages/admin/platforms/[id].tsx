@@ -386,23 +386,30 @@ export default function PlatformDetailPage() {
 
   return (
     <AdminLayout>
-      <div className="flex flex-col lg:flex-row h-full">
+      {/* 
+        使用标准 -m-4 md:-m-6 直接精准抵消外层 AdminLayout 强加的 p-4 padding，使其完全撑满容器贴边
+        绝不使用 fixed 或带有 ! 的破坏性 CSS。
+      */}
+      <div className="-m-4 md:-m-6 flex flex-col lg:flex-row lg:h-[calc(100vh-48px)] lg:overflow-hidden">
+        
         {/* 左侧：桌面端平台列表栏 */}
-        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6 shadow-sm">
+        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto h-full">
           <PlatformList
             platforms={platforms}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
-            className="h-[calc(100vh-100px)] overflow-y-auto"
+            className="h-full"
           />
         </div>
 
         {/* 右侧：主内容区 */}
-        <div className="flex-1 min-w-0 relative">
+        <div className="flex-1 min-w-0 flex flex-col lg:overflow-y-auto relative">
           
-          {/* 绝对无负边距方案：利用 fixed top-12 (48px) 让移动端吸顶条完全脱离文档流 */}
-          {/* 这样它会跨过 AdminLayout 的 Padding 束缚，强行贴在顶部 面包屑正下方 */}
-          <div className="lg:hidden fixed top-12 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
+          {/* 
+            移动端吸顶返回条：回到正常的文档流内部，使用纯正的 sticky top-0。
+            这样它会被自然推倒页面顶部，随着页面滚动时完美吸顶，绝不会出现内容穿越或重叠。
+          */}
+          <div className="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-3 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
@@ -429,9 +436,11 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 表单主体 */}
-          {/* 移动端 (lg 以下) 增加 pt-16 是为了给上方 fixed 悬浮的导航栏留出 64px 的物理空间，防止内容被压住 */}
-          <div className="w-full max-w-2xl mx-auto pt-16 lg:pt-0 pb-10">
+          {/* 
+            表单内容区：外层抵消了 padding 之后，在这里重新加回 p-4 保证表单内容不贴墙。
+            完全基于 Flexbox 文档流，不脱离、不越界。
+          */}
+          <div className="w-full max-w-2xl mx-auto p-4 md:p-6 lg:p-8">
             {detailLoading ? (
               <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
                 <RefreshCw size={28} className="inline animate-spin" />
