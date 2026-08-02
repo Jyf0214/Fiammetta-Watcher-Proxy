@@ -227,7 +227,7 @@ function TopHeader({
   const breadcrumb = t(breadcrumbKey);
 
   return (
-    <header className="h-12 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
+    <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
       <button
         onClick={onToggleSidebar}
         className="md:hidden p-2 -ml-2 mr-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
