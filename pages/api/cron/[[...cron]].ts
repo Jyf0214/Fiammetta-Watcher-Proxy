@@ -6,7 +6,8 @@
  *   GET/POST /api/cron/key-reset    → 重置 Key 用量
  *   GET/POST /api/cron/log-archive  → 归档过期日志
  *
- * 认证：CRON_SECRET 环境变量，未配置时跳过认证。
+ * 认证：必须配置 CRON_SECRET 环境变量并携带 Authorization: Bearer <CRON_SECRET>；
+ * 未配置 CRON_SECRET 时端点禁用（403），防止无鉴权触发定时任务。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -24,7 +25,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "GET" && req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return res.status(405).json({ error: "Method Not Allowed" }); }
 
   const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+  if (!secret) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden",
+      message: "CRON_SECRET 未配置，定时任务端点已禁用。请在部署环境配置 CRON_SECRET 后由外部调度器携带 Authorization: Bearer <CRON_SECRET> 调用",
+    });
+  }
+  if (req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
 
   const param = req.query.cron;
   const task = Array.isArray(param) ? param[0] : param;

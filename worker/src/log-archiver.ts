@@ -17,6 +17,9 @@ const RETENTION_DAYS = 30;
 /** 每批处理的天数（防止一次性处理过多数据导致超时） */
 const BATCH_SIZE = 7;
 
+/** 合理时间戳下限：2024-01-01T00:00:00Z（秒）——早于项目存在的日志视为异常数据 */
+const MIN_VALID_TS = 1704067200;
+
 /**
  * 执行日志归档任务
  *
@@ -36,6 +39,21 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
 
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   try {
+    // 清理异常时间戳日志（如导入备份带入的 2009 年测试数据）：
+    // 不聚合不保留，避免污染 daily_stats 统计
+    const nowPlus1d = now + 86400;
+    const invalidDeleted = await prisma.requestLogs.deleteMany({
+      where: {
+        OR: [
+          { createdAt: { lt: MIN_VALID_TS } },
+          { createdAt: { gt: nowPlus1d } },
+        ],
+      },
+    });
+    if (invalidDeleted.count > 0) {
+      console.log(`[log-archiver] 清理 ${invalidDeleted.count} 条异常时间戳日志`);
+    }
+
     const oldestLog = await prisma.requestLogs.findFirst({
       orderBy: { createdAt: "asc" },
       select: { createdAt: true },
@@ -72,7 +90,9 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
       batchStartTs += BATCH_SIZE * 86400;
     }
 
-    const message = `归档完成: ${totalDatesArchived} 天, ${totalLogsProcessed} 条日志处理, ${totalLogsDeleted} 条已删除`;
+    const message = `归档完成: ${totalDatesArchived} 天, ${totalLogsProcessed} 条日志处理, ${totalLogsDeleted} 条已删除${
+      invalidDeleted.count > 0 ? `, 清理 ${invalidDeleted.count} 条异常时间戳日志` : ""
+    }`;
     console.log(`[log-archiver] ${message}`);
 
     return {

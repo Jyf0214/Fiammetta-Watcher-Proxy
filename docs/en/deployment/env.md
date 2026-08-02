@@ -23,11 +23,11 @@ On Serverless platforms (Cloudflare / Vercel / EdgeOne), environment variables a
 | `PORT` | Listening port | `3000` |
 | `NODE_ENV` | Runtime environment | `production` |
 
-## Cron Auth (optional)
+## Cron Auth (required)
 
 | Variable | Description |
 |----------|-------------|
-| `CRON_SECRET` | Access key for the scheduled-task endpoints; requests must carry `Authorization: Bearer <CRON_SECRET>` when set |
+| `CRON_SECRET` | Access key for the scheduled-task endpoints (**required — `/api/cron/*` returns 403 when unset**); requests must carry `Authorization: Bearer <CRON_SECRET>` |
 
 ## By Platform
 

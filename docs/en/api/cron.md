@@ -18,7 +18,7 @@ If `CRON_SECRET` environment variable is set, all cron requests must include:
 Authorization: Bearer <CRON_SECRET>
 ```
 
-If `CRON_SECRET` is not set, endpoints require no authentication.
+**`CRON_SECRET` is required**: if it is not configured, the endpoints are disabled (403) to prevent unauthenticated triggering. Once configured, make sure your scheduler sends the correct auth header, otherwise calls return 401.
 
 ## Response Format
 

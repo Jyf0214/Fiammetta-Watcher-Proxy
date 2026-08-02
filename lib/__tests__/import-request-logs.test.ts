@@ -56,14 +56,18 @@ function createTestDb(): SqlJsDatabase {
   return db;
 }
 
-/** ISO 字符串或 unix 时间戳 → unix 秒 */
+/** ISO 字符串或 unix 时间戳 → unix 秒（与 import.ts 保持一致，超出合理范围回退当前时间） */
 function toUnixSeconds(value: unknown): number {
-  if (typeof value === "number" && value > 1_000_000_000) return value;
+  const now = Math.floor(Date.now() / 1000);
+  const maxValidTs = now + 86400;
+  if (typeof value === "number" && value > 1_000_000_000) {
+    return value >= 1704067200 && value <= maxValidTs ? value : now;
+  }
   if (typeof value === "string") {
     const ts = Math.floor(new Date(value).getTime() / 1000);
-    if (!isNaN(ts) && ts > 0) return ts;
+    if (!isNaN(ts) && ts >= 1704067200 && ts <= maxValidTs) return ts;
   }
-  return Math.floor(Date.now() / 1000);
+  return now;
 }
 
 /**
@@ -339,5 +343,38 @@ describe("requestLogs 导入：批量场景", () => {
     ]);
     expect(result.imported).toBe(1);
     db.close();
+  });
+});
+
+describe("toUnixSeconds：时间戳范围校验", () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  it("合理范围内的秒级时间戳原样保留", () => {
+    expect(toUnixSeconds(1785600000)).toBe(1785600000); // 2026-08-01
+    expect(toUnixSeconds(1704067200)).toBe(1704067200); // 2024-01-01 边界
+  });
+
+  it("2009 年秒级时间戳（如 1234483200）回退为当前时间", () => {
+    const result = toUnixSeconds(1234483200);
+    expect(result).toBeGreaterThanOrEqual(now - 5);
+    expect(result).toBeLessThanOrEqual(now + 5);
+  });
+
+  it("未来时间戳（如 2100 年）回退为当前时间", () => {
+    const result = toUnixSeconds(4102444800);
+    expect(result).toBeGreaterThanOrEqual(now - 5);
+    expect(result).toBeLessThanOrEqual(now + 5);
+  });
+
+  it("2009 年 ISO 日期字符串回退为当前时间", () => {
+    const result = toUnixSeconds("2009-02-13T00:00:00.000Z");
+    expect(result).toBeGreaterThanOrEqual(now - 5);
+    expect(result).toBeLessThanOrEqual(now + 5);
+  });
+
+  it("非法输入回退为当前时间", () => {
+    const result = toUnixSeconds("not-a-date");
+    expect(result).toBeGreaterThanOrEqual(now - 5);
+    expect(result).toBeLessThanOrEqual(now + 5);
   });
 });

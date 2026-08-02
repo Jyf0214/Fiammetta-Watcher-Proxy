@@ -707,18 +707,27 @@ async function importConfigs(
 
 // ==================== 导入审计日志 ====================
 
+/** 合理时间戳下限：2024-01-01T00:00:00Z（秒）——早于项目存在的导入时间视为异常数据 */
+const MIN_VALID_TS = 1704067200;
+
 /**
  * 将 ISO 时间字符串或 unix 时间戳转换为 unix 秒
+ *
+ * 仅接受合理范围内的秒级时间戳（2024-01-01 ~ 当前时间 + 1 天），
+ * 超出范围（如备份文件中的 2009 年测试数据 1234483200）回退为
+ * 当前时间，防止异常时间在日志归档时污染 daily_stats 统计。
  */
 function toUnixSeconds(value: unknown): number {
+  const now = Math.floor(Date.now() / 1000);
+  const maxValidTs = now + 86400;
   if (typeof value === "number" && value > 1_000_000_000) {
-    return value;
+    return value >= MIN_VALID_TS && value <= maxValidTs ? value : now;
   }
   if (typeof value === "string") {
     const ts = Math.floor(new Date(value).getTime() / 1000);
-    if (!isNaN(ts) && ts > 0) return ts;
+    if (!isNaN(ts) && ts >= MIN_VALID_TS && ts <= maxValidTs) return ts;
   }
-  return Math.floor(Date.now() / 1000);
+  return now;
 }
 
 /**

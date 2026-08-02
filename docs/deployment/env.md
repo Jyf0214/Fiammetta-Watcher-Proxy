@@ -23,11 +23,11 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 | `PORT` | 监听端口 | `3000` |
 | `NODE_ENV` | 运行环境 | `production` |
 
-## Cron 认证（可选）
+## Cron 认证（必须）
 
 | 变量 | 说明 |
 |------|------|
-| `CRON_SECRET` | 定时任务端点访问密钥；设置后调用需带 `Authorization: Bearer <CRON_SECRET>` 头 |
+| `CRON_SECRET` | 定时任务端点访问密钥（**必须配置**，未配置时 `/api/cron/*` 端点返回 403 禁用）；调用需带 `Authorization: Bearer <CRON_SECRET>` 头 |
 
 ## 按平台配置
 

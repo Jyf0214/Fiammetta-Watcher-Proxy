@@ -1,7 +1,11 @@
 /**
- * GET /api/admin/logs/archive — 查询已归档的日志统计数据（dailyStats 表）
+ * 归档日志统计 API
  *
- * 查询参数：
+ * GET    /api/admin/logs/archive — 查询已归档的日志统计数据（dailyStats 表）
+ * POST   /api/admin/logs/archive — 手动触发日志归档（聚合过期日志到 dailyStats）
+ * DELETE /api/admin/logs/archive — 按日期范围删除归档统计记录
+ *
+ * 查询参数（GET/DELETE）：
  * - page: 页码，默认 1
  * - pageSize: 每页条数，默认 20，最大 100
  * - startDate: 起始日期（YYYY-MM-DD）
@@ -14,6 +18,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { runArchiveTask } from "../../../../worker/src/log-archiver";
 
 /**
  * 将 YYYY-MM-DD 日期字符串转换为当天结束时的 Unix 时间戳（23:59:59）
@@ -41,6 +48,29 @@ export default async function handler(
     return;
   }
 
+  switch (req.method) {
+    case "GET": return handleGet(req, res);
+    case "POST":
+    case "DELETE": {
+      // 变更操作遵循项目惯例：CSRF 来源校验 + 管理端速率限制
+      if (!checkCsrfOrigin(req, res)) return;
+      if (!await checkAdminRateLimit(admin.adminId, res)) return;
+      return req.method === "POST" ? handlePost(req, res) : handleDelete(req, res);
+    }
+    default:
+      res.setHeader("Allow", ["GET", "POST", "DELETE"]);
+      return res.status(405).json({ success: false, error: "Method not allowed" });
+  }
+}
+
+/** 校验 YYYY-MM-DD 日期格式 */
+function isValidDateStr(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+// ==================== GET — 查询归档统计 ====================
+
+async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   const page = Math.max(1, parseInt((req.query.page as string) || "1", 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || "20", 10) || 20));
   const startDateStr = req.query.startDate as string | undefined;
@@ -48,6 +78,10 @@ export default async function handler(
   const keyId = req.query.keyId as string | undefined;
   const platformId = req.query.platformId as string | undefined;
   const model = req.query.model as string | undefined;
+
+  if ((startDateStr && !isValidDateStr(startDateStr)) || (endDateStr && !isValidDateStr(endDateStr))) {
+    return res.status(400).json({ success: false, error: "日期格式应为 YYYY-MM-DD" });
+  }
 
   try {
     const orm = await createDb();
@@ -104,5 +138,55 @@ export default async function handler(
   } catch (err) {
     console.error("[GET /api/admin/logs/archive] 查询归档日志失败:", err);
     res.status(500).json({ success: false, error: "查询归档日志失败" });
+  }
+}
+
+// ==================== POST — 手动触发归档 ====================
+
+async function handlePost(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    // 注意：此模式仅在非 D1 数据库类型（TiDB/PG/MySQL，生产 EO 为 TiDB）下有效——
+    // createDb 忽略传入的 dummy DB，走 DB_TYPE + TIDB_URL/PG_URL 环境变量；
+    // D1 部署下应改传真实 binding（无参调用自动检测）。与 pages/api/cron/[[...cron]].ts 用法一致。
+    const result = await runArchiveTask({} as D1Database, { DB_TYPE: process.env.DB_TYPE });
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("[POST /api/admin/logs/archive] 手动归档失败:", err);
+    res.status(500).json({ success: false, error: "归档失败" });
+  }
+}
+
+// ==================== DELETE — 按日期范围删除归档统计 ====================
+
+async function handleDelete(req: NextApiRequest, res: NextApiResponse) {
+  const startDateStr = req.query.startDate as string | undefined;
+  const endDateStr = req.query.endDate as string | undefined;
+
+  if (!startDateStr && !endDateStr) {
+    return res.status(400).json({ success: false, error: "请指定 startDate 或 endDate 日期范围" });
+  }
+  if ((startDateStr && !isValidDateStr(startDateStr)) || (endDateStr && !isValidDateStr(endDateStr))) {
+    return res.status(400).json({ success: false, error: "日期格式应为 YYYY-MM-DD" });
+  }
+
+  try {
+    const orm = await createDb();
+
+    const conditions: Prisma.dailyStatsWhereInput[] = [];
+    if (startDateStr) {
+      conditions.push({ date: { gte: dateToStartOfDay(startDateStr) } });
+    }
+    if (endDateStr) {
+      conditions.push({ date: { lte: dateToEndOfDay(endDateStr) } });
+    }
+
+    const result = await orm.dailyStats.deleteMany({
+      where: { AND: conditions },
+    });
+
+    res.status(200).json({ success: true, deleted: result.count, message: `已删除 ${result.count} 条归档记录` });
+  } catch (err) {
+    console.error("[DELETE /api/admin/logs/archive] 删除归档日志失败:", err);
+    res.status(500).json({ success: false, error: "删除归档日志失败" });
   }
 }
