@@ -347,32 +347,34 @@ describe("requestLogs 导入：批量场景", () => {
 });
 
 describe("toUnixSeconds：时间戳范围校验", () => {
-  const now = Math.floor(Date.now() / 1000);
-
   it("合理范围内的秒级时间戳原样保留", () => {
     expect(toUnixSeconds(1785600000)).toBe(1785600000); // 2026-08-01
     expect(toUnixSeconds(1704067200)).toBe(1704067200); // 2024-01-01 边界
   });
 
   it("2009 年秒级时间戳（如 1234483200）回退为当前时间", () => {
+    const now = Math.floor(Date.now() / 1000);
     const result = toUnixSeconds(1234483200);
     expect(result).toBeGreaterThanOrEqual(now - 5);
     expect(result).toBeLessThanOrEqual(now + 5);
   });
 
   it("未来时间戳（如 2100 年）回退为当前时间", () => {
+    const now = Math.floor(Date.now() / 1000);
     const result = toUnixSeconds(4102444800);
     expect(result).toBeGreaterThanOrEqual(now - 5);
     expect(result).toBeLessThanOrEqual(now + 5);
   });
 
   it("2009 年 ISO 日期字符串回退为当前时间", () => {
+    const now = Math.floor(Date.now() / 1000);
     const result = toUnixSeconds("2009-02-13T00:00:00.000Z");
     expect(result).toBeGreaterThanOrEqual(now - 5);
     expect(result).toBeLessThanOrEqual(now + 5);
   });
 
   it("非法输入回退为当前时间", () => {
+    const now = Math.floor(Date.now() / 1000);
     const result = toUnixSeconds("not-a-date");
     expect(result).toBeGreaterThanOrEqual(now - 5);
     expect(result).toBeLessThanOrEqual(now + 5);

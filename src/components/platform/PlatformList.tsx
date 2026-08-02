@@ -55,11 +55,12 @@ export function BrandAvatar({
 }: {
   name: string;
   type: string;
-  size?: "md" | "lg";
+  size?: "sm" | "md" | "lg";
 }) {
   const style = BRAND_STYLE[type] ?? DEFAULT_BRAND;
   const initial = name.trim().slice(0, 2).toUpperCase() || "?";
-  const box = size === "lg" ? "w-12 h-12 rounded-2xl text-base" : "w-10 h-10 rounded-lg text-sm";
+  const box =
+    size === "lg" ? "w-12 h-12 rounded-2xl text-base" : size === "sm" ? "w-8 h-8 rounded-lg text-xs" : "w-10 h-10 rounded-lg text-sm";
   return (
     <div className={cn("shrink-0 flex items-center justify-center font-bold", box, style.box, style.text)}>
       {initial}
