@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
-import { useThemeMode } from "@/hooks/use-theme-mode";
 import {
   LayoutDashboard,
   Server,
@@ -18,7 +17,6 @@ import {
   X,
   ChevronDown,
   ChevronRight,
-  Shield,
   BarChart3,
   Zap,
   Download,
@@ -77,25 +75,19 @@ function SidebarItem({
   return (
     <Link
       href={item.href}
-      prefetch={false}
       onClick={onClick}
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-300 no-underline ${
+      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative ${
         isActive
-          ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-lg shadow-zinc-200 dark:shadow-zinc-400/20"
-          : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
+          ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium"
+          : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
       }`}
     >
-      <Icon
-        size={18}
-        className={`shrink-0 transition-colors ${
-          isActive ? "text-white dark:text-zinc-900" : "text-zinc-300 dark:text-zinc-600"
-        }`}
-      />
-      <span className={`truncate ${isActive ? "font-bold" : "font-medium"}`}>
-        {t(item.key)}
-      </span>
+      <Icon className="w-5 h-5 shrink-0" />
+      <span className="text-sm">{t(item.key)}</span>
       {isActive && (
-        <div className="ml-auto w-1 h-4 bg-white/20 dark:bg-zinc-900/20 rounded-full" />
+        <div className="absolute right-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
+        </div>
       )}
     </Link>
   );
@@ -120,27 +112,23 @@ function SidebarGroup({
   t: (key: string) => string;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="mb-6">
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full px-3 mb-1 rounded-lg transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
-        aria-label={t("common.collapse")}
+        className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
       >
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 dark:text-zinc-600">
-          {t(groupI18nKeys[group] ?? group)}
-        </span>
-        <ChevronDown
-          size={12}
-          className={`text-zinc-200 dark:text-zinc-700 transition-transform duration-300 ${
-            isCollapsed ? "-rotate-90" : ""
-          }`}
-        />
+        {t(groupI18nKeys[group] ?? group)}
+        {isCollapsed ? (
+          <ChevronRight className="w-3 h-3" />
+        ) : (
+          <ChevronDown className="w-3 h-3" />
+        )}
       </button>
       {!isCollapsed && (
-        <div className="space-y-0.5">
+        <div className="mt-2 space-y-1">
           {groupItems.map((item) => (
             <SidebarItem
-              key={item.href}
+              key={item.key}
               item={item}
               isActive={isActive(item.href)}
               onClick={onItemClick}
@@ -166,33 +154,28 @@ function SidebarUserMenu({
   t: (key: string) => string;
 }) {
   return (
-    <div className="p-4 space-y-4 bg-zinc-50/50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
-      <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700">
-        <div className="w-10 h-10 rounded-full bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center shrink-0">
-          <Shield size={18} className="text-white dark:text-zinc-900" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">
-            {username}
+    <div className="mt-auto pt-4 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="px-3 py-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 mb-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm">
+            {username.charAt(0).toUpperCase()}
           </div>
-          <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">
-            Administrator
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+              {username}
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">Administrator</div>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          disabled={logoutLoading}
-          className={`p-2 rounded-xl transition-colors ${
-            logoutLoading
-              ? "text-zinc-300 dark:text-zinc-600 cursor-not-allowed"
-              : "text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-red-500"
-          }`}
-          title={t("auth.logout")}
-          aria-label={t("auth.logout")}
-        >
-          <LogOut size={18} className={logoutLoading ? "animate-spin" : ""} />
-        </button>
       </div>
+      <button
+        onClick={onLogout}
+        disabled={logoutLoading}
+        className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all disabled:opacity-50"
+      >
+        <LogOut className="w-5 h-5" />
+        <span className="text-sm">{t("admin.logout")}</span>
+      </button>
     </div>
   );
 }
@@ -227,27 +210,24 @@ function TopHeader({
   const breadcrumb = t(breadcrumbKey);
 
   return (
-    <header className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6 sticky top-0 z-50">
-      <button
-        onClick={onToggleSidebar}
-        className="md:hidden p-2 -ml-2 mr-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-        aria-label={t("common.open_sidebar")}
-      >
-        <Menu size={18} />
-      </button>
-      <nav className="flex items-center gap-1.5 text-sm text-zinc-400">
-        <span className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
-          {t("admin.system")}
-        </span>
-        {breadcrumb && (
-          <>
-            <ChevronRight size={14} className="text-zinc-300 dark:text-zinc-600 shrink-0" />
-            <span className="font-medium text-zinc-700 dark:text-zinc-200">
-              {breadcrumb}
+    <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 z-40">
+      <div className="h-full px-4 lg:pl-64 lg:pr-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onToggleSidebar}
+            className="lg:hidden p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+          </button>
+          <nav className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+            <span className="hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
+              {t("admin.system_config")}
             </span>
-          </>
-        )}
-      </nav>
+            <span className="text-zinc-300 dark:text-zinc-600">›</span>
+            <span className="font-medium text-zinc-900 dark:text-zinc-100">{breadcrumb}</span>
+          </nav>
+        </div>
+      </div>
     </header>
   );
 }
@@ -261,7 +241,6 @@ export default function AdminLayout({
   const { t } = useTranslation();
   const router = useRouter();
   const pathname = router.pathname;
-  const { isDark } = useThemeMode();
   const [username, setUsername] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -365,64 +344,58 @@ export default function AdminLayout({
   // 加载中显示旋转图标
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        <GlobalLoading size="large" />
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+        <GlobalLoading />
       </div>
     );
   }
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800">
       {/* 品牌头 */}
-      <div className="px-5 py-6 flex items-center justify-between border-b border-zinc-50/50 dark:border-zinc-800/50">
-        <Link href="/" className="flex items-center gap-3 group no-underline">
-          <div className="w-9 h-9 bg-zinc-900 dark:bg-zinc-100 rounded-xl flex items-center justify-center shadow-lg shadow-zinc-200 dark:shadow-zinc-700 group-hover:scale-105 transition-transform duration-300">
-            <span className="text-white dark:text-zinc-900 font-black text-lg tracking-tighter">
-              FW
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-sm tracking-tight text-zinc-900 dark:text-zinc-100 leading-none mb-0.5">
-              Fiammetta
-            </span>
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">
-              Watcher Proxy
-            </span>
-          </div>
-        </Link>
-        <button
-          onClick={close}
-          className="md:hidden p-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
-          aria-label={t("common.close_sidebar")}
-        >
-          <X size={18} />
-        </button>
+      <div className="h-16 flex items-center gap-3 px-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
+          FW
+        </div>
+        <div className="flex flex-col">
+          <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
+            Fiammetta
+          </span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400 leading-tight">
+            Watcher Proxy
+          </span>
+        </div>
       </div>
 
       {/* 用户信息 */}
-      <SidebarUserMenu username={username} onLogout={handleLogout} logoutLoading={logoutLoading} t={t} />
+      <div className="px-3 py-3">
+        <SidebarUserMenu
+          username={username}
+          onLogout={handleLogout}
+          logoutLoading={logoutLoading}
+          t={t}
+        />
+      </div>
 
       {/* 服务状态 */}
       {healthStatus && (
-        <div className="px-4 py-2">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-700/50">
-            <Database size={12} className="text-zinc-400 dark:text-zinc-500" />
-            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              {healthStatus.dbType}
-            </span>
-            <span className="ml-auto">
-              {healthStatus.status === "ok" ? (
-                <Wifi size={12} className="text-emerald-500" />
-              ) : (
-                <WifiOff size={12} className="text-red-400" />
-              )}
-            </span>
+        <div className="px-3 mb-4">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 text-xs">
+            <div className="flex items-center gap-1.5 flex-1">
+              <Database className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="text-zinc-600 dark:text-zinc-400">{healthStatus.dbType}</span>
+            </div>
+            {healthStatus.status === "ok" ? (
+              <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+            ) : (
+              <WifiOff className="w-3.5 h-3.5 text-red-500" />
+            )}
           </div>
         </div>
       )}
 
       {/* 菜单 */}
-      <nav className="flex-1 overflow-y-auto px-3 py-6 space-y-7 custom-scrollbar">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
         {Object.entries(grouped).map(([group, groupItems]) => (
           <SidebarGroup
             key={group}
@@ -440,41 +413,44 @@ export default function AdminLayout({
   );
 
   return (
-    <div className={`flex min-h-screen overflow-x-hidden ${isDark ? "dark" : ""}`}>
-      {/* 桌面端侧边栏 */}
-      <div className="hidden md:flex w-[280px] min-h-screen z-[100] bg-white dark:bg-zinc-900 flex-col shrink-0">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      {/* 顶部 Header - 固定高度 64px */}
+      <TopHeader pathname={pathname} t={t} onToggleSidebar={open} />
+
+      {/* 桌面端侧边栏 - 固定在左侧，从 Header 下方开始 */}
+      <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 z-30">
         {sidebarContent}
-      </div>
+      </aside>
 
       {/* 移动端遮罩层 */}
       {sidebarOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-zinc-900/40 backdrop-blur-md z-[998] transition-opacity duration-300"
-          aria-hidden="true"
+          className="lg:hidden fixed inset-0 bg-black/50 z-40"
           onClick={close}
         />
       )}
 
       {/* 移动端侧边栏 */}
-      <div
-        className="md:hidden fixed top-0 h-screen w-[300px] z-[999] bg-white dark:bg-zinc-900 shadow-[20px_0_60px_-15px_rgba(0,0,0,0.3)] transition-transform duration-500"
-        style={{
-          left: 0,
-          transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
-        }}
+      <aside
+        className={`lg:hidden fixed top-0 left-0 bottom-0 w-64 z-50 transform transition-transform duration-300 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
       >
         {sidebarContent}
-      </div>
+        <button
+          onClick={close}
+          className="absolute top-4 right-4 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </aside>
 
-      {/* 内容区 */}
-      <div className="flex-1 flex flex-col min-h-screen bg-zinc-50 dark:bg-zinc-950 overflow-x-hidden">
-        <TopHeader
-          pathname={pathname}
-          t={t}
-          onToggleSidebar={open}
-        />
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden">{children}</main>
-      </div>
+      {/* 内容区 - 补偿 Header 高度 64px */}
+      <main className="min-h-screen pt-16 lg:pl-64">
+        <div className="p-4 lg:p-6">
+          {children}
+        </div>
+      </main>
     </div>
   );
 }
