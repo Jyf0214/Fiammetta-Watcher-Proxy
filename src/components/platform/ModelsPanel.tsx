@@ -260,7 +260,7 @@ export function ModelsPanel({
               className={cn(
                 "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-200",
                 active
-                  ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                  ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
               )}
             >

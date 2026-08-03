@@ -54,7 +54,7 @@ export function PlatformConfigForm({
   const { t } = useTranslation();
 
   const formGroup =
-    "rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 sm:p-6";
+    "rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 sm:p-6";
   const groupTitle =
     "text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-4";
   const itemDesc = "text-xs text-zinc-400 dark:text-zinc-500";

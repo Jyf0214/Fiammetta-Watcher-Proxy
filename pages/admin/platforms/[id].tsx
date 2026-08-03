@@ -387,7 +387,7 @@ export default function PlatformDetailPage() {
     <AdminLayout>
       <div className="flex flex-col lg:flex-row h-full">
         {/* 左侧：桌面端平台列表栏 */}
-        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6 shadow-sm">
+        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6">
           <PlatformList
             platforms={platforms}
             loading={listLoading}
@@ -400,7 +400,7 @@ export default function PlatformDetailPage() {
         <div className="flex-1 min-w-0 relative">
 
           {/* 移动端返回条（sticky 吸附在 Header 下方 64px） */}
-          <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
+          <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
