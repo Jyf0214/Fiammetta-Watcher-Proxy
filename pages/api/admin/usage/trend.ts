@@ -60,20 +60,40 @@ export default async function handler(
     // 根据 period 决定聚合粒度：today 按小时，其他按天
     const isHourly = period === "today";
 
-    // 使用 Prisma ORM 查询所有匹配记录，只 select 聚合所需字段
-    const logs = await orm.requestLogs.findMany({
-      where: {
-        createdAt: { gte: startTimestamp },
-        isError: false,
-        ...(keyId ? { keyId } : {}),
-      },
-      select: {
-        tokens: true,
-        promptTokens: true,
-        completionTokens: true,
-        createdAt: true,
-      },
-    });
+    // 使用 Prisma ORM 查询所有匹配记录，只 select 聚合所需字段。
+    // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
+    // 必须分页循环拉取，否则统计只覆盖最早/最新 10000 条。
+    const PAGE_SIZE = 10000;
+    const logs: Array<{
+      tokens: number;
+      promptTokens: number;
+      completionTokens: number;
+      createdAt: number;
+    }> = [];
+    {
+      let skip = 0;
+      for (;;) {
+        const batch = await orm.requestLogs.findMany({
+          where: {
+            createdAt: { gte: startTimestamp },
+            isError: false,
+            ...(keyId ? { keyId } : {}),
+          },
+          select: {
+            tokens: true,
+            promptTokens: true,
+            completionTokens: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "asc" },
+          take: PAGE_SIZE,
+          skip,
+        });
+        logs.push(...batch);
+        if (batch.length < PAGE_SIZE) break;
+        skip += PAGE_SIZE;
+      }
+    }
 
     // 在 JS 中按日期分组并聚合
     const groups = new Map<

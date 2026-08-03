@@ -56,20 +56,44 @@ export default async function handler(
       orderBy: { createdAt: "desc" },
     });
 
-    // 通过 Prisma ORM 获取所有匹配的日志记录
-    const logs = await orm.requestLogs.findMany({
-      where,
-      select: {
-        platformId: true,
-        tokens: true,
-        promptTokens: true,
-        completionTokens: true,
-        ttft: true,
-        latency: true,
-        createdAt: true,
-        isError: true,
-      },
-    });
+    // 通过 Prisma ORM 获取所有匹配的日志记录。
+    // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
+    // 必须分页循环拉取，否则统计只覆盖最早/最新 10000 条。
+    const PAGE_SIZE = 10000;
+    const logs: Array<{
+      platformId: string | null;
+      tokens: number;
+      promptTokens: number;
+      completionTokens: number;
+      ttft: number;
+      latency: number;
+      createdAt: number;
+      isError: boolean;
+    }> = [];
+    {
+      let skip = 0;
+      for (;;) {
+        const batch = await orm.requestLogs.findMany({
+          where,
+          select: {
+            platformId: true,
+            tokens: true,
+            promptTokens: true,
+            completionTokens: true,
+            ttft: true,
+            latency: true,
+            createdAt: true,
+            isError: true,
+          },
+          orderBy: { createdAt: "asc" },
+          take: PAGE_SIZE,
+          skip,
+        });
+        logs.push(...batch);
+        if (batch.length < PAGE_SIZE) break;
+        skip += PAGE_SIZE;
+      }
+    }
 
     // 按 platformId 分组，手动计算聚合值
     const grouped = new Map<string, typeof logs>();
