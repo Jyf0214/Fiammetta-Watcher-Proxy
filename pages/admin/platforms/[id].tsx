@@ -39,7 +39,6 @@ export default function PlatformDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
-  const [tab, setTab] = useState<"config" | "models">("config");
 
   // 模型状态
   const [models, setModels] = useState<ModelItem[]>([]);
@@ -49,13 +48,12 @@ export default function PlatformDetailPage() {
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
-  // id 变化时重置详情状态（渲染期调整，避免 effect 内同步 setState）
+  // id 变化时重置详情状态（渲染期调整，避免 effect 内同步 setState，防止旧平台数据串写）
   const [prevId, setPrevId] = useState(id);
   if (prevId !== id) {
     setPrevId(id);
     setPlatform(null);
     setModels([]);
-    setTab("config");
   }
 
   // ---------- 数据加载 ----------
@@ -406,8 +404,8 @@ export default function PlatformDetailPage() {
 
         {/* 右侧：主内容区 */}
         <div className="flex-1 min-w-0 relative">
-          
-          {/* 使用 sticky 替代 fixed，使其相对于滚动容器吸顶，而非固定在系统屏幕级（视口） */}
+
+          {/* 移动端返回条（sticky 吸附在 Header 下方 64px） */}
           <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 shadow-sm">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
@@ -435,8 +433,7 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 表单主体 */}
-          {/* 移动端 (lg 以下) 增加 pt-16 是为了给上方悬浮的导航栏留出 64px 的物理空间，防止内容被压住 */}
+          {/* 详情主体 — 桌面端顶部补偿 Header 64px，移动端补偿返回条（64px Header + 44px 返回条 + 留白） */}
           <div className="w-full max-w-2xl mx-auto pt-[130px] lg:pt-0 pb-10">
             {detailLoading ? (
               <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
@@ -450,9 +447,9 @@ export default function PlatformDetailPage() {
                 {configForm}
               </>
             ) : platform ? (
-              <>
-                {/* 桌面端头部 */}
-                <div className="hidden lg:flex items-center gap-3 mb-5">
+              <div className="flex flex-col gap-8">
+                {/* 桌面端头部：品牌 + 名称 + 状态 + 启停开关（对照 ProviderConfig 头部） */}
+                <div className="hidden lg:flex items-center gap-3">
                   <BrandAvatar name={platform.name} type={platform.type} size="lg" />
                   <div className="flex-1 min-w-0">
                     <h1 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
@@ -473,39 +470,11 @@ export default function PlatformDetailPage() {
                   </div>
                 </div>
 
-                {/* Tab 切换 */}
-                <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl mb-4" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "config"}
-                    onClick={() => setTab("config")}
-                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
-                      tab === "config"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    {t("platform.config_tab")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "models"}
-                    onClick={() => setTab("models")}
-                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-all ${
-                      tab === "models"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    {t("platform.models")} ({models.length})
-                  </button>
-                </div>
+                {/* 配置表单（上） */}
+                {configForm}
 
-                {tab === "config" ? (
-                  configForm
-                ) : (
+                {/* 模型列表（下）— 对照 ProviderDetail 的 ModelList */}
+                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <ModelsPanel
                     models={models}
                     loading={modelsLoading}
@@ -520,8 +489,8 @@ export default function PlatformDetailPage() {
                     togglingAll={togglingAll}
                     togglingModelId={togglingModelId}
                   />
-                )}
-              </>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>
