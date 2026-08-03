@@ -159,22 +159,50 @@ async function archiveSingleDay(
   dayStartTs: number,
   dayEndTs: number
 ): Promise<{ processed: number; deleted: number }> {
-  const logs = await prisma.requestLogs.findMany({
-    where: {
-      createdAt: { gte: dayStartTs, lte: dayEndTs },
-    },
-    select: {
-      keyId: true,
-      keyName: true,
-      platformId: true,
-      model: true,
-      tokens: true,
-      promptTokens: true,
-      completionTokens: true,
-      ttft: true,
-      latency: true,
-    },
-  });
+  // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
+  // 分页循环拉取当天全部日志，避免超出部分未被聚合
+  const PAGE_SIZE = 10000;
+  const where = { createdAt: { gte: dayStartTs, lte: dayEndTs } };
+  const logs: Array<{
+    id: string;
+    keyId: string | null;
+    keyName: string | null;
+    platformId: string | null;
+    model: string;
+    tokens: number;
+    promptTokens: number;
+    completionTokens: number;
+    ttft: number;
+    latency: number;
+  }> = [];
+  const logIds: string[] = [];
+  {
+    let skip = 0;
+    for (;;) {
+      const batch = await prisma.requestLogs.findMany({
+        where,
+        select: {
+          id: true,
+          keyId: true,
+          keyName: true,
+          platformId: true,
+          model: true,
+          tokens: true,
+          promptTokens: true,
+          completionTokens: true,
+          ttft: true,
+          latency: true,
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: PAGE_SIZE,
+        skip,
+      });
+      logs.push(...batch);
+      for (const log of batch) logIds.push(log.id);
+      if (batch.length < PAGE_SIZE) break;
+      skip += PAGE_SIZE;
+    }
+  }
 
   if (logs.length === 0) return { processed: 0, deleted: 0 };
 
@@ -323,15 +351,19 @@ async function archiveSingleDay(
     }
   }
 
-  // 删除该天的原始日志
-  const deleteResult = await prisma.requestLogs.deleteMany({
-    where: {
-      createdAt: { gte: dayStartTs, lte: dayEndTs },
-    },
-  });
+  // 删除该天已归档的原始日志（按已收集的 id 分批删除，
+  // 避免按整天时间范围误删未被分页拉取到的部分）
+  let deleted = 0;
+  const DELETE_BATCH = 5000;
+  for (let i = 0; i < logIds.length; i += DELETE_BATCH) {
+    const r = await prisma.requestLogs.deleteMany({
+      where: { id: { in: logIds.slice(i, i + DELETE_BATCH) } },
+    });
+    deleted += r.count;
+  }
 
   return {
     processed: logs.length,
-    deleted: deleteResult.count,
+    deleted,
   };
 }
