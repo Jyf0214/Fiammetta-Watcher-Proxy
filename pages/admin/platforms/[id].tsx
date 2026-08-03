@@ -363,14 +363,6 @@ export default function PlatformDetailPage() {
   };
 
   // ---------- 渲染 ----------
-  const statusLabel = !platform
-    ? ""
-    : platform.status === "healthy"
-    ? t("platform.status_healthy")
-    : platform.status === "degraded"
-    ? t("platform.status_degraded")
-    : t("platform.status_down");
-
   const configForm = (
     <PlatformConfigForm
       form={form}
@@ -386,6 +378,8 @@ export default function PlatformDetailPage() {
       submitting={submitting}
       onDelete={handleDelete}
       deleting={deleting}
+      onToggle={handleToggle}
+      toggling={toggling}
     />
   );
 
@@ -448,29 +442,7 @@ export default function PlatformDetailPage() {
               </>
             ) : platform ? (
               <div className="flex flex-col gap-8">
-                {/* 桌面端头部：品牌 + 名称 + 状态 + 启停开关（对照 ProviderConfig 头部） */}
-                <div className="hidden lg:flex items-center gap-3">
-                  <BrandAvatar name={platform.name} type={platform.type} size="lg" />
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                      {platform.name}
-                    </h1>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <StatusDot status={platform.status} enabled={platform.enabled} />
-                      <span className="text-[11px] text-zinc-400">
-                        {platform.enabled ? statusLabel : t("common.disable")}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate font-mono mt-1">
-                      {platform.baseUrl}
-                    </p>
-                  </div>
-                  <div className="shrink-0">
-                    <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
-                  </div>
-                </div>
-
-                {/* 配置表单（上） */}
+                {/* 配置表单（上）— 卡片头部含品牌/名称/状态/启停开关 */}
                 {configForm}
 
                 {/* 模型列表（下）— 对照 ProviderDetail 的 ModelList */}

@@ -2,6 +2,7 @@
 
 import { Form, Input, InputNumber, Select, Popconfirm } from "antd";
 import { Button } from "@/components/ui/Button";
+import Switch from "@/components/ui/Switch";
 import {
   Plus,
   Copy,
@@ -11,10 +12,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
-import type { Platform } from "@/components/platform/PlatformList";
+import { BrandAvatar, StatusDot, type Platform } from "@/components/platform/PlatformList";
 
 /**
- * 平台配置表单 — 浅灰大圆角表单卡片组（基本信息 / API 密钥 / 参数设置）
+ * 平台配置表单 — 白卡 + 细边框 + 轻阴影 + 字段说明（对照参考 ProviderConfig 卡片）
+ * 首个卡片头部 = 品牌图标 + 名称 + 状态 + 启停开关（桌面端，移动端由返回条承担）
  */
 export function PlatformConfigForm({
   form,
@@ -30,6 +32,8 @@ export function PlatformConfigForm({
   submitting,
   onDelete,
   deleting,
+  onToggle,
+  toggling,
 }: {
   form: ReturnType<typeof Form.useForm>[0];
   editing: Platform | null;
@@ -44,24 +48,73 @@ export function PlatformConfigForm({
   submitting: boolean;
   onDelete: () => void;
   deleting: boolean;
+  onToggle: (enabled: boolean) => void;
+  toggling: boolean;
 }) {
   const { t } = useTranslation();
 
-  const formGroup = "rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 p-4";
-  const groupTitle = "text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3";
+  const formGroup =
+    "rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 sm:p-6";
+  const groupTitle =
+    "text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-4";
+  const itemDesc = "text-xs text-zinc-400 dark:text-zinc-500";
+
+  const statusLabel = !editing
+    ? ""
+    : editing.status === "healthy"
+    ? t("platform.status_healthy")
+    : editing.status === "degraded"
+    ? t("platform.status_degraded")
+    : t("platform.status_down");
 
   return (
-    <Form form={form} layout="vertical" onFinish={onSubmit} className="space-y-4">
-      {/* 组 1：基本信息 */}
+    <Form form={form} layout="vertical" onFinish={onSubmit} className="space-y-5">
+      {/* 组 1：基本信息（头部对照参考 ProviderConfig 分组标题） */}
       <div className={formGroup}>
+        {editing && (
+          <div className="hidden lg:flex items-center gap-3 pb-5 mb-5 border-b border-zinc-100 dark:border-zinc-800">
+            <BrandAvatar name={editing.name} type={editing.type} size="lg" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                  {editing.name}
+                </h2>
+                <StatusDot status={editing.status} enabled={editing.enabled} />
+                <span className="text-[11px] text-zinc-400">
+                  {editing.enabled ? statusLabel : t("common.disable")}
+                </span>
+              </div>
+            </div>
+            <div className="shrink-0">
+              <Switch checked={editing.enabled} loading={toggling} onChange={onToggle} />
+            </div>
+          </div>
+        )}
         <h3 className={groupTitle}>{t("platform.group_basic")}</h3>
-        <Form.Item name="name" label={t("platform.name")} rules={[{ required: true }]} className="!mb-4">
+        <Form.Item
+          name="name"
+          label={t("platform.name")}
+          rules={[{ required: true }]}
+          extra={<span className={itemDesc}>平台显示名称，用于列表与详情页展示</span>}
+          className="!mb-6"
+        >
           <Input />
         </Form.Item>
-        <Form.Item name="baseUrl" label={t("platform.base_url")} rules={[{ required: true }]} className="!mb-4">
+        <Form.Item
+          name="baseUrl"
+          label={t("platform.base_url")}
+          rules={[{ required: true }]}
+          extra={<span className={itemDesc}>OpenAI 兼容上游接口地址，所有请求将转发到该地址</span>}
+          className="!mb-6"
+        >
           <Input placeholder="https://api.openai.com/v1" />
         </Form.Item>
-        <Form.Item name="type" label={t("platform.type")} className="!mb-0">
+        <Form.Item
+          name="type"
+          label={t("platform.type")}
+          extra={<span className={itemDesc}>用于图标配色与兼容性适配</span>}
+          className="!mb-0"
+        >
           <Select
             options={[
               { value: "openai", label: "OpenAI" },
@@ -79,7 +132,7 @@ export function PlatformConfigForm({
           {namedKeys.map((namedKey, index) => (
             <div
               key={index}
-              className="flex items-center gap-1.5 p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700"
+              className="flex items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700"
             >
               <Input
                 value={namedKey.name}
@@ -143,20 +196,45 @@ export function PlatformConfigForm({
       <div className={formGroup}>
         <h3 className={groupTitle}>{t("platform.group_params")}</h3>
         <div className="grid grid-cols-2 gap-x-4">
-          <Form.Item name="priority" label={t("platform.priority")} className="!mb-4">
+          <Form.Item
+            name="priority"
+            label={t("platform.priority")}
+            extra={<span className={itemDesc}>数值越大优先级越高</span>}
+            className="!mb-6"
+          >
             <InputNumber min={0} className="!w-full" />
           </Form.Item>
-          <Form.Item name="weight" label={t("platform.weight")} className="!mb-4">
+          <Form.Item
+            name="weight"
+            label={t("platform.weight")}
+            extra={<span className={itemDesc}>负载均衡权重，越大分配流量越多</span>}
+            className="!mb-6"
+          >
             <InputNumber min={1} className="!w-full" />
           </Form.Item>
-          <Form.Item name="rpmLimit" label={t("platform.rpm_limit")} className="!mb-4">
+          <Form.Item
+            name="rpmLimit"
+            label={t("platform.rpm_limit")}
+            extra={<span className={itemDesc}>每分钟最大请求数，留空不限</span>}
+            className="!mb-6"
+          >
             <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
           </Form.Item>
-          <Form.Item name="tpmLimit" label={t("platform.tpm_limit")} className="!mb-4">
+          <Form.Item
+            name="tpmLimit"
+            label={t("platform.tpm_limit")}
+            extra={<span className={itemDesc}>每分钟最大 Token 数，留空不限</span>}
+            className="!mb-6"
+          >
             <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
           </Form.Item>
         </div>
-        <Form.Item name="forwardHeaders" label={t("platform.forward_headers")} className="!mb-0">
+        <Form.Item
+          name="forwardHeaders"
+          label={t("platform.forward_headers")}
+          extra={<span className={itemDesc}>每行一个请求头名称，透传到上游请求</span>}
+          className="!mb-0"
+        >
           <Input.TextArea
             rows={2}
             placeholder={"每行一个 Header 名称\nX-Thinking-Mode\nX-Reasoning-Effort"}
