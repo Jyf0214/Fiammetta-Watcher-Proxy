@@ -427,8 +427,8 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 详情主体 — 桌面端顶部补偿 Header 64px，移动端补偿返回条（64px Header + 44px 返回条 + 留白） */}
-          <div className="w-full max-w-2xl mx-auto pt-[130px] lg:pt-0 pb-10">
+          {/* 详情主体 — 桌面端无额外顶部间距；移动端返回条 sticky 在文档流内占位，仅保留少量呼吸间距 */}
+          <div className="w-full max-w-2xl mx-auto pt-4 lg:pt-0 pb-10">
             {detailLoading ? (
               <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
                 <RefreshCw size={28} className="inline animate-spin" />
