@@ -2,8 +2,12 @@
  * 请求模板匹配与应用测试
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { matchModel, getApplicableTemplates, applyTemplates, type RequestTemplate } from "../request-templates";
+
+vi.mock("@/lib/prisma", () => ({
+  createDb: vi.fn(),
+}));
 
 describe("matchModel", () => {
   it("精确匹配", () => {
@@ -135,6 +139,21 @@ describe("applyTemplates", () => {
     expect(result).toEqual({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
   });
 
+  it("思考控制类参数（reasoning_effort/chat_template_kwargs/extra_body）可生效", () => {
+    const body = { model: "deepseek-r1", messages: [] };
+    const templates: RequestTemplate[] = [
+      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { reasoning_effort: "max", chat_template_kwargs: { enable_thinking: true }, extra_body: { foo: 1 } }, enabled: true },
+    ];
+    const result = applyTemplates(body, templates);
+    expect(result).toEqual({
+      model: "deepseek-r1",
+      messages: [],
+      reasoning_effort: "max",
+      chat_template_kwargs: { enable_thinking: true },
+      extra_body: { foo: 1 },
+    });
+  });
+
   it("数组整体替换", () => {
     const body = { model: "gpt-4o", stop: ["a"] };
     const templates: RequestTemplate[] = [
@@ -152,5 +171,60 @@ describe("applyTemplates", () => {
     ];
     const result = applyTemplates(body, templates);
     expect(result.temperature).toBe(1.0);
+  });
+});
+
+describe("loadTemplates 缓存失效（保存后立即生效）", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it("updatedAt 变化时强制重载，未变化时命中缓存", async () => {
+    // 模拟 D1 configs 记录：管理后台保存会同时更新 value 与 updatedAt
+    let value = JSON.stringify([
+      { id: "1", name: "旧模板", description: "", models: ["*"], mergeBody: { temperature: 0.5 }, enabled: true },
+    ]);
+    let updatedAt = 1000;
+    let fullReads = 0;
+
+    const { createDb } = await import("@/lib/prisma");
+    const mockCreateDb = vi.mocked(createDb);
+    mockCreateDb.mockResolvedValue({
+      configs: {
+        findFirst: vi.fn((args: { select: Record<string, boolean> }) => {
+          // 全量加载会同时查 value + updatedAt；失效检查只查 updatedAt
+          if ("value" in args.select) {
+            fullReads++;
+            return Promise.resolve({ value, updatedAt });
+          }
+          return Promise.resolve({ updatedAt });
+        }),
+      },
+    } as any);
+
+    const { loadTemplates } = await import("../request-templates");
+    const db = {} as any;
+
+    // 首次加载：全量读 1 次
+    const first = await loadTemplates(db);
+    expect(first).toHaveLength(1);
+    expect(first[0].name).toBe("旧模板");
+    expect(fullReads).toBe(1);
+
+    // updatedAt 未变：命中缓存，不触发全量读
+    const second = await loadTemplates(db);
+    expect(second).toHaveLength(1);
+    expect(second[0].name).toBe("旧模板");
+    expect(fullReads).toBe(1);
+
+    // 管理后台保存：updatedAt 与 value 都变化 → 强制重载
+    value = JSON.stringify([
+      { id: "1", name: "新模板", description: "", models: ["*"], mergeBody: { temperature: 0.7 }, enabled: true },
+    ]);
+    updatedAt = 2000;
+    const third = await loadTemplates(db);
+    expect(third[0].name).toBe("新模板");
+    expect(fullReads).toBe(2);
   });
 });

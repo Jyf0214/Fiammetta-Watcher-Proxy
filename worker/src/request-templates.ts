@@ -24,6 +24,7 @@ export interface RequestTemplate {
 
 let templateCache: RequestTemplate[] | null = null;
 let lastRefresh = 0;
+let cachedUpdatedAt: number | null = null;
 const CACHE_TTL = 30_000;
 
 // ==================== 深度合并 ====================
@@ -33,6 +34,8 @@ const MERGEBODY_ALLOWED_KEYS = new Set([
   "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
   "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
   "n", "logprobs", "top_logprobs", "response_format", "seed",
+  // 思考控制类参数（deepseek/qwen 等厂商透传），与管理后台 API 白名单保持一致
+  "reasoning_effort", "chat_template_kwargs", "extra_body",
 ]);
 
 /**
@@ -109,35 +112,54 @@ const CONFIG_KEY = "system:request_templates";
 
 /**
  * 从 D1 加载模板列表（带缓存）
+ *
+ * 缓存未过期时先用 configs.updatedAt 做廉价失效检查：管理后台每次保存
+ * 模板都会更新 updatedAt，发生变化即强制重载，保证保存后立即生效。
  */
 export async function loadTemplates(
   db: D1Database,
   env?: WorkerEnv
 ): Promise<RequestTemplate[]> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   const now = Date.now();
+
   if (templateCache !== null && now - lastRefresh < CACHE_TTL) {
-    return templateCache;
+    try {
+      const meta = await prisma.configs.findFirst({
+        where: { key: CONFIG_KEY },
+        select: { updatedAt: true },
+      });
+      if ((meta?.updatedAt ?? null) === cachedUpdatedAt) {
+        return templateCache;
+      }
+    } catch (err) {
+      // 失效检查失败时退回 TTL 缓存
+      console.error("[request-templates] 缓存失效检查失败，使用缓存:", err);
+      return templateCache;
+    }
   }
 
   try {
-    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
     const row = await prisma.configs.findFirst({
       where: { key: CONFIG_KEY },
-      select: { value: true },
+      select: { value: true, updatedAt: true },
     });
 
     if (!row || !row.value) {
       templateCache = [];
+      cachedUpdatedAt = row?.updatedAt ?? null;
       lastRefresh = now;
       return templateCache;
     }
 
     const parsed = JSON.parse(row.value);
     templateCache = Array.isArray(parsed) ? parsed : [];
+    cachedUpdatedAt = row.updatedAt;
     lastRefresh = now;
   } catch (err) {
     console.error("[request-templates] 加载模板失败:", err);
     templateCache = [];
+    cachedUpdatedAt = null;
     lastRefresh = now;
   }
 
