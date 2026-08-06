@@ -77,9 +77,46 @@ docker compose logs -f app   # 实时日志
 docker compose down          # 停止（数据保留在 volume 中）
 ```
 
-## 方式二：docker build + 外部数据库
+## 方式二：docker compose standalone + 外部数据库
 
-已有 TiDB / MariaDB / PostgreSQL 实例时，只构建并运行应用容器：
+已有 TiDB / MariaDB / PostgreSQL 实例时，只运行应用容器（不内置数据库）。
+
+### 第一步：创建 .env 配置文件
+
+```bash
+cat > .env << 'EOF'
+# ===== 数据库（外部实例） =====
+DATABASE_URL=postgresql://用户:密码@主机:5432/数据库名
+# 数据库类型，可选，默认 pg。必须与连接串协议匹配：
+#   postgresql:// 配 pg，mysql:// 配 tidb，mariadb:// 配 mariadb
+# DB_TYPE=tidb
+
+# ===== 管理后台登录 =====
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=你的管理员密码
+
+# ===== 安全 =====
+JWT_SECRET=至少32字符的随机密钥
+
+# ===== Cron 认证（可选） =====
+CRON_SECRET=随机密钥
+
+# ===== 服务（可选） =====
+# PORT=3000
+EOF
+```
+
+### 第二步：构建并启动
+
+```bash
+docker compose -f docker-compose.standalone.yml up -d --build
+```
+
+- 首次启动会自动同步外部数据库表结构（幂等），无需手动建表
+- `DB_TYPE` 同时决定构建期生成的数据库驱动（compose 构建参数）与运行时类型，**必须与连接串协议匹配**（`postgresql://` 配 `pg`，`mysql://` 配 `tidb`，`mariadb://` 配 `mariadb`）
+- 应用监听 `3000` 端口（可用 `PORT` 修改）
+
+### 备选：不用 compose 直接 docker run
 
 ```bash
 docker build --build-arg DB_TYPE=pg -t fiammetta-watcher-proxy .
@@ -98,15 +135,13 @@ docker run -d \
 ```
 
 - `--build-arg DB_TYPE` 决定构建期生成的数据库驱动，**必须与运行时 `DB_TYPE` 一致**（`pg` / `mariadb` / `tidb`）
-- 数据库连接串协议必须与 `DB_TYPE` 匹配（`postgresql://` 配 `pg`，`mariadb://` 配 `mariadb`，`mysql://` 配 `tidb`）
 - 未设置 `DB_TYPE` 时启动脚本会按 `DATABASE_URL` 协议自动推断
-- 首次启动自动完成建表，之后每次启动幂等同步表结构
 
 ## 环境变量
 
 | 变量 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `DB_TYPE` | 数据库类型：`tidb` / `mariadb` / `pg`（容器内不支持 `d1`） | 是 | 按 `DATABASE_URL` 推断 |
+| `DB_TYPE` | 数据库类型：`tidb` / `mariadb` / `pg`（容器内不支持 `d1`） | 是 | compose 默认 `pg`；docker run 未设置时按 `DATABASE_URL` 推断 |
 | `DATABASE_URL` | 数据库连接串 | 是 | — |
 | `ADMIN_USERNAME` | 管理后台登录用户名 | 是 | `admin`（compose） |
 | `ADMIN_PASSWORD` | 管理后台登录密码 | 是 | — |

@@ -278,8 +278,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     try { errText = await upRes.text(); } catch { /* 读取错误体失败（如 signal 超时） */ }
     clearTimeout(upstreamTimeoutId);
     try { await recordFailure(cur.id, dummyDb); } catch {}
-    // 空响应时日志 status 记上游实际状态（200），下游收到 502：有意保留上游事实，配合 isError + errorMessage 标记失败语义
-    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), db: dummyDb, env }); } catch {}
+    // 日志 status 记录实际返回下游的状态：空响应耗尽时下游收到 502，
+    // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
+    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), db: dummyDb, env }); } catch {}
     if (isAutoModelRequest(requestedModel)) freezeAutoModel(requestedModel);
     // 空响应特判：绝不向下游透传空响应，返回 502 + 明确错误
     if (isEmptyResponse) {
@@ -312,6 +313,8 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
     let tt = 0, pt = 0, ct = 0, buf = "";
+    // 流内 error 事件（上游 200 + data: {"error": ...}）：HTTP 头无法反映失败，日志须按错误码记录
+    let streamError: { code: number; message: string } | undefined;
     let lastChunkAt = Date.now();
     let idleTimedOut = false;
     // 看门狗：距上次收到数据超过 UPSTREAM_IDLE_TIMEOUT_MS 即取消上游流，避免函数被无数据流无限占用
@@ -331,7 +334,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         for (const l of lines) {
           res.write(l + "\n");
           if (l.startsWith("data: ") && l !== "data: [DONE]") {
-            try { const data = JSON.parse(l.slice(6)); if (data.usage) { const ex = extractUsage(data.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; } } catch {}
+            try { const data = JSON.parse(l.slice(6)); if (data.usage) { const ex = extractUsage(data.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; } if (data.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = data.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(data.error.message || "").substring(0, 1000) }; } } } catch {}
           }
         }
         const { done, value } = await r.read();
@@ -346,7 +349,10 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       clearInterval(watchdog);
     }
     if (idleTimedOut) {
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, db: dummyDb, env }); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, db: dummyDb, env }); } catch {}
+    } else if (streamError) {
+      // 流内 error：按错误码记录失败日志（不计 Key 用量），下游实际收到的是 200 + error 流
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: streamError.message, db: dummyDb, env }); } catch {}
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }); } catch {}

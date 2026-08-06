@@ -124,6 +124,24 @@ export async function recordRequestLog(params: {
 }
 
 /**
+ * 从流内 error 事件中解析 HTTP 状态码
+ *
+ * 上游网关对失败请求可能返回 200 + SSE 流内 `data: {"error": {"code": 503}}`，
+ * 此时 HTTP 头无法反映失败。code 为 400-599 的整数才视为有效状态码，
+ * 否则返回 null（调用方回退到 200 成功路径）。
+ */
+function resolveStreamErrorStatus(error: Record<string, unknown> | undefined): number | null {
+  if (!error || typeof error !== "object") return null;
+  const raw = (error as Record<string, unknown>).code;
+  const code =
+    typeof raw === "number" ? raw : typeof raw === "string" ? parseInt(raw, 10) : NaN;
+  // 必须是 400-599 的整数：浮点等病态 code 会触发 Prisma Int 列校验错误，
+  // 导致整条失败日志丢失（外层 catch 吞掉）
+  if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) return code;
+  return null;
+}
+
+/**
  * 创建 Usage 提取 TransformStream
  *
  * 在流式响应中逐块解析 SSE 数据，提取最后一个 usage 对象，
@@ -147,6 +165,7 @@ export function createUsageTransformer(params: {
 }): TransformStream<Uint8Array, Uint8Array> {
   let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
+  let streamError: { code: number; message: string } | undefined;
   let ttft = 0;
   let isFirstChunk = true;
   let chunkCount = 0;
@@ -177,6 +196,16 @@ export function createUsageTransformer(params: {
           if (parsed.usage) {
             lastUsage = parsed.usage;
           }
+          // 上游 200 + 流内 error 事件：失败语义由日志记录（status=error.code，isError=true）
+          if (parsed.error) {
+            const status = resolveStreamErrorStatus(parsed.error);
+            if (status !== null) {
+              streamError = {
+                code: status,
+                message: String(parsed.error.message || "").substring(0, 1000),
+              };
+            }
+          }
         } catch {
           // 忽略不完整的 JSON 片段
         }
@@ -184,7 +213,8 @@ export function createUsageTransformer(params: {
     },
 
     async flush() {
-      if (!lastUsage && chunkCount > 0) {
+      // 流内 error 事件本身无 usage，属于失败请求的正常形态，不告警
+      if (!lastUsage && !streamError && chunkCount > 0) {
         console.warn(
           `[token] 流式响应未提取到 usage，chunks: ${chunkCount}，model: ${params.model}`
         );
@@ -197,7 +227,8 @@ export function createUsageTransformer(params: {
       // 复用同一个 PrismaClient 完成所有 DB 操作
       const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
       try {
-        if (totalTokens > 0) {
+        // 流内 error 视为失败请求：不计入 Key 用量/次数
+        if (!streamError && totalTokens > 0) {
           await prisma.apiKeys.update({
             where: { id: params.keyId },
             data: {
@@ -217,13 +248,14 @@ export function createUsageTransformer(params: {
             model: params.model,
             endpoint: "stream",
             method: "POST",
-            status: 200,
+            status: streamError ? streamError.code : 200,
             latency: duration,
-            tokens: totalTokens,
-            promptTokens,
-            completionTokens,
+            tokens: streamError ? 0 : totalTokens,
+            promptTokens: streamError ? 0 : promptTokens,
+            completionTokens: streamError ? 0 : completionTokens,
             ttft,
-            isError: false,
+            isError: !!streamError,
+            errorMessage: streamError?.message ?? null,
             createdAt: Math.floor(Date.now() / 1000),
           },
         });

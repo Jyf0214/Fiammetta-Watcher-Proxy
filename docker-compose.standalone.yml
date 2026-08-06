@@ -1,0 +1,49 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 构建期生成对应方言的 Prisma Client，必须与运行时 DB_TYPE 一致
+        DB_TYPE: ${DB_TYPE:-pg}
+    container_name: fiammetta-watcher-proxy-standalone
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-3000}
+      # 数据库类型：与构建参数一致（tidb / mariadb / pg），按 DATABASE_URL 协议匹配
+      - DB_TYPE=${DB_TYPE:-pg}
+      # 外部数据库连接串（自备 PostgreSQL / TiDB / MariaDB，不内置数据库）
+      - DATABASE_URL=${DATABASE_URL:?请在 .env 文件中设置 DATABASE_URL}
+      # 管理后台登录账号（环境变量认证，无需初始化）
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 文件中设置管理员密码}
+      # JWT 密钥：必须设置且不少于 32 字符，否则无法登录
+      - JWT_SECRET=${JWT_SECRET:?请在 .env 文件中设置 JWT_SECRET（至少 32 字符）}
+      # Cron 认证（可选但推荐，未配置时 /api/cron/* 端点返回 403 禁用）
+      - CRON_SECRET=${CRON_SECRET:-}
+    # 容器安全加固：禁止提升权限、移除所有 Linux capabilities
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 资源限制：防止容器占用过多内存和 CPU
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    # 健康检查：定期检测应用是否正常响应（与 PORT 一致，避免自定义端口时恒 unhealthy）
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-3000}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - app_data:/app/data
+
+volumes:
+  app_data:

@@ -13,6 +13,7 @@ import { proxyV1Request, withIdleTimeout } from "../proxy";
 import { getNextKey, getRandomKeyExcept, banKey } from "../platform-keys";
 import { recordFailure, recordSuccess } from "../load-balancer";
 import { routeRequest } from "../router";
+import { recordRequestLog } from "../token";
 import type { PlatformConfig } from "@/lib/types";
 import type { WorkerEnv } from "../config";
 
@@ -455,5 +456,81 @@ describe("withIdleTimeout 空闲超时流", () => {
 
     await vi.advanceTimersByTimeAsync(10_000);
     expect(onTimeout).not.toHaveBeenCalled();
+  });
+});
+
+// ==================== 空闲超时日志 ====================
+
+describe("proxyV1Request 流式挂起空闲超时", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform(),
+      targetModel: "target-model",
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("上游挂起 120 秒无数据：流切断，日志记 504 + isError=true（修复前记 200）", async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const hangingStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[]}\n\n'));
+        // 之后不再产出数据，模拟上游挂起
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(hangingStream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      )
+    );
+
+    // 空闲超时路径用 ctx.waitUntil 保护补记日志，mock 里直接执行该 promise
+    const waitUntilCtx = {
+      waitUntil: vi.fn((p: Promise<unknown>) => {
+        void p.catch(() => {});
+      }),
+    } as unknown as ExecutionContext;
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      waitUntilCtx
+    );
+
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+
+    // 推进 120s：无数据到达 → 空闲超时切断流
+    const errPromise = reader.read().catch((e) => e);
+    await vi.advanceTimersByTimeAsync(120_000);
+    const err = await errPromise;
+    expect(err.name).toBe("TimeoutError");
+
+    // 补记日志：status=504（修复前记录 200），isError=true，tokens=0
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    console.log("[repro] 空闲超时日志参数:", JSON.stringify({
+      status: logParams.status,
+      isError: logParams.isError,
+      errorMessage: logParams.errorMessage,
+      tokens: logParams.tokens,
+    }));
+    expect(logParams.status).toBe(504);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.tokens).toBe(0);
+    expect(logParams.errorMessage).toContain("空闲超时");
   });
 });

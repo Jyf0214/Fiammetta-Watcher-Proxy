@@ -706,8 +706,8 @@ export async function proxyV1Request(
     }
 
     try {
-      // 空响应时日志 status 记上游实际状态（200），下游收到 502：
-      // 有意保留上游事实，配合 isError + errorMessage 标记失败语义
+      // 日志 status 记录实际返回下游的状态：空响应耗尽时下游收到 502，
+      // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
       await recordRequestLog({
         keyId: apiKey.id,
         keyName: apiKey.name,
@@ -715,7 +715,7 @@ export async function proxyV1Request(
         model: requestedModel,
         endpoint: config.upstreamPath,
         method: "POST",
-        status: upstreamResponse.status,
+        status: isEmptyResponse ? 502 : upstreamResponse.status,
         tokens: 0,
         promptTokens: 0,
         completionTokens: 0,
@@ -889,7 +889,7 @@ async function handleUpstreamResponse(
             model: requestedModel,
             endpoint: config.upstreamPath,
             method: "POST",
-            status: 200,
+            status: 504,
             tokens: 0,
             promptTokens: 0,
             completionTokens: 0,
