@@ -42,7 +42,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 
 ## Deployment
 
-### Option 1: GitHub Actions (Recommended)
+### Option 1: GitHub Actions
 
 Push to the `canary` branch triggers Cloudflare deployment; EdgeOne deployments are manual only (requires `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets). You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
 

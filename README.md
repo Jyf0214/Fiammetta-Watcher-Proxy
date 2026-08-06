@@ -42,7 +42,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 
 ## 部署
 
-### 方式一：GitHub Actions 自动部署（推荐）
+### 方式一：GitHub Actions 自动部署
 
 推送到 `canary` 分支自动触发 Cloudflare 部署；EdgeOne 部署仅支持手动触发（需配置 `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets）；也可在 Actions 页面手动选择部署平台（cf / edgeone / both）。工作流步骤：
 

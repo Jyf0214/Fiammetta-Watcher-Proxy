@@ -17,13 +17,13 @@ FWP 支持 4 种部署方式，按部署目标分组：
 | 定时任务 | 内置（免费） | **仅 Pro 计划** | 外部调度 | 系统 cron |
 | 数据库 | D1（默认，零配置） | TiDB/MariaDB/PG（远程） | TiDB/MariaDB/PG（远程） | TiDB/MariaDB/PG |
 | 部署触发 | 网页手动触发，或推 `canary` 分支 | 控制台关联 Git 仓库 | 网页手动触发 | 手动 |
-| 适合 | 零成本首选 | 已有 Vercel / TiDB 账号 | 腾讯云生态 | 完全掌控 |
+| 适合 | 零成本 Serverless | 已有 Vercel / TiDB 账号 | 腾讯云生态 | 完全掌控 |
 
 > **免费版注意**：Cloudflare Workers 免费版单请求 CPU 上限 10ms，代理 AI 流式请求容易超限导致失败；生产建议升级 Workers Paid（CPU 上限默认 30s，最高 5 分钟）或选择其他平台。
 
 ## 如何选择
 
-1. **想要零成本 Serverless** → [Cloudflare 部署](/deployment/cloudflare)（生产首选，D1 数据库免费）
+1. **想要零成本 Serverless** → [Cloudflare 部署](/deployment/cloudflare)（D1 数据库免费）
 2. **已有 Vercel 项目或 TiDB Cloud** → [Vercel 部署](/deployment/vercel)
 3. **腾讯云用户 / 需要国内加速** → [EdgeOne 部署](/deployment/edgeone)（新平台，首次部署请人工验证）
 4. **自有服务器 / VPS / 内网** → [Node.js 直接部署](/deployment/standalone) 或 [Docker 部署](/deployment/docker)

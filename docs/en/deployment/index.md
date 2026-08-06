@@ -17,13 +17,13 @@ FWP supports 4 deployment methods, grouped by target:
 | Scheduled tasks | Built-in (free) | **Pro plan only** | External scheduler | System cron |
 | Database | D1 (default, zero config) | TiDB/MariaDB/PG (remote) | TiDB/MariaDB/PG (remote) | TiDB/MariaDB/PG |
 | Deploy trigger | Manual via web UI, or push `canary` | Connect Git repo in console | Manual via web UI | Manual |
-| Best for | Zero-cost default | Existing Vercel / TiDB account | Tencent Cloud ecosystem | Full control |
+| Best for | Zero-cost serverless | Existing Vercel / TiDB account | Tencent Cloud ecosystem | Full control |
 
 > **Free-tier note**: Cloudflare Workers Free allows 10ms CPU per request. Proxying streaming AI requests easily exceeds this. For production, upgrade to Workers Paid (CPU limit defaults to 30s, up to 5 min) or choose another platform.
 
 ## How to Choose
 
-1. **Zero-cost serverless** → [Cloudflare](/en/deployment/cloudflare) (production default; D1 is free)
+1. **Zero-cost serverless** → [Cloudflare](/en/deployment/cloudflare) (D1 is free)
 2. **Existing Vercel project or TiDB Cloud** → [Vercel](/en/deployment/vercel)
 3. **Tencent Cloud user / needs China acceleration** → [EdgeOne](/en/deployment/edgeone) (new platform — verify the first deployment manually)
 4. **Own server / VPS / intranet** → [Node.js standalone](/en/deployment/standalone) or [Docker](/en/deployment/docker)

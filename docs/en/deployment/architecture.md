@@ -4,7 +4,7 @@ FWP is an AI gateway: it exposes an OpenAI-compatible proxy API outward, and pro
 
 ## The Two Modes
 
-### Cloudflare Mode (managed, recommended)
+### Cloudflare Mode (managed)
 
 ```
 Requests → proxy API + scheduled tasks (run by Cloudflare)

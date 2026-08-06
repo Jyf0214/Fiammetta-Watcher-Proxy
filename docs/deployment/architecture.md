@@ -4,7 +4,7 @@ FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对�
 
 ## 两种运行模式
 
-### Cloudflare 模式（托管，推荐）
+### Cloudflare 模式（托管）
 
 ```
 请求 → 代理接口与定时任务（Cloudflare 托管运行）

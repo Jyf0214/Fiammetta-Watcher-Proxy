@@ -1,35 +1,6 @@
 # 快速开始
 
-## 方式一：Cloudflare 部署（推荐）
-
-最简单的部署方式，零运维成本，全球边缘节点。
-
-### 前置条件
-
-- [Cloudflare 账号](https://dash.cloudflare.com/sign-up)（免费）
-- [GitHub 账号](https://github.com)
-
-### 步骤
-
-1. Fork 项目到你的 GitHub 账号
-2. 获取 [Cloudflare API Token](https://dash.cloudflare.com/profile/api-tokens)（权限：Workers Edit、Workers KV Storage Edit、D1 Edit、Pages Edit）
-3. 在仓库 Settings → Secrets and variables → Actions 配置以下 Secret：
-
-| Secret | 说明 |
-|--------|------|
-| `CLOUDFLARE_API_TOKEN` | 你的 Cloudflare API Token |
-| `CLOUDFLARE_ACCOUNT_ID` | 你的 Cloudflare 账号 ID（Dashboard 右侧栏） |
-| `ADMIN_USERNAME` | 管理后台登录用户名 |
-| `ADMIN_PASSWORD` | 管理后台登录密码 |
-| `DB_TYPE` | 数据库类型，默认 `d1`，无需自备数据库 |
-| `DATABASE_URL` | 外部数据库连接串（仅 `DB_TYPE=tidb/pg` 时需要） |
-
-4. 在 Actions 页面启用工作流（首次按提示启用/批准）
-5. 手动运行工作流：Actions → Deploy → Run workflow → 分支选择 `canary` → 平台选择 `cf` → 点击 Run workflow。自动完成部署（数据库、Worker、Pages、后台登录凭据全部自动配置）
-
-详见 [Cloudflare 部署](/deployment/cloudflare)。
-
-## 方式二：本地开发
+## 本地开发
 
 ### 1. 安装依赖
 
@@ -69,27 +40,15 @@ npm run dev
 
 打开 `http://localhost:3000/admin`，使用配置的管理员账号登录。
 
-## 方式三：Vercel 部署
+## 部署到生产
 
-1. 在 [Vercel Dashboard](https://vercel.com/dashboard) 导入 GitHub 仓库
-2. 框架预设选择 Next.js
-3. 添加环境变量（`DB_TYPE`、`DATABASE_URL`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET`）
-4. 部署
+项目支持 Cloudflare、Vercel、EdgeOne、Node.js、Docker 多种部署方式，完整部署教程与平台对比见 [部署指南](/deployment/)，各平台详细步骤见对应文档：
 
-详见 [Vercel 部署](/deployment/vercel)。
-
-## 方式四：Node.js 直接运行
-
-```bash
-git clone -b canary https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
-npm install --legacy-peer-deps
-# 配置 .env 文件（见方式二）
-npm run build
-npx next start
-```
-
-详见 [Node.js 直接部署](/deployment/standalone)。
+- [Cloudflare 部署](/deployment/cloudflare)
+- [Vercel 部署](/deployment/vercel)
+- [EdgeOne 部署](/deployment/edgeone)
+- [Node.js 直接部署](/deployment/standalone)
+- [Docker 部署](/deployment/docker)
 
 ## 下一步
 
