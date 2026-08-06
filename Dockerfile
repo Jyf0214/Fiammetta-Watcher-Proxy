@@ -9,8 +9,11 @@ ARG DB_TYPE=pg
 ENV DB_TYPE=$DB_TYPE
 
 # 安装依赖（--ignore-scripts 跳过 prepare 钩子，Prisma Client 由 prebuild 钩子生成）
+# --legacy-peer-deps：项目必须 legacy 模式（React 19 与 vitepress 链 @docsearch/react 的 peer <19 冲突）。
+# 容器内无 .npmrc（本文件未复制它），strict 模式下 npm ci 的 lockfile 校验会报 EUSAGE
+# （Missing: search-insights / Invalid: @cloudflare/workers-types），必须显式传 flag。
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts --legacy-peer-deps
 
 # 复制源码并构建（prebuild 钩子自动生成对应方言的 Prisma Client；
 # 构建环境无 CI=true，prepare-db.mjs 不会执行 db push，表结构由容器启动时同步）
@@ -30,8 +33,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache wget
 
 # 安装生产依赖（含 prisma CLI，用于启动时同步表结构）
+# --legacy-peer-deps：同 builder 阶段，容器内无 .npmrc，strict 模式会 EUSAGE
 COPY --from=builder /app/package.json /app/package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts --legacy-peer-deps
 
 # 复制构建产物与运行所需文件
 COPY --from=builder /app/.next ./.next
