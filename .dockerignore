@@ -1,0 +1,22 @@
+node_modules
+.next
+src/generated
+.git
+.github
+.githooks
+.qwen
+.idx
+*.md
+!README.md
+.env*
+.dev.vars
+docker-compose.yml
+.dockerignore
+
+# 日志文件
+*.log
+
+# IDE 配置
+.vscode/
+.idea/
+.cursor/
