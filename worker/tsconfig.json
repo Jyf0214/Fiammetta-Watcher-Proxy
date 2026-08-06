@@ -14,7 +14,7 @@
     "noEmit": true,
     "rootDir": "..",
     "paths": {
-      "@/lib/*": ["../lib/*"],
+      "@/lib/*": ["../lib/*", "../src/lib/*"],
       "@/*": ["./*"]
     }
   },
