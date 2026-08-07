@@ -229,7 +229,7 @@ function DashboardContent() {
     },
     {
       key: "avgTtft",
-      title: "Avg TTFT",
+      title: t("avgTtft"),
       value: stats?.avgTtft ?? 0,
       icon: <Clock />,
       color: "bg-orange-50",
@@ -238,12 +238,12 @@ function DashboardContent() {
     },
     {
       key: "avgDuration",
-      title: "Avg Duration",
+      title: t("avgDuration"),
       value: stats?.avgDuration ?? 0,
       icon: <Clock />,
       color: "bg-cyan-50",
       iconColor: "text-cyan-500",
-      get display() { return formatDuration(this.value); },
+      get display() { return formatDuration(this.value, t); },
     },
   ];
 
@@ -319,7 +319,7 @@ function DashboardContent() {
           {statCards.map((card) => {
             const displayVal = "display" in card && card.display
               ? card.display.value
-              : formatCompactNumber(card.value);
+              : formatCompactNumber(card.value, t);
             return (
               <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
                 <div className="flex items-center gap-2.5">
@@ -343,7 +343,7 @@ function DashboardContent() {
           {statCards.map((card) => {
             const displayVal = "display" in card && card.display
               ? card.display.value
-              : formatCompactNumber(card.value);
+              : formatCompactNumber(card.value, t);
             const hasTrend = trendData[card.key] && trendData[card.key].length > 0;
             return (
               <ProCard key={card.key} className="bg-white border-zinc-200" padding="px-4 py-3">

@@ -82,6 +82,94 @@ function getClientIp(req: NextApiRequest): string {
   return str?.split(",")[0]?.trim() || (req.headers["x-real-ip"] as string) || "unknown";
 }
 
+/**
+ * 非 KV 平台（EdgeOne/Vercel/纯 Node）的登录限流兜底。
+ *
+ * 采用"先写后查"：每次尝试先插入一条 login_failed 占位记录，再统计
+ * 最近 30 分钟的失败数。并发请求各自插入后再计数，读取到的计数必然
+ * 包含本次及之前的尝试——消除了"先查后写"下 count 与 insert 之间的
+ * TOCTOU 竞态窗口（此前并发突刺可让全部请求同时读到低计数而绕过上限）。
+ * 计数超过上限（第 6 条起）即拒绝；登录成功时调用方会清除该 IP 的
+ * 全部失败记录（占位随成功一并清除）。
+ * 正确性前提：单库强一致（读自己的写）。TiDB serverless 单端点 / 单库部署
+ * 成立；若未来引入从库读/多区域读，此方案需重新评估。
+ * DB 故障时放行（fail-open，限流是防滥用而非安全边界），但记录错误日志，
+ * 避免限流静默失效（历史教训：审计写入失败曾被静默吞掉）。
+ */
+async function registerDbLoginAttempt(
+  ip: string,
+  username: string,
+  reason = "登录尝试"
+): Promise<{ limited: boolean; resetAt?: string }> {
+  try {
+    const db = await createDb();
+    const now = Math.floor(Date.now() / 1000);
+    // 先写入本次尝试的占位记录
+    await db.auditLogs.create({
+      data: {
+        id: crypto.randomUUID(),
+        adminId: "unknown",
+        action: "login_failed",
+        detail: JSON.stringify({ username, reason }),
+        ip,
+        createdAt: now,
+      },
+    });
+    const since = now - LOGIN_WINDOW_MS / 1000;
+    const fails = await db.auditLogs.count({
+      where: { action: "login_failed", ip, createdAt: { gte: since } },
+    });
+    if (fails > LOGIN_MAX_ATTEMPTS) {
+      // resetAt 用最近一次失败的窗口到期时间近似
+      const last = await db.auditLogs.findFirst({
+        where: { action: "login_failed", ip, createdAt: { gte: since } },
+        orderBy: { createdAt: "desc" },
+      });
+      const resetAt = last
+        ? new Date((last.createdAt + LOGIN_WINDOW_MS / 1000) * 1000).toISOString()
+        : undefined;
+      return { limited: true, resetAt };
+    }
+    return { limited: false };
+  } catch (err) {
+    console.error(
+      "[auth] 登录失败计数写入异常（本次限流放行）:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return { limited: false };
+  }
+}
+
+/**
+ * 只读查询某 IP 最近 30 分钟的登录失败计数（预检用）。
+ * 不写入任何记录；并发安全由失败分支的"先写后查"（registerDbLoginAttempt）
+ * 保证，预检只是让已超限的 IP 快速被拒、避免持续写库。
+ */
+async function readDbLoginFailInfo(ip: string): Promise<{ count: number; resetAt?: string }> {
+  try {
+    const db = await createDb();
+    const since = Math.floor(Date.now() / 1000) - LOGIN_WINDOW_MS / 1000;
+    const count = await db.auditLogs.count({
+      where: { action: "login_failed", ip, createdAt: { gte: since } },
+    });
+    if (count === 0) return { count };
+    const last = await db.auditLogs.findFirst({
+      where: { action: "login_failed", ip, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+    });
+    const resetAt = last
+      ? new Date((last.createdAt + LOGIN_WINDOW_MS / 1000) * 1000).toISOString()
+      : undefined;
+    return { count, resetAt };
+  } catch (err) {
+    console.error(
+      "[auth] 登录失败计数查询异常（预检放行）:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return { count: 0 };
+  }
+}
+
 function getTokenFromCookie(req: NextApiRequest): string | null {
   const cookieHeader = req.headers.cookie;
   if (!cookieHeader) return null;
@@ -153,7 +241,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
   try {
     const clientIp = getClientIp(req);
 
-    // KV 持久化限流检查
+    // KV 持久化限流检查（CF 平台）
     if (kv) {
       const recentFails = await getRecentFails(kv, clientIp);
       if (recentFails.length >= LOGIN_MAX_ATTEMPTS) {
@@ -163,6 +251,19 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
           success: false,
           error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
           resetAt,
+        });
+      }
+    } else {
+      // 非 CF 平台：数据库兜底限流（audit_logs 失败计数）
+      // 只读预检：已超限的 IP 直接拒绝（不写入，避免超限后仍持续写库）；
+      // 权威判定在失败分支的"先写后查"（registerDbLoginAttempt），并发突刺
+      // 即使穿过预检也会在写后计数处被统一拦截
+      const preCheck = await readDbLoginFailInfo(clientIp);
+      if (preCheck.count >= LOGIN_MAX_ATTEMPTS) {
+        return res.status(429).json({
+          success: false,
+          error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+          resetAt: preCheck.resetAt,
         });
       }
     }
@@ -182,26 +283,44 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
         const fails = await getRecentFails(kv, clientIp);
         fails.push(Date.now());
         await saveFails(kv, clientIp, fails);
+        try {
+          const db = await createDb();
+          await db.auditLogs.create({
+            data: {
+              id: crypto.randomUUID(),
+              adminId: "unknown",
+              action: "login_failed",
+              detail: JSON.stringify({ username, reason: "用户名或密码错误" }),
+              ip: clientIp,
+              createdAt: Math.floor(Date.now() / 1000),
+            },
+          });
+        } catch { /* 审计日志写入失败不阻塞主流程 */ }
+      } else {
+        // 非 CF 平台：先写后查（占位记录即审计日志），超限返回 429
+        const dbLimit = await registerDbLoginAttempt(clientIp, username, "用户名或密码错误");
+        if (dbLimit.limited) {
+          return res.status(429).json({
+            success: false,
+            error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+            resetAt: dbLimit.resetAt,
+          });
+        }
       }
-      try {
-        const db = await createDb();
-        await db.auditLogs.create({
-          data: {
-            id: crypto.randomUUID(),
-            adminId: "unknown",
-            action: "login_failed",
-            detail: JSON.stringify({ username, reason: "用户名或密码错误" }),
-            ip: clientIp,
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        });
-      } catch { /* 审计日志写入失败不阻塞主流程 */ }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
 
     // 登录成功 → 清除该 IP 全部失败记录 + 审计日志
     if (kv) {
       await kv.delete(kvKey(clientIp));
+    } else {
+      // 非 CF 平台：清除该 IP 的 login_failed 审计记录（DB 兜底限流计数归零）
+      try {
+        const db = await createDb();
+        await db.auditLogs.deleteMany({
+          where: { action: "login_failed", ip: clientIp },
+        });
+      } catch { /* 清除失败不阻塞主流程，下次登录仍可用 */ }
     }
     try {
       const db = await createDb();

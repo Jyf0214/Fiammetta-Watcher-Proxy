@@ -20,6 +20,35 @@ function getKvKey(adminId: string): string {
 }
 
 /**
+ * 非 KV 平台（EdgeOne/Vercel/纯 Node）的进程内滑动窗口兜底。
+ * 单实例有效；多副本部署时各自计数（仍有基本防护，强度弱于 KV 全局窗口）。
+ * 管理员数量极少，Map 不会膨胀。
+ */
+const memoryWindows = new Map<string, number[]>();
+
+/** 进程内窗口检查：true 表示放行，false 表示已发送 429 */
+function checkMemoryWindow(adminId: string, res: NextApiResponse): boolean {
+  const now = Date.now();
+  const windowStart = now - WINDOW_MS;
+  const timestamps = (memoryWindows.get(adminId) || []).filter((ts) => ts > windowStart);
+
+  if (timestamps.length >= MAX_REQUESTS) {
+    const resetAt = new Date(timestamps[0] + WINDOW_MS).toISOString();
+    res.setHeader("Retry-After", String(Math.ceil((timestamps[0] + WINDOW_MS - now) / 1000)));
+    res.status(429).json({
+      success: false,
+      error: "管理 API 请求过于频繁（100 次/分钟），请稍后再试",
+      resetAt,
+    });
+    return false;
+  }
+
+  timestamps.push(now);
+  memoryWindows.set(adminId, timestamps);
+  return true;
+}
+
+/**
  * 检查管理 API 速率限制
  *
  * @returns true 表示允许，false 表示已被限流（已发送 429 响应）
@@ -37,7 +66,10 @@ export async function checkAdminRateLimit(
     kv = env.KV;
   } catch { /* 本地开发或非 CF 环境 */ }
 
-  if (!kv) return true;
+  if (!kv) {
+    // 非 CF 平台：进程内滑动窗口兜底（原来直接放行 → 无限流）
+    return checkMemoryWindow(adminId, res);
+  }
 
   const key = getKvKey(adminId);
   const now = Date.now();

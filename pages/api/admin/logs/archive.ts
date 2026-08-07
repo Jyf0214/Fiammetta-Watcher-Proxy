@@ -63,9 +63,16 @@ export default async function handler(
   }
 }
 
-/** 校验 YYYY-MM-DD 日期格式 */
+/**
+ * 校验 YYYY-MM-DD 日期字符串：格式正确 + 真实日历日期（排除 2024-13-99 等）
+ * + 秒级时间戳在 Int32 范围内（超出会触发 Prisma Int 校验失败 → 500）
+ */
 function isValidDateStr(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + "T00:00:00Z");
+  if (isNaN(d.getTime())) return false;
+  const sec = Math.floor(d.getTime() / 1000);
+  return sec >= 0 && sec <= 2147483647;
 }
 
 // ==================== GET — 查询归档统计 ====================
@@ -108,8 +115,11 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     }
 
     // 模型筛选（模糊匹配）
+    // Prisma 的 contains 在 PG/MySQL/TiDB 下直接拼接 LIKE '%...%'，不转义 %/_ 通配符；
+    // 不转义时 model=% 会匹配全部记录（查询范围被放大），这里先行转义
     if (model) {
-      conditions.push({ model: { contains: model } });
+      const escaped = model.replace(/[\\%_]/g, (m) => `\\${m}`);
+      conditions.push({ model: { contains: escaped } });
     }
 
     const where = conditions.length > 0 ? { AND: conditions } : undefined;

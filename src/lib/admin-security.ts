@@ -7,89 +7,53 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
+import { isSafeUpstreamUrl, isPrivateIp } from "./ssrf";
 
 // ==================== SSRF 防护 ====================
 
-/** 内网地址正则匹配 */
-const PRIVATE_IP_PATTERNS = [
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^127\./,
-  /^0\./,
-];
-
-/** 检查 IP 是否为内网地址 */
-function isPrivateIp(ip: string): boolean {
-  // IPv4 内网地址
-  if (PRIVATE_IP_PATTERNS.some((p) => p.test(ip))) return true;
-  // IPv6 本地地址
-  if (ip === "::1" || ip === "[::1]" || ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("fe80")) return true;
-  // IPv4-mapped IPv6
-  if (ip.startsWith("::ffff:")) {
-    const mapped = ip.slice(7);
-    if (PRIVATE_IP_PATTERNS.some((p) => p.test(mapped))) return true;
-  }
-  return false;
-}
-
 /**
- * 解析 URL 并检查是否指向内网地址（含 DNS Rebinding 防护）
+ * 解析 URL 并检查是否指向内网地址（降低 DNS Rebinding 风险）
  *
- * 先做 hostname 字符串校验，再做 DNS 解析后 IP 校验。
- * 两层都通过才算安全。
+ * 第一层：协议 + hostname/IP 字面量黑名单（复用 isSafeUpstreamUrl，
+ * 含 IPv6 回环/ULA/链路本地/IPv4-mapped 规范化）。
+ * 第二层：DNS 解析（A + AAAA）后逐 IP 校验，拦截 AAAA-only 内网域名与
+ * 大部分 DNS Rebinding 场景（解析与连接间仍有 TOCTOU 窗口，属已知限制）。
+ * IP 字面量直接跳过第二层：node:dns 不解析字面量（返回 ENOTFOUND），
+ * 且第一层已覆盖全部内网段。
  */
 export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
-  let url: URL;
+  const first = isSafeUpstreamUrl(urlStr);
+  if (!first.safe) return first;
+
+  const hostname = new URL(urlStr).hostname;
+
+  // IP 字面量：第一层已判定非内网，无需（也无法）再做 DNS 解析
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":")) {
+    return { safe: true };
+  }
+
+  // 第二层：DNS 解析后 IP 检查（防 DNS Rebinding / AAAA-only 内网域名）
+  // node:dns 不可用（Cloudflare Pages Functions）时降级为 hostname 黑名单防护；
+  // 域名无法解析时 fail-closed（拒绝），不静默放行
   try {
-    url = new URL(urlStr);
-  } catch {
-    return { safe: false, reason: "URL 格式不合法" };
-  }
-
-  if (!["http:", "https:"].includes(url.protocol)) {
-    return { safe: false, reason: "URL 协议必须是 http 或 https" };
-  }
-
-  const hostname = url.hostname;
-
-  // 第一层：hostname 字符串黑名单
-  if (
-    hostname === "localhost" ||
-    hostname === "0.0.0.0" ||
-    hostname === "127.0.0.1" ||
-    PRIVATE_IP_PATTERNS.some((p) => p.test(hostname)) ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  ) {
-    return { safe: false, reason: "URL 不能指向内网或本地地址" };
-  }
-
-  // 第二层：DNS 解析后 IP 检查（防 DNS Rebinding）
-  // 在支持 node:dns 的环境中启用（如 Node.js 本地开发），
-  // 在 Cloudflare Pages Functions 中优雅降级（保留 hostname 黑名单防护）
-  try {
-    const dnsMod = await import("node:dns");
-    const resolve4 = dnsMod.default?.resolve4 ?? (dnsMod as Record<string, unknown>).resolve4 as ((host: string, cb: (err: Error | null, addrs: string[]) => void) => void) | undefined;
-    if (resolve4) {
-      const addresses = await new Promise<string[]>((resolve, reject) => {
-        resolve4(hostname, (err: Error | null, addrs: string[]) => {
-          if (err) reject(err);
-          else resolve(addrs);
-        });
-      });
-
-      for (const addr of addresses) {
+    const dnsMod = (await import("node:dns")) as Record<string, any>;
+    const promises = dnsMod.default?.promises ?? dnsMod.promises;
+    if (promises?.resolve4) {
+      const [v4, v6] = await Promise.all([
+        promises.resolve4(hostname).catch(() => [] as string[]),
+        promises.resolve6(hostname).catch(() => [] as string[]),
+      ]);
+      if (v4.length === 0 && v6.length === 0) {
+        return { safe: false, reason: `域名 ${hostname} 无法解析` };
+      }
+      for (const addr of [...v4, ...v6]) {
         if (isPrivateIp(addr)) {
           return { safe: false, reason: `域名 ${hostname} 解析到内网地址 ${addr}` };
         }
       }
     }
-    // node:dns 不可用时静默跳过（hostname 黑名单已提供基础防护）
   } catch {
-    // node:dns 不可用（Cloudflare Pages Functions 环境）— 静默跳过，
-    // 依赖 hostname 字符串黑名单提供基础 SSRF 防护
+    // node:dns 不可用（Cloudflare Pages Functions 环境）— 降级为 hostname 黑名单防护
   }
 
   return { safe: true };
@@ -125,9 +89,16 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   // 从 Origin/Referer 提取 host
   let sourceHost = "";
   if (origin) {
-    try { sourceHost = new URL(origin).host; } catch { /* 无效 Origin */ }
+    try { sourceHost = new URL(origin).host; } catch {
+      // 提供了 Origin 但无法解析（畸形字符串 / "null"）→ 视为攻击，fail-closed
+      res.status(403).json({ success: false, error: "请求来源不合法" });
+      return false;
+    }
   } else if (referer) {
-    try { sourceHost = new URL(referer).host; } catch { /* 无效 Referer */ }
+    try { sourceHost = new URL(referer).host; } catch {
+      res.status(403).json({ success: false, error: "请求来源不合法" });
+      return false;
+    }
   }
 
   // 获取当前请求的 host

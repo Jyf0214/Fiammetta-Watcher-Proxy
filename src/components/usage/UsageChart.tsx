@@ -91,7 +91,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             tick={{ fontSize: 12, fill: "#a1a1aa" }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={formatCompact}
+            tickFormatter={(v: number) => formatCompact(v, t)}
             tickCount={calcNiceTicks(maxRequests, 0)}
             width={50}
           />
@@ -101,7 +101,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             tick={{ fontSize: 12, fill: "#a1a1aa" }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={formatCompact}
+            tickFormatter={(v: number) => formatCompact(v, t)}
             tickCount={calcNiceTicks(maxTokens, 0)}
             width={50}
           />

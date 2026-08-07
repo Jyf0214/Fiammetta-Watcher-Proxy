@@ -253,3 +253,7 @@ CREATE INDEX IF NOT EXISTS "audit_logs_admin_id_idx" ON "audit_logs"("admin_id")
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "audit_logs_created_at_idx" ON "audit_logs"("created_at");
 
+-- CreateIndex
+-- 登录限流"先写后查"与预检按 action+ip+createdAt 查询，复合索引避免全表扫描
+CREATE INDEX IF NOT EXISTS "audit_logs_action_ip_created_at_idx" ON "audit_logs"("action", "ip", "created_at");
+

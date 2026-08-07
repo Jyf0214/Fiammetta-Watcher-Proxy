@@ -117,9 +117,9 @@ export function PlatformConfigForm({
         >
           <Select
             options={[
-              { value: "openai", label: "OpenAI" },
-              { value: "azure", label: "Azure" },
-              { value: "custom", label: "Custom" },
+              { value: "openai", label: t("typeOpenai") },
+              { value: "azure", label: t("typeAzure") },
+              { value: "custom", label: t("typeCustom") },
             ]}
           />
         </Form.Item>

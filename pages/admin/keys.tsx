@@ -42,6 +42,7 @@ function ApiKeyCard({
   const { t } = useTranslation("apikey");
   const statusColor = apiKey.status === "active" ? "green" : apiKey.status === "disabled" ? "red" : "orange";
   const isActive = apiKey.status === "active";
+  const statusText = apiKey.status === "active" ? t("statusActive") : apiKey.status === "disabled" ? t("statusDisabled") : t("statusExpired");
 
   const createdDate = formatDate(apiKey.createdAt);
 
@@ -51,7 +52,7 @@ function ApiKeyCard({
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{apiKey.name}</h3>
-          <Tag color={statusColor} className="!text-[10px] !px-1.5 !py-0 !m-0 shrink-0">{apiKey.status}</Tag>
+          <Tag color={statusColor} className="!text-[10px] !px-1.5 !py-0 !m-0 shrink-0">{statusText}</Tag>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-zinc-400">{isActive ? t("common:enable") : t("common:disable")}</span>
@@ -62,7 +63,7 @@ function ApiKeyCard({
       {/* 卡片主体：Label-Value 排版 */}
       <div className="px-4 pb-2 space-y-1">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-zinc-400 w-14 shrink-0">API Key</span>
+          <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("key")}</span>
           <span className="text-[11px] text-zinc-600 dark:text-zinc-300 font-mono truncate whitespace-nowrap overflow-hidden text-ellipsis">
             {apiKey.key}
           </span>
@@ -263,7 +264,12 @@ export default function KeysPage() {
       align: "center" as const,
       render: (v: string) => {
         const colorMap: Record<string, string> = { active: "green", disabled: "red", expired: "orange" };
-        return <Tag color={colorMap[v] || "default"}>{v}</Tag>;
+        const textMap: Record<string, string> = {
+          active: t("statusActive"),
+          disabled: t("statusDisabled"),
+          expired: t("statusExpired"),
+        };
+        return <Tag color={colorMap[v] || "default"}>{textMap[v] || v}</Tag>;
       },
     },
     {

@@ -255,7 +255,7 @@ export default function PlatformUsageTab({
       align: "right",
       render: (_: unknown, record: PlatformUsage) =>
         record.stats.avgDuration > 0
-          ? `${record.stats.avgDuration}ms`
+          ? `${record.stats.avgDuration}${t("common:unitMs")}`
           : "-",
       responsive: ["xl"],
     },

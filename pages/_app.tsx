@@ -2,6 +2,7 @@ import type { AppProps } from 'next/app'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import '../styles/globals.css'
 import '@/lib/i18n'
 import { message } from 'antd'
@@ -12,6 +13,7 @@ message.config({ top: 60 })
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()
+  const { t } = useTranslation("common")
   const [routeLoading, setRouteLoading] = useState(false)
 
   // 管理后台路由切换时显示骨架屏，替代整页白屏 + 居中 Spinner
@@ -35,7 +37,8 @@ export default function App({ Component, pageProps }: AppProps) {
     <>
       <Head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Fiammetta Watcher Proxy</title>
+        <meta name="description" content={t("metaDescription")} />
+        <title>{t("brandFull")}</title>
       </Head>
       {routeLoading && <RouteLoading />}
       <Component {...pageProps} />

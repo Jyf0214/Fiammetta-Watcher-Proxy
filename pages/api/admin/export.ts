@@ -95,13 +95,16 @@ export default async function handler(
         resetPeriod: p.resetPeriod,
       }));
 
-      // 系统配置（全部导出）
+      // 系统配置（跳过敏感配置，如 admin_reset_password——与 import 的跳过逻辑对齐，
+      // 避免导出文件泄露凭据或经导入误恢复）
       const configs = await db.configs.findMany();
 
-      exportData.configs = configs.map((c) => ({
-        key: c.key,
-        value: c.value,
-      }));
+      exportData.configs = configs
+        .filter((c) => c.key !== "admin_reset_password")
+        .map((c) => ({
+          key: c.key,
+          value: c.value,
+        }));
     }
 
     // ==================== 数据级导出 ====================

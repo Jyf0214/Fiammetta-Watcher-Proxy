@@ -22,48 +22,9 @@ import {
 import { createUsageTransformer, recordRequestLog } from "./token";
 import { extractForwardableHeaders } from "./forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
+import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
-
-// ==================== SSRF 防护 ====================
-
-/** 内网地址正则匹配 */
-const PRIVATE_IP_PATTERNS = [
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^127\./,
-  /^0\./,
-];
-
-/**
- * 校验上游 URL 是否安全（防 SSRF）
- * 仅允许 http/https 协议，禁止内网地址
- */
-function isSafeUpstreamUrl(urlStr: string): { safe: boolean; reason?: string } {
-  let url: URL;
-  try {
-    url = new URL(urlStr);
-  } catch {
-    return { safe: false, reason: "URL 格式不合法" };
-  }
-  if (!["http:", "https:"].includes(url.protocol)) {
-    return { safe: false, reason: "URL 协议必须是 http 或 https" };
-  }
-  const hostname = url.hostname;
-  if (
-    hostname === "localhost" ||
-    hostname === "0.0.0.0" ||
-    hostname === "127.0.0.1" ||
-    PRIVATE_IP_PATTERNS.some((p) => p.test(hostname)) ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  ) {
-    return { safe: false, reason: "URL 不能指向内网或本地地址" };
-  }
-  return { safe: true };
-}
 
 // ==================== 上游错误脱敏 ====================
 
@@ -554,6 +515,9 @@ export async function proxyV1Request(
         },
         body: JSON.stringify(upstreamBody),
         signal: upstreamController.signal,
+        // 禁止跟随重定向：isSafeUpstreamUrl 只校验初始 URL，
+        // 跟随 3xx 可能将请求重定向到内网（SSRF / DNS rebinding TOCTOU）
+        redirect: "manual",
       });
     } catch (fetchError) {
       clearTimeout(upstreamTimeoutId);
@@ -577,8 +541,9 @@ export async function proxyV1Request(
     // ── 2xx 成功响应：正常处理（流式/非流式）──
     // 上游返回空响应（2xx + 空 body/空流）时 handleUpstreamResponse 返回哨兵，
     // 判定为无效，与 429/401/403 一样纳入重试（封禁当前 Key → 换 Key → 换平台）
+    // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
-    if (upstreamResponse.status < 400) {
+    if (upstreamResponse.status >= 200 && upstreamResponse.status < 300) {
       const handled = await handleUpstreamResponse(
         upstreamResponse,
         currentPlatform,

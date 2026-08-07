@@ -41,6 +41,8 @@ const prismaStack = [
 const mariadbStack = ["@prisma/adapter-mariadb", "mariadb"];
 
 const nextConfig: NextConfig = {
+  // 移除 X-Powered-By 响应头，避免泄露 Next.js 版本指纹
+  poweredByHeader: false,
   // 构建期内联部署平台（DEPLOY_PLATFORM 构建期变量 → 前端可读），
   // 用于平台相关的 UI 文案（如 keys 页 Base URL 提示）。未设置时为空串。
   env: {

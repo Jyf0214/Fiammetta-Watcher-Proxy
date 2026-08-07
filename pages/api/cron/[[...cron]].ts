@@ -26,17 +26,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const secret = process.env.CRON_SECRET;
   if (!secret) {
-    return res.status(403).json({
-      success: false,
-      error: "Forbidden",
-      message: "CRON_SECRET 未配置，定时任务端点已禁用。请在部署环境配置 CRON_SECRET 后由外部调度器携带 Authorization: Bearer <CRON_SECRET> 调用",
-    });
+    // 403 消息不泄露 CRON_SECRET 配置细节与指引（未配置/错误头的状态码差异与文档约定一致）
+    return res.status(403).json({ success: false, error: "Forbidden" });
   }
   if (req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
 
   const param = req.query.cron;
   const task = Array.isArray(param) ? param[0] : param;
-  if (!task || !(task in CRON_ROUTES)) return res.status(404).json({ error: "Not Found", message: `未知任务: ${task || "(空)"}`, available: Object.keys(CRON_ROUTES) });
+  // hasOwnProperty 而非 in：in 会命中原型链键（constructor/toString/__proto__ 等），
+  // 导致这些键被当作合法任务执行（实测 __proto__ 触发 500 泄露内部错误）
+  if (!task || !Object.prototype.hasOwnProperty.call(CRON_ROUTES, task)) {
+    return res.status(404).json({ error: "Not Found" });
+  }
 
   const dummyDb = {} as D1Database;
   const env = { DB_TYPE: process.env.DB_TYPE };
@@ -53,6 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const elapsed = Date.now() - start;
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[cron] ${task} 失败 (${elapsed}ms):`, msg);
-    return res.status(500).json({ success: false, task, elapsed, error: msg });
+    // 不向调用方回显内部错误细节，避免泄露 DB/内部实现信息
+    return res.status(500).json({ success: false, task, elapsed, error: "任务执行失败" });
   }
 }

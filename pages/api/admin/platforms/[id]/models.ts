@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
-import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 
 
 /** 生成唯一 ID（cuid 风格） */
@@ -233,6 +233,15 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       return res.status(400).json({ success: false, error: "平台未配置 API Key，无法刷新" });
     }
 
+    // SSRF 防护：刷新模型同样校验上游地址（此前无校验，与 model-fetcher 一致
+    // 会形成盲 SSRF，响应数据入库后可经未认证 GET /v1/models 外带）。
+    // 用 isSafeUrl（含 DNS 解析层，防 AAAA-only 内网域名/DNS Rebinding），
+    // 与平台创建/更新路径的校验强度一致
+    const urlCheck = await isSafeUrl(platform.baseUrl);
+    if (!urlCheck.safe) {
+      return res.status(400).json({ success: false, error: `上游 URL 不安全: ${urlCheck.reason}` });
+    }
+
     // 调用上游模型列表接口
     const modelsUrl = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
     let upstreamModels: OpenAIModel[] = [];
@@ -248,6 +257,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
           "Content-Type": "application/json",
         },
         signal: controller.signal,
+        // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
+        redirect: "manual",
       });
 
       clearTimeout(timeout);

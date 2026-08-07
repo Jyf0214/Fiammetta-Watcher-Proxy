@@ -81,7 +81,7 @@ export default function HomePage() {
               <Server className="text-white dark:text-zinc-900 text-xs sm:text-sm" />
             </div>
             <span className="font-bold text-sm sm:text-base text-zinc-900 dark:text-zinc-100">
-              Fiammetta
+              {t("common:brandName")}
             </span>
           </div>
           <div className="hidden md:flex items-center gap-4">
@@ -123,7 +123,7 @@ export default function HomePage() {
             className="flex items-center gap-2 text-zinc-400 font-black text-[10px] uppercase tracking-[0.2em] mb-6"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-zinc-900 dark:bg-zinc-100 animate-pulse" />
-            <span>OpenAI API Proxy</span>
+            <span>{t("heroTagline")}</span>
           </motion.div>
 
           <motion.h1
@@ -132,9 +132,9 @@ export default function HomePage() {
             transition={{ delay: 0.1 }}
             className="text-3xl sm:text-5xl md:text-7xl font-black tracking-tighter text-zinc-900 dark:text-zinc-100 mb-4"
           >
-            <div>Fiammetta</div>
+            <div>{t("common:brandName")}</div>
             <div className="text-zinc-300 dark:text-zinc-600 -mt-2 sm:-mt-4 md:-mt-6">
-              Watcher Proxy
+              {t("common:brandSub")}
             </div>
           </motion.h1>
 
@@ -167,7 +167,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-2xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors text-sm sm:text-base"
             >
               <GitFork size={18} />
-              GitHub
+              {t("github")}
             </Link>
           </motion.div>
         </div>
@@ -302,7 +302,7 @@ export default function HomePage() {
             <div className="w-5 h-5 bg-zinc-900 dark:bg-zinc-100 rounded-lg flex items-center justify-center">
               <Server className="text-white dark:text-zinc-900 text-[10px]" />
             </div>
-            <span>Fiammetta Watcher Proxy</span>
+            <span>{t("common:brandFull")}</span>
           </div>
           <div className="flex items-center gap-4 text-zinc-400 text-sm">
             <Link

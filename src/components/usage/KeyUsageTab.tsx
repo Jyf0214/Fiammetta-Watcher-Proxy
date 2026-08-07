@@ -236,7 +236,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       align: "right",
       render: (_: unknown, record: KeyUsage) =>
         record.stats.avgDuration > 0
-          ? `${record.stats.avgDuration}ms`
+          ? `${record.stats.avgDuration}${t("common:unitMs")}`
           : "-",
       responsive: ["xl"],
     },

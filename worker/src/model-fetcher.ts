@@ -13,6 +13,7 @@
 import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "./config";
 import { parseApiKeys, getNextKey } from "./platform-keys";
+import { isSafeUrl } from "@/lib/admin-security";
 import type { PlatformConfig } from "@/lib/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -32,6 +33,18 @@ async function fetchPlatformModels(platform: {
   name: string;
 }): Promise<UpstreamModel[] | null> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
+
+  // SSRF 防护：模型拉取同样必须校验上游地址（此前无校验，平台 baseUrl 指向内网时
+  // 会形成盲 SSRF——响应数据入库后可经未认证 GET /v1/models 外带）。
+  // 用 isSafeUrl（含 DNS 解析层，防 AAAA-only 内网域名/DNS Rebinding）；定时任务非热路径，
+  // DNS 开销可接受；workerd 无 node:dns 时内部降级为 hostname 层
+  const urlCheck = await isSafeUrl(platform.baseUrl);
+  if (!urlCheck.safe) {
+    console.warn(
+      `[model-fetcher] 平台 ${platform.name}(${platform.id}) 上游 URL 不安全，跳过: ${urlCheck.reason}`
+    );
+    return null;
+  }
 
   const parsedKeys = parseApiKeys(platform.apiKeys);
   const platformConfig: PlatformConfig = {
@@ -62,6 +75,8 @@ async function fetchPlatformModels(platform: {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
+      // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
+      redirect: "manual",
     });
     clearTimeout(timeoutId);
 

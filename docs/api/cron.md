@@ -39,7 +39,7 @@ Authorization: Bearer <CRON_SECRET>
   "success": false,
   "task": "model-fetch",
   "elapsed": 500,
-  "error": "错误信息"
+  "error": "任务执行失败"
 }
 ```
 
@@ -47,11 +47,11 @@ Authorization: Bearer <CRON_SECRET>
 
 ```json
 {
-  "error": "Not Found",
-  "message": "未知任务: xxx",
-  "available": ["model-fetch", "key-reset", "log-archive"]
+  "error": "Not Found"
 }
 ```
+
+（未知任务与失败响应不回显内部错误细节或可用任务列表，防止信息泄露。）
 
 ## 调用示例
 

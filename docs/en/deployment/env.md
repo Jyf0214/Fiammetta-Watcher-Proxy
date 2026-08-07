@@ -22,6 +22,7 @@ On Serverless platforms (Cloudflare / Vercel / EdgeOne), environment variables a
 |----------|-------------|---------|
 | `PORT` | Listening port | `3000` |
 | `NODE_ENV` | Runtime environment | `production` |
+| `ENVIRONMENT` | Environment flag: when `production`, the login cookie gets `Secure` and CSRF uses the strict branch; built into the Docker images as `production`, other platforms fall back to non-production when unset | `production` (Docker) |
 
 ## Cron Auth (required)
 

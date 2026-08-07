@@ -58,7 +58,7 @@ export default function UsagePage() {
         });
         const data = await res.json() as Record<string, any>;
         if (!res.ok || !data.success) {
-          const errMsg = data.error || `HTTP ${res.status}`;
+          const errMsg = data.error || t("httpError", { status: res.status });
           console.error("[usage trend] load failed:", errMsg, data);
           setTrendError(errMsg);
           return;

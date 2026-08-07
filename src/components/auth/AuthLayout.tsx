@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Server } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n";
 
 interface AuthLayoutProps {
   children: ReactNode;
@@ -9,6 +11,7 @@ interface AuthLayoutProps {
  * 认证页面全屏布局 — 顶部品牌、中部居中内容、底部版权
  */
 export default function AuthLayout({ children }: AuthLayoutProps) {
+  const { t } = useTranslation("common");
   return (
     <div className="relative min-h-screen w-full flex flex-col bg-zinc-50 dark:bg-zinc-950 p-4 sm:p-6 md:p-8">
       <div className="relative overflow-hidden border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 flex flex-col min-h-[calc(100vh-1rem)]">
@@ -18,7 +21,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
             <Server className="text-white dark:text-zinc-900 text-xs" />
           </div>
           <span className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-            Fiammetta
+            {t("brandName")}
           </span>
         </div>
 
@@ -30,7 +33,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
         {/* 底部版权 */}
         <div className="flex items-center justify-center py-5">
           <span className="text-xs text-zinc-400 dark:text-zinc-500 text-center">
-            Fiammetta Watcher Proxy © {new Date().getFullYear()}
+            {t("copyright", { year: new Date().getFullYear() })}
           </span>
         </div>
       </div>

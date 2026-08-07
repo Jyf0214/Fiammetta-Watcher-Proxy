@@ -39,7 +39,7 @@ Authorization: Bearer <CRON_SECRET>
   "success": false,
   "task": "model-fetch",
   "elapsed": 500,
-  "error": "error message"
+  "error": "Task execution failed"
 }
 ```
 
@@ -47,11 +47,11 @@ Authorization: Bearer <CRON_SECRET>
 
 ```json
 {
-  "error": "Not Found",
-  "message": "Unknown task: xxx",
-  "available": ["model-fetch", "key-reset", "log-archive"]
+  "error": "Not Found"
 }
 ```
+
+(Unknown-task and failure responses do not echo internal error details or the available-task list, to prevent information disclosure.)
 
 ## Usage Examples
 

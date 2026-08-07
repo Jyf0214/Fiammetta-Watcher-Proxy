@@ -12,6 +12,8 @@ services:
       - "${PORT:-3000}:${PORT:-3000}"
     environment:
       - NODE_ENV=production
+      # 声明生产环境：登录 Cookie 附加 Secure、CSRF 校验走 isProd 分支
+      - ENVIRONMENT=production
       - PORT=${PORT:-3000}
       # 数据库类型：容器内置 PostgreSQL，固定 pg
       - DB_TYPE=pg

@@ -27,6 +27,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV ENVIRONMENT=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # wget 用于健康检查

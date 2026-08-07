@@ -142,7 +142,7 @@ function AuditContent() {
       responsive: ["md"],
     },
     {
-      title: "IP",
+      title: t("ip"),
       dataIndex: "ip",
       key: "ip",
       width: 140,

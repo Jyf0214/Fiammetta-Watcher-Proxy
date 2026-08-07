@@ -164,7 +164,7 @@ function SidebarUserMenu({
             <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
               {username}
             </div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">Administrator</div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">{t("administrator")}</div>
           </div>
         </div>
       </div>
@@ -359,10 +359,10 @@ export default function AdminLayout({
         </div>
         <div className="flex flex-col">
           <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
-            Fiammetta
+            {t("common:brandName")}
           </span>
           <span className="text-xs text-zinc-500 dark:text-zinc-400 leading-tight">
-            Watcher Proxy
+            {t("common:brandSub")}
           </span>
         </div>
       </div>

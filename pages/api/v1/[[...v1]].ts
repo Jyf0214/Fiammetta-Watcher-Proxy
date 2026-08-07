@@ -16,6 +16,7 @@ import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/
 import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
+import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -29,18 +30,6 @@ export const config = {
 };
 
 interface ProxyConfig { upstreamPath: string; supportsStreaming?: boolean; }
-
-const PRIVATE_IP_PATTERNS = [/^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^169\.254\./, /^127\./, /^0\./];
-
-function isSafeUpstreamUrl(urlStr: string): { safe: boolean; reason?: string } {
-  let url: URL;
-  try { url = new URL(urlStr); } catch { return { safe: false, reason: "URL 格式不合法" }; }
-  if (!["http:", "https:"].includes(url.protocol)) return { safe: false, reason: "URL 协议必须是 http 或 https" };
-  const h = url.hostname;
-  if (h === "localhost" || h === "0.0.0.0" || h === "127.0.0.1" || PRIVATE_IP_PATTERNS.some(p => p.test(h)) || h === "[::1]" || h === "::1")
-    return { safe: false, reason: "URL 不能指向内网或本地地址" };
-  return { safe: true };
-}
 
 function sanitizeUpstreamError(text: string, status: number): string {
   try { const p = JSON.parse(text); const m = p?.error?.message || p?.message || p?.detail || ""; return JSON.stringify({ error: { message: String(m).substring(0, 500) || "上游服务返回错误", type: "upstream_error", upstream_status: status } }); }
@@ -232,7 +221,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let upRes: Response;
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
-    try { upRes = await fetch(url, { method: "POST", headers: new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd }), body: JSON.stringify(upstreamBody), signal: upstreamController.signal }); }
+    try { upRes = await fetch(url, { method: "POST", headers: new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd }), body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual" }); }
     catch (e) {
       clearTimeout(upstreamTimeoutId);
       if (e instanceof DOMException && e.name === "AbortError") { res.status(504).json({ error: { message: "上游请求超时", type: "timeout_error" } }); return; }
@@ -242,8 +231,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // ── 2xx 成功响应：正常处理（流式/非流式）──
     // 上游返回空响应（2xx + 空 body/空流）时 handleUpstreamResponsePages 返回哨兵，
     // 判定为无效，与 429/401/403 一样纳入重试（封禁当前 Key → 换 Key → 换平台）
+    // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
-    if (upRes.status < 400) {
+    if (upRes.status >= 200 && upRes.status < 300) {
       const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, logTag, res, upstreamController, upstreamTimeoutId);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;

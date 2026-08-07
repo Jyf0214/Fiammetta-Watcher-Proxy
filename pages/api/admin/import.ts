@@ -18,7 +18,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
-import { isSafeUrl } from "@/lib/admin-security";
+import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -73,6 +73,8 @@ export default async function handler(
     res.status(401).json({ success: false, error: "未授权" });
     return;
   }
+  // 导入是状态变更操作，必须校验来源（与其他 admin 写端点一致）
+  if (!checkCsrfOrigin(req, res)) return;
   if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
   try {

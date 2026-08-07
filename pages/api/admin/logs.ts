@@ -110,15 +110,33 @@ export default async function handler(
     }
 
     // 日期范围筛选（Unix 时间戳）
+    // 先校验可解析性：非法字符串 new Date().getTime() 为 NaN，落入 Prisma Int
+    // 过滤器会触发校验失败返回 500，这里显式 400
     if (startDateStr || endDateStr) {
       const createdAt: Prisma.IntFilter = {};
       if (startDateStr) {
-        createdAt.gte = Math.floor(new Date(startDateStr).getTime() / 1000);
+        const ts = new Date(startDateStr).getTime();
+        if (isNaN(ts)) {
+          return res.status(400).json({ success: false, error: "无效的 startDate，请使用 YYYY-MM-DD 或 ISO 格式" });
+        }
+        const sec = Math.floor(ts / 1000);
+        // createdAt 为 Int（Int32）：超出可表示范围会触发 Prisma Int 校验失败 → 500
+        if (sec < 0 || sec > 2147483647) {
+          return res.status(400).json({ success: false, error: "startDate 超出支持范围" });
+        }
+        createdAt.gte = sec;
       }
       if (endDateStr) {
         const end = new Date(endDateStr);
+        if (isNaN(end.getTime())) {
+          return res.status(400).json({ success: false, error: "无效的 endDate，请使用 YYYY-MM-DD 或 ISO 格式" });
+        }
         end.setHours(23, 59, 59, 999);
-        createdAt.lte = Math.floor(end.getTime() / 1000);
+        const sec = Math.floor(end.getTime() / 1000);
+        if (sec < 0 || sec > 2147483647) {
+          return res.status(400).json({ success: false, error: "endDate 超出支持范围" });
+        }
+        createdAt.lte = sec;
       }
       where.createdAt = createdAt;
     }

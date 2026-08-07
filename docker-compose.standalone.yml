@@ -12,6 +12,8 @@ services:
       - "${PORT:?请在 .env 文件中设置 PORT}:${PORT:?请在 .env 文件中设置 PORT}"
     environment:
       - NODE_ENV=production
+      # 声明生产环境：登录 Cookie 与 CSRF 校验走生产分支
+      - ENVIRONMENT=production
       - PORT=${PORT:?请在 .env 文件中设置 PORT}
       # 数据库类型：与构建参数一致（tidb / mariadb / pg），按 DATABASE_URL 协议匹配
       - DB_TYPE=${DB_TYPE:?请在 .env 文件中设置 DB_TYPE（pg / mariadb / tidb）}

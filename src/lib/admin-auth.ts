@@ -25,7 +25,8 @@ export interface AuthResult {
 /**
  * 获取审计日志用的 adminId
  *
- * 返回 null 的情况（audit_logs 表有外键约束 REFERENCES admins(id)）：
+ * 返回 null 的情况（audit_logs.admin_id 早期方言 DDL 曾带 REFERENCES admins(id)
+ * 外键，现仓库内全部方言已无外键，但虚拟/外部 ID 仍无对应行，保持返回 null 兼容）：
  * - system-key 认证：系统 Key 不在 admins 表中
  * - JWT 认证且 adminId="env-admin"：env-admin 是 JWT 登录的虚拟 ID，不在 admins 表中
  */
