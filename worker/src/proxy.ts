@@ -871,7 +871,9 @@ async function handleUpstreamResponse(
       }
     );
     const pipedStream = guardedStream.pipeThrough(transformer);
-    await recordSuccess(platform.id, env.DB);
+    // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
+    // 若在返回 Response 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
+    ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
 
     return new Response(pipedStream, {
       status: 200,

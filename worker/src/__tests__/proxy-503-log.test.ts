@@ -105,7 +105,13 @@ const env = {
   DB_TYPE: "d1",
 } as { DB: D1Database; KV: KVNamespace } & WorkerEnv;
 
-const ctx = {} as ExecutionContext;
+// 流式成功路径用 ctx.waitUntil 保护 recordSuccess（不阻塞首字节），
+// mock 里直接执行该 promise
+const ctx = {
+  waitUntil: (p: Promise<unknown>) => {
+    void p.catch(() => {});
+  },
+} as unknown as ExecutionContext;
 
 const apiKey = {
   id: "key-id",

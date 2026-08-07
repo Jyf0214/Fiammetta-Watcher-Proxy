@@ -6,6 +6,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import { recordFailure } from "./load-balancer";
 import type { WorkerEnv } from "./config";
 
 /**
@@ -166,6 +167,9 @@ export function createUsageTransformer(params: {
   let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
   let streamError: { code: number; message: string } | undefined;
+  // 上游正常结束的标志：SSE 流必须以 data: [DONE] 收尾。上游在思考中途截断
+  // （EOF 但无 [DONE]）时若按成功记录，坏平台永远不会被熔断，负载均衡会反复撞上它
+  let sawDone = false;
   let ttft = 0;
   let isFirstChunk = true;
   let chunkCount = 0;
@@ -190,7 +194,8 @@ export function createUsageTransformer(params: {
         const trimmed = line.trim();
         if (!trimmed.startsWith("data: ")) continue;
         const data = trimmed.slice(6);
-        if (!data || data === "[DONE]") continue;
+        if (data === "[DONE]") { sawDone = true; continue; }
+        if (!data) continue;
         try {
           const parsed = JSON.parse(data);
           if (parsed.usage) {
@@ -213,22 +218,23 @@ export function createUsageTransformer(params: {
     },
 
     async flush() {
-      // 流内 error 事件本身无 usage，属于失败请求的正常形态，不告警
-      if (!lastUsage && !streamError && chunkCount > 0) {
-        console.warn(
-          `[token] 流式响应未提取到 usage，chunks: ${chunkCount}，model: ${params.model}`
-        );
-      }
-
       const { promptTokens, completionTokens, totalTokens } =
         extractUsage(lastUsage);
       const duration = Date.now() - params.startTime;
 
+      // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
+      // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
+      // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
+      const truncated = !sawDone && !streamError && chunkCount > 0;
+      if (truncated) {
+        try { await recordFailure(params.platformId, params.db); } catch {}
+      }
+
       // 复用同一个 PrismaClient 完成所有 DB 操作
       const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
       try {
-        // 流内 error 视为失败请求：不计入 Key 用量/次数
-        if (!streamError && totalTokens > 0) {
+        // 流内 error / 截断均视为失败请求：不计入 Key 用量/次数
+        if (!streamError && !truncated && totalTokens > 0) {
           await prisma.apiKeys.update({
             where: { id: params.keyId },
             data: {
@@ -248,14 +254,14 @@ export function createUsageTransformer(params: {
             model: params.model,
             endpoint: "stream",
             method: "POST",
-            status: streamError ? streamError.code : 200,
+            status: streamError ? streamError.code : truncated ? 502 : 200,
             latency: duration,
-            tokens: streamError ? 0 : totalTokens,
-            promptTokens: streamError ? 0 : promptTokens,
-            completionTokens: streamError ? 0 : completionTokens,
+            tokens: streamError || truncated ? 0 : totalTokens,
+            promptTokens: streamError || truncated ? 0 : promptTokens,
+            completionTokens: streamError || truncated ? 0 : completionTokens,
             ttft,
-            isError: !!streamError,
-            errorMessage: streamError?.message ?? null,
+            isError: !!streamError || truncated,
+            errorMessage: streamError?.message ?? (truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
             createdAt: Math.floor(Date.now() / 1000),
           },
         });

@@ -299,12 +299,18 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     if (first.done) { clearTimeout(upstreamTimeoutId); r.releaseLock(); return EMPTY_UPSTREAM_RESPONSE; }
     // 总超时使命完成：流式响应允许长时间持续传输，改由空闲超时保护（无数据才切断）
     clearTimeout(upstreamTimeoutId);
-    await recordSuccess(platform.id, dummyDb);
+    // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
+    // 若在设置 SSE headers 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
+    void recordSuccess(platform.id, dummyDb).catch(() => {});
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
     let tt = 0, pt = 0, ct = 0, buf = "";
     // 流内 error 事件（上游 200 + data: {"error": ...}）：HTTP 头无法反映失败，日志须按错误码记录
     let streamError: { code: number; message: string } | undefined;
+    // 上游正常结束的标志：SSE 流必须以 data: [DONE] 收尾。
+    // 上游在思考中途截断（EOF 但无 [DONE]，如部分 zen-proxy 入口 ~10s 截断）时，
+    // 若按成功记录，坏平台永远不会被熔断，负载均衡会反复撞上它。
+    let sawDone = false;
     let lastChunkAt = Date.now();
     let idleTimedOut = false;
     // 看门狗：距上次收到数据超过 UPSTREAM_IDLE_TIMEOUT_MS 即取消上游流，避免函数被无数据流无限占用
@@ -323,7 +329,8 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         const lines = buf.split("\n"); buf = lines.pop() || "";
         for (const l of lines) {
           res.write(l + "\n");
-          if (l.startsWith("data: ") && l !== "data: [DONE]") {
+          if (l === "data: [DONE]") { sawDone = true; continue; }
+          if (l.startsWith("data: ")) {
             try { const data = JSON.parse(l.slice(6)); if (data.usage) { const ex = extractUsage(data.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; } if (data.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = data.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(data.error.message || "").substring(0, 1000) }; } } } catch {}
           }
         }
@@ -343,6 +350,12 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     } else if (streamError) {
       // 流内 error：按错误码记录失败日志（不计 Key 用量），下游实际收到的是 200 + error 流
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: streamError.message, db: dummyDb, env }); } catch {}
+    } else if (!sawDone) {
+      // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
+      // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
+      // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
+      try { await recordFailure(platform.id, dummyDb); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", db: dummyDb, env }); } catch {}
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }); } catch {}
