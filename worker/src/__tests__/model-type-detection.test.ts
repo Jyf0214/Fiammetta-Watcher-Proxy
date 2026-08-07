@@ -3,17 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-
-// 模拟 detectModelType（从 models.ts 提取的核心逻辑）
-function detectModelType(modelId: string): string {
-  const id = modelId.toLowerCase();
-  if (/embed|embedding|vector|text-embedding/.test(id)) return "embedding";
-  if (/dall-e|stable-diffusion|midjourney|flux|image/.test(id)) return "image";
-  if (/whisper|tts|speech|audio|voice/.test(id)) return "audio";
-  if (/video|sora|runway|kling|pika|luma/.test(id)) return "video";
-  if (/moderation|safety|content-moderation|content-safety|content-filter/.test(id)) return "moderation";
-  return "chat";
-}
+import { detectModelType } from "@/lib/detect-model-type";
 
 describe("detectModelType", () => {
   it("默认返回 chat", () => {
@@ -33,6 +23,9 @@ describe("detectModelType", () => {
     expect(detectModelType("stable-diffusion-xl")).toBe("image");
     expect(detectModelType("midjourney-v6")).toBe("image");
     expect(detectModelType("flux-schnell")).toBe("image");
+    expect(detectModelType("google/diffusiongemma-26b-a4b-it")).toBe("image");
+    expect(detectModelType("agnes-image-2.0-flash")).toBe("image");
+    expect(detectModelType("gpt-image-1")).toBe("image");
   });
 
   it("audio 类型检测", () => {
@@ -46,6 +39,11 @@ describe("detectModelType", () => {
     expect(detectModelType("sora-pro")).toBe("video");
     expect(detectModelType("kling-v2")).toBe("video");
     expect(detectModelType("runway-gen3")).toBe("video");
+    expect(detectModelType("agnes-video-v2.0")).toBe("video");
+    expect(detectModelType("veo-3")).toBe("video");
+    expect(detectModelType("wan2.1-t2v")).toBe("video");
+    expect(detectModelType("hailuo-01")).toBe("video");
+    expect(detectModelType("nvidia/ai-synthetic-video-detector")).toBe("video");
   });
 
   it("moderation 类型检测", () => {

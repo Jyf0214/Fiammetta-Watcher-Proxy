@@ -11,6 +11,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import { detectModelType } from "@/lib/detect-model-type";
 import type { WorkerEnv } from "./config";
 import { parseApiKeys, getNextKey } from "./platform-keys";
 import { isSafeUrl } from "@/lib/admin-security";
@@ -101,31 +102,6 @@ async function fetchPlatformModels(platform: {
   } catch {
     return null;
   }
-}
-
-/**
- * 判别模型类型（简化版）
- */
-function detectModelType(modelId: string): string {
-  const id = modelId.toLowerCase();
-
-  if (
-    id.includes("dall-e") || id.includes("flux") || id.includes("stable-diffusion") ||
-    id.includes("sdxl") || id.includes("cogview") || id.includes("gpt-image") ||
-    id.includes("image") || id.startsWith("sd-")
-  ) return "image";
-
-  if (
-    id.includes("embedding") || id.includes("bge-") || id.includes("e5-") ||
-    id.includes("gte-") || id.startsWith("text-embedding")
-  ) return "embedding";
-
-  if (
-    id.includes("whisper") || id.includes("tts-") || id.includes("speech") ||
-    id.includes("cosyvoice") || id.includes("bark")
-  ) return "audio";
-
-  return "chat";
 }
 
 /**
