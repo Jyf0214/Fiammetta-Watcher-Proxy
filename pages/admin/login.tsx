@@ -9,7 +9,7 @@ import { LoadingSpinner } from "@/components/ui/Button/LoadingSpinner";
 import "@/lib/i18n";
 
 export default function AdminLoginPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("auth");
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<"username" | "password">("username");
@@ -41,7 +41,7 @@ export default function AdminLoginPage() {
         setTimeout(() => setCopied(false), 2000);
       } catch {
         // 最终回退：显示提示信息
-        message.error(t("common.copy_failed") || "复制失败，请手动复制");
+        message.error(t("common:copyFailed"));
       }
     }
   };
@@ -59,7 +59,7 @@ export default function AdminLoginPage() {
     setError("");
     setSuccess("");
     if (!username.trim()) {
-      setError(t("auth.username") + t("validation.field_required"));
+      setError(t("username") + t("validation:required"));
       return;
     }
     setStep("password");
@@ -71,7 +71,7 @@ export default function AdminLoginPage() {
     setSuccess("");
 
     if (!password) {
-      setError(t("auth.password") + t("validation.field_required"));
+      setError(t("password") + t("validation:required"));
       return;
     }
 
@@ -86,19 +86,19 @@ export default function AdminLoginPage() {
       const data: Record<string, any> = await res.json();
 
       if (data.success) {
-        setSuccess(data.message || t("auth.login_success"));
-        const hide = message.loading(t("auth.redirecting") || "正在跳转...", 1.5);
+        setSuccess(data.message || t("loginSuccess"));
+        const hide = message.loading(t("redirecting"), 1.5);
         setTimeout(() => {
           hide();
           router.push("/admin");
         }, 800);
       } else {
-        setError(data.error || t("auth.login_failed"));
+        setError(data.error || t("loginFailed"));
       }
     } catch (err) {
       const msg = err instanceof TypeError && err.message.includes("fetch")
-        ? t("common.network_error")
-        : t("auth.login_failed");
+        ? t("common:networkError")
+        : t("loginFailed");
       setError(msg);
     } finally {
       setLoading(false);
@@ -120,12 +120,12 @@ export default function AdminLoginPage() {
 
   const renderUsernameStep = () => (
     <AuthCard
-      title={t("auth.welcome_back") || "欢迎回来"}
-      subtitle={t("auth.login_subtitle") || "输入用户名继续"}
+      title={t("welcomeBack")}
+      subtitle={t("loginSubtitle")}
       footer={
         <div className="flex flex-col items-center gap-4 mt-4">
           <span className="text-xs text-zinc-400 dark:text-zinc-500">
-            {t("auth.admin_only") || "仅限管理员登录"}
+            {t("adminOnly")}
           </span>
         </div>
       }
@@ -141,7 +141,7 @@ export default function AdminLoginPage() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder={t("auth.username")}
+            placeholder={t("username")}
             className={inputStyle + " pl-11 pr-4"}
             autoComplete="username"
             autoFocus
@@ -155,7 +155,7 @@ export default function AdminLoginPage() {
               type="button"
               onClick={() => handleCopyError(error)}
               className="shrink-0 mt-0.5 p-1 rounded hover:bg-red-100 dark:hover:bg-red-800/30 transition-colors"
-              aria-label="复制错误信息"
+              aria-label={t("copyError")}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
@@ -168,13 +168,13 @@ export default function AdminLoginPage() {
           </div>
         )}
 
-        <button type="submit" className={btnPrimary} disabled={loading} aria-label={t("common.next")}>
+        <button type="submit" className={btnPrimary} disabled={loading} aria-label={t("common:next")}>
           {loading ? (
             <LoadingSpinner />
           ) : (
             <>
               <ChevronRight size={18} />
-              {t("common.next")}
+              {t("common:next")}
             </>
           )}
         </button>
@@ -184,18 +184,18 @@ export default function AdminLoginPage() {
 
   const renderPasswordStep = () => (
     <AuthCard
-      title={t("auth.welcome_back") || "欢迎回来"}
-      subtitle={t("auth.input_password") || "输入密码以登录"}
+      title={t("welcomeBack")}
+      subtitle={t("inputPassword")}
       footer={
         <div className="flex flex-col gap-3 mt-4">
           <button
             type="button"
             onClick={handleBack}
             className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-sm font-medium"
-            aria-label={t("common.back")}
+            aria-label={t("common:back")}
           >
             <ArrowLeft size={14} />
-            {t("common.back")}
+            {t("common:back")}
           </button>
         </div>
       }
@@ -214,7 +214,7 @@ export default function AdminLoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("auth.password")}
+            placeholder={t("password")}
             className={inputStyle + " pl-11 pr-4"}
             autoComplete="current-password"
             autoFocus
@@ -228,7 +228,7 @@ export default function AdminLoginPage() {
               type="button"
               onClick={() => handleCopyError(error)}
               className="shrink-0 mt-0.5 p-1 rounded hover:bg-red-100 dark:hover:bg-red-800/30 transition-colors"
-              aria-label="复制错误信息"
+              aria-label={t("copyError")}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
@@ -245,14 +245,14 @@ export default function AdminLoginPage() {
           type="submit"
           className={btnPrimary}
           disabled={loading}
-          aria-label={t("auth.login")}
+          aria-label={t("login")}
         >
           {loading ? (
             <LoadingSpinner />
           ) : (
             <>
               <ChevronRight size={18} />
-              {t("auth.login")}
+              {t("login")}
             </>
           )}
         </button>

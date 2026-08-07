@@ -9,9 +9,10 @@ i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
+    // messages/*.json 顶层即命名空间（common/auth/admin/...）
     resources: {
-      zh: { translation: zh },
-      en: { translation: en },
+      zh,
+      en,
     },
     fallbackLng: "zh",
     interpolation: {

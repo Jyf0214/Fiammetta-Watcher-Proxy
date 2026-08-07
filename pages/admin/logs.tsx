@@ -65,7 +65,7 @@ interface KeyOption {
 // ==================== 详细日志 Tab ====================
 
 function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("log");
   const router = useRouter();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +123,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
         });
         if (res.status === 401) {
           message.warning(
-            t("auth.unauthorized") || "登录已过期，请重新登录"
+            t("auth:unauthorized")
           );
           router.push("/admin/login");
           return;
@@ -135,7 +135,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -176,21 +176,21 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
 
   const columns: TableColumnsType<LogEntry> = [
     {
-      title: t("common.created_at"),
+      title: t("common:createdAt"),
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
       render: (v: string) => formatDateTime(v),
     },
     {
-      title: t("log.api_key"),
+      title: t("apiKey"),
       key: "keyName",
       width: 130,
       ellipsis: true,
       render: (_: unknown, record: LogEntry) => record.key?.name || "-",
     },
     {
-      title: t("log.platform"),
+      title: t("platform"),
       key: "platformName",
       width: 110,
       ellipsis: true,
@@ -199,14 +199,14 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       responsive: ["md"],
     },
     {
-      title: t("log.model"),
+      title: t("model"),
       dataIndex: "model",
       key: "model",
       width: 160,
       ellipsis: true,
     },
     {
-      title: t("log.status_code"),
+      title: t("statusCode"),
       dataIndex: "status",
       key: "status",
       width: 80,
@@ -226,7 +226,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       ),
     },
     {
-      title: t("usage.prompt_tokens"),
+      title: t("usage:promptTokens"),
       dataIndex: "promptTokens",
       key: "promptTokens",
       width: 100,
@@ -234,7 +234,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("usage.completion_tokens"),
+      title: t("usage:completionTokens"),
       dataIndex: "completionTokens",
       key: "completionTokens",
       width: 100,
@@ -242,7 +242,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("log.tokens"),
+      title: t("tokens"),
       dataIndex: "tokens",
       key: "tokens",
       width: 100,
@@ -250,7 +250,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("log.ttft"),
+      title: t("ttft"),
       dataIndex: "ttft",
       key: "ttft",
       width: 90,
@@ -264,7 +264,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       },
     },
     {
-      title: t("log.duration"),
+      title: t("duration"),
       dataIndex: "duration",
       key: "duration",
       width: 90,
@@ -278,16 +278,16 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       },
     },
     {
-      title: t("log.is_error"),
+      title: t("isError"),
       dataIndex: "isError",
       key: "isError",
       width: 80,
       align: "center",
       render: (v: boolean) =>
         v ? (
-          <Tag color="red">{t("common.error")}</Tag>
+          <Tag color="red">{t("common:error")}</Tag>
         ) : (
-          <Tag color="green">{t("common.success")}</Tag>
+          <Tag color="green">{t("common:success")}</Tag>
         ),
       responsive: ["lg"],
     },
@@ -304,13 +304,13 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
             setPage(1);
           }}
           placeholder={[
-            t("log.start_date") || "开始日期",
-            t("log.end_date") || "结束日期",
+            t("startDate"),
+            t("endDate"),
           ]}
           className="w-full sm:w-[260px]"
         />
         <Select
-          placeholder={t("log.filter_by_key") || "按 Key 筛选"}
+          placeholder={t("filterByKey")}
           allowClear
           showSearch
           optionFilterProp="label"
@@ -326,7 +326,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           }))}
         />
         <Select
-          placeholder={t("log.status_filter_placeholder")}
+          placeholder={t("statusFilterPlaceholder")}
           allowClear
           className="w-full sm:w-32"
           value={statusFilter}
@@ -344,7 +344,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           ]}
         />
         <Select
-          placeholder={t("log.error_filter_placeholder")}
+          placeholder={t("errorFilterPlaceholder")}
           allowClear
           className="w-full sm:w-32"
           value={errorFilter || undefined}
@@ -353,8 +353,8 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
             setPage(1);
           }}
           options={[
-            { value: "true", label: t("log.filter_error_only") },
-            { value: "false", label: t("log.filter_normal_only") },
+            { value: "true", label: t("filterErrorOnly") },
+            { value: "false", label: t("filterNormalOnly") },
           ]}
         />
         {hasFilters && (
@@ -364,7 +364,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
             icon={<Search size={14} />}
             onClick={handleResetFilters}
           >
-            {t("common.reset") || "重置"}
+            {t("common:reset")}
           </Button>
         )}
       </div>
@@ -379,7 +379,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) => t("common.pagination_total", { count }),
+          showTotal: (count) => t("common:pagination", { count }),
         }}
         scroll={{ x: 1300 }}
       />
@@ -390,7 +390,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
 // ==================== 归档统计 Tab ====================
 
 function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("log");
   const router = useRouter();
   const [stats, setStats] = useState<ArchiveEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -445,7 +445,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         });
         if (res.status === 401) {
           message.warning(
-            t("auth.unauthorized") || "登录已过期，请重新登录"
+            t("auth:unauthorized")
           );
           router.push("/admin/login");
           return;
@@ -457,7 +457,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("log.fetch_failed") || "获取归档数据失败");
+        message.error(t("fetchFailed"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -483,28 +483,28 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       const res = await fetch("/api/admin/logs/archive", { method: "POST" });
       const data: any = await res.json();
       if (data.success) {
-        message.success(data.message || "归档完成");
+        message.success(data.message || t("archiveSuccess"));
         handleRefresh();
       } else {
-        message.error(data.error || "归档失败");
+        message.error(data.error || t("archiveFailed"));
       }
     } catch {
-      message.error("归档请求失败");
+      message.error(t("archiveRequestFailed"));
     } finally {
       setArchiving(false);
     }
-  }, [handleRefresh]);
+  }, [handleRefresh, t]);
 
   const columns: TableColumnsType<ArchiveEntry> = [
     {
-      title: t("log.archive_date"),
+      title: t("archiveDate"),
       dataIndex: "date",
       key: "date",
       width: 120,
       render: (v: string) => formatDate(v),
     },
     {
-      title: t("log.api_key"),
+      title: t("apiKey"),
       key: "keyName",
       width: 130,
       ellipsis: true,
@@ -512,7 +512,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         record.keyName || "-",
     },
     {
-      title: t("log.platform"),
+      title: t("platform"),
       key: "platformName",
       width: 110,
       ellipsis: true,
@@ -520,14 +520,14 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         record.platformName || "-",
     },
     {
-      title: t("log.model"),
+      title: t("model"),
       dataIndex: "model",
       key: "model",
       width: 160,
       ellipsis: true,
     },
     {
-      title: t("log.total_requests"),
+      title: t("totalRequests"),
       dataIndex: "totalRequests",
       key: "totalRequests",
       width: 90,
@@ -535,7 +535,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("log.error_requests"),
+      title: t("errorRequests"),
       dataIndex: "errorRequests",
       key: "errorRequests",
       width: 80,
@@ -548,7 +548,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         ),
     },
     {
-      title: t("usage.prompt_tokens"),
+      title: t("usage:promptTokens"),
       dataIndex: "totalPromptTokens",
       key: "totalPromptTokens",
       width: 110,
@@ -556,7 +556,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("usage.completion_tokens"),
+      title: t("usage:completionTokens"),
       dataIndex: "totalCompletionTokens",
       key: "totalCompletionTokens",
       width: 110,
@@ -564,7 +564,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("log.tokens"),
+      title: t("tokens"),
       dataIndex: "totalTokens",
       key: "totalTokens",
       width: 100,
@@ -572,7 +572,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       render: (v: number) => v?.toLocaleString() || "0",
     },
     {
-      title: t("log.avg_ttft"),
+      title: t("avgTtft"),
       dataIndex: "avgTtft",
       key: "avgTtft",
       width: 100,
@@ -586,7 +586,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       },
     },
     {
-      title: t("log.avg_duration"),
+      title: t("avgDuration"),
       dataIndex: "avgDuration",
       key: "avgDuration",
       width: 100,
@@ -612,13 +612,13 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
             setPage(1);
           }}
           placeholder={[
-            t("log.start_date") || "开始日期",
-            t("log.end_date") || "结束日期",
+            t("startDate"),
+            t("endDate"),
           ]}
           className="w-full sm:w-[260px]"
         />
         <Select
-          placeholder={t("log.filter_by_key") || "按 Key 筛选"}
+          placeholder={t("filterByKey")}
           allowClear
           showSearch
           optionFilterProp="label"
@@ -644,7 +644,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
               setPage(1);
             }}
           >
-            {t("common.reset") || "重置"}
+            {t("common:reset")}
           </Button>
         )}
         <Button
@@ -655,8 +655,8 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
           disabled={archiving}
         >
           {archiving
-            ? t("log.archiving") || "归档中..."
-            : t("log.manual_archive") || "立即归档"}
+            ? t("archiving")
+            : t("manualArchive")}
         </Button>
       </div>
 
@@ -670,7 +670,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) => t("common.pagination_total", { count }),
+          showTotal: (count) => t("common:pagination", { count }),
         }}
         scroll={{ x: 1300 }}
       />
@@ -681,7 +681,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
 // ==================== 页面内容组件 ====================
 
 function LogsContent() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("log");
   const detailRefreshRef = useRef<(() => void) | null>(null);
   const archiveRefreshRef = useRef<(() => void) | null>(null);
   const [activeTab, setActiveTab] = useState("detailed");
@@ -697,7 +697,7 @@ function LogsContent() {
   const tabItems = [
     {
       key: "detailed",
-      label: t("log.tab_detailed") || "详细日志",
+      label: t("tabDetailed"),
       children: (
         <DetailedLogsTab
           onRefreshRef={(fn) => { detailRefreshRef.current = fn; }}
@@ -706,7 +706,7 @@ function LogsContent() {
     },
     {
       key: "archived",
-      label: t("log.tab_archived") || "归档统计",
+      label: t("tabArchived"),
       children: (
         <ArchivedStatsTab
           onRefreshRef={(fn) => { archiveRefreshRef.current = fn; }}
@@ -724,15 +724,15 @@ function LogsContent() {
             className="text-zinc-500 dark:text-zinc-400"
           />
         }
-        title={t("admin.logs")}
-        description={t("admin.logs_desc")}
+        title={t("admin:logs")}
+        description={t("admin:logsDesc")}
         extra={
           <Button
             variant="default"
             onClick={handleRefresh}
             icon={<RefreshCw size={14} />}
           >
-            {t("common.refresh")}
+            {t("common:refresh")}
           </Button>
         }
       />

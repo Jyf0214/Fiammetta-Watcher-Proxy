@@ -61,4 +61,15 @@ if [ $? -ne 0 ]; then
 fi
 echo "✓ [pre-commit] Frontend ESLint 通过"
 
+# 5. Vitest（i18n 一致性检查等，失败即退出）
+echo "[pre-commit] Vitest..."
+VITEST_OUTPUT=$(npx vitest run 2>&1)
+VITEST_EXIT=$?
+echo "$VITEST_OUTPUT" | tail -30
+if [ $VITEST_EXIT -ne 0 ]; then
+  echo "✗ [pre-commit] Vitest 测试失败，提交被阻止"
+  exit 1
+fi
+echo "✓ [pre-commit] Vitest 通过"
+
 echo "✓ [pre-commit] 所有检查通过"

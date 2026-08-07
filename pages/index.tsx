@@ -34,40 +34,40 @@ for await (const chunk of response) {
 }`;
 
 export default function HomePage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("home");
   // 修复：使用 useThemeMode() hook 统一深色模式管理，支持 light/dark/system 三态
   useThemeMode();
 
   const features = [
     {
       icon: <Globe className="text-2xl" />,
-      title: t("home.feature_multi_platform_title"),
-      desc: t("home.feature_multi_platform_desc"),
+      title: t("multiPlatformTitle"),
+      desc: t("multiPlatformDesc"),
     },
     {
       icon: <Zap className="text-2xl" />,
-      title: t("home.feature_sse_title"),
-      desc: t("home.feature_sse_desc"),
+      title: t("sseTitle"),
+      desc: t("sseDesc"),
     },
     {
       icon: <Key className="text-2xl" />,
-      title: t("home.feature_key_mgmt_title"),
-      desc: t("home.feature_key_mgmt_desc"),
+      title: t("keyMgmtTitle"),
+      desc: t("keyMgmtDesc"),
     },
     {
       icon: <Shield className="text-2xl" />,
-      title: t("home.feature_circuit_breaker_title"),
-      desc: t("home.feature_circuit_breaker_desc"),
+      title: t("circuitBreakerTitle"),
+      desc: t("circuitBreakerDesc"),
     },
     {
       icon: <BarChart3 className="text-2xl" />,
-      title: t("home.feature_usage_title"),
-      desc: t("home.feature_usage_desc"),
+      title: t("usageTitle"),
+      desc: t("usageDesc"),
     },
     {
       icon: <Activity className="text-2xl" />,
-      title: t("home.feature_sdk_compat_title"),
-      desc: t("home.feature_sdk_compat_desc"),
+      title: t("sdkCompatTitle"),
+      desc: t("sdkCompatDesc"),
     },
   ];
 
@@ -89,19 +89,19 @@ export default function HomePage() {
               href="#features"
               className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
-              {t("home.nav_features")}
+              {t("navFeatures")}
             </Link>
             <Link
               href="#quickstart"
               className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
-              {t("home.nav_quickstart")}
+              {t("navQuickStart")}
             </Link>
             <Link
               href="/admin/login"
               className="text-sm px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 transition-opacity font-medium"
             >
-              {t("home.nav_admin")}
+              {t("navAdmin")}
             </Link>
           </div>
           {/* 移动端仅显示管理后台入口 */}
@@ -109,7 +109,7 @@ export default function HomePage() {
             href="/admin/login"
             className="md:hidden text-sm px-3 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 transition-opacity font-medium"
           >
-            {t("home.nav_admin")}
+            {t("navAdmin")}
           </Link>
         </div>
       </nav>
@@ -144,7 +144,7 @@ export default function HomePage() {
             transition={{ delay: 0.2 }}
             className="text-base sm:text-lg text-zinc-500 dark:text-zinc-400 max-w-2xl mb-8 sm:mb-10 leading-relaxed"
           >
-            {t("home.hero_description")}
+            {t("heroDesc")}
           </motion.p>
 
           <motion.div
@@ -158,7 +158,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl font-medium hover:opacity-90 transition-opacity text-sm sm:text-base"
             >
               <BookOpen size={18} />
-              {t("home.nav_quickstart")}
+              {t("navQuickStart")}
             </Link>
             <Link
               href="https://github.com/Jyf0214/Fiammetta-Watcher-Proxy"
@@ -183,10 +183,10 @@ export default function HomePage() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-4">
-              {t("home.section_core_features")}
+              {t("sectionCoreFeatures")}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
-              {t("home.section_core_features_desc")}
+              {t("sectionCoreFeaturesDesc")}
             </p>
           </motion.div>
 
@@ -225,10 +225,10 @@ export default function HomePage() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-4">
-              {t("home.nav_quickstart")}
+              {t("navQuickStart")}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
-              {t("home.section_quickstart_desc")}
+              {t("sectionQuickStartDesc")}
             </p>
           </motion.div>
 
@@ -256,18 +256,18 @@ export default function HomePage() {
             {[
               {
                 step: "01",
-                title: t("home.step_config_env_title"),
-                desc: t("home.step_config_env_desc"),
+                title: t("stepConfigEnvTitle"),
+                desc: t("stepConfigEnvDesc"),
               },
               {
                 step: "02",
-                title: t("home.step_start_service_title"),
-                desc: t("home.step_start_service_desc"),
+                title: t("stepStartServiceTitle"),
+                desc: t("stepStartServiceDesc"),
               },
               {
                 step: "03",
-                title: t("home.step_get_started_title"),
-                desc: t("home.step_get_started_desc"),
+                title: t("stepGetStartedTitle"),
+                desc: t("stepGetStartedDesc"),
               },
             ].map((item, i) => (
               <motion.div
@@ -317,7 +317,7 @@ export default function HomePage() {
               href="/admin/login"
               className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors flex items-center gap-1"
             >
-              {t("home.nav_admin")} <ArrowRight size={14} />
+              {t("navAdmin")} <ArrowRight size={14} />
             </Link>
           </div>
         </div>

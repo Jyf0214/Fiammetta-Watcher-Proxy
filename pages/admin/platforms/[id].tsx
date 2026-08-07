@@ -24,7 +24,7 @@ import {
 } from "@/lib/platform";
 
 export default function PlatformDetailPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("platform");
   const router = useRouter();
   const rawId = router.query.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -35,7 +35,8 @@ export default function PlatformDetailPage() {
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [listLoading, setListLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(!isNew);
-  const [namedKeys, setNamedKeys] = useState<NamedApiKey[]>([{ name: "密钥1", key: "" }]);
+  const defaultKeyName = useCallback((i: number) => `${t("keyNamePrefix")}${i}`, [t]);
+  const [namedKeys, setNamedKeys] = useState<NamedApiKey[]>([{ name: defaultKeyName(1), key: "" }]);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -64,7 +65,7 @@ export default function PlatformDetailPage() {
       if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       if (!signal?.aborted) setListLoading(false);
     }
@@ -78,7 +79,7 @@ export default function PlatformDetailPage() {
       if (data.success) setModels(data.data || []);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       if (!signal?.aborted) setModelsLoading(false);
     }
@@ -94,7 +95,7 @@ export default function PlatformDetailPage() {
       setDetailLoading(false);
       form.resetFields();
       form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
-      setNamedKeys([{ name: "密钥1", key: "" }]);
+      setNamedKeys([{ name: defaultKeyName(1), key: "" }]);
       return () => controller.abort();
     }
     setDetailLoading(true);
@@ -106,33 +107,33 @@ export default function PlatformDetailPage() {
           const p = data.data as Platform;
           setPlatform(p);
           form.setFieldsValue({ ...p, forwardHeaders: parseForwardHeaders(p.forwardHeaders) });
-          const parsed = parseNamedKeys(p);
-          setNamedKeys(parsed.length > 0 ? parsed : [{ name: "密钥1", key: "" }]);
+          const parsed = parseNamedKeys(p, t("keyNamePrefix"));
+          setNamedKeys(parsed.length > 0 ? parsed : [{ name: defaultKeyName(1), key: "" }]);
           fetchModels(id, signal);
         } else {
-          if (!signal.aborted) message.error(data.error || t("common.error"));
+          if (!signal.aborted) message.error(data.error || t("common:error"));
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!signal.aborted) setDetailLoading(false);
       }
     })();
     return () => controller.abort();
-  }, [id, fetchList, fetchModels, form, isNew, t]);
+  }, [id, fetchList, fetchModels, form, isNew, t, defaultKeyName]);
 
   // ---------- 密钥编辑 ----------
   const addNamedKey = () => {
     const names = namedKeys.map((k) => k.name);
     let i = 1;
-    while (names.includes(`密钥${i}`)) i++;
-    setNamedKeys([...namedKeys, { name: `密钥${i}`, key: "" }]);
+    while (names.includes(defaultKeyName(i))) i++;
+    setNamedKeys([...namedKeys, { name: defaultKeyName(i), key: "" }]);
   };
 
   const removeNamedKey = (index: number) => {
     if (namedKeys.length <= 1) {
-      message.warning("至少保留一个密钥");
+      message.warning(t("atLeastOneKey"));
       return;
     }
     setNamedKeys(namedKeys.filter((_, i) => i !== index));
@@ -153,8 +154,8 @@ export default function PlatformDetailPage() {
   const copyKeyValue = (key: string) => {
     navigator.clipboard
       .writeText(key)
-      .then(() => message.success("已复制到剪贴板"))
-      .catch(() => message.error("复制失败"));
+      .then(() => message.success(t("common:copied")))
+      .catch(() => message.error(t("common:copyFailed")));
   };
 
   const handleToggleWhitelist = (index: number) => {
@@ -162,7 +163,7 @@ export default function PlatformDetailPage() {
     const newState = !next[index].whitelisted;
     next[index] = { ...next[index], whitelisted: newState };
     setNamedKeys(next);
-    message.info(newState ? "已加入白名单（429 时不封禁）" : "已移出白名单");
+    message.info(newState ? t("whitelistAdded") : t("whitelistRemoved"));
   };
 
   // ---------- 保存 / 删除 / 启停 ----------
@@ -171,7 +172,7 @@ export default function PlatformDetailPage() {
       const values = await form.validateFields();
       const validKeys = namedKeys.filter((k) => k.key && k.key.trim());
       if (validKeys.length === 0 && isNew) {
-        message.error("请至少填写一个 API 密钥");
+        message.error(t("keyRequired"));
         return;
       }
       setSubmitting(true);
@@ -210,11 +211,11 @@ export default function PlatformDetailPage() {
         setPlatform(updated);
         setPlatforms((prev) => prev.map((p) => (p.id === id ? updated : p)));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setSubmitting(false);
     }
@@ -227,13 +228,13 @@ export default function PlatformDetailPage() {
       const res = await fetch(`/api/admin/platforms/${id}`, { method: "DELETE" });
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
-        message.success(t("platform.delete_success") || "删除成功");
+        message.success(t("deleteSuccess"));
         router.push("/admin/platforms");
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setDeleting(false);
     }
@@ -253,10 +254,10 @@ export default function PlatformDetailPage() {
         setPlatform((prev) => (prev ? { ...prev, enabled } : prev));
         setPlatforms((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setToggling(false);
     }
@@ -273,10 +274,10 @@ export default function PlatformDetailPage() {
         message.success(data.message);
         fetchModels(id);
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setRefreshing(false);
     }
@@ -296,10 +297,10 @@ export default function PlatformDetailPage() {
         setNewModelId("");
         fetchModels(id);
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     }
   };
 
@@ -312,9 +313,9 @@ export default function PlatformDetailPage() {
       );
       const data = (await res.json()) as Record<string, any>;
       if (data.success) fetchModels(id);
-      else message.error(data.error || t("error.delete_failed"));
+      else message.error(data.error || t("deleteFailed"));
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     }
   };
 
@@ -331,10 +332,10 @@ export default function PlatformDetailPage() {
       if (data.success) {
         setModels((prev) => prev.map((m) => (m.modelId === modelId ? { ...m, enabled } : m)));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setTogglingModelId(null);
     }
@@ -353,10 +354,10 @@ export default function PlatformDetailPage() {
       if (data.success) {
         setModels((prev) => prev.map((m) => ({ ...m, enabled })));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setTogglingAll(false);
     }
@@ -405,7 +406,7 @@ export default function PlatformDetailPage() {
               <button
                 onClick={() => router.push("/admin/platforms")}
                 className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 shrink-0"
-                aria-label={t("platform.back")}
+                aria-label={t("back")}
               >
                 <ArrowLeft size={18} />
               </button>
@@ -415,7 +416,7 @@ export default function PlatformDetailPage() {
                 </div>
               )}
               <span className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                {isNew ? t("platform.create_platform") : platform?.name ?? "…"}
+                {isNew ? t("createPlatform") : platform?.name ?? "…"}
               </span>
             </div>
 
@@ -436,7 +437,7 @@ export default function PlatformDetailPage() {
             ) : isNew ? (
               <>
                 <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-5">
-                  {t("platform.create_platform")}
+                  {t("createPlatform")}
                 </h1>
                 {configForm}
               </>

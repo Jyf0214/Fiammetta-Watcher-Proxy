@@ -59,14 +59,14 @@ interface ErrorEvent {
 // ==================== 导入步骤定义（用于显示名称） ====================
 
 const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
-  platforms: { labelKey: "dm_step_platforms" },
-  modelMaps: { labelKey: "dm_step_model_maps" },
-  plans: { labelKey: "dm_step_plans" },
-  configs: { labelKey: "dm_step_configs" },
-  apiKeys: { labelKey: "dm_step_api_keys" },
-  auditLogs: { labelKey: "dm_step_audit_logs" },
-  systemEvents: { labelKey: "dm_step_system_events" },
-  requestLogs: { labelKey: "dm_step_request_logs", detailKey: "dm_step_request_logs_detail" },
+  platforms: { labelKey: "dmStepPlatforms" },
+  modelMaps: { labelKey: "dmStepModelMaps" },
+  plans: { labelKey: "dmStepPlans" },
+  configs: { labelKey: "dmStepConfigs" },
+  apiKeys: { labelKey: "dmStepApiKeys" },
+  auditLogs: { labelKey: "dmStepAuditLogs" },
+  systemEvents: { labelKey: "dmStepSystemEvents" },
+  requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
 };
 
 // ==================== 进度状态 ====================
@@ -99,7 +99,7 @@ function formatImportKey(key: string): string {
 }
 
 export default function DataManagerPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("admin");
   const [exportType, setExportType] = useState<ExportType>("all");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -124,24 +124,24 @@ export default function DataManagerPage() {
   }[] = [
     {
       value: "system",
-      label: t("admin.dm_system_config"),
-      desc: t("admin.dm_system_config_desc"),
+      label: t("dmSystemConfig"),
+      desc: t("dmSystemConfigDesc"),
       icon: <Cloud size={16} />,
-      tag: t("admin.dm_system_config_tag"),
+      tag: t("dmSystemConfigTag"),
       tagColor: "bg-blue-50 text-blue-600 border-blue-200",
     },
     {
       value: "data",
-      label: t("admin.dm_business_data"),
-      desc: t("admin.dm_business_data_desc"),
+      label: t("dmBusinessData"),
+      desc: t("dmBusinessDataDesc"),
       icon: <FileText size={16} />,
     },
     {
       value: "all",
-      label: t("admin.dm_all_export"),
-      desc: t("admin.dm_all_export_desc"),
+      label: t("dmAllExport"),
+      desc: t("dmAllExportDesc"),
       icon: <Database size={16} />,
-      tag: t("admin.dm_all_export_tag"),
+      tag: t("dmAllExportTag"),
       tagColor: "bg-amber-50 text-amber-600 border-amber-200",
     },
   ];
@@ -154,7 +154,7 @@ export default function DataManagerPage() {
 
       if (!res.ok) {
         const error: Record<string, any> = await res.json();
-        throw new Error(error.error || t("admin.dm_err_export"));
+        throw new Error(error.error || t("dmErrExport"));
       }
 
       const blob = await res.blob();
@@ -167,9 +167,9 @@ export default function DataManagerPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      message.success(t("admin.dm_export_success"));
+      message.success(t("dmExportSuccess"));
     } catch (err) {
-      message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+      message.error(err instanceof Error ? err.message : t("dmErrExport"));
     } finally {
       setExporting(false);
     }
@@ -190,7 +190,7 @@ export default function DataManagerPage() {
         const data = JSON.parse(text);
 
         if (!data.version || !data.exportedAt) {
-          throw new Error(t("admin.dm_err_invalid_format"));
+          throw new Error(t("dmErrInvalidFormat"));
         }
 
         // 发起流式请求
@@ -202,7 +202,7 @@ export default function DataManagerPage() {
 
         if (!res.ok) {
           const err: Record<string, any> = await res.json();
-          throw new Error(err.error || t("admin.dm_err_export"));
+          throw new Error(err.error || t("dmErrExport"));
         }
 
         // 读取 NDJSON 流
@@ -268,7 +268,7 @@ export default function DataManagerPage() {
                 throw new Error(ev.error);
               }
             } catch (parseErr) {
-              console.warn("[import] 解析进度事件失败:", parseErr, "line:", line.slice(0, 100));
+              console.warn("[import] failed to parse progress event:", parseErr, "line:", line.slice(0, 100));
             }
           }
         }
@@ -291,10 +291,10 @@ export default function DataManagerPage() {
           }
         }
       } catch (err) {
-        message.error(err instanceof Error ? err.message : t("admin.dm_err_export"));
+        message.error(err instanceof Error ? err.message : t("dmErrExport"));
         setImportResult({
           success: false,
-          message: err instanceof Error ? err.message : t("admin.dm_err_export"),
+          message: err instanceof Error ? err.message : t("dmErrExport"),
         });
       } finally {
         setImporting(false);
@@ -311,11 +311,11 @@ export default function DataManagerPage() {
 
       const isJson = file.type === "application/json" || file.name.endsWith(".json");
       if (!isJson) {
-        message.error(t("admin.dm_err_json_only"));
+        message.error(t("dmErrJsonOnly"));
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
-        message.error(t("admin.dm_err_file_too_large"));
+        message.error(t("dmErrFileTooLarge"));
         return;
       }
 
@@ -333,7 +333,7 @@ export default function DataManagerPage() {
       if (!file) return;
 
       if (!file.name.endsWith(".json")) {
-        message.error(t("admin.dm_err_json_only"));
+        message.error(t("dmErrJsonOnly"));
         return;
       }
       processImportFile(file);
@@ -353,7 +353,7 @@ export default function DataManagerPage() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="text-zinc-500 dark:text-zinc-400">
-              {t("admin.dm_importing")}
+              {t("dmImporting")}
             </span>
             <span className="text-zinc-500 dark:text-zinc-400 tabular-nums">
               {totalProcessed.toLocaleString()}/{totalRecords.toLocaleString()} ({percent}%)
@@ -384,11 +384,11 @@ export default function DataManagerPage() {
                   <div className="h-3.5 w-3.5 rounded-full border border-zinc-300 dark:border-zinc-600 flex-shrink-0" />
                 )}
                 <span className="text-zinc-600 dark:text-zinc-400 min-w-0">
-                  {t(`admin.${sp.labelKey}`)}
+                  {t(`${sp.labelKey}`)}
                 </span>
                 <span className="text-zinc-400 dark:text-zinc-500 tabular-nums ml-auto flex-shrink-0">
                   {sp.imported > 0 && <span className="text-emerald-500">+{sp.imported}</span>}
-                  {sp.skipped > 0 && <span className="ml-1">{t("admin.dm_skip")} {sp.skipped}</span>}
+                  {sp.skipped > 0 && <span className="ml-1">{t("dmSkip")} {sp.skipped}</span>}
                   {sp.imported === 0 && sp.skipped === 0 && <span>-</span>}
                 </span>
               </div>
@@ -417,7 +417,7 @@ export default function DataManagerPage() {
           <div className="flex items-center gap-2 text-xs">
             <Loader2 size={13} className="text-blue-500 animate-spin flex-shrink-0" />
             <span className="text-blue-600 dark:text-blue-400 font-medium">
-              {t(`admin.${STEP_LABELS[currentStepKey]?.labelKey || currentStepKey}`)}
+              {t(`${STEP_LABELS[currentStepKey]?.labelKey || currentStepKey}`)}
             </span>
             <span className="text-zinc-400 dark:text-zinc-500 ml-auto">
               ...
@@ -433,17 +433,17 @@ export default function DataManagerPage() {
       <PageContainer>
         <PageHeader
           icon={<Database size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.data_manager")}
-          description={t("admin.data_manager_desc")}
+          title={t("dataManager")}
+          description={t("dataManagerDesc")}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* ========== 导出区域 ========== */}
-          <ProCard title={t("admin.dm_export")}>
+          <ProCard title={t("dmExport")}>
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                  {t("admin.dm_select_type")}
+                  {t("dmSelectType")}
                 </label>
                 <div className="space-y-2">
                   {exportOptions.map((opt) => (
@@ -513,13 +513,13 @@ export default function DataManagerPage() {
                 loading={exporting}
                 block
               >
-                {t("admin.dm_export_btn")}
+                {t("dmExportBtn")}
               </Button>
             </div>
           </ProCard>
 
           {/* ========== 导入区域 ========== */}
-          <ProCard title={t("admin.dm_import")}>
+          <ProCard title={t("dmImport")}>
             <div className="space-y-4">
               {/* 上传区域 */}
               <div
@@ -563,10 +563,10 @@ export default function DataManagerPage() {
 
                 <div className="text-center">
                   <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                    {importing ? t("admin.dm_importing") : t("admin.dm_drop_hint")}
+                    {importing ? t("dmImporting") : t("dmDropHint")}
                   </p>
                   <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                    {t("admin.dm_file_hint")}
+                    {t("dmFileHint")}
                   </p>
                 </div>
               </div>
@@ -620,7 +620,7 @@ export default function DataManagerPage() {
                             )}
                             {value.skipped > 0 && (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                                {t("admin.dm_skip")} {value.skipped}
+                                {t("dmSkip")} {value.skipped}
                               </span>
                             )}
                           </div>
@@ -639,25 +639,25 @@ export default function DataManagerPage() {
           <div className="flex items-start gap-2 mb-3">
             <Info className="text-zinc-400 mt-0.5 flex-shrink-0" />
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-              {t("admin.dm_tips")}
+              {t("dmTips")}
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-zinc-600 dark:text-zinc-400">
             <div className="space-y-1.5">
               <p className="font-medium text-zinc-700 dark:text-zinc-300">
-                {t("admin.dm_export_scenarios")}
+                {t("dmExportScenarios")}
               </p>
-              <p>{t("admin.dm_tip_migrate")}</p>
-              <p>{t("admin.dm_tip_backup")}</p>
-              <p>{t("admin.dm_tip_copy")}</p>
+              <p>{t("dmTipMigrate")}</p>
+              <p>{t("dmTipBackup")}</p>
+              <p>{t("dmTipCopy")}</p>
             </div>
             <div className="space-y-1.5">
               <p className="font-medium text-zinc-700 dark:text-zinc-300">
-                {t("admin.dm_import_notes")}
+                {t("dmImportNotes")}
               </p>
-              <p>{t("admin.dm_tip_no_overwrite")}</p>
-              <p>{t("admin.dm_tip_skip_existing")}</p>
-              <p>{t("admin.dm_tip_check_status")}</p>
+              <p>{t("dmTipNoOverwrite")}</p>
+              <p>{t("dmTipSkipExisting")}</p>
+              <p>{t("dmTipCheckStatus")}</p>
             </div>
           </div>
         </ProCard>

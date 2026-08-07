@@ -22,7 +22,7 @@ interface EventEntry {
 }
 
 export default function EventsPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("admin");
   const router = useRouter();
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +41,7 @@ export default function EventsPage() {
           { signal: controller.signal }
         );
         if (res.status === 401) {
-          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          message.warning(t("auth:unauthorized"));
           router.push("/admin/login");
           return;
         }
@@ -52,7 +52,7 @@ export default function EventsPage() {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -77,14 +77,14 @@ export default function EventsPage() {
 
   const columns: TableColumnsType<EventEntry> = [
     {
-      title: t("common.created_at"),
+      title: t("common:createdAt"),
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
       render: (v: string) => formatDateTime(v),
     },
     {
-      title: t("event.level"),
+      title: t("event:level"),
       dataIndex: "level",
       key: "level",
       width: 100,
@@ -94,13 +94,13 @@ export default function EventsPage() {
       ),
     },
     {
-      title: t("common.message"),
+      title: t("common:message"),
       dataIndex: "message",
       key: "message",
       ellipsis: true,
     },
     {
-      title: t("common.detail"),
+      title: t("common:detail"),
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
@@ -126,11 +126,11 @@ export default function EventsPage() {
       <PageContainer>
         <PageHeader
           icon={<AlertTriangle size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.events")}
-          description={t("admin.events_desc")}
+          title={t("events")}
+          description={t("eventsDesc")}
           extra={
             <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={loading}>
-              {t("common.refresh") || "刷新"}
+              {t("common:refresh")}
             </Button>
           }
         />
@@ -146,7 +146,7 @@ export default function EventsPage() {
               total,
               pageSize: 20,
               onChange: setPage,
-              showTotal: (count) => t("common.pagination_total", { count }),
+              showTotal: (count) => t("common:pagination", { count }),
             }}
           />
         </ProCard>

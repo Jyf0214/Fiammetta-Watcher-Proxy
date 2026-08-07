@@ -18,7 +18,7 @@ interface SystemInfo {
 }
 
 export default function SystemPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("system");
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -66,14 +66,14 @@ export default function SystemPage() {
         <PageContainer>
           <PageHeader
             icon={<Settings size={20} className="text-zinc-500 dark:text-zinc-400" />}
-            title={t("admin.system")}
-            description={t("system.db_status")}
+            title={t("admin:system")}
+            description={t("dbStatus")}
           />
           <ProCard>
             <Alert
               type="error"
               showIcon
-              message={t("common.error")}
+              message={t("common:error")}
               description={
                 <Button
                   variant="default"
@@ -81,7 +81,7 @@ export default function SystemPage() {
                   icon={<RefreshCw size={14} />}
                   size="sm"
                 >
-                  {t("common.refresh") || "刷新"}
+                  {t("common:refresh")}
                 </Button>
               }
             />
@@ -96,26 +96,26 @@ export default function SystemPage() {
       <PageContainer>
         <PageHeader
           icon={<Settings size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.system")}
-          description={t("system.db_status")}
+          title={t("admin:system")}
+          description={t("dbStatus")}
         />
 
         <ProCard className="mb-4">
           <Descriptions column={1} bordered>
-            <Descriptions.Item label={t("system.admin_init")}>
-              {info?.adminUsername || t("common.not_set")}
+            <Descriptions.Item label={t("adminInit")}>
+              {info?.adminUsername || t("common:notSet")}
             </Descriptions.Item>
-            <Descriptions.Item label={t("system.db_status")}>
+            <Descriptions.Item label={t("dbStatus")}>
               <Tag color={info?.dbConnected ? "green" : "red"}>
                 {info?.dbConnected
-                  ? t("system.db_connected")
-                  : t("system.db_disconnected")}
+                  ? t("dbConnected")
+                  : t("dbDisconnected")}
               </Tag>
             </Descriptions.Item>
-            <Descriptions.Item label={t("dashboard.active_platforms")}>
+            <Descriptions.Item label={t("dashboard:activePlatforms")}>
               {info?.platformCount ?? 0}
             </Descriptions.Item>
-            <Descriptions.Item label={t("dashboard.active_keys")}>
+            <Descriptions.Item label={t("dashboard:activeKeys")}>
               {info?.keyCount ?? 0}
             </Descriptions.Item>
           </Descriptions>

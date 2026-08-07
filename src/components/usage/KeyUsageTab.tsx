@@ -32,7 +32,7 @@ interface KeyUsageTabProps {
 }
 
 export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("usage");
   const [data, setData] = useState<KeyUsage[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -52,7 +52,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -81,7 +81,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
   const statCards = [
     {
       key: "requests",
-      title: t("usage.total_requests"),
+      title: t("totalRequests"),
       value: summary.totalRequests,
       icon: <Zap />,
       bgColor: "bg-blue-50",
@@ -89,7 +89,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       key: "tokens",
-      title: t("usage.total_tokens"),
+      title: t("totalTokens"),
       value: summary.totalTokens,
       icon: <TrendingUp />,
       bgColor: "bg-emerald-50",
@@ -97,7 +97,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       key: "activeKeys",
-      title: t("usage.active_keys"),
+      title: t("activeKeys"),
       value: summary.activeKeys,
       suffix: `/ ${data.length}`,
       icon: <Cloud />,
@@ -106,7 +106,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       key: "ttft",
-      title: t("usage.avg_ttft"),
+      title: t("avgTtft"),
       value: summary.avgTtft,
       suffix: "ms",
       icon: <Clock />,
@@ -117,14 +117,14 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
 
   const columns: TableColumnsType<KeyUsage> = [
     {
-      title: t("usage.key_name"),
+      title: t("keyName"),
       dataIndex: "name",
       key: "name",
       width: 140,
       ellipsis: true,
     },
     {
-      title: t("usage.key"),
+      title: t("key"),
       dataIndex: "key",
       key: "key",
       width: 160,
@@ -133,19 +133,19 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       ),
     },
     {
-      title: t("usage.status"),
+      title: t("status"),
       dataIndex: "status",
       key: "status",
       width: 90,
       align: "center",
       render: (v: string) => (
         <Tag color={v === "active" ? "green" : "red"}>
-          {v === "active" ? t("common.enable") : t("common.disable")}
+          {v === "active" ? t("common:enable") : t("common:disable")}
         </Tag>
       ),
     },
     {
-      title: t("usage.total_requests"),
+      title: t("totalRequests"),
       key: "totalRequests",
       width: 100,
       align: "right",
@@ -153,7 +153,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         record.stats.totalRequests.toLocaleString(),
     },
     {
-      title: t("usage.total_tokens"),
+      title: t("totalTokens"),
       key: "totalTokens",
       width: 110,
       align: "right",
@@ -162,8 +162,8 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       title: (
-        <Tooltip title={t("usage.prompt_tokens_desc")}>
-          {t("usage.prompt_tokens")}
+        <Tooltip title={t("promptTokensDesc")}>
+          {t("promptTokens")}
         </Tooltip>
       ),
       key: "promptTokens",
@@ -175,8 +175,8 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       title: (
-        <Tooltip title={t("usage.completion_tokens_desc")}>
-          {t("usage.completion_tokens")}
+        <Tooltip title={t("completionTokensDesc")}>
+          {t("completionTokens")}
         </Tooltip>
       ),
       key: "completionTokens",
@@ -188,8 +188,8 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_ttft_desc")}>
-          {t("usage.avg_ttft")}
+        <Tooltip title={t("avgTtftDesc")}>
+          {t("avgTtft")}
         </Tooltip>
       ),
       key: "avgTtft",
@@ -201,8 +201,8 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_tokens_per_sec_desc")}>
-          {t("usage.avg_tokens_per_sec")}
+        <Tooltip title={t("avgTpsDesc")}>
+          {t("avgTps")}
         </Tooltip>
       ),
       key: "avgTokensPerSecond",
@@ -216,8 +216,8 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_rpm_desc")}>
-          {t("usage.avg_rpm")}
+        <Tooltip title={t("avgRpmDesc")}>
+          {t("avgRpm")}
         </Tooltip>
       ),
       key: "avgRequestsPerMinute",
@@ -230,7 +230,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       responsive: ["xl"],
     },
     {
-      title: t("usage.avg_duration"),
+      title: t("avgDuration"),
       key: "avgDuration",
       width: 100,
       align: "right",
@@ -241,14 +241,14 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       responsive: ["xl"],
     },
     {
-      title: t("usage.token_limit"),
+      title: t("tokenLimit"),
       key: "tokenLimit",
       width: 100,
       align: "right",
       render: (_: unknown, record: KeyUsage) =>
         record.tokenLimit
           ? record.tokenLimit.toLocaleString()
-          : t("common.unlimited"),
+          : t("common:unlimited"),
       responsive: ["xl"],
     },
   ];
@@ -292,7 +292,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         loading={loading}
         pagination={{
           pageSize: 20,
-          showTotal: (count) => t("common.pagination_total", { count }),
+          showTotal: (count) => t("common:pagination", { count }),
         }}
         scroll={{ x: 1400 }}
       />

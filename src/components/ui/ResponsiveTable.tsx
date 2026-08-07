@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react
 // @lobehub/ui 没有 Table / Pagination 组件，保留 antd
 import { Table, Pagination } from 'antd';
 import type { TableProps } from 'antd';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 精简列类型 — 只包含 ResponsiveTable 实际使用的属性，
@@ -72,6 +73,7 @@ function MobileCards<T>({
   rowKey: string | number | ((r: T) => string);
 }) {
   const sw = useScreenWidth();
+  const { t } = useTranslation("common");
 
   const { titleCol, bodyCols, actionsCol } = useMemo(() => {
     const vis = columns.filter((c) => colVisible(c, sw));
@@ -92,7 +94,7 @@ function MobileCards<T>({
   if (!data.length) {
     return (
       <div className="text-center py-12 text-sm text-zinc-400 dark:text-zinc-500">
-        暂无数据
+        {t("noData")}
       </div>
     );
   }
@@ -202,6 +204,7 @@ function TimelineView<T>({
   fields: TimelineFieldMap<T>;
   rowKey: string | number | ((r: T) => string);
 }) {
+  const { t } = useTranslation("common");
   const keyOf = useCallback(
     (r: T) => {
       if (typeof rowKey === "function") return rowKey(r);
@@ -212,7 +215,7 @@ function TimelineView<T>({
 
   if (!data.length) {
     return (
-      <div className="text-center py-8 text-sm text-zinc-400">暂无事件</div>
+      <div className="text-center py-8 text-sm text-zinc-400">{t("noData")}</div>
     );
   }
 
@@ -262,7 +265,7 @@ function TimelineView<T>({
                       <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate">
                         {item.message}
                         {item.count > 1 && (
-                          <span className="text-xs text-zinc-400 ml-1">({item.count}次)</span>
+                          <span className="text-xs text-zinc-400 ml-1">{t("event:times", { count: item.count })}</span>
                         )}
                       </span>
                       <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{item.time}</span>

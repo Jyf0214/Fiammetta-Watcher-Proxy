@@ -9,8 +9,8 @@ export interface NamedApiKey {
   whitelisted?: boolean;
 }
 
-/** 解析平台密钥列表（兼容 JSON 字符串与已解析数组两种形态） */
-export function parseNamedKeys(platform: Platform | null): NamedApiKey[] {
+/** 解析平台密钥列表（兼容 JSON 字符串与已解析数组两种形态）；namePrefix 为默认密钥名前缀 */
+export function parseNamedKeys(platform: Platform | null, namePrefix = "Key"): NamedApiKey[] {
   const parsed: NamedApiKey[] = [];
   const raw = platform?.apiKeys;
   if (!raw) return parsed;
@@ -28,7 +28,7 @@ export function parseNamedKeys(platform: Platform | null): NamedApiKey[] {
       arr.forEach((item: { name?: string; key: string; whitelisted?: boolean }) => {
         if (item && typeof item.key === "string" && item.key.trim()) {
           parsed.push({
-            name: item.name || `密钥${parsed.length + 1}`,
+            name: item.name || `${namePrefix}${parsed.length + 1}`,
             key: item.key,
             whitelisted: !!item.whitelisted,
           });
@@ -37,7 +37,7 @@ export function parseNamedKeys(platform: Platform | null): NamedApiKey[] {
     } else {
       arr.forEach((key: unknown, idx: number) => {
         if (typeof key === "string" && key.trim()) {
-          parsed.push({ name: `密钥${idx + 1}`, key });
+          parsed.push({ name: `${namePrefix}${idx + 1}`, key });
         }
       });
     }
@@ -57,13 +57,13 @@ export interface ModelItem {
   fetchedAt: string;
 }
 
-export const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; label: string; color: string; bg: string }> = {
-  chat:       { icon: MessageSquare, label: "文字", color: "text-blue-500",   bg: "bg-blue-50 dark:bg-blue-900/30" },
-  embedding:  { icon: Layers,       label: "向量", color: "text-cyan-500",   bg: "bg-cyan-50 dark:bg-cyan-900/30" },
-  image:      { icon: Image,        label: "图片", color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30" },
-  audio:      { icon: Mic,          label: "音频", color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30" },
-  video:      { icon: Box,          label: "视频", color: "text-pink-500",   bg: "bg-pink-50 dark:bg-pink-900/30" },
-  moderation: { icon: Cpu,          label: "审核", color: "text-red-500",    bg: "bg-red-50 dark:bg-red-900/30" },
+export const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; labelKey: string; color: string; bg: string }> = {
+  chat:       { icon: MessageSquare, labelKey: "typeChat",       color: "text-blue-500",   bg: "bg-blue-50 dark:bg-blue-900/30" },
+  embedding:  { icon: Layers,       labelKey: "typeEmbedding",  color: "text-cyan-500",   bg: "bg-cyan-50 dark:bg-cyan-900/30" },
+  image:      { icon: Image,        labelKey: "typeImage",      color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30" },
+  audio:      { icon: Mic,          labelKey: "typeAudio",      color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30" },
+  video:      { icon: Box,          labelKey: "typeVideo",      color: "text-pink-500",   bg: "bg-pink-50 dark:bg-pink-900/30" },
+  moderation: { icon: Cpu,          labelKey: "typeModeration", color: "text-red-500",    bg: "bg-red-50 dark:bg-red-900/30" },
 };
 
 /** 根据模型 ID 猜测品牌首字母 */

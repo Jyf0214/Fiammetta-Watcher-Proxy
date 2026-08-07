@@ -21,7 +21,7 @@ interface PlatformModel {
 }
 
 export default function AutoModelPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("system");
 
   // 自动模型 ID 状态
   const [autoModelId, setAutoModelId] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function AutoModelPage() {
           setModels(allModels);
         }
       } catch {
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         setModelsLoading(false);
       }
@@ -107,12 +107,12 @@ export default function AutoModelPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         setAutoModelId(newId);
-        message.success(t("system.auto_model_regenerated") || "自动模型 ID 已重新生成");
+        message.success(t("autoModelRegenerated"));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setAutoModelLoading(false);
     }
@@ -141,12 +141,12 @@ export default function AutoModelPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success(t("system.auto_model_selected_saved") || "模型选择已保存");
+        message.success(t("autoModelSelectedSaved"));
       } else {
-        message.error(data.error || t("common.error"));
+        message.error(data.error || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setSelectedModelsLoading(false);
     }
@@ -154,7 +154,7 @@ export default function AutoModelPage() {
 
   const columns = [
     {
-      title: t("admin.platforms"),
+      title: t("admin:platforms"),
       key: "platform",
       width: 120,
       render: (_: unknown, record: PlatformModel) => (
@@ -165,13 +165,13 @@ export default function AutoModelPage() {
       ),
     },
     {
-      title: t("platform.model_id"),
+      title: t("platform:modelId"),
       dataIndex: "modelId",
       key: "modelId",
       ellipsis: true,
     },
     {
-      title: t("platform.model_source"),
+      title: t("platform:modelSource"),
       dataIndex: "source",
       key: "source",
       width: 80,
@@ -183,12 +183,12 @@ export default function AutoModelPage() {
               : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
           }`}
         >
-          {v === "manual" ? "手动" : "自动"}
+          {v === "manual" ? t("platform:manual") : t("platform:auto")}
         </span>
       ),
     },
     {
-      title: t("common.updated_at"),
+      title: t("common:updatedAt"),
       dataIndex: "fetchedAt",
       key: "fetchedAt",
       width: 180,
@@ -201,8 +201,8 @@ export default function AutoModelPage() {
       <PageContainer>
         <PageHeader
           icon={<Zap size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.auto_model")}
-          description={t("admin.auto_model_desc")}
+          title={t("admin:autoModel")}
+          description={t("admin:autoModelDesc")}
         />
 
         {/* 自动模型 ID 配置 */}
@@ -210,13 +210,13 @@ export default function AutoModelPage() {
           title={
             <span className="flex items-center gap-2">
               <Zap size={16} />
-              {t("system.auto_model_title") || "自动模型"}
+              {t("autoModelTitle")}
             </span>
           }
           className="mb-4"
         >
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-4">
-            {t("system.auto_model_desc") || "配置后，请求此模型 ID 时将自动轮询所有可用平台。"}
+            {t("autoModelDesc")}
           </p>
           {autoModelId ? (
             <div className="flex items-center gap-3">
@@ -229,7 +229,7 @@ export default function AutoModelPage() {
                 iconOnly
                 icon={copied ? <Check size={14} /> : <Copy size={14} />}
                 onClick={copyAutoModelId}
-                title={copied ? t("common.copied") : t("common.copy")}
+                title={copied ? t("common:copied") : t("common:copy")}
               />
               <Button
                 variant="default"
@@ -238,7 +238,7 @@ export default function AutoModelPage() {
                 onClick={regenerateAutoModelId}
                 loading={autoModelLoading}
               >
-                {t("system.auto_model_regenerate") || "重新生成"}
+                {t("autoModelRegenerate")}
               </Button>
             </div>
           ) : (
@@ -248,7 +248,7 @@ export default function AutoModelPage() {
               onClick={regenerateAutoModelId}
               loading={autoModelLoading}
             >
-              {t("system.auto_model_enable") || "启用自动模型"}
+              {t("autoModelEnable")}
             </Button>
           )}
         </ProCard>
@@ -258,19 +258,19 @@ export default function AutoModelPage() {
           title={
             <span className="flex items-center gap-2">
               <Search size={16} />
-              {t("system.auto_model_select_title") || "选择自动分流模型"}
+              {t("autoModelSelectTitle")}
             </span>
           }
           className="mb-4"
         >
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-4">
-            {t("system.auto_model_select_desc") || "从已发现的模型中选择要参与自动分流的模型，支持搜索和多选。"}
+            {t("autoModelSelectDesc")}
           </p>
           <div className="mb-4">
             <Select
               mode="multiple"
               style={{ width: "100%" }}
-              placeholder={t("system.auto_model_select_placeholder") || "搜索并选择模型..."}
+              placeholder={t("autoModelSelectPlaceholder")}
               value={selectedModels}
               onChange={setSelectedModels}
               loading={modelsLoading}
@@ -282,10 +282,10 @@ export default function AutoModelPage() {
                 value: m.modelId,
                 label: `${m.modelId} (${m.platform.name})`,
               }))}
-              notFoundContent={<Empty description={t("common.no_data") || "暂无数据"} />}
+              notFoundContent={<Empty description={t("common:noData")} />}
               maxTagCount="responsive"
               maxTagPlaceholder={(omittedValues) =>
-                `+${omittedValues.length} ${t("common.items") || "项"}`
+                `+${omittedValues.length} ${t("common:items")}`
               }
             />
           </div>
@@ -297,7 +297,7 @@ export default function AutoModelPage() {
               loading={selectedModelsLoading}
               disabled={selectedModels.length === 0}
             >
-              {t("common.save") || "保存选择"}
+              {t("common:save")}
             </Button>
           </div>
         </ProCard>
@@ -307,7 +307,7 @@ export default function AutoModelPage() {
           title={
             <span className="flex items-center gap-2">
               <Database size={16} />
-              {t("admin.auto_model_discovered") || "已发现的模型"}
+              {t("admin:autoModelDiscovered")}
             </span>
           }
         >
@@ -316,7 +316,7 @@ export default function AutoModelPage() {
             dataSource={models}
             rowKey="id"
             loading={modelsLoading}
-            pagination={{ pageSize: 20, showTotal: (total) => t("common.pagination_total", { count: total }) }}
+            pagination={{ pageSize: 20, showTotal: (total) => t("common:pagination", { count: total }) }}
             scroll={{ x: 600 }}
           />
         </ProCard>

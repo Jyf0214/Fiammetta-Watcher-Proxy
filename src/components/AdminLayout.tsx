@@ -38,25 +38,25 @@ interface MenuItem {
 
 // ---------- 菜单配置 ----------
 const menuItems: MenuItem[] = [
-  { key: "admin.dashboard", icon: LayoutDashboard, href: "/admin", group: "overview" },
-  { key: "admin.platforms", icon: Server, href: "/admin/platforms", group: "manage" },
-  { key: "admin.keys", icon: Key, href: "/admin/keys", group: "manage" },
-  { key: "admin.auto_model", icon: Zap, href: "/admin/auto-model", group: "manage" },
-  { key: "admin.request_templates", icon: FileText, href: "/admin/request-templates", group: "manage" },
-  { key: "admin.usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
-  { key: "admin.logs", icon: FileText, href: "/admin/logs", group: "monitor" },
-  { key: "admin.audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
-  { key: "admin.events", icon: Bell, href: "/admin/events", group: "monitor" },
-  { key: "admin.data_manager", icon: Download, href: "/admin/data-manager", group: "system" },
-  { key: "admin.system_keys", icon: Key, href: "/admin/system-keys", group: "system" },
-  { key: "admin.system", icon: Settings, href: "/admin/system", group: "system" },
+  { key: "dashboard", icon: LayoutDashboard, href: "/admin", group: "overview" },
+  { key: "platforms", icon: Server, href: "/admin/platforms", group: "manage" },
+  { key: "keys", icon: Key, href: "/admin/keys", group: "manage" },
+  { key: "autoModel", icon: Zap, href: "/admin/auto-model", group: "manage" },
+  { key: "requestTemplates", icon: FileText, href: "/admin/request-templates", group: "manage" },
+  { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
+  { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor" },
+  { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
+  { key: "events", icon: Bell, href: "/admin/events", group: "monitor" },
+  { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system" },
+  { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system" },
+  { key: "system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
 const groupI18nKeys: Record<string, string> = {
-  overview: "admin.group_overview",
-  manage: "admin.group_manage",
-  monitor: "admin.group_monitor",
-  system: "admin.group_system",
+  overview: "groupOverview",
+  manage: "groupManage",
+  monitor: "groupMonitor",
+  system: "groupSystem",
 };
 
 // ---------- SidebarItem ----------
@@ -174,7 +174,7 @@ function SidebarUserMenu({
         className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all disabled:opacity-50"
       >
         <LogOut className="w-5 h-5" />
-        <span className="text-sm">{t("admin.logout")}</span>
+        <span className="text-sm">{t("logout")}</span>
       </button>
     </div>
   );
@@ -191,22 +191,22 @@ function TopHeader({
   onToggleSidebar: () => void;
 }) {
   const breadcrumbMap: Record<string, string> = {
-    "/admin": "admin.dashboard",
-    "/admin/platforms": "admin.platforms",
-    "/admin/platforms/[id]": "admin.platforms",
-    "/admin/keys": "admin.keys",
-    "/admin/auto-model": "admin.auto_model",
-    "/admin/request-templates": "admin.request_templates",
-    "/admin/usage": "admin.usage",
-    "/admin/logs": "admin.logs",
-    "/admin/audit": "admin.audit",
-    "/admin/system": "admin.system",
-    "/admin/events": "admin.events",
-    "/admin/data-manager": "admin.data_manager",
-    "/admin/system-keys": "admin.system_keys",
+    "/admin": "dashboard",
+    "/admin/platforms": "platforms",
+    "/admin/platforms/[id]": "platforms",
+    "/admin/keys": "keys",
+    "/admin/auto-model": "autoModel",
+    "/admin/request-templates": "requestTemplates",
+    "/admin/usage": "usage",
+    "/admin/logs": "logs",
+    "/admin/audit": "audit",
+    "/admin/system": "system",
+    "/admin/events": "events",
+    "/admin/data-manager": "dataManager",
+    "/admin/system-keys": "systemKeys",
   };
 
-  const breadcrumbKey = breadcrumbMap[pathname] ?? "admin.dashboard";
+  const breadcrumbKey = breadcrumbMap[pathname] ?? "dashboard";
   const breadcrumb = t(breadcrumbKey);
 
   return (
@@ -221,7 +221,7 @@ function TopHeader({
           </button>
           <nav className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
             <span className="hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
-              {t("admin.system_config")}
+              {t("systemConfig")}
             </span>
             <span className="text-zinc-300 dark:text-zinc-600">›</span>
             <span className="font-medium text-zinc-900 dark:text-zinc-100">{breadcrumb}</span>
@@ -238,7 +238,7 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("admin");
   const router = useRouter();
   const pathname = router.pathname;
   const [username, setUsername] = useState("");
@@ -311,10 +311,10 @@ export default function AdminLayout({
     try {
       const res = await fetch("/api/admin/auth", { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      message.success(t("auth.logout_success") || "退出成功");
+      message.success(t("auth:logoutSuccess"));
       router.push("/");
     } catch {
-      message.error(t("auth.logout_failed") || "退出失败，请重试");
+      message.error(t("auth:logoutFailed"));
     } finally {
       setLogoutLoading(false);
     }

@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/Skeleton";
+import { useTranslation } from "react-i18next";
 
 /**
  * 路由切换骨架屏 — 管理后台页面切换时替代白屏/居中 Spinner
@@ -7,11 +8,12 @@ import { Skeleton } from "@/components/ui/Skeleton";
  * 淡入淡出过渡，避免页面切换闪烁。
  */
 export default function RouteLoading() {
+  const { t } = useTranslation("common");
   return (
     <div
       className="fixed inset-0 z-[200] bg-zinc-50 dark:bg-zinc-950 overflow-hidden"
       role="status"
-      aria-label="页面加载中"
+      aria-label={t("loading")}
     >
       {/* 顶栏骨架 */}
       <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6">

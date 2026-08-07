@@ -51,7 +51,7 @@ export function PlatformConfigForm({
   onToggle: (enabled: boolean) => void;
   toggling: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("platform");
 
   const formGroup =
     "rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 sm:p-6";
@@ -62,10 +62,10 @@ export function PlatformConfigForm({
   const statusLabel = !editing
     ? ""
     : editing.status === "healthy"
-    ? t("platform.status_healthy")
+    ? t("statusHealthy")
     : editing.status === "degraded"
-    ? t("platform.status_degraded")
-    : t("platform.status_down");
+    ? t("statusDegraded")
+    : t("statusDown");
 
   return (
     <Form form={form} layout="vertical" onFinish={onSubmit} className="space-y-5">
@@ -81,7 +81,7 @@ export function PlatformConfigForm({
                 </h2>
                 <StatusDot status={editing.status} enabled={editing.enabled} />
                 <span className="text-[11px] text-zinc-400">
-                  {editing.enabled ? statusLabel : t("common.disable")}
+                  {editing.enabled ? statusLabel : t("common:disable")}
                 </span>
               </div>
             </div>
@@ -90,29 +90,29 @@ export function PlatformConfigForm({
             </div>
           </div>
         )}
-        <h3 className={groupTitle}>{t("platform.group_basic")}</h3>
+        <h3 className={groupTitle}>{t("groupBasic")}</h3>
         <Form.Item
           name="name"
-          label={t("platform.name")}
+          label={t("name")}
           rules={[{ required: true }]}
-          extra={<span className={itemDesc}>平台显示名称，用于列表与详情页展示</span>}
+          extra={<span className={itemDesc}>{t("nameDesc")}</span>}
           className="!mb-6"
         >
           <Input />
         </Form.Item>
         <Form.Item
           name="baseUrl"
-          label={t("platform.base_url")}
+          label={t("baseUrl")}
           rules={[{ required: true }]}
-          extra={<span className={itemDesc}>OpenAI 兼容上游接口地址，所有请求将转发到该地址</span>}
+          extra={<span className={itemDesc}>{t("baseUrlDesc")}</span>}
           className="!mb-6"
         >
           <Input placeholder="https://api.openai.com/v1" />
         </Form.Item>
         <Form.Item
           name="type"
-          label={t("platform.type")}
-          extra={<span className={itemDesc}>用于图标配色与兼容性适配</span>}
+          label={t("type")}
+          extra={<span className={itemDesc}>{t("typeDesc")}</span>}
           className="!mb-0"
         >
           <Select
@@ -127,7 +127,7 @@ export function PlatformConfigForm({
 
       {/* 组 2：API 密钥 */}
       <div className={formGroup}>
-        <h3 className={groupTitle}>{t("platform.api_key")}</h3>
+        <h3 className={groupTitle}>{t("apiKey")}</h3>
         <div className="space-y-2 mb-3">
           {namedKeys.map((namedKey, index) => (
             <div
@@ -137,14 +137,14 @@ export function PlatformConfigForm({
               <Input
                 value={namedKey.name}
                 onChange={(e) => onUpdateKeyName(index, e.target.value)}
-                placeholder={t("platform.key_name")}
+                placeholder={t("keyName")}
                 className="!w-20 sm:!w-24 !min-w-0 shrink-0"
                 size="small"
               />
               <Input.Password
                 value={namedKey.key}
                 onChange={(e) => onUpdateKeyValue(index, e.target.value)}
-                placeholder={editing ? "清空将移除该密钥" : "输入 API 密钥"}
+                placeholder={editing ? t("keyPlaceholderEdit") : t("keyPlaceholderAdd")}
                 className="!flex-1 !min-w-0 font-mono text-xs"
                 size="small"
               />
@@ -152,7 +152,7 @@ export function PlatformConfigForm({
                 type="button"
                 onClick={() => onToggleWhitelist(index)}
                 disabled={!namedKey.key}
-                title={namedKey.whitelisted ? t("platform.whitelist_remove_tip") : t("platform.whitelist_add_tip")}
+                title={namedKey.whitelisted ? t("whitelistRemoveTip") : t("whitelistAddTip")}
                 className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                   namedKey.whitelisted
                     ? "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/30"
@@ -161,7 +161,7 @@ export function PlatformConfigForm({
               >
                 {namedKey.whitelisted ? <ShieldCheck size={14} className="inline" /> : <ShieldOff size={14} className="inline" />}
                 <span className="hidden sm:inline ml-0.5">
-                  {namedKey.whitelisted ? t("platform.whitelist_remove") : t("platform.whitelist_add")}
+                  {namedKey.whitelisted ? t("whitelistRemove") : t("whitelistAdd")}
                 </span>
               </button>
               <button
@@ -169,7 +169,7 @@ export function PlatformConfigForm({
                 onClick={() => onCopyKey(namedKey.key)}
                 disabled={!namedKey.key}
                 className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                title={t("platform.copy_key_tip")}
+                title={t("copyKeyTip")}
               >
                 <Copy size={13} />
               </button>
@@ -178,7 +178,7 @@ export function PlatformConfigForm({
                 onClick={() => onRemoveKey(index)}
                 disabled={namedKeys.length <= 1}
                 className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                title={t("platform.remove_key_tip")}
+                title={t("removeKeyTip")}
               >
                 <Trash2 size={13} />
               </button>
@@ -187,57 +187,57 @@ export function PlatformConfigForm({
         </div>
         <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3">
           <Button variant="default" onClick={onAddKey} icon={<Plus size={14} />} block size="sm">
-            {t("platform.add_key")}
+            {t("addKey")}
           </Button>
         </div>
       </div>
 
       {/* 组 3：参数设置 */}
       <div className={formGroup}>
-        <h3 className={groupTitle}>{t("platform.group_params")}</h3>
+        <h3 className={groupTitle}>{t("groupParams")}</h3>
         <div className="grid grid-cols-2 gap-x-4">
           <Form.Item
             name="priority"
-            label={t("platform.priority")}
-            extra={<span className={itemDesc}>数值越大优先级越高</span>}
+            label={t("priority")}
+            extra={<span className={itemDesc}>{t("priorityDesc")}</span>}
             className="!mb-6"
           >
             <InputNumber min={0} className="!w-full" />
           </Form.Item>
           <Form.Item
             name="weight"
-            label={t("platform.weight")}
-            extra={<span className={itemDesc}>负载均衡权重，越大分配流量越多</span>}
+            label={t("weight")}
+            extra={<span className={itemDesc}>{t("weightDesc")}</span>}
             className="!mb-6"
           >
             <InputNumber min={1} className="!w-full" />
           </Form.Item>
           <Form.Item
             name="rpmLimit"
-            label={t("platform.rpm_limit")}
-            extra={<span className={itemDesc}>每分钟最大请求数，留空不限</span>}
+            label={t("rpmLimit")}
+            extra={<span className={itemDesc}>{t("rpmDesc")}</span>}
             className="!mb-6"
           >
-            <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
+            <InputNumber min={0} placeholder={t("common:unlimited")} className="!w-full" />
           </Form.Item>
           <Form.Item
             name="tpmLimit"
-            label={t("platform.tpm_limit")}
-            extra={<span className={itemDesc}>每分钟最大 Token 数，留空不限</span>}
+            label={t("tpmLimit")}
+            extra={<span className={itemDesc}>{t("tpmDesc")}</span>}
             className="!mb-6"
           >
-            <InputNumber min={0} placeholder={t("common.unlimited")} className="!w-full" />
+            <InputNumber min={0} placeholder={t("common:unlimited")} className="!w-full" />
           </Form.Item>
         </div>
         <Form.Item
           name="forwardHeaders"
-          label={t("platform.forward_headers")}
-          extra={<span className={itemDesc}>每行一个请求头名称，透传到上游请求</span>}
+          label={t("forwardHeaders")}
+          extra={<span className={itemDesc}>{t("forwardHeadersDesc")}</span>}
           className="!mb-0"
         >
           <Input.TextArea
             rows={2}
-            placeholder={"每行一个 Header 名称\nX-Thinking-Mode\nX-Reasoning-Effort"}
+            placeholder={t("forwardHeadersPlaceholder")}
           />
         </Form.Item>
       </div>
@@ -246,11 +246,11 @@ export function PlatformConfigForm({
       <div className="flex items-center justify-between pt-1">
         {editing ? (
           <Popconfirm
-            title={t("platform.delete_platform")}
-            description={t("platform.delete_platform_desc")}
+            title={t("deletePlatform")}
+            description={t("deletePlatformDesc")}
             onConfirm={onDelete}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
+            okText={t("common:confirm")}
+            cancelText={t("common:cancel")}
             okButtonProps={{ danger: true }}
           >
             <button
@@ -258,7 +258,7 @@ export function PlatformConfigForm({
               disabled={deleting}
               className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50 transition-colors"
             >
-              {deleting ? t("common.loading") : t("platform.delete_platform")}
+              {deleting ? t("common:loading") : t("deletePlatform")}
             </button>
           </Popconfirm>
         ) : (
@@ -270,7 +270,7 @@ export function PlatformConfigForm({
           disabled={submitting}
           autoLoading={false}
         >
-          {submitting ? t("common.loading") : editing ? t("common.save") : t("common.create")}
+          {submitting ? t("common:loading") : editing ? t("common:save") : t("common:create")}
         </Button>
       </div>
     </Form>

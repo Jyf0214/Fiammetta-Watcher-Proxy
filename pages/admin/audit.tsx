@@ -23,24 +23,24 @@ interface AuditEntry {
   username: string | null;
 }
 
-// ==================== 操作名称中英双语翻译 ====================
+// ==================== 操作名称 i18n 键映射 ====================
 
-const ACTION_LABELS: Record<string, { zh: string; en: string }> = {
-  login: { zh: "管理员登录", en: "Admin Login" },
-  logout: { zh: "管理员登出", en: "Admin Logout" },
-  create_platform: { zh: "创建平台", en: "Create Platform" },
-  update_platform: { zh: "更新平台", en: "Update Platform" },
-  delete_platform: { zh: "删除平台", en: "Delete Platform" },
-  create_api_key: { zh: "创建 API Key", en: "Create API Key" },
-  delete_api_key: { zh: "删除 API Key", en: "Delete API Key" },
-  create_model_map: { zh: "创建模型映射", en: "Create Model Map" },
-  update_model_map: { zh: "更新模型映射", en: "Update Model Map" },
-  delete_model_map: { zh: "删除模型映射", en: "Delete Model Map" },
-  enable_model_map: { zh: "启用模型映射", en: "Enable Model Map" },
-  disable_model_map: { zh: "禁用模型映射", en: "Disable Model Map" },
-  batch_enable_model_maps: { zh: "批量启用模型映射", en: "Batch Enable Model Maps" },
-  batch_disable_model_maps: { zh: "批量禁用模型映射", en: "Batch Disable Model Maps" },
-  batch_delete_model_maps: { zh: "批量删除模型映射", en: "Batch Delete Model Maps" },
+const ACTION_LABELS: Record<string, string> = {
+  login: "actionLogin",
+  logout: "actionLogout",
+  create_platform: "actionCreatePlatform",
+  update_platform: "actionUpdatePlatform",
+  delete_platform: "actionDeletePlatform",
+  create_api_key: "actionCreateApiKey",
+  delete_api_key: "actionDeleteApiKey",
+  create_model_map: "actionCreateModelMap",
+  update_model_map: "actionUpdateModelMap",
+  delete_model_map: "actionDeleteModelMap",
+  enable_model_map: "actionEnableModelMap",
+  disable_model_map: "actionDisableModelMap",
+  batch_enable_model_maps: "actionBatchEnableModelMaps",
+  batch_disable_model_maps: "actionBatchDisableModelMaps",
+  batch_delete_model_maps: "actionBatchDeleteModelMaps",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -66,7 +66,7 @@ const ACTION_COLOR: Record<string, string> = {
 // ==================== 页面组件 ====================
 
 function AuditContent() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("audit");
   const router = useRouter();
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +82,7 @@ function AuditContent() {
       try {
         const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal: controller.signal });
         if (res.status === 401) {
-          message.warning(t("auth.unauthorized") || "登录已过期，请重新登录");
+          message.warning(t("auth:unauthorized"));
           router.push("/admin/login");
           return;
         }
@@ -93,7 +93,7 @@ function AuditContent() {
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -109,17 +109,15 @@ function AuditContent() {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  /** 获取操作的中英双语标签 */
+  /** 获取操作名称的 i18n 标签 */
   const getActionLabel = (action: string): string => {
-    const label = ACTION_LABELS[action];
-    if (!label) return action;
-    const isZh = t("audit.admin") === "管理员";
-    return isZh ? label.zh : label.en;
+    const key = ACTION_LABELS[action];
+    return t(key ?? action);
   };
 
   const columns: TableColumnsType<AuditEntry> = [
     {
-      title: t("common.action"),
+      title: t("common:action"),
       dataIndex: "action",
       key: "action",
       width: 180,
@@ -130,14 +128,14 @@ function AuditContent() {
       ),
     },
     {
-      title: t("audit.admin"),
+      title: t("admin"),
       dataIndex: "username",
       key: "username",
       width: 120,
       render: (v: string | null) => v || "-",
     },
     {
-      title: t("common.detail"),
+      title: t("common:detail"),
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
@@ -151,7 +149,7 @@ function AuditContent() {
       responsive: ["lg"],
     },
     {
-      title: t("common.created_at"),
+      title: t("common:createdAt"),
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
@@ -167,11 +165,11 @@ function AuditContent() {
     <PageContainer>
       <PageHeader
         icon={<History size={20} className="text-zinc-500 dark:text-zinc-400" />}
-        title={t("admin.audit")}
-        description={t("admin.audit_desc")}
+        title={t("admin:audit")}
+        description={t("admin:auditDesc")}
         extra={
           <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={loading}>
-            {t("common.refresh") || "刷新"}
+            {t("common:refresh")}
           </Button>
         }
       />
@@ -186,7 +184,7 @@ function AuditContent() {
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (count) => t("common.pagination_total", { count }),
+          showTotal: (count) => t("common:pagination", { count }),
         }}
       />
     </PageContainer>

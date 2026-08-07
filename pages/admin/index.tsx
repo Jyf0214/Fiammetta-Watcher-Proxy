@@ -68,7 +68,7 @@ const AUTO_REFRESH_INTERVAL = 30_000; // 30 秒自动刷新
 // ==================== 页面组件 ====================
 
 function DashboardContent() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("dashboard");
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,7 +91,7 @@ function DashboardContent() {
         }
       } catch {
         if (isManual) {
-          message.error(t("common.error"));
+          message.error(t("common:error"));
         }
       } finally {
         setLoading(false);
@@ -197,7 +197,7 @@ function DashboardContent() {
   const statCards = [
     {
       key: "platforms",
-      title: t("dashboard.active_platforms"),
+      title: t("activePlatforms"),
       value: stats?.activePlatforms ?? 0,
       icon: <Cloud />,
       color: "bg-blue-50",
@@ -205,7 +205,7 @@ function DashboardContent() {
     },
     {
       key: "keys",
-      title: t("dashboard.active_keys"),
+      title: t("activeKeys"),
       value: stats?.activeKeys ?? 0,
       icon: <Key />,
       color: "bg-blue-50",
@@ -213,7 +213,7 @@ function DashboardContent() {
     },
     {
       key: "requests",
-      title: t("dashboard.total_requests"),
+      title: t("totalRequests"),
       value: stats?.totalRequests ?? 0,
       icon: <Globe />,
       color: "bg-blue-50",
@@ -221,7 +221,7 @@ function DashboardContent() {
     },
     {
       key: "tokens",
-      title: t("dashboard.total_tokens"),
+      title: t("totalTokens"),
       value: stats?.totalTokens ?? 0,
       icon: <Database />,
       color: "bg-blue-50",
@@ -270,13 +270,13 @@ function DashboardContent() {
     <PageContainer>
       <PageHeader
         icon={<LayoutDashboard size={20} className="text-zinc-500 dark:text-zinc-400" />}
-        title={t("dashboard.adminConsole")}
+        title={t("title")}
         description={
           <div className="flex flex-col">
-            <span>{t("dashboard.adminConsoleDesc")}</span>
+            <span>{t("desc")}</span>
             {lastRefreshed && (
               <span className="text-xs text-zinc-400 mt-0.5">
-                {t("dashboard.last_refreshed") || "上次刷新"}: {lastRefreshed.toLocaleTimeString()}
+                {t("lastRefresh")}: {lastRefreshed.toLocaleTimeString()}
               </span>
             )}
           </div>
@@ -376,7 +376,7 @@ function DashboardContent() {
       <ProCard
         title={
           <span className="font-semibold text-zinc-900">
-            {t("dashboard.recent_events")}
+            {t("recentEvents")}
           </span>
         }
       >

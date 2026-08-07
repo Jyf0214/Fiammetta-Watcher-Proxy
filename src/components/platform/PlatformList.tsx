@@ -126,7 +126,7 @@ export function PlatformList({
   activeId,
   className,
 }: PlatformListProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("platform");
   const router = useRouter();
   const [items, setItems] = useState<Platform[]>(platforms);
   const [prevPlatforms, setPrevPlatforms] = useState(platforms);
@@ -214,7 +214,7 @@ export function PlatformList({
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-100 dark:border-zinc-800">
         <Input
           prefix={<Search size={14} className="text-zinc-400" />}
-          placeholder={t("platform.search_placeholder")}
+          placeholder={t("searchPlaceholder")}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
@@ -225,8 +225,8 @@ export function PlatformList({
           type="button"
           onClick={goCreate}
           className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 transition-colors"
-          title={t("platform.create_platform")}
-          aria-label={t("platform.create_platform")}
+          title={t("createPlatform")}
+          aria-label={t("createPlatform")}
         >
           <Plus size={18} strokeWidth={1.5} />
         </button>
@@ -240,16 +240,16 @@ export function PlatformList({
       ) : items.length === 0 ? (
         <div className="text-center py-16 text-zinc-400">
           <Cloud size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{t("platform.no_platforms")}</p>
+          <p className="text-sm">{t("noPlatforms")}</p>
           <Button variant="primary" size="sm" className="mt-4" onClick={goCreate} icon={<Plus size={14} />}>
-            {t("platform.create_platform")}
+            {t("createPlatform")}
           </Button>
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-2.5">
           {enabled.length === 0 && disabled.length === 0 ? (
             <div className="text-center py-12 text-zinc-400 text-sm">
-              {t("platform.search_no_result")}
+              {t("searchNoResult")}
             </div>
           ) : (
             <>
@@ -268,11 +268,11 @@ export function PlatformList({
                   <WalletCards size={16} strokeWidth={1.5} />
                 </span>
                 <span className="flex-1 min-w-0 text-sm text-zinc-800 dark:text-zinc-200 truncate">
-                  {t("platform.group_all")}
+                  {t("groupAll")}
                 </span>
               </button>
-              {renderGroup("enabled", t("platform.group_enabled"), enabled)}
-              {renderGroup("disabled", t("platform.group_disabled"), disabled)}
+              {renderGroup("enabled", t("groupEnabled"), enabled)}
+              {renderGroup("disabled", t("groupDisabled"), disabled)}
             </>
           )}
         </div>

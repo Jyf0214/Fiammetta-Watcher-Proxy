@@ -35,7 +35,7 @@ const BRAND_PATTERNS: { pattern: RegExp; brand: BrandDef }[] = [
   // Perplexity
   { pattern: /^perplexity/i, brand: { label: "P", gradient: "bg-gradient-to-br from-teal-400 to-emerald-600" } },
   // 豆包
-  { pattern: /^(doubao|volc)/i, brand: { label: "豆", gradient: "bg-gradient-to-br from-red-400 to-rose-600" } },
+  { pattern: /^(doubao|volc)/i, brand: { label: "DB", gradient: "bg-gradient-to-br from-red-400 to-rose-600" } },
   // MiniMax
   { pattern: /^minimax/i, brand: { label: "M", gradient: "bg-gradient-to-br from-fuchsia-500 to-purple-700" } },
   // Cohere

@@ -54,7 +54,7 @@ export function ModelsPanel({
   togglingAll: boolean;
   togglingModelId: string | null;
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("platform");
   const [typeFilter, setTypeFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
 
@@ -82,19 +82,19 @@ export function ModelsPanel({
 
   // 类型 Tabs：带图标 + 计数，仅显示有模型的数量（除 all 外）
   const typeTabs = [
-    { key: "all", label: t("platform.group_all"), icon: Grid3x3 },
-    { key: "chat", label: MODEL_TYPE_CONFIG.chat.label, icon: MessageSquare },
-    { key: "image", label: MODEL_TYPE_CONFIG.image.label, icon: ImageIcon },
-    { key: "embedding", label: MODEL_TYPE_CONFIG.embedding.label, icon: Layers },
-    { key: "audio", label: MODEL_TYPE_CONFIG.audio.label, icon: Mic },
-    { key: "video", label: MODEL_TYPE_CONFIG.video.label, icon: Video },
+    { key: "all", label: t("groupAll"), icon: Grid3x3 },
+    { key: "chat", label: t(MODEL_TYPE_CONFIG.chat.labelKey), icon: MessageSquare },
+    { key: "image", label: t(MODEL_TYPE_CONFIG.image.labelKey), icon: ImageIcon },
+    { key: "embedding", label: t(MODEL_TYPE_CONFIG.embedding.labelKey), icon: Layers },
+    { key: "audio", label: t(MODEL_TYPE_CONFIG.audio.labelKey), icon: Mic },
+    { key: "video", label: t(MODEL_TYPE_CONFIG.video.labelKey), icon: Video },
   ].filter((tab) => tab.key === "all" || (typeCounts[tab.key] && typeCounts[tab.key] > 0));
 
   const copyModelId = (modelId: string) => {
     navigator.clipboard
       .writeText(modelId)
-      .then(() => message.success("已复制模型 ID"))
-      .catch(() => message.error("复制失败"));
+      .then(() => message.success(t("modelIdCopied")))
+      .catch(() => message.error(t("common:copyFailed")));
   };
 
   /** 单个模型行 — 品牌色图标 + 名称（点击复制）+ hover 编辑/删除 + 类型标签 + 启停开关（对照 ModelItem） */
@@ -113,7 +113,7 @@ export function ModelsPanel({
             <button
               type="button"
               onClick={() => copyModelId(model.modelId)}
-              title="点击复制模型 ID"
+              title={t("copyModelIdTip")}
               className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
             >
               {model.modelId}
@@ -122,16 +122,16 @@ export function ModelsPanel({
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 type="button"
-                title="模型配置"
+                title={t("modelConfig")}
                 className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
               >
                 <Pencil size={13} />
               </button>
               <Popconfirm
-                title="确认删除此模型？"
+                title={t("deleteModelConfirm")}
                 onConfirm={() => onDeleteModel(model.modelId)}
-                okText="确认"
-                cancelText="取消"
+                okText={t("common:confirm")}
+                cancelText={t("common:cancel")}
               >
                 <button
                   type="button"
@@ -143,7 +143,7 @@ export function ModelsPanel({
             </div>
           </div>
           <div className="flex items-center gap-1.5 mt-1 text-[11px] text-zinc-400">
-            <span>{model.source === "manual" ? "手动" : "自动"}</span>
+            <span>{model.source === "manual" ? t("manual") : t("auto")}</span>
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-2">
@@ -155,7 +155,7 @@ export function ModelsPanel({
             )}
           >
             <TypeIcon size={10} />
-            {typeCfg.label}
+            {t(typeCfg.labelKey)}
           </span>
           <Switch
             checked={model.enabled}
@@ -203,12 +203,12 @@ export function ModelsPanel({
       {/* 标题区：模型列表 + 搜索/刷新（对照 ModelTitle） */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-          {t("platform.models")}
+          {t("models")}
         </h3>
         <div className="flex items-center gap-2">
           <Input
             prefix={<Search size={14} className="text-zinc-400" />}
-            placeholder="搜索模型…"
+            placeholder={t("searchPlaceholder")}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             allowClear
@@ -222,7 +222,7 @@ export function ModelsPanel({
             onClick={onRefreshModels}
             loading={refreshing}
           >
-            刷新
+            {t("refreshModels")}
           </Button>
         </div>
       </div>
@@ -230,7 +230,7 @@ export function ModelsPanel({
       {/* 添加模型 */}
       <div className="flex gap-2 mb-3">
         <Input
-          placeholder="输入模型 ID 添加"
+          placeholder={t("modelPlaceholder")}
           value={newModelId}
           onChange={(e) => onNewModelIdChange(e.target.value)}
           onPressEnter={onAddModel}
@@ -244,7 +244,7 @@ export function ModelsPanel({
           disabled={!newModelId.trim()}
           icon={<Plus size={13} />}
         >
-          添加
+          {t("addModel")}
         </Button>
       </div>
 
@@ -277,23 +277,23 @@ export function ModelsPanel({
       {/* 模型列表 */}
       {loading ? (
         <div className="flex items-center justify-center py-12 text-zinc-400">
-          <RefreshCw size={20} className="animate-spin mr-2" />加载中…
+          <RefreshCw size={20} className="animate-spin mr-2" />{t("common:loading")}…
         </div>
       ) : filteredModels.length === 0 ? (
         <div className="text-center py-12 text-zinc-400">
           <Cpu size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{searchText ? "无匹配模型" : "暂无模型"}</p>
+          <p className="text-sm">{searchText ? t("searchNoResult") : t("noModels")}</p>
         </div>
       ) : (
         <>
           {/* 已启用分组 */}
-          {renderGroupHeader("已启用", enabledModels.length, {
-            title: "全部禁用",
+          {renderGroupHeader(t("groupEnabled"), enabledModels.length, {
+            title: t("disableAll"),
             onClick: () => onToggleAll(false),
             loading: togglingAll,
           })}
           {enabledModels.length === 0 ? (
-            <p className="text-center py-6 text-xs text-zinc-400">暂无已启用模型</p>
+            <p className="text-center py-6 text-xs text-zinc-400">{t("noEnabledModels")}</p>
           ) : (
             <div className="space-y-0.5">
               {enabledModels.map(renderModelRow)}
@@ -301,13 +301,13 @@ export function ModelsPanel({
           )}
 
           {/* 已禁用分组 */}
-          {renderGroupHeader("已禁用", disabledModels.length, {
-            title: "全部启用",
+          {renderGroupHeader(t("groupDisabled"), disabledModels.length, {
+            title: t("enableAll"),
             onClick: () => onToggleAll(true),
             loading: togglingAll,
           })}
           {disabledModels.length === 0 ? (
-            <p className="text-center py-6 text-xs text-zinc-400">暂无已禁用模型</p>
+            <p className="text-center py-6 text-xs text-zinc-400">{t("noDisabledModels")}</p>
           ) : (
             <div className="space-y-0.5">
               {disabledModels.map(renderModelRow)}

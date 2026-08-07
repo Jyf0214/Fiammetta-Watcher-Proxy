@@ -52,7 +52,7 @@ function calcNiceTicks(max: number, min: number): number {
 }
 
 export default function UsageChart({ data, granularity = "daily" }: UsageChartProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("usage");
 
   const chartData = useMemo(
     () =>
@@ -126,7 +126,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             yAxisId="left"
             type="monotone"
             dataKey="requests"
-            name={t("usage.requests")}
+            name={t("requests")}
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
@@ -136,7 +136,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             yAxisId="right"
             type="monotone"
             dataKey="tokens"
-            name={t("usage.total_tokens")}
+            name={t("totalTokens")}
             stroke="#10b981"
             strokeWidth={2}
             dot={false}

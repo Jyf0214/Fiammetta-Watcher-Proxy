@@ -39,7 +39,7 @@ function ApiKeyCard({
   onEdit: (item: ApiKeyItem) => void;
   onDelete: (id: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("apikey");
   const statusColor = apiKey.status === "active" ? "green" : apiKey.status === "disabled" ? "red" : "orange";
   const isActive = apiKey.status === "active";
 
@@ -54,7 +54,7 @@ function ApiKeyCard({
           <Tag color={statusColor} className="!text-[10px] !px-1.5 !py-0 !m-0 shrink-0">{apiKey.status}</Tag>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-zinc-400">{isActive ? t("common.enable") : t("common.disable")}</span>
+          <span className="text-xs text-zinc-400">{isActive ? t("common:enable") : t("common:disable")}</span>
           <Switch checked={isActive} loading={togglingId === apiKey.id} onChange={() => onToggle(apiKey)} />
         </div>
       </div>
@@ -68,7 +68,7 @@ function ApiKeyCard({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-zinc-400 w-14 shrink-0">创建时间</span>
+          <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("common:createdAt")}</span>
           <span className="text-[11px] text-zinc-600 dark:text-zinc-300">{createdDate}</span>
         </div>
       </div>
@@ -79,12 +79,12 @@ function ApiKeyCard({
           onClick={() => onEdit(apiKey)}
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
         >
-          <Pencil size={13} /> 编辑
+          <Pencil size={13} /> {t("common:edit")}
         </button>
         <div className="w-px bg-zinc-100 dark:border-zinc-800" />
-        <Popconfirm title={t("common.confirm_delete")} onConfirm={() => onDelete(apiKey.id)} okText={t("common.confirm")} cancelText={t("common.cancel")}>
+        <Popconfirm title={t("common:confirmDelete")} onConfirm={() => onDelete(apiKey.id)} okText={t("common:confirm")} cancelText={t("common:cancel")}>
           <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-            <Trash2 size={13} /> 删除
+            <Trash2 size={13} /> {t("common:delete")}
           </button>
         </Popconfirm>
       </div>
@@ -93,7 +93,7 @@ function ApiKeyCard({
 }
 
 export default function KeysPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("apikey");
   /** 构建期内联的部署平台（cf / edgeone / vercel / 空=自托管或本地） */
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
@@ -132,13 +132,13 @@ export default function KeysPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success(newStatus === "active" ? "已启用" : "已禁用");
+        message.success(newStatus === "active" ? t("statusActive") : t("statusDisabled"));
         handleRefresh();
       } else {
-        message.error(data.error?.message || "操作失败");
+        message.error(data.error?.message || t("common:operationFailed"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     } finally {
       setTogglingId(null);
     }
@@ -173,7 +173,7 @@ export default function KeysPage() {
         });
         const data: Record<string, any> = await res.json();
         if (data.success) {
-          message.success("更新成功");
+          message.success(t("updateSuccess"));
           setModalOpen(false);
           handleRefresh();
         } else {
@@ -198,7 +198,7 @@ export default function KeysPage() {
         }
       }
     } catch (err) {
-      if (!("errorFields" in (err as Record<string, unknown>))) message.error(t("common.error"));
+      if (!("errorFields" in (err as Record<string, unknown>))) message.error(t("common:error"));
     } finally {
       setSubmitting(false);
     }
@@ -209,36 +209,36 @@ export default function KeysPage() {
       const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success(t("api_key.delete_success") || "删除成功");
+        message.success(t("deleteSuccess"));
         handleRefresh();
       } else {
-        message.error(data.error?.message || t("common.error"));
+        message.error(data.error?.message || t("common:error"));
       }
     } catch {
-      message.error(t("common.error"));
+      message.error(t("common:error"));
     }
   };
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      message.success(t("common.copied"));
+      message.success(t("common:copied"));
     } catch {
-      message.error(t("common.copy_failed") || "复制失败");
+      message.error(t("common:copyFailed"));
     }
   };
 
   // 桌面端表格列（保持表格模式）
   const columns = [
     {
-      title: t("api_key.name"),
+      title: t("name"),
       dataIndex: "name",
       key: "name",
       width: 140,
       ellipsis: true,
     },
     {
-      title: t("api_key.key"),
+      title: t("key"),
       dataIndex: "key",
       key: "key",
       ellipsis: true,
@@ -247,7 +247,7 @@ export default function KeysPage() {
       ),
     },
     {
-      title: t("api_key.used_tokens"),
+      title: t("usedTokens"),
       dataIndex: "usedTokens",
       key: "usedTokens",
       width: 120,
@@ -256,7 +256,7 @@ export default function KeysPage() {
       responsive: ["md" as const],
     },
     {
-      title: t("common.status"),
+      title: t("common:status"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -267,7 +267,7 @@ export default function KeysPage() {
       },
     },
     {
-      title: t("common.created_at"),
+      title: t("common:createdAt"),
       dataIndex: "createdAt",
       key: "createdAt",
       width: 180,
@@ -285,11 +285,11 @@ export default function KeysPage() {
       <PageContainer>
         <PageHeader
           icon={<Key size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title={t("admin.keys")}
-          description={t("admin.keys_desc")}
+          title={t("admin:keys")}
+          description={t("admin:keysDesc")}
           extra={
             <Button variant="primary" icon={<Plus size={14} />} onClick={openCreate}>
-              {t("api_key.create_key")}
+              {t("createKey")}
             </Button>
           }
         />
@@ -299,8 +299,8 @@ export default function KeysPage() {
           showIcon
           message={
             deployPlatform === "cf"
-              ? "使用此密钥时，Base URL 请填写系统配套的 Cloudflare Workers 地址（如 https://your-worker.workers.dev），而非上游平台地址。"
-              : "使用此密钥时，Base URL 请填写本系统部署地址（如 https://your-domain.com），而非上游平台地址。"
+              ? t("baseUrlCfHint")
+              : t("baseUrlSelfHint")
           }
           className="mb-3"
         />
@@ -308,7 +308,7 @@ export default function KeysPage() {
         {/* 移动端：卡片列表 */}
         <div className="sm:hidden space-y-3 mb-6">
           {keys.length === 0 && !loading ? (
-            <div className="text-center py-12 text-sm text-zinc-400">暂无 API Key</div>
+            <div className="text-center py-12 text-sm text-zinc-400">{t("noApiKey")}</div>
           ) : (
             keys.map((apiKey) => (
               <ApiKeyCard
@@ -333,7 +333,7 @@ export default function KeysPage() {
               loading={loading}
               pagination={{
                 pageSize: 20,
-                showTotal: (total) => t("common.pagination_total", { count: total }),
+                showTotal: (total) => t("common:pagination", { count: total }),
               }}
               scroll={{ x: 700 }}
             />
@@ -342,7 +342,7 @@ export default function KeysPage() {
 
         {/* 创建/编辑弹窗 */}
         <Modal
-          title={editItem ? "编辑 API Key" : t("api_key.create_key")}
+          title={editItem ? t("editKey") : t("createKey")}
           open={modalOpen}
           onCancel={() => {
             setModalOpen(false);
@@ -356,27 +356,27 @@ export default function KeysPage() {
           style={{ maxWidth: "90vw" }}
         >
           <Form form={form} layout="vertical">
-            <Form.Item name="name" label={t("api_key.name")} rules={[{ required: true }]}>
+            <Form.Item name="name" label={t("name")} rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Form.Item name="tokenLimit" label={t("api_key.token_limit")}>
-              <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <Form.Item name="tokenLimit" label={t("tokenLimit")}>
+              <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />
             </Form.Item>
-            <Form.Item name="callLimit" label={t("api_key.call_limit")}>
-              <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <Form.Item name="callLimit" label={t("callLimit")}>
+              <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />
             </Form.Item>
-            <Form.Item name="rpmLimit" label={t("api_key.rpm_limit")}>
-              <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <Form.Item name="rpmLimit" label={t("rpmLimit")}>
+              <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />
             </Form.Item>
-            <Form.Item name="tpmLimit" label={t("api_key.tpm_limit")}>
-              <InputNumber min={0} className="w-full" placeholder={t("common.unlimited")} />
+            <Form.Item name="tpmLimit" label={t("tpmLimit")}>
+              <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />
             </Form.Item>
-            <Form.Item name="resetPeriod" label={t("api_key.reset_period")} initialValue="monthly">
+            <Form.Item name="resetPeriod" label={t("resetPeriod")} initialValue="monthly">
               <Select
                 options={[
-                  { value: "monthly", label: t("api_key.reset_monthly") },
-                  { value: "daily", label: t("api_key.reset_daily") },
-                  { value: "never", label: t("api_key.reset_never") },
+                  { value: "monthly", label: t("resetMonthly") },
+                  { value: "daily", label: t("resetDaily") },
+                  { value: "never", label: t("resetNever") },
                 ]}
               />
             </Form.Item>
@@ -385,7 +385,7 @@ export default function KeysPage() {
 
         {/* 新 Key 展示弹窗 */}
         <Modal
-          title={t("api_key.created_title")}
+          title={t("createdTitle")}
           open={newKeyVisible}
           onCancel={() => setNewKeyVisible(false)}
           centered
@@ -393,11 +393,11 @@ export default function KeysPage() {
           style={{ maxWidth: "90vw" }}
           footer={[
             <Button key="close" variant="default" onClick={() => setNewKeyVisible(false)} className="w-full sm:w-auto">
-              {t("common.close")}
+              {t("common:close")}
             </Button>,
           ]}
         >
-          <p className="text-zinc-400 dark:text-zinc-300 mb-3">{t("api_key.save_warning")}</p>
+          <p className="text-zinc-400 dark:text-zinc-300 mb-3">{t("saveWarning")}</p>
           <div className="bg-zinc-800 dark:bg-zinc-700 p-3 rounded-lg font-mono text-sm break-all text-zinc-200 dark:text-zinc-100 border border-zinc-700 dark:border-zinc-600">
             {newKeyValue}
           </div>
@@ -405,10 +405,10 @@ export default function KeysPage() {
             variant="default"
             className="mt-3 w-full sm:w-auto"
             icon={<Copy size={14} />}
-            aria-label={t("api_key.copy_key")}
+            aria-label={t("copyKey")}
             onClick={() => copyToClipboard(newKeyValue)}
           >
-            {t("api_key.copy_key")}
+            {t("copyKey")}
           </Button>
         </Modal>
       </PageContainer>

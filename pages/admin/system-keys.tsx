@@ -29,7 +29,7 @@ interface SystemKeyItem {
 }
 
 export default function SystemKeysPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("system");
   const [keys, setKeys] = useState<SystemKeyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -49,7 +49,7 @@ export default function SystemKeysPage() {
         if (data.success && Array.isArray(data.data)) setKeys(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -71,14 +71,14 @@ export default function SystemKeysPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success(data.message || "创建成功");
+        message.success(data.message || t("sysKeyCreateSuccess"));
         setModalOpen(false);
         form.resetFields();
         setNewKeyValue(data.data.key);
         setNewKeyVisible(true);
         handleRefresh();
       } else {
-        message.error(data.error || "创建失败");
+        message.error(data.error || t("sysKeyCreateFailed"));
       }
     } catch {
       /* validation error */
@@ -92,13 +92,13 @@ export default function SystemKeysPage() {
       const res = await fetch(`/api/admin/system-keys/${id}`, { method: "DELETE" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success("已删除");
+        message.success(t("sysKeyDeleteSuccess"));
         handleRefresh();
       } else {
-        message.error(data.error || "删除失败");
+        message.error(data.error || t("sysKeyDeleteFailed"));
       }
     } catch {
-      message.error("删除失败");
+      message.error(t("sysKeyDeleteFailed"));
     }
   };
 
@@ -111,20 +111,20 @@ export default function SystemKeysPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        message.success(enabled ? "已启用" : "已禁用");
+        message.success(enabled ? t("sysKeyToggleEnabled") : t("sysKeyToggleDisabled"));
         handleRefresh();
       } else {
-        message.error(data.error || "操作失败");
+        message.error(data.error || t("sysKeyOperationFailed"));
       }
     } catch {
-      message.error("操作失败");
+      message.error(t("sysKeyOperationFailed"));
     }
   };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(
-      () => message.success("已复制到剪贴板"),
-      () => message.error("复制失败")
+      () => message.success(t("sysKeyCopied")),
+      () => message.error(t("sysKeyCopyFailed"))
     );
   };
 
@@ -134,9 +134,9 @@ export default function SystemKeysPage() {
   };
 
   const columns: TableColumnsType<SystemKeyItem> = [
-    { title: "名称", dataIndex: "name", key: "name", width: 200 },
+    { title: t("common:name"), dataIndex: "name", key: "name", width: 200 },
     {
-      title: "密钥",
+      title: t("apikey:key"),
       dataIndex: "key",
       key: "key",
       width: 220,
@@ -145,7 +145,7 @@ export default function SystemKeysPage() {
       ),
     },
     {
-      title: "状态",
+      title: t("common:status"),
       dataIndex: "enabled",
       key: "enabled",
       width: 100,
@@ -157,14 +157,14 @@ export default function SystemKeysPage() {
         />
       ),
     },
-    { title: "最后使用", dataIndex: "lastUsedAt", key: "lastUsedAt", width: 180, render: (v: number | null) => formatTime(v) },
-    { title: "创建时间", dataIndex: "createdAt", key: "createdAt", width: 180, render: (v: number) => formatTime(v) },
+    { title: t("sysKeyLastUsed"), dataIndex: "lastUsedAt", key: "lastUsedAt", width: 180, render: (v: number | null) => formatTime(v) },
+    { title: t("common:createdAt"), dataIndex: "createdAt", key: "createdAt", width: 180, render: (v: number) => formatTime(v) },
     {
-      title: "操作",
+      title: t("common:actions"),
       key: "actions",
       width: 80,
       render: (_, record) => (
-        <Popconfirm title="确认删除此系统 Key？" onConfirm={() => handleDelete(record.id)} okText="删除" cancelText="取消">
+        <Popconfirm title={t("sysKeyDeleteConfirm")} onConfirm={() => handleDelete(record.id)} okText={t("common:delete")} cancelText={t("common:cancel")}>
           <Button variant="dangerGhost" size="sm">
             <Trash2 size={14} />
           </Button>
@@ -186,11 +186,11 @@ export default function SystemKeysPage() {
       <PageContainer>
         <PageHeader
           icon={<Key size={20} className="text-zinc-500 dark:text-zinc-400" />}
-          title="系统 API Key"
-          description="用于后台 API 认证（Authorization: Bearer），不可用于 v1 代理"
+          title={t("sysKeyTitle")}
+          description={t("sysKeyDesc")}
           extra={
             <Button onClick={() => setModalOpen(true)}>
-              <Plus size={16} className="mr-1" /> 创建系统 Key
+              <Plus size={16} className="mr-1" /> {t("sysKeyCreate")}
             </Button>
           }
         />
@@ -198,7 +198,7 @@ export default function SystemKeysPage() {
         <Alert
           type="warning"
           showIcon
-          message="本页密钥仅用于管理后台 API 认证。调用 v1 代理请前往「API 密钥管理」页面创建。"
+          message={t("sysKeyAlert")}
           className="mb-3"
         />
 
@@ -213,41 +213,41 @@ export default function SystemKeysPage() {
 
         {/* 创建弹窗 */}
         <Modal
-          title="创建系统 API Key"
+          title={t("sysKeyModalTitle")}
           open={modalOpen}
           onOk={handleCreate}
           onCancel={() => { setModalOpen(false); form.resetFields(); }}
           confirmLoading={submitting}
-          okText="创建"
-          cancelText="取消"
+          okText={t("sysKeyCreateBtn")}
+          cancelText={t("common:cancel")}
         >
           <Form form={form} layout="vertical" autoComplete="off">
             <Form.Item
               name="name"
-              label="Key 名称"
-              rules={[{ required: true, message: "请输入名称" }, { max: 100, message: "不超过 100 个字符" }]}
+              label={t("sysKeyNameLabel")}
+              rules={[{ required: true, message: t("sysKeyNameRequired") }, { max: 100, message: t("sysKeyNameMax") }]}
             >
-              <Input placeholder="例如：本地开发、CI/CD 脚本" />
+              <Input placeholder={t("sysKeyNamePlaceholder")} />
             </Form.Item>
           </Form>
           <div className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
             <Shield size={12} className="inline mr-1" />
-            系统 Key 仅用于管理后台 API 认证，不可用于 v1 代理转发。
+            {t("sysKeyUsageHint")}
           </div>
         </Modal>
 
         {/* 新 Key 展示弹窗 */}
         <Modal
-          title="系统 Key 创建成功"
+          title={t("sysKeyCreatedTitle")}
           open={newKeyVisible}
           onOk={() => { setNewKeyVisible(false); setNewKeyValue(""); }}
           onCancel={() => { setNewKeyVisible(false); setNewKeyValue(""); }}
-          okText="我已保存"
+          okText={t("sysKeySaved")}
           cancelButtonProps={{ style: { display: "none" } }}
         >
           <Alert
             type="warning"
-            message="密钥仅显示一次，请立即复制保存"
+            message={t("sysKeyShowOnce")}
             className="mb-3"
           />
           <div className="bg-neutral-50 dark:bg-neutral-800 rounded p-3 font-mono text-sm break-all">
@@ -257,7 +257,7 @@ export default function SystemKeysPage() {
             className="mt-3"
             onClick={() => copyToClipboard(newKeyValue)}
           >
-            <Copy size={14} className="mr-1" /> 复制密钥
+            <Copy size={14} className="mr-1" /> {t("sysKeyCopy")}
           </Button>
         </Modal>
       </PageContainer>

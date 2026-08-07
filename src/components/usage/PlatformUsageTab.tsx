@@ -36,7 +36,7 @@ export default function PlatformUsageTab({
   period,
   refreshKey,
 }: PlatformUsageTabProps) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("usage");
   const [data, setData] = useState<PlatformUsage[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,7 +56,7 @@ export default function PlatformUsageTab({
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("common:error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -80,7 +80,7 @@ export default function PlatformUsageTab({
   const statCards = [
     {
       key: "requests",
-      title: t("usage.total_requests"),
+      title: t("totalRequests"),
       value: summary.totalRequests,
       icon: <Zap />,
       bgColor: "bg-blue-50",
@@ -88,7 +88,7 @@ export default function PlatformUsageTab({
     },
     {
       key: "tokens",
-      title: t("usage.total_tokens"),
+      title: t("totalTokens"),
       value: summary.totalTokens,
       icon: <TrendingUp />,
       bgColor: "bg-emerald-50",
@@ -96,7 +96,7 @@ export default function PlatformUsageTab({
     },
     {
       key: "activePlatforms",
-      title: t("dashboard.active_platforms"),
+      title: t("dashboard:activePlatforms"),
       value: summary.activePlatforms,
       suffix: `/ ${data.length}`,
       icon: <Globe />,
@@ -105,7 +105,7 @@ export default function PlatformUsageTab({
     },
     {
       key: "errors",
-      title: t("common.error") || "错误",
+      title: t("common:error"),
       value: summary.errorRequests,
       icon: <AlertTriangle />,
       bgColor: "bg-red-50",
@@ -121,14 +121,14 @@ export default function PlatformUsageTab({
 
   const columns: TableColumnsType<PlatformUsage> = [
     {
-      title: t("platform.name") || "平台名称",
+      title: t("platform:name"),
       dataIndex: "name",
       key: "name",
       width: 150,
       ellipsis: true,
     },
     {
-      title: t("platform.type") || "类型",
+      title: t("platform:type"),
       dataIndex: "type",
       key: "type",
       width: 90,
@@ -139,7 +139,7 @@ export default function PlatformUsageTab({
       ),
     },
     {
-      title: t("usage.status"),
+      title: t("status"),
       dataIndex: "status",
       key: "status",
       width: 90,
@@ -149,7 +149,7 @@ export default function PlatformUsageTab({
       ),
     },
     {
-      title: t("usage.total_requests"),
+      title: t("totalRequests"),
       key: "totalRequests",
       width: 100,
       align: "right",
@@ -157,7 +157,7 @@ export default function PlatformUsageTab({
         record.stats.totalRequests.toLocaleString(),
     },
     {
-      title: t("usage.total_tokens"),
+      title: t("totalTokens"),
       key: "totalTokens",
       width: 110,
       align: "right",
@@ -166,8 +166,8 @@ export default function PlatformUsageTab({
     },
     {
       title: (
-        <Tooltip title={t("usage.prompt_tokens_desc")}>
-          {t("usage.prompt_tokens")}
+        <Tooltip title={t("promptTokensDesc")}>
+          {t("promptTokens")}
         </Tooltip>
       ),
       key: "promptTokens",
@@ -179,8 +179,8 @@ export default function PlatformUsageTab({
     },
     {
       title: (
-        <Tooltip title={t("usage.completion_tokens_desc")}>
-          {t("usage.completion_tokens")}
+        <Tooltip title={t("completionTokensDesc")}>
+          {t("completionTokens")}
         </Tooltip>
       ),
       key: "completionTokens",
@@ -191,7 +191,7 @@ export default function PlatformUsageTab({
       responsive: ["md"],
     },
     {
-      title: t("common.error") || "错误",
+      title: t("common:error"),
       key: "errorRequests",
       width: 80,
       align: "right",
@@ -207,8 +207,8 @@ export default function PlatformUsageTab({
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_ttft_desc")}>
-          {t("usage.avg_ttft")}
+        <Tooltip title={t("avgTtftDesc")}>
+          {t("avgTtft")}
         </Tooltip>
       ),
       key: "avgTtft",
@@ -220,8 +220,8 @@ export default function PlatformUsageTab({
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_tokens_per_sec_desc")}>
-          {t("usage.avg_tokens_per_sec")}
+        <Tooltip title={t("avgTpsDesc")}>
+          {t("avgTps")}
         </Tooltip>
       ),
       key: "avgTokensPerSecond",
@@ -235,8 +235,8 @@ export default function PlatformUsageTab({
     },
     {
       title: (
-        <Tooltip title={t("usage.avg_rpm_desc")}>
-          {t("usage.avg_rpm")}
+        <Tooltip title={t("avgRpmDesc")}>
+          {t("avgRpm")}
         </Tooltip>
       ),
       key: "avgRequestsPerMinute",
@@ -249,7 +249,7 @@ export default function PlatformUsageTab({
       responsive: ["xl"],
     },
     {
-      title: t("usage.avg_duration"),
+      title: t("avgDuration"),
       key: "avgDuration",
       width: 100,
       align: "right",
@@ -300,7 +300,7 @@ export default function PlatformUsageTab({
         loading={loading}
         pagination={{
           pageSize: 20,
-          showTotal: (count) => t("common.pagination_total", { count }),
+          showTotal: (count) => t("common:pagination", { count }),
         }}
         scroll={{ x: 1200 }}
       />

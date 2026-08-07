@@ -13,7 +13,7 @@ import { PlatformList, type Platform } from "@/components/platform/PlatformList"
  * 整行点击进入独立路由 /admin/platforms/[id]（桌面端右侧展示详情，移动端全屏）
  */
 export default function PlatformsPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("common");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +27,7 @@ export default function PlatformsPage() {
         if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common.error"));
+        message.error(t("error"));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
