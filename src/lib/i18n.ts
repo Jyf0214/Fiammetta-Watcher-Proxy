@@ -19,6 +19,8 @@ i18n
       escapeValue: false,
       prefix: "{",
       suffix: "}",
+      // 未传参的插值块（如展示用 JSON 文本中的花括号）保留原文，避免被误插值
+      skipOnVariables: true,
     },
     detection: {
       order: ["localStorage", "navigator"],

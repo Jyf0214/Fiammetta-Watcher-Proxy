@@ -133,6 +133,47 @@ function stripComments(src: string): string {
   return out;
 }
 
+/** 从 start（open 字符所在位置）起引号/注释感知地扫描匹配的 close 字符，返回其下标；未找到返回 -1 */
+function blockEnd(src: string, start: number, open: string, close: string): number {
+  let depth = 0;
+  let quote: string | null = null;
+  let i = start;
+  while (i < src.length) {
+    const c = src[i];
+    if (quote) {
+      if (c === "\\") {
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      i += 1;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    if (c === open) depth++;
+    else if (c === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
 interface Messages {
   nsKeys: Map<string, Set<string>>; // ns -> 键集合（扁平）
   allKeys: Set<string>; // "ns:key" 全限定形态
@@ -155,10 +196,12 @@ interface Issues {
   tFallback: string[];
   badNs: string[]; // useTranslation 声明了不存在的命名空间
   missingKey: string[]; // 引用侧缺失
+  dictKey: string[]; // t() 变量引用的字典值缺失
   unresolvableDynamic: string[]; // 动态键一个候选都拼不出
   unusedKey: string[]; // 死键
   badKeyName: string[]; // 键名格式违规
   asymmetry: string[]; // zh/en 不对称
+  stepMismatch: string[]; // 前端步骤字典与服务端导入步骤不一致
 }
 
 function analyze(): Issues {
@@ -171,14 +214,17 @@ function analyze(): Issues {
     tFallback: [],
     badNs: [],
     missingKey: [],
+    dictKey: [],
     unresolvableDynamic: [],
     unusedKey: [],
     badKeyName: [],
     asymmetry: [],
+    stepMismatch: [],
   };
 
   const usedKeys = new Set<string>(); // "ns:key"
   const globalLiterals = new Set<string>(); // 全库字符串字面量
+  const uiLiterals = new Set<string>(); // 前端 UI 文件字符串字面量
 
   // ---------- 检查 6a：键名格式 + zh/en 对称 ----------
   const KEY_NAME_OK = /^[a-z][a-zA-Z0-9]*$/;
@@ -197,12 +243,12 @@ function analyze(): Issues {
     if (kDiff.length > 0) {
       issues.asymmetry.push(`[${ns}] zh/en 键不一致: ${kDiff.join(" ")}`);
     }
-    for (const k of zk) {
-      if (!KEY_NAME_OK.test(k)) issues.badKeyName.push(`[${ns}] ${k}`);
-    }
-    for (const k of zk) {
-      const v = (zh[ns] as Record<string, unknown>)[k];
-      if (v && typeof v === "object") issues.badKeyName.push(`[${ns}] ${k} 为嵌套对象，键必须扁平`);
+    for (const lang of [zh, en] as const) {
+      for (const k of Object.keys(lang[ns] as Record<string, unknown>)) {
+        if (!KEY_NAME_OK.test(k)) issues.badKeyName.push(`[${ns}] ${k}`);
+        const v = (lang[ns] as Record<string, unknown>)[k];
+        if (v && typeof v === "object") issues.badKeyName.push(`[${ns}] ${k} 为嵌套对象，键必须扁平`);
+      }
     }
   }
 
@@ -229,6 +275,7 @@ function analyze(): Issues {
     const fileLiterals = [...src.matchAll(STRING_LIT)]
       .map((m2) => m2[1] ?? m2[2] ?? m2[3])
       .filter((lit): lit is string => typeof lit === "string" && lit.length > 0 && lit.length < 80);
+    for (const lit of fileLiterals) uiLiterals.add(lit);
 
     // 解析单个键引用 → "ns:key"；返回 null 表示引用不合法
     // tryResolve 不产生报错（用于动态键候选筛选），resolve 会记录缺失
@@ -241,7 +288,12 @@ function analyze(): Issues {
         if (!msgs.nsKeys.get(ns)!.has(k)) return null;
         return key;
       }
-      if (nsSet.size === 0) return null;
+      if (nsSet.size === 0) {
+        // 纯数据模块（如 src/lib/platform.ts）无 useTranslation 声明，
+        // 字典值按任意命名空间解析
+        const hit = [...msgs.nsKeys.keys()].find((ns) => msgs.nsKeys.get(ns)!.has(key));
+        return hit ? `${hit}:${key}` : null;
+      }
       const hit = [...nsSet].find((ns) => msgs.nsKeys.get(ns)!.has(key));
       return hit ? `${hit}:${key}` : null;
     };
@@ -302,9 +354,107 @@ function analyze(): Issues {
         }
       }
     }
+
+    // 检查 4b：t() 变量引用的字典常量值必须存在于命名空间
+    // 覆盖三种消费形态：
+    //   1) t(XXX[...]) / t(XXX.yyy) 直接引用
+    //   2) 中间变量：const key = XXX[...]; t(key) / t(key ?? fallback)
+    //   3) 结构化属性：labelKey/detailKey/nameKey 值（含 import 自其他文件的字典，如 MODEL_TYPE_CONFIG）
+    const tVarRefs = new Set<string>();
+    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[[.]/g)) {
+      tVarRefs.add(m[1]);
+    }
+    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\?\?|\))/g)) {
+      const v = m[1];
+      const assign = src.match(new RegExp(`(?:const|let)\\s+${v}\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\[`));
+      if (assign) tVarRefs.add(assign[1]);
+    }
+    for (const name of tVarRefs) {
+      const defRe = new RegExp(`const\\s+${name}\\s*(?::[^=]*)?=\\s*\\{`);
+      const dm = src.match(defRe);
+      if (!dm || dm.index === undefined) continue; // import 或函数参数等非常量定义
+      const blockStart = dm.index + dm[0].length - 1;
+      const blockEndIdx = blockEnd(src, blockStart, "{", "}");
+      if (blockEndIdx === -1) continue;
+      const block = src.slice(blockStart, blockEndIdx + 1);
+      const hasStructured = /(?:labelKey|detailKey|nameKey)\s*:/.test(block);
+      if (hasStructured) {
+        // 结构化字典（STEP_LABELS / MODEL_TYPE_CONFIG / EXAMPLE_BODIES）：只校验属性键值
+        for (const vm of block.matchAll(/(?:labelKey|detailKey|nameKey):\s*"([^"]+)"/g)) {
+          const v = vm[1];
+          const r = tryResolve(v);
+          if (r === null) issues.dictKey.push(`${rel} 字典 ${name} 的键值 "${v}" 不存在于文件命名空间`);
+          else usedKeys.add(r);
+        }
+      } else {
+        // 纯字符串字典（ACTION_LABELS / groupI18nKeys）：校验 camelCase 形态的字符串值，
+        // 跳过颜色/CSS 类/URL 等非键值，避免混合用途字典误报
+        for (const vm of block.matchAll(/:\s*"([^"]+)"/g)) {
+          const v = vm[1];
+          if (!/^[a-z][a-zA-Z0-9]+$/.test(v)) continue;
+          const r = tryResolve(v);
+          if (r === null) issues.dictKey.push(`${rel} 字典 ${name} 的值 "${v}" 不存在于文件命名空间`);
+          else usedKeys.add(r);
+        }
+      }
+    }
+    // 跨文件字典兜底：labelKey/detailKey/nameKey 属性只在 i18n 字典出现，
+    // 全文件扫描可覆盖 import 自其他文件（如 src/lib/platform.ts 的 MODEL_TYPE_CONFIG）的定义
+    for (const vm of src.matchAll(/(?:labelKey|detailKey|nameKey):\s*"([^"]+)"/g)) {
+      const v = vm[1];
+      const r = tryResolve(v);
+      if (r === null) issues.dictKey.push(`${rel} labelKey/detailKey/nameKey 值 "${v}" 不存在于文件命名空间`);
+      else usedKeys.add(r);
+    }
   }
 
-  // ---------- 检查 5：死键（全代码库字面量 + 引用侧并集） ----------
+  // ---------- 检查 4c：前端导入步骤字典与服务端导入步骤一致 ----------
+  const dmPath = path.join(ROOT, "pages", "admin", "data-manager.tsx");
+  const importPath = path.join(ROOT, "pages", "api", "admin", "import.ts");
+  if (fs.existsSync(dmPath) && fs.existsSync(importPath)) {
+    const dmSrc = fs.readFileSync(dmPath, "utf8");
+    const importSrc = fs.readFileSync(importPath, "utf8");
+    const dmMatch = dmSrc.match(/const\s+STEP_LABELS[\s\S]*?=\s*\{/);
+    if (!dmMatch || dmMatch.index === undefined) {
+      issues.stepMismatch.push("无法解析 data-manager.tsx 的 STEP_LABELS 定义");
+    } else {
+      const dmEnd = blockEnd(dmSrc, dmMatch.index + dmMatch[0].length - 1, "{", "}");
+      if (dmEnd === -1) {
+        issues.stepMismatch.push("无法解析 data-manager.tsx 的 STEP_LABELS 定义块");
+      } else {
+        const dmBlock = dmSrc.slice(dmMatch.index, dmEnd + 1);
+        const dmKeys = new Set<string>();
+        const entryRe = /\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{/g;
+        let em: RegExpExecArray | null;
+        while ((em = entryRe.exec(dmBlock)) !== null) {
+          const innerStart = em.index + em[0].length - 1;
+          const innerEnd = blockEnd(dmBlock, innerStart, "{", "}");
+          if (innerEnd === -1) continue;
+          if (/labelKey\s*:/.test(dmBlock.slice(innerStart, innerEnd + 1))) dmKeys.add(em[1]);
+        }
+        const stepsMatch = importSrc.match(/const\s+steps[\s\S]*?=\s*\[/);
+        if (!stepsMatch || stepsMatch.index === undefined) {
+          issues.stepMismatch.push("无法解析 import.ts 的 steps 定义");
+        } else {
+          const stepsEnd = blockEnd(importSrc, stepsMatch.index + stepsMatch[0].length - 1, "[", "]");
+          if (stepsEnd === -1) {
+            issues.stepMismatch.push("无法解析 import.ts 的 steps 定义块");
+          } else {
+            const stepsBlock = importSrc.slice(stepsMatch.index, stepsEnd + 1);
+            const stepKeys = new Set(
+              [...stepsBlock.matchAll(/\{\s*key:\s*"([^"]+)"/g)].map((m) => m[1])
+            );
+            const onlyDm = [...dmKeys].filter((k) => !stepKeys.has(k));
+            const onlyStep = [...stepKeys].filter((k) => !dmKeys.has(k));
+            if (onlyDm.length > 0) issues.stepMismatch.push(`STEP_LABELS 多余步骤: ${onlyDm.join(" ")}`);
+            if (onlyStep.length > 0) issues.stepMismatch.push(`import.ts 步骤缺少 STEP_LABELS: ${onlyStep.join(" ")}`);
+          }
+        }
+      }
+    }
+  }
+
+  // ---------- 检查 5：死键（UI 字面量 + 全限定形态 + 引用侧并集） ----------
   for (const abs of collectAllFiles()) {
     const src = fs.readFileSync(abs, "utf8");
     for (const m2 of src.matchAll(STRING_LIT)) {
@@ -315,10 +465,11 @@ function analyze(): Issues {
   for (const [ns, keys] of msgs.nsKeys) {
     for (const k of keys) {
       const full = `${ns}:${k}`;
-      // 被引用判定：t() 显式引用，或全库存在与键名/全限定名一致的字符串字面量（字典值、侧边栏 key 等）
+      // 被引用判定：t() 显式/字典/动态引用，或 UI 文件存在同名键字面量（侧边栏 key 等），
+      // 或全库存在全限定形态字面量（"ns:key" / "ns.key"）。服务端普通字符串不再保护键名。
       const referenced =
         usedKeys.has(full) ||
-        globalLiterals.has(k) ||
+        uiLiterals.has(k) ||
         globalLiterals.has(full) ||
         globalLiterals.has(`${ns}.${k}`);
       if (!referenced) issues.unusedKey.push(full);
@@ -351,8 +502,16 @@ describe("i18n 一致性检查", () => {
     expectNone(result.missingKey, "以下键缺失");
   });
 
+  it("t() 变量引用的字典值必须存在于对应命名空间", () => {
+    expectNone(result.dictKey, "以下字典值缺失");
+  });
+
   it("动态键必须能解析出至少一个候选键", () => {
     expectNone(result.unresolvableDynamic, "以下动态键无法解析");
+  });
+
+  it("前端导入步骤字典必须与服务端导入步骤一致", () => {
+    expectNone(result.stepMismatch, "以下步骤不一致");
   });
 
   it("不允许死键（所有键需被代码引用）", () => {
