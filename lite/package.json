@@ -1,0 +1,24 @@
+{
+  "name": "fiammetta-watcher-lite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "精简版运行时依赖清单 — 仅 V1 代理 + 定时器 API（无前端 UI 依赖，供 Dockerfile.lite 使用）",
+  "scripts": {
+    "start": "next start"
+  },
+  "dependencies": {
+    "@prisma/adapter-d1": "^7.9.0",
+    "@prisma/adapter-mariadb": "^7.9.0",
+    "@prisma/adapter-pg": "^7.9.0",
+    "@prisma/client": "^7.9.0",
+    "@tidbcloud/prisma-adapter": "^6.17.0",
+    "@tidbcloud/serverless": "^0.3.0",
+    "dotenv": "^17.4.2",
+    "mariadb": "^3.4.5",
+    "next": "^16.2.11",
+    "pg": "^8.22.0",
+    "prisma": "^7.9.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

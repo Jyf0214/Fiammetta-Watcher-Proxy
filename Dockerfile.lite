@@ -1,0 +1,70 @@
+# ==================== 构建阶段 ====================
+# 精简版：只保留 V1 代理 + 定时器接口。
+# 复用 pages/api/v1 与 pages/api/cron 路由本体，构建门控脚本（lite-gate.sh）在
+# next build 前临时移走前端页面与其他 API 路由，使产物只含 V1 + 定时器。
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# 构建方言：Docker 部署仅支持 tidb / mariadb / pg（d1 只存在于 Cloudflare 运行时）。
+# 必须与运行时 DB_TYPE 一致——决定构建期生成的 Prisma Client 方言与转译内联的数据库栈。
+ARG DB_TYPE=pg
+ENV DB_TYPE=$DB_TYPE
+
+# 安装完整依赖（--ignore-scripts 跳过 prepare 钩子：容器内无 .git/.githooks，钩子会失败；
+# Prisma Client 由 prebuild 钩子在构建时生成）
+# --legacy-peer-deps：容器内无 .npmrc（本文件未复制它），strict 模式下 npm ci 的
+# lockfile 校验会报 EUSAGE，必须显式传 flag（与主 Dockerfile 一致）
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --legacy-peer-deps
+
+# 复制源码并构建（prebuild 钩子生成对应方言的 Prisma Client；
+# 构建环境无 CI=true，prepare-db.mjs 不会执行 db push，表结构由容器启动时同步）
+COPY . .
+
+RUN npm run build:lite
+
+# ==================== 运行阶段 ====================
+# 精简依赖清单（lite/package.json）：仅 next/react/prisma/数据库驱动，
+# 无任何前端 UI 包（antd/recharts/motion 等一律不安装、不复制）。
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# wget 备用（健康检查用 node fetch，无需额外安装）
+
+# 安装精简生产依赖（含 prisma CLI，用于启动时同步表结构）
+COPY lite/package.json lite/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --legacy-peer-deps
+
+# 复制构建产物（仅 v1 + cron 路由）与运行所需文件
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
+COPY --from=builder /app/scripts ./scripts/
+
+# 启动脚本（启动时同步表结构）
+COPY docker-entrypoint.lite.sh ./
+RUN chmod +x docker-entrypoint.lite.sh
+
+# 创建非 root 用户运行应用
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# 确保应用目录对 nextjs 用户可写（启动脚本会重新生成 Prisma Client 到 src/generated）
+RUN chown -R nextjs:nodejs /app
+
+EXPOSE 3000
+
+USER nextjs
+
+ENV PORT=3000
+
+# 健康检查：lite 无页面，探测 v1 路由（未认证 401 / 正常 200 均视为存活）
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://localhost:${PORT}/api/v1/models').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["./docker-entrypoint.lite.sh"]
