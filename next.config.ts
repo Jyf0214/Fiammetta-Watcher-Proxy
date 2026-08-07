@@ -58,6 +58,18 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Anthropic Messages 兼容端点：Anthropic SDK / Claude Code 的 baseURL 为域名根时，
+  // 请求路径固定为 /v1/messages（SDK buildURL = baseURL + "/v1/messages"），而本项目
+  // 函数路由以 /api 开头。全量把 /v1/* 转发到 /api/v1/*，OpenAI 客户端亦可配 base=域名根。
+  // CF 部署（Worker 直连 /v1/*）不需要此转发。
+  async rewrites() {
+    return [
+      {
+        source: "/v1/:path*",
+        destination: "/api/v1/:path*",
+      },
+    ];
+  },
   // 安全响应头
   async headers() {
     return [

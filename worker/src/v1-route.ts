@@ -12,7 +12,11 @@
 import { validateApiKey } from "./auth";
 import { proxyV1Request, type ProxyConfig } from "./proxy";
 import { refreshCache, getPlatformCache, getPlatformModelCache } from "./router";
+import { convertAnthropicRequest, estimateInputTokens, formatAnthropicError } from "@/lib/anthropic";
 import type { WorkerEnv } from "./config";
+
+/** 请求体大小上限（与 proxy.ts 的 parseRequestBody 保持一致） */
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 /**
  * 根据路径确定端点配置
@@ -43,12 +47,27 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
       return { upstreamPath: "/responses", supportsStreaming: true };
     case "/models":
       return { upstreamPath: "/models", supportsStreaming: false };
+    case "/messages":
+      return {
+        upstreamPath: "/chat/completions",
+        supportsStreaming: true,
+        protocol: "anthropic",
+        buildUpstreamBody: convertAnthropicRequest,
+      };
     default:
       if (endpoint.startsWith("/models/")) {
         return { upstreamPath: endpoint, supportsStreaming: false };
       }
       return null;
   }
+}
+
+/**
+ * 提取 API Key：兼容 Anthropic 客户端（x-api-key 头）与 OpenAI 客户端（Authorization: Bearer）
+ */
+function getApiKeyHeader(request: Request): string | null {
+  // authorization 优先（OpenAI 惯例），回退 x-api-key（Anthropic 惯例）——与 Pages 入口一致
+  return request.headers.get("authorization") || request.headers.get("x-api-key");
 }
 
 /**
@@ -60,6 +79,26 @@ export async function handleV1Route(
   ctx: ExecutionContext
 ): Promise<Response> {
   const url = new URL(request.url);
+
+  // POST /v1/messages/count_tokens — token 估算（不转发上游）
+  if (url.pathname === "/v1/messages/count_tokens" && request.method === "POST") {
+    const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
+    if ("error" in authResult) {
+      const errBody = await authResult.error.json().catch(() => ({})) as { error?: { message?: string } };
+      return Response.json(formatAnthropicError(authResult.error.status, errBody?.error?.message || "认证失败"), { status: authResult.error.status });
+    }
+    let body: Record<string, unknown>;
+    // 与主路径一致：超大请求体（Content-Length 预检）直接拒绝，避免整体读入内存
+    if (Number(request.headers.get("content-length") || "0") > MAX_BODY_BYTES) {
+      return Response.json(formatAnthropicError(413, "请求体过大"), { status: 413 });
+    }
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return Response.json(formatAnthropicError(400, "请求体格式错误"), { status: 400 });
+    }
+    return Response.json({ input_tokens: estimateInputTokens(body) });
+  }
 
   const endpointConfig = getEndpointConfig(url.pathname);
   if (!endpointConfig) {
@@ -81,12 +120,15 @@ export async function handleV1Route(
   }
 
   // 验证 API Key
-  const authResult = await validateApiKey(
-    request.headers.get("authorization"),
-    env.DB,
-    env
-  );
-  if ("error" in authResult) return authResult.error;
+  const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
+  if ("error" in authResult) {
+    // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
+    if (endpointConfig.protocol === "anthropic") {
+      const errBody = await authResult.error.json().catch(() => ({})) as { error?: { message?: string } };
+      return Response.json(formatAnthropicError(authResult.error.status, errBody?.error?.message || "认证失败"), { status: authResult.error.status });
+    }
+    return authResult.error;
+  }
 
   // 代理转发
   return proxyV1Request(request, endpointConfig, authResult.apiKey, env, ctx);

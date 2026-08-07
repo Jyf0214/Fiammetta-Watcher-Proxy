@@ -15,6 +15,7 @@ import { fetchAllPlatformModels } from "./model-fetcher";
 import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
 import { loadWhitelist, loadKeyStatusFromKV } from "./platform-keys";
+import { formatAnthropicError } from "@/lib/anthropic";
 import type { WorkerEnv } from "./config";
 
 export interface Env extends WorkerEnv {
@@ -89,6 +90,11 @@ export default {
         errorMessage,
         errorStack
       );
+      // Anthropic 端点（/v1/messages、count_tokens）意外异常按协议格式化，
+      // 与 Pages 入口外层 catch 行为一致
+      if (url.pathname === "/v1/messages" || url.pathname === "/v1/messages/count_tokens") {
+        return Response.json(formatAnthropicError(500, "服务器内部错误"), { status: 500 });
+      }
       return Response.json(
         {
           error: {
