@@ -305,6 +305,15 @@ export default function AdminLayout({
     return () => controller.abort();
   }, [isLoginPage]);
 
+  // 移动端侧边栏打开期间锁定背景滚动
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [sidebarOpen]);
+
   const handleLogout = async () => {
     if (logoutLoading) return;
     setLogoutLoading(true);
@@ -367,19 +376,9 @@ export default function AdminLayout({
         </div>
       </div>
 
-      {/* 用户信息 */}
-      <div className="px-3 py-3">
-        <SidebarUserMenu
-          username={username}
-          onLogout={handleLogout}
-          logoutLoading={logoutLoading}
-          t={t}
-        />
-      </div>
-
       {/* 服务状态 */}
       {healthStatus && (
-        <div className="px-3 mb-4">
+        <div className="px-3 py-3">
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 text-xs">
             <div className="flex items-center gap-1.5 flex-1">
               <Database className="w-3.5 h-3.5 text-zinc-400" />
@@ -409,6 +408,14 @@ export default function AdminLayout({
           />
         ))}
       </nav>
+
+      {/* 用户信息 — 置于导航之后，mt-auto 吸底 */}
+      <SidebarUserMenu
+        username={username}
+        onLogout={handleLogout}
+        logoutLoading={logoutLoading}
+        t={t}
+      />
     </div>
   );
 
@@ -422,10 +429,10 @@ export default function AdminLayout({
         {sidebarContent}
       </aside>
 
-      {/* 移动端遮罩层 */}
+      {/* 移动端遮罩层 — 低于顶栏（z-40），顶栏保持可操作；高于内容 */}
       {sidebarOpen && (
         <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          className="lg:hidden fixed inset-0 bg-black/50 z-[35]"
           onClick={close}
         />
       )}

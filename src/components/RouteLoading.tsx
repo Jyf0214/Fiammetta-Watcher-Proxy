@@ -15,17 +15,14 @@ export default function RouteLoading() {
       role="status"
       aria-label={t("loading")}
     >
-      {/* 顶栏骨架 */}
-      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 md:px-6">
+      {/* 顶栏骨架 — 与 TopHeader 一致：移动端全宽、桌面端从侧边栏（64 = 16rem）右侧开始 */}
+      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 lg:pl-64 lg:pr-6">
         <Skeleton className="h-4 w-28" />
-        <div className="ml-auto flex items-center gap-2">
-          <Skeleton className="h-9 w-9 rounded-xl" />
-          <Skeleton className="h-9 w-9 rounded-xl" />
-        </div>
       </div>
 
-      {/* 内容骨架 */}
-      <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+      {/* 内容骨架 — 与 AdminLayout main 的 pt-16 lg:pl-64 对齐 */}
+      <div className="pt-16 lg:pl-64">
+        <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
         {/* 标题区 */}
         <div className="flex items-center gap-3">
           <Skeleton className="h-9 w-9 rounded-lg" />
@@ -44,6 +41,7 @@ export default function RouteLoading() {
 
         {/* 列表块 */}
         <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-800" />
+        </div>
       </div>
     </div>
   );

@@ -51,6 +51,30 @@ function calcNiceTicks(max: number, min: number): number {
   return 5;
 }
 
+/** 自定义 tooltip — 跟随深色模式（recharts contentStyle 无法使用 Tailwind 类） */
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-[13px] shadow-lg">
+      <p className="text-zinc-500 dark:text-zinc-400 mb-1.5">{label}</p>
+      <div className="space-y-1">
+        {payload.map((item: any) => (
+          <div key={item.dataKey} className="flex items-center gap-2 tabular-nums">
+            <span
+              className="inline-block w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: item.stroke || item.color }}
+            />
+            <span className="text-zinc-500 dark:text-zinc-400">{item.name}</span>
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {Number(item.value).toLocaleString()}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function UsageChart({ data, granularity = "daily" }: UsageChartProps) {
   const { t } = useTranslation("usage");
 
@@ -105,20 +129,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             tickCount={calcNiceTicks(maxTokens, 0)}
             width={50}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "#fff",
-              border: "1px solid #e4e4e7",
-              borderRadius: "8px",
-              fontSize: "13px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-            }}
-            formatter={(value, name) => [
-              Number(value).toLocaleString(),
-              String(name),
-            ]}
-            labelFormatter={(label) => String(label)}
-          />
+          <Tooltip content={<ChartTooltip />} />
           <Legend
             wrapperStyle={{ fontSize: "13px", paddingTop: "8px" }}
           />

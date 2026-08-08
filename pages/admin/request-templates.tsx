@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Form, Input, Select, Modal, message } from "antd";
 import { Button } from "@/components/ui/Button";
+import Switch from "@/components/ui/Switch";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
@@ -65,6 +66,7 @@ export default function RequestTemplatesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<RequestTemplate | null>(null);
   const [saving, setSaving] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [bodyJsonError, setBodyJsonError] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -176,6 +178,7 @@ export default function RequestTemplatesPage() {
             name: values.name,
             description: values.description,
             models: values.models,
+            enabled: values.enabled,
             mergeBody,
           }),
         });
@@ -196,6 +199,7 @@ export default function RequestTemplatesPage() {
   };
 
   const handleToggle = async (tpl: RequestTemplate) => {
+    setTogglingId(tpl.id);
     try {
       const res = await fetch("/api/admin/request-templates", {
         method: "PUT",
@@ -208,6 +212,8 @@ export default function RequestTemplatesPage() {
       }
     } catch {
       // 静默失败
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -293,7 +299,7 @@ export default function RequestTemplatesPage() {
                         {tpl.models.length === 1 && tpl.models[0] === "*" ? t("rtAllModels") : tpl.models.join(", ")}
                       </span>
                       {!tpl.enabled && (
-                        <span className="text-[10px] font-bold text-zinc-300 dark:text-zinc-600">
+                        <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
                           {t("common:disabled")}
                         </span>
                       )}
@@ -305,18 +311,12 @@ export default function RequestTemplatesPage() {
                       <pre className="m-0">{JSON.stringify(tpl.mergeBody, null, 2)}</pre>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => handleToggle(tpl)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        tpl.enabled
-                          ? "text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20"
-                          : "text-zinc-300 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      }`}
-                      title={tpl.enabled ? t("rtEnabled") : t("common:disabled")}
-                    >
-                      <Check size={16} className={tpl.enabled ? "" : "opacity-30"} />
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Switch
+                      checked={tpl.enabled}
+                      loading={togglingId === tpl.id}
+                      onChange={() => handleToggle(tpl)}
+                    />
                     <button
                       onClick={() => handleCopyBody(tpl)}
                       className="p-2 rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
@@ -379,7 +379,7 @@ export default function RequestTemplatesPage() {
               </Form.Item>
 
               <Form.Item name="enabled" label={t("rtEnabled")} valuePropName="checked">
-                <input type="checkbox" className="w-4 h-4 mt-2" />
+                <Switch />
               </Form.Item>
             </div>
 

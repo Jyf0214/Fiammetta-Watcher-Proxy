@@ -255,7 +255,8 @@ function TimelineView<T>({
           </div>
           {/* 事件列表 + 竖线 */}
           <div className="relative pl-3">
-            <div className="absolute left-[5px] top-1 bottom-1 w-px bg-zinc-200 dark:bg-zinc-700" />
+            {/* 竖线中心对齐圆点中心（pl-3 = 12px + 圆点半宽 4px = 16px） */}
+            <div className="absolute left-[15.5px] top-1 bottom-1 w-px bg-zinc-200 dark:bg-zinc-700" />
             <div className="space-y-2.5">
               {items.map((item) => (
                 <div key={item.id} className="relative flex items-start gap-2.5">

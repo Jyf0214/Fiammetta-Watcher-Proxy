@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import { ProCard } from "@/components/ui/ProCard";
+import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
 import { useTranslation } from "react-i18next";
 import { Zap, TrendingUp, Globe, AlertTriangle } from "lucide-react";
 import "@/lib/i18n";
@@ -215,7 +217,9 @@ export default function PlatformUsageTab({
       width: 100,
       align: "right",
       render: (_: unknown, record: PlatformUsage) =>
-        record.stats.avgTtft > 0 ? `${record.stats.avgTtft}ms` : "-",
+        record.stats.avgTtft > 0
+          ? `${formatDuration(record.stats.avgTtft, t).value} ${formatDuration(record.stats.avgTtft, t).suffix}`
+          : "-",
       responsive: ["lg"],
     },
     {
@@ -255,7 +259,7 @@ export default function PlatformUsageTab({
       align: "right",
       render: (_: unknown, record: PlatformUsage) =>
         record.stats.avgDuration > 0
-          ? `${record.stats.avgDuration}${t("common:unitMs")}`
+          ? `${formatDuration(record.stats.avgDuration, t).value} ${formatDuration(record.stats.avgDuration, t).suffix}`
           : "-",
       responsive: ["xl"],
     },
@@ -263,33 +267,33 @@ export default function PlatformUsageTab({
 
   return (
     <>
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-        {statCards.map((card) => (
-          <div
-            key={card.key}
-            className="bg-white border border-zinc-200 rounded-xl p-4"
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`h-9 w-9 ${card.bgColor} rounded-lg flex items-center justify-center`}
-              >
-                <span className={card.iconColor}>{card.icon}</span>
+      {/* 统计卡片 — 与仪表盘 StatCard 视觉统一（ProCard p-3 / 动态字号 / 紧凑数字） */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+        {statCards.map((card) => {
+          const displayVal = formatCompactNumber(card.value, t);
+          return (
+            <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`h-8 w-8 ${card.bgColor} rounded-lg flex items-center justify-center shrink-0`}
+                >
+                  <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
+                  <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
+                    {displayVal}
+                    {card.suffix && (
+                      <span className="text-sm font-normal text-zinc-400 ml-1">
+                        {card.suffix}
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-zinc-500 text-xs">{card.title}</p>
-                <p className="text-xl font-bold text-zinc-900">
-                  {card.value.toLocaleString()}
-                  {card.suffix && (
-                    <span className="text-sm font-normal text-zinc-400 ml-1">
-                      {card.suffix}
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-        ))}
+            </ProCard>
+          );
+        })}
       </div>
 
       {/* 明细表格 */}

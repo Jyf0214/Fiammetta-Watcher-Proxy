@@ -141,20 +141,36 @@ export default function SystemKeysPage() {
       key: "key",
       width: 220,
       render: (key: string) => (
-        <code className="text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">{key}</code>
+        <div className="flex items-center gap-1 min-w-0">
+          <code className="flex-1 min-w-0 truncate text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
+            {key}
+          </code>
+          <button
+            onClick={() => copyToClipboard(key)}
+            className="p-1 rounded text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors shrink-0"
+            title={t("common:copy")}
+          >
+            <Copy size={13} />
+          </button>
+        </div>
       ),
     },
     {
       title: t("common:status"),
       dataIndex: "enabled",
       key: "enabled",
-      width: 100,
+      width: 120,
       render: (enabled: boolean, record) => (
-        <Switch
-          checked={enabled}
-          size="small"
-          onChange={(checked) => handleToggle(record.id, checked)}
-        />
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={enabled}
+            size="small"
+            onChange={(checked) => handleToggle(record.id, checked)}
+          />
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            {enabled ? t("sysKeyToggleEnabled") : t("sysKeyToggleDisabled")}
+          </span>
+        </div>
       ),
     },
     { title: t("sysKeyLastUsed"), dataIndex: "lastUsedAt", key: "lastUsedAt", width: 180, render: (v: number | null) => formatTime(v) },
@@ -189,8 +205,8 @@ export default function SystemKeysPage() {
           title={t("sysKeyTitle")}
           description={t("sysKeyDesc")}
           extra={
-            <Button onClick={() => setModalOpen(true)}>
-              <Plus size={16} className="mr-1" /> {t("sysKeyCreate")}
+            <Button variant="primary" onClick={() => setModalOpen(true)} icon={<Plus size={16} />}>
+              {t("sysKeyCreate")}
             </Button>
           }
         />
@@ -256,8 +272,9 @@ export default function SystemKeysPage() {
           <Button
             className="mt-3"
             onClick={() => copyToClipboard(newKeyValue)}
+            icon={<Copy size={14} />}
           >
-            <Copy size={14} className="mr-1" /> {t("sysKeyCopy")}
+            {t("sysKeyCopy")}
           </Button>
         </Modal>
       </PageContainer>

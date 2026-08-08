@@ -19,6 +19,10 @@ interface ApiKeyItem {
   name: string;
   planId: string | null;
   usedTokens: number;
+  tokenLimit: number | null;
+  callLimit: number | null;
+  rpmLimit: number | null;
+  tpmLimit: number | null;
   status: string;
   resetPeriod: string;
   expiresAt: string | null;
@@ -55,7 +59,6 @@ function ApiKeyCard({
           <Tag color={statusColor} className="!text-[10px] !px-1.5 !py-0 !m-0 shrink-0">{statusText}</Tag>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-zinc-400">{isActive ? t("common:enable") : t("common:disable")}</span>
           <Switch checked={isActive} loading={togglingId === apiKey.id} onChange={() => onToggle(apiKey)} />
         </div>
       </div>
@@ -82,7 +85,7 @@ function ApiKeyCard({
         >
           <Pencil size={13} /> {t("common:edit")}
         </button>
-        <div className="w-px bg-zinc-100 dark:border-zinc-800" />
+        <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
         <Popconfirm title={t("common:confirmDelete")} onConfirm={() => onDelete(apiKey.id)} okText={t("common:confirm")} cancelText={t("common:cancel")}>
           <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
             <Trash2 size={13} /> {t("common:delete")}
@@ -155,7 +158,11 @@ export default function KeysPage() {
     setEditItem(item);
     form.setFieldsValue({
       name: item.name,
-      tokenLimit: item.usedTokens,
+      // 预填真实限额（usedTokens 是已用量，误填会覆盖限额配置）
+      tokenLimit: item.tokenLimit,
+      callLimit: item.callLimit,
+      rpmLimit: item.rpmLimit,
+      tpmLimit: item.tpmLimit,
       resetPeriod: item.resetPeriod,
     });
     setModalOpen(true);
@@ -279,6 +286,42 @@ export default function KeysPage() {
       width: 180,
       render: (v: string) => formatDateTime(v),
       responsive: ["lg" as const],
+    },
+    {
+      title: t("common:actions"),
+      dataIndex: "actions",
+      key: "actions",
+      width: 140,
+      align: "center" as const,
+      render: (_: unknown, item: ApiKeyItem) => (
+        <div className="flex items-center justify-center gap-1">
+          <button
+            type="button"
+            onClick={() => openEdit(item)}
+            title={t("common:edit")}
+            className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(item.key)}
+            title={t("copyKey")}
+            className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+          >
+            <Copy size={14} />
+          </button>
+          <Popconfirm title={t("common:confirmDelete")} onConfirm={() => handleDelete(item.id)} okText={t("common:confirm")} cancelText={t("common:cancel")}>
+            <button
+              type="button"
+              title={t("common:delete")}
+              className="p-1.5 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              <Trash2 size={14} />
+            </button>
+          </Popconfirm>
+        </div>
+      ),
     },
   ];
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Select, Empty, message } from "antd";
+import { Select, Empty, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -121,9 +121,13 @@ export default function AutoModelPage() {
   /** 复制自动模型 ID */
   const copyAutoModelId = () => {
     if (autoModelId) {
-      navigator.clipboard.writeText(autoModelId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      navigator.clipboard.writeText(autoModelId).then(
+        () => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        },
+        () => message.error(t("common:copyFailed"))
+      );
     }
   };
 
@@ -152,7 +156,7 @@ export default function AutoModelPage() {
     }
   };
 
-  const columns = [
+  const columns: TableColumnsType<PlatformModel> = [
     {
       title: t("admin:platforms"),
       key: "platform",

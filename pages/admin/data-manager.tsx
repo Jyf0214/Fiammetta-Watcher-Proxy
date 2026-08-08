@@ -82,22 +82,6 @@ interface StepProgress {
   skipReasons?: Record<string, number>;
 }
 
-/** 格式化导入字段名 */
-function formatImportKey(key: string): string {
-  const map: Record<string, string> = {
-    platforms: "platforms",
-    modelMaps: "modelMaps",
-    plans: "plans",
-    apiKeys: "apiKeys",
-    configs: "configs",
-    requestLogs: "requestLogs",
-    dailyStats: "dailyStats",
-    auditLogs: "auditLogs",
-    systemEvents: "systemEvents",
-  };
-  return map[key] || key;
-}
-
 export default function DataManagerPage() {
   const { t } = useTranslation("admin");
   const [exportType, setExportType] = useState<ExportType>("all");
@@ -229,13 +213,12 @@ export default function DataManagerPage() {
 
               if (event.type === "progress") {
                 const ev = event as ProgressEvent;
-                console.log("[import progress]", ev.step, "imported:", ev.imported, "skipped:", ev.skipped, "skipReasons:", ev.skipReasons);
                 setTotalProcessed(ev.totalProcessed);
                 setTotalRecords(ev.totalRecords);
                 setCurrentStepKey(ev.step);
                 setStepProgressList((prev) => {
                   const idx = prev.findIndex((p) => p.labelKey === STEP_LABELS[ev.step]?.labelKey);
-                  const hasError = (ev.imported === 0 && ev.skipped === ev.stepTotal) || !!ev.error;
+                  const hasError = !!ev.error;
                   const newEntry: StepProgress = {
                     labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
                     detailKey: STEP_LABELS[ev.step]?.detailKey,
@@ -268,7 +251,7 @@ export default function DataManagerPage() {
                 throw new Error(ev.error);
               }
             } catch (parseErr) {
-              console.warn("[import] failed to parse progress event:", parseErr, "line:", line.slice(0, 100));
+              console.warn("[import] failed to parse progress event:", parseErr);
             }
           }
         }
@@ -369,10 +352,6 @@ export default function DataManagerPage() {
 
         {/* 各步骤明细 */}
         {stepProgressList.map((sp, i) => {
-          const _isCurrent = currentStepKey && STEP_LABELS[currentStepKey]?.labelKey === sp.labelKey;
-          const _stepPercent = sp.stepTotal > 0 ? Math.round(((sp.imported + sp.skipped) / sp.stepTotal) * 100) : 0;
-          if (sp.skipped > 0) console.log("[render step]", sp.labelKey, "skipReasons:", sp.skipReasons, "keys:", sp.skipReasons ? Object.keys(sp.skipReasons) : "null");
-
           return (
             <div key={i}>
               <div className="flex items-center gap-2 text-xs">
@@ -555,9 +534,9 @@ export default function DataManagerPage() {
                   )}
                 >
                   {importing ? (
-                    <RefreshCw size={14} className="text-xl animate-spin" />
+                    <RefreshCw size={20} className="animate-spin" />
                   ) : (
-                    <Upload size={14} className="text-xl" />
+                    <Upload size={20} />
                   )}
                 </div>
 
@@ -610,7 +589,7 @@ export default function DataManagerPage() {
                           className="flex items-center justify-between text-xs"
                         >
                           <span className="text-zinc-600 dark:text-zinc-400">
-                            {formatImportKey(key)}
+                            {key}
                           </span>
                           <div className="flex items-center gap-1.5">
                             {value.imported > 0 && (

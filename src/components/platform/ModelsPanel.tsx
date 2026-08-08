@@ -9,7 +9,6 @@ import {
   Trash2,
   Plus,
   Search,
-  Pencil,
   Cpu,
   Grid3x3,
   MessageSquare,
@@ -118,15 +117,8 @@ export function ModelsPanel({
             >
               {model.modelId}
             </button>
-            {/* hover 操作内联在名称后（对照 ModelItem Actions） */}
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                title={t("modelConfig")}
-                className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-              >
-                <Pencil size={13} />
-              </button>
+            {/* hover 操作内联在名称后（对照 ModelItem Actions）；触屏无 hover，移动端常显 */}
+            <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
               <Popconfirm
                 title={t("deleteModelConfirm")}
                 onConfirm={() => onDeleteModel(model.modelId)}

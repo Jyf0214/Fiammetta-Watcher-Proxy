@@ -139,7 +139,7 @@ function AuditContent() {
       dataIndex: "detail",
       key: "detail",
       ellipsis: true,
-      responsive: ["md"],
+      // 移动端恒显：detail 是审计记录的核心内容（做了什么），不能按断点砍掉
     },
     {
       title: t("ip"),

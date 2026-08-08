@@ -14,7 +14,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
   const { t } = useTranslation("common");
   return (
     <div className="relative min-h-screen w-full flex flex-col bg-zinc-50 dark:bg-zinc-950 p-4 sm:p-6 md:p-8">
-      <div className="relative overflow-hidden border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 flex flex-col min-h-[calc(100vh-1rem)]">
+      <div className="relative overflow-hidden border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 flex flex-col flex-1">
         {/* 品牌标题 */}
         <div className="flex items-center gap-2 w-full px-5 py-4">
           <div className="w-7 h-7 bg-zinc-900 dark:bg-zinc-100 rounded-xl flex items-center justify-center">

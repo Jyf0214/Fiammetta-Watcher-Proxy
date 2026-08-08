@@ -94,13 +94,17 @@ function PlatformRow({
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors",
+        // 选中态用蓝色指示条 + 蓝调底色，与 hover 拉开档位
         active
-          ? "bg-zinc-100 dark:bg-zinc-800"
+          ? "bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500 dark:border-blue-400"
           : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       )}
     >
       <BrandAvatar name={platform.name} type={platform.type} size="sm" />
-      <span className="flex-1 min-w-0 text-sm text-zinc-800 dark:text-zinc-200 truncate">
+      <span className={cn(
+        "flex-1 min-w-0 text-sm truncate",
+        active ? "text-blue-700 dark:text-blue-300 font-medium" : "text-zinc-800 dark:text-zinc-200"
+      )}>
         {platform.name}
       </span>
       <StatusDot status={platform.status} enabled={platform.enabled} />

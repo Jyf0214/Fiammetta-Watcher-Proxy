@@ -208,24 +208,24 @@ function DashboardContent() {
       title: t("activeKeys"),
       value: stats?.activeKeys ?? 0,
       icon: <Key />,
-      color: "bg-blue-50",
-      iconColor: "text-blue-500",
+      color: "bg-emerald-50",
+      iconColor: "text-emerald-500",
     },
     {
       key: "requests",
       title: t("totalRequests"),
       value: stats?.totalRequests ?? 0,
       icon: <Globe />,
-      color: "bg-blue-50",
-      iconColor: "text-blue-500",
+      color: "bg-purple-50",
+      iconColor: "text-purple-500",
     },
     {
       key: "tokens",
       title: t("totalTokens"),
       value: stats?.totalTokens ?? 0,
       icon: <Database />,
-      color: "bg-blue-50",
-      iconColor: "text-blue-500",
+      color: "bg-amber-50",
+      iconColor: "text-amber-500",
     },
     {
       key: "avgTtft",
@@ -234,7 +234,7 @@ function DashboardContent() {
       icon: <Clock />,
       color: "bg-orange-50",
       iconColor: "text-orange-500",
-      get display() { return formatDuration(this.value); },
+      get display() { return formatDuration(this.value, t); },
     },
     {
       key: "avgDuration",
@@ -251,9 +251,9 @@ function DashboardContent() {
   const getChartColor = (key: string): string => {
     const colorMap: Record<string, string> = {
       platforms: "#3b82f6",
-      keys: "#3b82f6",
-      requests: "#3b82f6",
-      tokens: "#3b82f6",
+      keys: "#10b981",
+      requests: "#8b5cf6",
+      tokens: "#f59e0b",
       avgTtft: "#f97316",
       avgDuration: "#06b6d4",
     };
@@ -317,9 +317,8 @@ function DashboardContent() {
         // 网格视图：一行多个
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
           {statCards.map((card) => {
-            const displayVal = "display" in card && card.display
-              ? card.display.value
-              : formatCompactNumber(card.value, t);
+            const display = "display" in card && card.display ? card.display : null;
+            const displayVal = display ? display.value : formatCompactNumber(card.value, t);
             return (
               <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
                 <div className="flex items-center gap-2.5">
@@ -330,6 +329,9 @@ function DashboardContent() {
                     <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
                     <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
                       {displayVal}
+                      {display?.suffix && (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">{display.suffix}</span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -341,9 +343,8 @@ function DashboardContent() {
         // 详细视图：一行一个，带趋势图
         <div className="space-y-3 mb-6">
           {statCards.map((card) => {
-            const displayVal = "display" in card && card.display
-              ? card.display.value
-              : formatCompactNumber(card.value, t);
+            const display = "display" in card && card.display ? card.display : null;
+            const displayVal = display ? display.value : formatCompactNumber(card.value, t);
             const hasTrend = trendData[card.key] && trendData[card.key].length > 0;
             return (
               <ProCard key={card.key} className="bg-white border-zinc-200" padding="px-4 py-3">
@@ -355,6 +356,9 @@ function DashboardContent() {
                     <p className="text-zinc-500 text-[11px] leading-tight mb-0.5">{card.title}</p>
                     <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap`}>
                       {displayVal}
+                      {display?.suffix && (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">{display.suffix}</span>
+                      )}
                     </p>
                   </div>
                   {hasTrend && (

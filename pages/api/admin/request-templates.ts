@@ -115,13 +115,14 @@ export default async function handler(
         description?: string;
         models?: string[];
         mergeBody?: Record<string, unknown>;
+        enabled?: boolean;
       } = req.body;
       if (!body || typeof body !== "object") {
         res.status(400).json({ success: false, error: "请求格式错误" });
         return;
       }
 
-      const { name, description, models, mergeBody } = body;
+      const { name, description, models, mergeBody, enabled } = body;
 
       // 参数校验
       if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -144,7 +145,8 @@ export default async function handler(
         description: description?.trim() || "",
         models: Array.isArray(models) && models.length > 0 ? models : ["*"],
         mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>),
-        enabled: true,
+        // 创建时接受 enabled（表单开关），缺省保持默认启用
+        enabled: enabled !== undefined ? Boolean(enabled) : true,
       };
 
       templates.push(newTemplate);

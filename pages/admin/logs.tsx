@@ -216,9 +216,13 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           color={
             v >= 200 && v < 300
               ? "green"
-              : v >= 400
-                ? "red"
-                : "orange"
+              : v === 429
+                ? "gold"
+                : v >= 500
+                  ? "red"
+                  : v >= 400
+                    ? "orange"
+                    : "default"
           }
         >
           {v}
@@ -276,20 +280,6 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
         }
         return "-";
       },
-    },
-    {
-      title: t("isError"),
-      dataIndex: "isError",
-      key: "isError",
-      width: 80,
-      align: "center",
-      render: (v: boolean) =>
-        v ? (
-          <Tag color="red">{t("common:error")}</Tag>
-        ) : (
-          <Tag color="green">{t("common:success")}</Tag>
-        ),
-      responsive: ["lg"],
     },
   ];
 
@@ -542,7 +532,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       align: "right",
       render: (v: number) =>
         v > 0 ? (
-          <Tag color="red">{v.toLocaleString()}</Tag>
+          <span className="text-red-500">{v.toLocaleString()}</span>
         ) : (
           "0"
         ),
