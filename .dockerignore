@@ -13,6 +13,9 @@ src/generated
 docker-compose.yml
 .dockerignore
 
+# 嵌入式 PostgreSQL 开发库（scripts/dev-postgres.mjs，数百 MB）
+.pgdata/
+
 # 日志文件
 *.log
 

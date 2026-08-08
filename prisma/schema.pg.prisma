@@ -20,6 +20,8 @@ model admins {
   id           String @id
   username     String @unique
   passwordHash String @map("password_hash")
+  // 时间戳约定：全项目统一写秒级（Math.floor(Date.now()/1000)），int4 上限 2038-01-19（Y2038）
+  // 与 mysql/d1 方言保持一致；如未来整体迁移 int8 需先手动 ALTER，db push 对列类型变更会重建列
   createdAt    Int    @default(0) @map("created_at")
   updatedAt    Int    @default(0) @map("updated_at")
 

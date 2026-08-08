@@ -31,16 +31,17 @@ const ROOT = resolve(__dirname, "..");
 // ==================== 环境加载（与 prepare-db.mjs 一致） ====================
 
 function loadDotEnv() {
-  const envFile = resolve(ROOT, ".env");
-  if (!existsSync(envFile)) return;
-  for (const line of readFileSync(envFile, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (key && process.env[key] === undefined) process.env[key] = value;
+  for (const envFile of [resolve(ROOT, ".env.local"), resolve(ROOT, ".env")]) {
+    if (!existsSync(envFile)) continue;
+    for (const line of readFileSync(envFile, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      if (key && process.env[key] === undefined) process.env[key] = value;
+    }
   }
 }
 

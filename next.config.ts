@@ -41,6 +41,9 @@ const prismaStack = [
 const mariadbStack = ["@prisma/adapter-mariadb", "mariadb"];
 
 const nextConfig: NextConfig = {
+  // standalone 输出：Docker 镜像运行 .next/standalone/server.js，
+  // 只加载构建期追踪的模块（nft），避免全量 node_modules 进内存
+  output: "standalone",
   // 移除 X-Powered-By 响应头，避免泄露 Next.js 版本指纹
   poweredByHeader: false,
   // 构建期内联部署平台（DEPLOY_PLATFORM 构建期变量 → 前端可读），

@@ -39,7 +39,10 @@ COPY --from=builder /app/package.json /app/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --legacy-peer-deps
 
 # 复制构建产物与运行所需文件
-COPY --from=builder /app/.next ./.next
+# standalone 精简产物（server.js + nft 追踪的精简 node_modules + 内联 bundle）：
+# 运行时只加载构建期追踪到的模块，避免全量 node_modules 进内存（内存 ~180MB → ~120MB）
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
@@ -61,6 +64,8 @@ EXPOSE 3000
 USER nextjs
 
 ENV PORT=3000
+# standalone server.js 按 HOSTNAME 决定监听地址，必须监听 0.0.0.0 供容器外访问
+ENV HOSTNAME="0.0.0.0"
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \

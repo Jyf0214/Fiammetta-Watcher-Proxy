@@ -379,7 +379,10 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
     // 若在设置 SSE headers 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
     void recordSuccess(platform.id, dummyDb).catch(() => {});
-    res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache"); res.setHeader("Connection", "keep-alive");
+    // no-transform：阻止 next start（Node 服务器）内置 gzip 压缩流式响应。
+    // compression 中间件会把每个 write 导入 zlib 流，输出攒够 16KB 才下发，
+    // 导致思考内容被整体缓冲、首字节随思考延伸而推迟，且大响应尾部有截断风险。
+    res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache, no-transform"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
     let tt = 0, pt = 0, ct = 0, buf = "";
     // 流内 error 事件（上游 200 + data: {"error": ...}）：HTTP 头无法反映失败，日志须按错误码记录

@@ -37,4 +37,4 @@ echo "[启动] 同步数据库表结构（DB_TYPE=$DB_TYPE）..."
 DB_PUSH=1 node scripts/prepare-db.mjs
 
 echo "[启动] 启动应用..."
-exec node_modules/.bin/next start
+exec node server.js

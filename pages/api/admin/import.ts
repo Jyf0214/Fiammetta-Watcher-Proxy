@@ -108,7 +108,8 @@ export default async function handler(
 
     // 流式响应：边处理边推送进度
     res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
+    // no-transform：与 v1 代理 SSE 同理，阻止 next start 内置 gzip 缓冲进度事件
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no");
 
     const writeEvent = (event: Record<string, unknown>) => {

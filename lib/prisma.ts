@@ -31,7 +31,8 @@ let cachedDbKind: DbKind | null = null;
 
 /**
  * 根据 DB_TYPE 环境变量推断数据库类型
- * 无 DB_TYPE 时根据 DATABASE_URL 推断，默认 d1
+ * 无 DB_TYPE 时根据 DATABASE_URL 推断，默认 d1（开发环境通过 .env.local
+ * 写入 DB_TYPE=pg + DATABASE_URL 切换到本地嵌入式 PostgreSQL）
  */
 function resolveDbKind(env?: Record<string, unknown>): DbKind {
   // 优先读 DB_TYPE

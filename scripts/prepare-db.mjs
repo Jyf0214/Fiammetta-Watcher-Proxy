@@ -4,9 +4,10 @@
  * 功能：
  *   1. 根据 DB_TYPE 只生成需要的 Prisma Client（避免打包多余 WASM）
  *   2. 为未使用的方言生成空 stub 文件（webpack 静态分析需要 import 路径存在）
- *   3. 自动读取 .env（不覆盖已有环境变量；EdgeOne CLI 构建期会把项目环境变量拉取到 .env）
+ *   3. 自动读取 .env.local（优先，本地开发库）与 .env（不覆盖已有环境变量；EdgeOne CLI 构建期会把项目环境变量拉取到 .env）
  *   4. MySQL/MariaDB/PG 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/CF 构建）且 DATABASE_URL 协议匹配时
  *      自动执行 prisma db push 同步表结构；本地默认不 push，需要时设置 DB_PUSH=1
+ *      （npm run db:dev 会在 .env.local 写入 DB_PUSH=1，本地开发自动同步表结构）
  *   5. D1 由 Python 部署脚本单独处理建表，不在此处 push
  *
  * 生成目录：
@@ -17,6 +18,8 @@
  *
  * 使用方式：
  *   DB_TYPE=d1 node scripts/prepare-db.mjs
+ *   无 DB_TYPE/DATABASE_URL 时默认 d1（本地开发用 npm run db:dev 在 .env.local
+ *   显式写入 DB_TYPE=pg + DATABASE_URL，切换到嵌入式 PostgreSQL）
  */
 
 import { execSync } from "node:child_process";
@@ -40,20 +43,22 @@ const DIALECTS = {
 // ==================== 1. 加载 .env + 推断 DB_TYPE ====================
 
 /**
- * 读取项目根目录 .env（不覆盖已存在的环境变量，与 dotenv 行为一致）。
+ * 读取项目根目录 .env.local（优先）与 .env（不覆盖已存在的环境变量）。
+ * .env.local 由 scripts/dev-postgres.mjs 写入（本地开发库连接），优先级高于 .env；
  * EdgeOne CLI 部署时会把项目环境变量拉取到 .env，构建期依赖它拿到 DB_TYPE/DATABASE_URL。
  */
 function loadDotEnv() {
-  const envFile = resolve(ROOT, ".env");
-  if (!existsSync(envFile)) return;
-  for (const line of readFileSync(envFile, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (key && process.env[key] === undefined) process.env[key] = value;
+  for (const envFile of [resolve(ROOT, ".env.local"), resolve(ROOT, ".env")]) {
+    if (!existsSync(envFile)) continue;
+    for (const line of readFileSync(envFile, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      if (key && process.env[key] === undefined) process.env[key] = value;
+    }
   }
 }
 
