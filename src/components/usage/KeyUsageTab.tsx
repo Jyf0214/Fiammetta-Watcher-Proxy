@@ -110,10 +110,10 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "ttft",
       title: t("avgTtft"),
       value: summary.avgTtft,
-      suffix: "ms",
       icon: <Clock />,
       bgColor: "bg-amber-50",
       iconColor: "text-amber-500",
+      get display() { return formatDuration(this.value, t); },
     },
   ];
 
@@ -197,10 +197,11 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "avgTtft",
       width: 100,
       align: "right",
-      render: (_: unknown, record: KeyUsage) =>
-        record.stats.avgTtft > 0
-          ? `${formatDuration(record.stats.avgTtft, t).value} ${formatDuration(record.stats.avgTtft, t).suffix}`
-          : "-",
+      render: (_: unknown, record: KeyUsage) => {
+        if (record.stats.avgTtft <= 0) return "-";
+        const { value, suffix } = formatDuration(record.stats.avgTtft, t);
+        return `${value} ${suffix}`;
+      },
       responsive: ["lg"],
     },
     {
@@ -238,10 +239,11 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "avgDuration",
       width: 100,
       align: "right",
-      render: (_: unknown, record: KeyUsage) =>
-        record.stats.avgDuration > 0
-          ? `${formatDuration(record.stats.avgDuration, t).value} ${formatDuration(record.stats.avgDuration, t).suffix}`
-          : "-",
+      render: (_: unknown, record: KeyUsage) => {
+        if (record.stats.avgDuration <= 0) return "-";
+        const { value, suffix } = formatDuration(record.stats.avgDuration, t);
+        return `${value} ${suffix}`;
+      },
       responsive: ["xl"],
     },
     {
@@ -262,7 +264,9 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       {/* 统计卡片 — 与仪表盘 StatCard 视觉统一（ProCard p-3 / 动态字号 / 紧凑数字） */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         {statCards.map((card) => {
-          const displayVal = formatCompactNumber(card.value, t);
+          const display = "display" in card ? card.display : null;
+          const displayVal = display ? display.value : formatCompactNumber(card.value, t);
+          const suffix = display?.suffix ?? card.suffix;
           return (
             <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
               <div className="flex items-center gap-2.5">
@@ -275,9 +279,9 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
                   <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
                   <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
                     {displayVal}
-                    {card.suffix && (
+                    {suffix && (
                       <span className="text-sm font-normal text-zinc-400 ml-1">
-                        {card.suffix}
+                        {suffix}
                       </span>
                     )}
                   </p>

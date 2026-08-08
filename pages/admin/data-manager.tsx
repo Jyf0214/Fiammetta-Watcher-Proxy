@@ -251,7 +251,13 @@ export default function DataManagerPage() {
                 throw new Error(ev.error);
               }
             } catch (parseErr) {
-              console.warn("[import] failed to parse progress event:", parseErr);
+              // JSON 解析失败：跳过坏行继续；流内 error 事件（导入失败）则关闭读取并向上抛出中止导入
+              if (parseErr instanceof SyntaxError) {
+                console.warn("[import] failed to parse progress event:", parseErr);
+              } else {
+                await reader.cancel().catch(() => {});
+                throw parseErr;
+              }
             }
           }
         }

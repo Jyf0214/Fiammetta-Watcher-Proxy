@@ -216,10 +216,11 @@ export default function PlatformUsageTab({
       key: "avgTtft",
       width: 100,
       align: "right",
-      render: (_: unknown, record: PlatformUsage) =>
-        record.stats.avgTtft > 0
-          ? `${formatDuration(record.stats.avgTtft, t).value} ${formatDuration(record.stats.avgTtft, t).suffix}`
-          : "-",
+      render: (_: unknown, record: PlatformUsage) => {
+        if (record.stats.avgTtft <= 0) return "-";
+        const { value, suffix } = formatDuration(record.stats.avgTtft, t);
+        return `${value} ${suffix}`;
+      },
       responsive: ["lg"],
     },
     {
@@ -257,10 +258,11 @@ export default function PlatformUsageTab({
       key: "avgDuration",
       width: 100,
       align: "right",
-      render: (_: unknown, record: PlatformUsage) =>
-        record.stats.avgDuration > 0
-          ? `${formatDuration(record.stats.avgDuration, t).value} ${formatDuration(record.stats.avgDuration, t).suffix}`
-          : "-",
+      render: (_: unknown, record: PlatformUsage) => {
+        if (record.stats.avgDuration <= 0) return "-";
+        const { value, suffix } = formatDuration(record.stats.avgDuration, t);
+        return `${value} ${suffix}`;
+      },
       responsive: ["xl"],
     },
   ];

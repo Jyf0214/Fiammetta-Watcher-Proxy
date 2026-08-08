@@ -20,27 +20,27 @@ export default function RouteLoading() {
         <Skeleton className="h-4 w-28" />
       </div>
 
-      {/* 内容骨架 — 与 AdminLayout main 的 pt-16 lg:pl-64 对齐 */}
+      {/* 内容骨架 — 与 AdminLayout main 的 pt-16 lg:pl-64、p-4 lg:p-6 对齐 */}
       <div className="pt-16 lg:pl-64">
-        <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
-        {/* 标题区 */}
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-9 w-9 rounded-lg" />
-          <div className="space-y-2">
-            <Skeleton className="h-5 w-32" />
-            <Skeleton className="h-3 w-52" />
+        <div className="p-4 lg:p-6 space-y-5 max-w-[1400px] mx-auto">
+          {/* 标题区 */}
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-3 w-52" />
+            </div>
           </div>
-        </div>
 
-        {/* 统计卡片网格 */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-xl bg-white dark:bg-zinc-800" />
-          ))}
-        </div>
+          {/* 统计卡片网格 */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-20 rounded-xl bg-white dark:bg-zinc-800" />
+            ))}
+          </div>
 
-        {/* 列表块 */}
-        <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-800" />
+          {/* 列表块 */}
+          <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-800" />
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Select, Empty, message, type TableColumnsType } from "antd";
+import { useState, useEffect, useMemo } from "react";
+import { Input, Checkbox, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -32,15 +32,19 @@ export default function AutoModelPage() {
   const [models, setModels] = useState<PlatformModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
 
-  // 模型选择状态
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  // 模型选择状态：行 id 为唯一勾选来源（同一 modelId 可存在于多个平台行），保存时派生 modelId 集合
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [selectedModelsLoading, setSelectedModelsLoading] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  // config 中已保存的选择（部分平台加载失败时用于兜底保留，避免保存静默丢配置）
+  const [savedModelIds, setSavedModelIds] = useState<string[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     const fetchAllData = async () => {
       setModelsLoading(true);
+      let savedSelected: string[] = [];
       try {
         const res = await fetch("/api/admin/config", { signal: controller.signal });
         const data: Record<string, any> = await res.json();
@@ -49,11 +53,12 @@ export default function AutoModelPage() {
           const savedModels = data.data["system:auto_model_selected"];
           if (savedModels) {
             try {
-              setSelectedModels(JSON.parse(savedModels));
+              savedSelected = JSON.parse(savedModels);
             } catch {
-              setSelectedModels([]);
+              savedSelected = [];
             }
           }
+          setSavedModelIds(savedSelected);
         }
       } catch {
         // 静默失败
@@ -78,6 +83,12 @@ export default function AutoModelPage() {
             }
           }
           setModels(allModels);
+          // 已保存的模型选择扩散为对应行勾选（同一模型在多平台的全部行，代表该模型在路由池）
+          setSelectedKeys(
+            allModels
+              .filter((m) => savedSelected.includes(m.modelId))
+              .map((m) => m.id)
+          );
         }
       } catch {
         message.error(t("common:error"));
@@ -131,16 +142,27 @@ export default function AutoModelPage() {
     }
   };
 
-  /** 保存模型选择 */
+  /** 保存模型选择（行勾选 → 唯一 modelId 集合；并集保留已保存但当前不可见的选择，避免平台加载失败时静默丢配置） */
   const saveSelectedModels = async () => {
     setSelectedModelsLoading(true);
     try {
+      const visibleIds = new Set(
+        models
+          .filter((m) => selectedKeys.includes(m.id))
+          .map((m) => m.modelId)
+      );
+      const modelIds = Array.from(
+        new Set([
+          ...savedModelIds.filter((id) => !models.some((m) => m.modelId === id)),
+          ...visibleIds,
+        ])
+      );
       const res = await fetch("/api/admin/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           key: "system:auto_model_selected",
-          value: JSON.stringify(selectedModels),
+          value: JSON.stringify(modelIds),
         }),
       });
       const data: Record<string, any> = await res.json();
@@ -156,7 +178,41 @@ export default function AutoModelPage() {
     }
   };
 
+  /** 勾选切换：行 id 为勾选来源（同 modelId 多平台行独立勾选，保存时去重）；桌面表格与移动端卡片共用此列 */
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelectedKeys((prev) =>
+      checked
+        ? prev.includes(id)
+          ? prev
+          : [...prev, id]
+        : prev.filter((k) => k !== id)
+    );
+  };
+
+  /** 表格内搜索：按模型 ID / 平台名过滤 */
+  const filteredModels = useMemo(() => {
+    const q = modelSearch.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter(
+      (m) =>
+        m.modelId.toLowerCase().includes(q) ||
+        m.platform.name.toLowerCase().includes(q)
+    );
+  }, [models, modelSearch]);
+
   const columns: TableColumnsType<PlatformModel> = [
+    {
+      title: "",
+      key: "select",
+      width: 44,
+      render: (_: unknown, record: PlatformModel) => (
+        <Checkbox
+          checked={selectedKeys.includes(record.id)}
+          onChange={(e) => toggleSelect(record.id, e.target.checked)}
+          aria-label={record.modelId}
+        />
+      ),
+    },
     {
       title: t("admin:platforms"),
       key: "platform",
@@ -257,56 +313,7 @@ export default function AutoModelPage() {
           )}
         </ProCard>
 
-        {/* 模型选择器 */}
-        <ProCard
-          title={
-            <span className="flex items-center gap-2">
-              <Search size={16} />
-              {t("autoModelSelectTitle")}
-            </span>
-          }
-          className="mb-4"
-        >
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-4">
-            {t("autoModelSelectDesc")}
-          </p>
-          <div className="mb-4">
-            <Select
-              mode="multiple"
-              style={{ width: "100%" }}
-              placeholder={t("autoModelSelectPlaceholder")}
-              value={selectedModels}
-              onChange={setSelectedModels}
-              loading={modelsLoading}
-              showSearch
-              filterOption={(input, option) =>
-                String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-              }
-              options={models.map((m) => ({
-                value: m.modelId,
-                label: `${m.modelId} (${m.platform.name})`,
-              }))}
-              notFoundContent={<Empty description={t("common:noData")} />}
-              maxTagCount="responsive"
-              maxTagPlaceholder={(omittedValues) =>
-                `+${omittedValues.length} ${t("common:items")}`
-              }
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={saveSelectedModels}
-              loading={selectedModelsLoading}
-              disabled={selectedModels.length === 0}
-            >
-              {t("common:save")}
-            </Button>
-          </div>
-        </ProCard>
-
-        {/* 已发现的模型列表 */}
+        {/* 已发现的模型列表 — 行勾选即选择参与自动分流的模型（选择器与表格合并，避免双份同源展示） */}
         <ProCard
           title={
             <span className="flex items-center gap-2">
@@ -314,10 +321,32 @@ export default function AutoModelPage() {
               {t("admin:autoModelDiscovered")}
             </span>
           }
+          extra={
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={saveSelectedModels}
+              loading={selectedModelsLoading}
+              disabled={selectedKeys.length === 0}
+            >
+              {t("common:save")}
+            </Button>
+          }
         >
+          <div className="mb-3">
+            <Input
+              prefix={<Search size={14} className="text-zinc-400" />}
+              placeholder={t("autoModelSearchPlaceholder")}
+              value={modelSearch}
+              onChange={(e) => setModelSearch(e.target.value)}
+              allowClear
+              size="small"
+              className="max-w-sm"
+            />
+          </div>
           <ResponsiveTable
             columns={columns}
-            dataSource={models}
+            dataSource={filteredModels}
             rowKey="id"
             loading={modelsLoading}
             pagination={{ pageSize: 20, showTotal: (total) => t("common:pagination", { count: total }) }}

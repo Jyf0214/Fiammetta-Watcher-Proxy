@@ -117,8 +117,9 @@ export function ModelsPanel({
             >
               {model.modelId}
             </button>
-            {/* hover 操作内联在名称后（对照 ModelItem Actions）；触屏无 hover，移动端常显 */}
-            <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+            {/* hover 操作内联在名称后（对照 ModelItem Actions）；触屏无 hover，移动端常显；
+                桌面隐藏时同时禁用指针，避免透明按钮仍可点击误删 */}
+            <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:pointer-events-none lg:group-hover:pointer-events-auto transition-opacity">
               <Popconfirm
                 title={t("deleteModelConfirm")}
                 onConfirm={() => onDeleteModel(model.modelId)}

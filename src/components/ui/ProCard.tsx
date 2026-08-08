@@ -27,7 +27,7 @@ export const ProCard = memo<ProCardProps>(({
       className={cn(
         'bg-white dark:bg-zinc-900 rounded-xl transition-all duration-300',
         bordered && 'border border-zinc-200 dark:border-zinc-700',
-        hoverable && 'hover:border-zinc-300 hover:shadow-md',
+        hoverable && 'hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-md',
         className,
       )}
     >

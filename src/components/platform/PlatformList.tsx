@@ -93,11 +93,11 @@ function PlatformRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors",
-        // 选中态用蓝色指示条 + 蓝调底色，与 hover 拉开档位
+        "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
+        // 选中态用蓝色指示条 + 蓝调底色，与 hover 拉开档位；border-l-2 常驻避免选中行内容偏移 2px
         active
-          ? "bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500 dark:border-blue-400"
-          : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+          ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-400"
+          : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       )}
     >
       <BrandAvatar name={platform.name} type={platform.type} size="sm" />
@@ -257,21 +257,26 @@ export function PlatformList({
             </div>
           ) : (
             <>
-              {/* “全部”行（对照 ProviderMenu 的 All 项）：点击回到列表页全量视图 */}
+              {/* “全部”行（对照 ProviderMenu 的 All 项）：点击回到列表页全量视图；选中态与平台行统一蓝色方案 */}
               <button
                 type="button"
                 onClick={() => router.push("/admin/platforms")}
                 className={cn(
-                  "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors",
+                  "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
                   !activeId
-                    ? "bg-zinc-100 dark:bg-zinc-800"
-                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                    ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-400"
+                    : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 )}
               >
                 <span className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
                   <WalletCards size={16} strokeWidth={1.5} />
                 </span>
-                <span className="flex-1 min-w-0 text-sm text-zinc-800 dark:text-zinc-200 truncate">
+                <span className={cn(
+                  "flex-1 min-w-0 text-sm truncate",
+                  !activeId
+                    ? "text-blue-700 dark:text-blue-300 font-medium"
+                    : "text-zinc-800 dark:text-zinc-200"
+                )}>
                   {t("groupAll")}
                 </span>
               </button>
