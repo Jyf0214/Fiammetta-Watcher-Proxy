@@ -7,6 +7,8 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
+// type-only 导入：编译期擦除，不影响 Pages/Worker 运行时
+import type * as NodeDns from "node:dns";
 import { isSafeUpstreamUrl, isPrivateIp } from "./ssrf";
 
 // ==================== SSRF 防护 ====================
@@ -20,6 +22,8 @@ import { isSafeUpstreamUrl, isPrivateIp } from "./ssrf";
  * 大部分 DNS Rebinding 场景（解析与连接间仍有 TOCTOU 窗口，属已知限制）。
  * IP 字面量直接跳过第二层：node:dns 不解析字面量（返回 ENOTFOUND），
  * 且第一层已覆盖全部内网段。
+ * fail-closed：node:dns 不可用（无 nodejs_compat 的 workerd / 降级运行时）时
+ * 拒绝域名型 URL，绝不静默放行——SSRF 防护缺失时宁可功能不可用。
  */
 export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
   const first = isSafeUpstreamUrl(urlStr);
@@ -33,27 +37,29 @@ export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason
   }
 
   // 第二层：DNS 解析后 IP 检查（防 DNS Rebinding / AAAA-only 内网域名）
-  // node:dns 不可用（Cloudflare Pages Functions）时降级为 hostname 黑名单防护；
-  // 域名无法解析时 fail-closed（拒绝），不静默放行
+  let dnsMod: typeof NodeDns;
   try {
-    const dnsMod = (await import("node:dns")) as Record<string, any>;
-    const promises = dnsMod.default?.promises ?? dnsMod.promises;
-    if (promises?.resolve4) {
-      const [v4, v6] = await Promise.all([
-        promises.resolve4(hostname).catch(() => [] as string[]),
-        promises.resolve6(hostname).catch(() => [] as string[]),
-      ]);
-      if (v4.length === 0 && v6.length === 0) {
-        return { safe: false, reason: `域名 ${hostname} 无法解析` };
-      }
-      for (const addr of [...v4, ...v6]) {
-        if (isPrivateIp(addr)) {
-          return { safe: false, reason: `域名 ${hostname} 解析到内网地址 ${addr}` };
-        }
-      }
-    }
+    dnsMod = await import("node:dns");
   } catch {
-    // node:dns 不可用（Cloudflare Pages Functions 环境）— 降级为 hostname 黑名单防护
+    return { safe: false, reason: "DNS 解析能力不可用，拒绝域名型 URL" };
+  }
+  // ESM interop：CJS 形态（Node）走 dnsMod.promises，ESM 包装形态（workerd）走 default.promises
+  const promises = (dnsMod as { default?: typeof NodeDns }).default?.promises ?? dnsMod.promises;
+  if (!promises?.resolve4 || !promises?.resolve6) {
+    return { safe: false, reason: "DNS 解析能力不可用，拒绝域名型 URL" };
+  }
+  const [v4, v6] = await Promise.all([
+    promises.resolve4(hostname).catch(() => []),
+    promises.resolve6(hostname).catch(() => []),
+  ]);
+  // 域名无法解析时 fail-closed（拒绝），不静默放行
+  if (v4.length === 0 && v6.length === 0) {
+    return { safe: false, reason: `域名 ${hostname} 无法解析` };
+  }
+  for (const addr of [...v4, ...v6]) {
+    if (isPrivateIp(addr)) {
+      return { safe: false, reason: `域名 ${hostname} 解析到内网地址 ${addr}` };
+    }
   }
 
   return { safe: true };

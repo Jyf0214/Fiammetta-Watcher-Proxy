@@ -11,6 +11,11 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 | `ADMIN_USERNAME` | 管理后台登录用户名 | 是 | 无 |
 | `ADMIN_PASSWORD` | 管理后台登录密码 | 是 | 无 |
 | `JWT_SECRET` | 登录签名密钥，至少 32 字符 | 是 | 无（Cloudflare CI 自动生成，其他平台需手动设置） |
+| `TRUSTED_PROXY_IPS` | 可信反向代理/网关 IP 列表（逗号分隔，**仅精确 IP，含 IPv6，不支持 CIDR/通配符**）。**部署在 CDN 或反向代理之后时必须配置**：登录限流依赖它识别真实客户端 IP——仅当 TCP 对端在此列表内时才采信 `X-Forwarded-For`（从右向左取第一个非可信条目），否则一律按对端地址计，防止伪造 XFF 绕过限流。**未配置时**：直连部署按客户端地址计；CDN/反代回源部署按网关节点地址计，所有用户共享同一限流桶——攻击者连续 5 次失败即可让全站登录锁定 30 分钟 | 否 | 空（直连部署） |
+
+::: tip
+部署在无 TCP 对端概念的边缘运行时（如 Cloudflare Pages/Workers）时无需配置 `TRUSTED_PROXY_IPS` —— 自动采信边缘注入的 `CF-Connecting-IP`；有 TCP 对端的部署（Node 直连 / 自建反代 / CDN 回源）按上表配置
+:::
 
 ::: warning
 `DB_TYPE` 必须与实际数据库一致：`tidb` 配 MySQL 协议连接串，`mariadb` 配 `mariadb://` 连接串，`pg` 配 PostgreSQL 协议连接串

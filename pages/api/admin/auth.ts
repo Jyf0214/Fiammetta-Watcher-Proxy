@@ -16,41 +16,10 @@ import { getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
 
 const COOKIE_NAME = "admin_token";
 
-// ==================== 速率限制（KV 持久化滑动窗口） ====================
+// ==================== 速率限制（数据库滑动窗口，先写后查） ====================
 
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 30 * 60 * 1000;
-const KV_KEY_PREFIX = "login:fail:";
-
-/**
- * KV 存储的失败记录结构
- * failures: 每次失败的时间戳（毫秒），用于滑动窗口
- * 每次失败追加新时间戳，检查时过滤掉超过 30 分钟的旧记录
- */
-interface KVFails { failures: number[]; }
-
-function kvKey(ip: string): string { return `${KV_KEY_PREFIX}${ip}`; }
-
-/** 从 KV 读取失败记录，自动过滤过期 */
-async function getRecentFails(kv: KVNamespace, ip: string): Promise<number[]> {
-  const raw = await kv.get(kvKey(ip));
-  if (!raw) return [];
-  const data = JSON.parse(raw) as KVFails;
-  const now = Date.now();
-  return (data.failures || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
-}
-
-/** 写入失败记录到 KV */
-async function saveFails(kv: KVNamespace, ip: string, failures: number[]): Promise<void> {
-  if (failures.length === 0) {
-    await kv.delete(kvKey(ip));
-  } else {
-    // KV TTL 设为窗口时间，到期自动清除
-    await kv.put(kvKey(ip), JSON.stringify({ failures }), {
-      expirationTtl: Math.ceil(LOGIN_WINDOW_MS / 1000) + 60,
-    });
-  }
-}
 
 // ==================== 工具函数 ====================
 
@@ -76,17 +45,94 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-function getClientIp(req: NextApiRequest): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const str = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return str?.split(",")[0]?.trim() || (req.headers["x-real-ip"] as string) || "unknown";
+/** 归一化 IP：剥离 IPv6 方括号，IPv4-mapped（::ffff:a.b.c.d）还原为点分十进制 */
+function normalizeIp(ip: string): string {
+  const t = ip.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return t.startsWith("::ffff:") && t.includes(".") ? t.slice(7) : t;
+}
+
+function firstHeaderValue(h: string | string[] | undefined): string | undefined {
+  if (!h) return undefined;
+  const v = Array.isArray(h) ? h[0] : h;
+  return v.trim() || undefined;
 }
 
 /**
- * 非 KV 平台（EdgeOne/Vercel/纯 Node）的登录限流兜底。
+ * 解析真实客户端 IP（可信代理链）。
  *
- * 采用"先写后查"：每次尝试先插入一条 login_failed 占位记录，再统计
- * 最近 30 分钟的失败数。并发请求各自插入后再计数，读取到的计数必然
+ * 优先级：
+ * 1. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
+ *    为 undefined，如 Cloudflare Pages/Workers）— 前置头由边缘强制注入且客户端
+ *    无法伪造，采信 CF-Connecting-IP；
+ * 2. 直连（socket 对端不在 TRUSTED_PROXY_IPS 内）— X-Forwarded-For /
+ *    CF-Connecting-IP 等前置头完全不可信（攻击者可任意伪造），直接使用 TCP
+ *    对端地址（攻击者无法伪造 socket 地址）；
+ * 3. 经可信代理（socket 对端在 TRUSTED_PROXY_IPS 内）— 从右向左跳过可信代理，
+ *    取第一个不可信条目作为真实客户端；
+ * 4. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
+ *
+ * 返回 null 仅发生在极端环境（无 CF 头且无 socket 地址）；调用方此时应跳过
+ * 限流（fail-open），禁止把不同来源归入同一个共享桶——否则攻击者可预填共享
+ * 桶制造全平台登录 DoS（历史漏洞：所有来源统一回退为 "unknown"）。
+ */
+export function getClientIp(req: NextApiRequest): string | null {
+  const socketIp = normalizeIp(req.socket?.remoteAddress ?? "");
+
+  const trustedProxies = (process.env.TRUSTED_PROXY_IPS ?? "")
+    .split(",")
+    .map((s) => normalizeIp(s))
+    .filter(Boolean);
+
+  // 边缘运行时（无 TCP 对端概念）：采信边缘注入的 CF-Connecting-IP
+  if (!socketIp) {
+    const cfIp = firstHeaderValue(req.headers["cf-connecting-ip"]);
+    return cfIp ? normalizeIp(cfIp) : null;
+  }
+
+  if (!trustedProxies.includes(socketIp)) return socketIp;
+
+  // socket 对端是可信代理：XFF 链从右向左取第一个非可信代理的条目
+  const xff = firstHeaderValue(req.headers["x-forwarded-for"]);
+  if (xff) {
+    const chain = xff.split(",").map(normalizeIp).filter(Boolean);
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (!trustedProxies.includes(chain[i])) return chain[i];
+    }
+  }
+  const realIp = firstHeaderValue(req.headers["x-real-ip"]);
+  return realIp ? normalizeIp(realIp) : null;
+}
+
+/** 审计日志详情（与各调用点写入的结构一致） */
+interface AuditDetail {
+  username: string;
+  reason?: string;
+}
+
+/** 写入审计日志（写入失败向上抛出，由调用方决定处理方式） */
+async function writeAuditLog(
+  action: "login_failed" | "login_success" | "logout",
+  detail: AuditDetail,
+  ip: string | null,
+  adminId: string | null,
+): Promise<void> {
+  const db = await createDb();
+  await db.auditLogs.create({
+    data: {
+      id: crypto.randomUUID(),
+      adminId,
+      action,
+      detail: JSON.stringify(detail),
+      // 审计中的 unknown 仅作展示，不参与限流计数（限流键为 null 时跳过）
+      ip: ip ?? "unknown",
+      createdAt: Math.floor(Date.now() / 1000),
+    },
+  });
+}
+
+/**
+ * 登录限流"先写后查"：每次失败先插入一条 login_failed 占位记录（即审计日志），
+ * 再统计最近 30 分钟的失败数。并发请求各自插入后再计数，读取到的计数必然
  * 包含本次及之前的尝试——消除了"先查后写"下 count 与 insert 之间的
  * TOCTOU 竞态窗口（此前并发突刺可让全部请求同时读到低计数而绕过上限）。
  * 计数超过上限（第 6 条起）即拒绝；登录成功时调用方会清除该 IP 的
@@ -102,19 +148,10 @@ async function registerDbLoginAttempt(
   reason = "登录尝试"
 ): Promise<{ limited: boolean; resetAt?: string }> {
   try {
-    const db = await createDb();
     const now = Math.floor(Date.now() / 1000);
-    // 先写入本次尝试的占位记录
-    await db.auditLogs.create({
-      data: {
-        id: crypto.randomUUID(),
-        adminId: "unknown",
-        action: "login_failed",
-        detail: JSON.stringify({ username, reason }),
-        ip,
-        createdAt: now,
-      },
-    });
+    // 先写入本次尝试的占位记录（即审计日志）；未登录无管理员身份，adminId 置 null
+    await writeAuditLog("login_failed", { username, reason }, ip, null);
+    const db = await createDb();
     const since = now - LOGIN_WINDOW_MS / 1000;
     const fails = await db.auditLogs.count({
       where: { action: "login_failed", ip, createdAt: { gte: since } },
@@ -202,17 +239,8 @@ async function getAdmin(req: NextApiRequest, env: { JWT_SECRET?: string }): Prom
 // ==================== Handler ====================
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  let kv: KVNamespace | undefined;
-  try {
-    // 动态加载 CF 运行时 API：仅 Cloudflare 平台启用 KV 登录限流，
-    // 非 CF 平台（EdgeOne/Vercel/纯 Node）降级为不限流，避免运行时依赖缺失
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const { env } = getCloudflareContext();
-    kv = env.KV;
-  } catch { /* 本地开发或非 CF 环境下 getCloudflareContext 可能抛异常 */ }
-
   switch (req.method) {
-    case "POST": return handleLogin(req, res, kv);
+    case "POST": return handleLogin(req, res);
     case "DELETE": return handleLogout(req, res);
     case "GET": return handleGetAdmin(req, res);
     default:
@@ -223,7 +251,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 // ==================== POST — 管理员登录 ====================
 
-async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNamespace) {
+async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
@@ -241,23 +269,10 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
   try {
     const clientIp = getClientIp(req);
 
-    // KV 持久化限流检查（CF 平台）
-    if (kv) {
-      const recentFails = await getRecentFails(kv, clientIp);
-      if (recentFails.length >= LOGIN_MAX_ATTEMPTS) {
-        const lastFail = recentFails[recentFails.length - 1];
-        const resetAt = new Date(lastFail + LOGIN_WINDOW_MS).toISOString();
-        return res.status(429).json({
-          success: false,
-          error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
-          resetAt,
-        });
-      }
-    } else {
-      // 非 CF 平台：数据库兜底限流（audit_logs 失败计数）
-      // 只读预检：已超限的 IP 直接拒绝（不写入，避免超限后仍持续写库）；
-      // 权威判定在失败分支的"先写后查"（registerDbLoginAttempt），并发突刺
-      // 即使穿过预检也会在写后计数处被统一拦截
+    // 数据库限流预检：已超限的 IP 直接拒绝（不写入，避免超限后仍持续写库）；
+    // 权威判定在失败分支的"先写后查"（registerDbLoginAttempt），并发突刺
+    // 即使穿过预检也会在写后计数处被统一拦截
+    if (clientIp) {
       const preCheck = await readDbLoginFailInfo(clientIp);
       if (preCheck.count >= LOGIN_MAX_ATTEMPTS) {
         return res.status(429).json({
@@ -278,26 +293,9 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
     const usernameMatch = timingSafeStringEqual(username, env.ADMIN_USERNAME);
     const passwordMatch = timingSafeStringEqual(password, env.ADMIN_PASSWORD);
     if (!usernameMatch || !passwordMatch) {
-      // 密码错误 → KV 记录失败 + 审计日志
-      if (kv) {
-        const fails = await getRecentFails(kv, clientIp);
-        fails.push(Date.now());
-        await saveFails(kv, clientIp, fails);
-        try {
-          const db = await createDb();
-          await db.auditLogs.create({
-            data: {
-              id: crypto.randomUUID(),
-              adminId: "unknown",
-              action: "login_failed",
-              detail: JSON.stringify({ username, reason: "用户名或密码错误" }),
-              ip: clientIp,
-              createdAt: Math.floor(Date.now() / 1000),
-            },
-          });
-        } catch { /* 审计日志写入失败不阻塞主流程 */ }
-      } else {
-        // 非 CF 平台：先写后查（占位记录即审计日志），超限返回 429
+      // 先写后查（占位记录即审计日志），超限返回 429；
+      // IP 不可得（极端环境）时仅写审计、限流放行，不归入共享桶
+      if (clientIp) {
         const dbLimit = await registerDbLoginAttempt(clientIp, username, "用户名或密码错误");
         if (dbLimit.limited) {
           return res.status(429).json({
@@ -306,15 +304,16 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
             resetAt: dbLimit.resetAt,
           });
         }
+      } else {
+        // IP 不可得多为代理配置错误（可信代理未设 XFF/X-Real-IP），打日志避免限流静默失效
+        console.warn("[auth] 无法确定客户端 IP，本次限流跳过（请检查代理配置）");
+        await writeAuditLog("login_failed", { username, reason: "用户名或密码错误" }, null, "unknown").catch(() => {});
       }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
 
-    // 登录成功 → 清除该 IP 全部失败记录 + 审计日志
-    if (kv) {
-      await kv.delete(kvKey(clientIp));
-    } else {
-      // 非 CF 平台：清除该 IP 的 login_failed 审计记录（DB 兜底限流计数归零）
+    // 登录成功 → 清除该 IP 的 login_failed 审计记录（DB 限流计数归零）+ 审计
+    if (clientIp) {
       try {
         const db = await createDb();
         await db.auditLogs.deleteMany({
@@ -322,19 +321,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse, kv?: KVNam
         });
       } catch { /* 清除失败不阻塞主流程，下次登录仍可用 */ }
     }
-    try {
-      const db = await createDb();
-      await db.auditLogs.create({
-        data: {
-          id: crypto.randomUUID(),
-          adminId: "env-admin",
-          action: "login_success",
-          detail: JSON.stringify({ username: env.ADMIN_USERNAME }),
-          ip: clientIp,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      });
-    } catch { /* 审计日志写入失败不阻塞主流程 */ }
+    await writeAuditLog("login_success", { username: env.ADMIN_USERNAME }, clientIp, "env-admin").catch(() => {});
 
     const isProd = env.ENVIRONMENT === "production";
     const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME! }, env);
@@ -363,19 +350,12 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
     clearAuthCookie(res);
 
     if (admin) {
-      try {
-        const db = await createDb();
-        await db.auditLogs.create({
-          data: {
-            id: crypto.randomUUID(),
-            adminId: getAuditAdminId(admin as AuthResult),
-            action: "logout",
-            detail: JSON.stringify({ username: admin.username }),
-            ip: clientIp,
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        });
-      } catch { /* 审计日志写入失败不阻塞主流程 */ }
+      await writeAuditLog(
+        "logout",
+        { username: admin.username },
+        clientIp,
+        getAuditAdminId(admin as AuthResult),
+      ).catch(() => {});
     }
 
     return res.status(200).json({ success: true, message: "已退出登录" });
