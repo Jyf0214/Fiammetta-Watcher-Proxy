@@ -19,7 +19,7 @@ import AdminLayout from "@/components/AdminLayout";
 const UsageChart = dynamic(() => import("@/components/usage/UsageChart"), {
   ssr: false,
   loading: () => (
-    <div className="h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />
+    <div className="h-[220px] sm:h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />
   ),
 });
 
@@ -150,11 +150,11 @@ export default function UsagePage() {
             {t("trendTitle")}
           </h3>
           {trendLoading ? (
-            <div className="h-[320px] flex items-center justify-center">
+            <div className="h-[220px] sm:h-[320px] flex items-center justify-center">
               <GlobalLoading size="small" />
             </div>
           ) : trendError ? (
-            <div className="h-[320px] flex flex-col items-center justify-center gap-2">
+            <div className="h-[220px] sm:h-[320px] flex flex-col items-center justify-center gap-2">
               <AlertTriangle className="text-2xl text-red-400" />
               <p className="text-sm text-red-500 font-medium">
                 {t("dashboard:fetchFailed")}
@@ -173,7 +173,7 @@ export default function UsagePage() {
               </Button>
             </div>
           ) : trendData.length === 0 ? (
-            <div className="h-[320px] flex flex-col items-center justify-center gap-2">
+            <div className="h-[220px] sm:h-[320px] flex flex-col items-center justify-center gap-2">
               <BarChart3 className="text-3xl text-zinc-300" />
               <p className="text-sm text-zinc-400">
                 {t("common:noData")}

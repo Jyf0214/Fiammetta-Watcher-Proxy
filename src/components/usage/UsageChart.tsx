@@ -96,7 +96,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
   }, [chartData]);
 
   return (
-    <div className="h-[320px]">
+    <div className="h-[220px] sm:h-[320px]">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={chartData}
