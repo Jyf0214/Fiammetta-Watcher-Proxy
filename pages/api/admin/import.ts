@@ -35,7 +35,6 @@ interface FullImportResult {
   details: {
     platforms?: ImportResult;
     modelMaps?: ImportResult;
-    plans?: ImportResult;
     apiKeys?: ImportResult;
     configs?: ImportResult;
     auditLogs?: ImportResult;
@@ -57,6 +56,20 @@ export const config = {
 function generateId(): string {
   return crypto.randomUUID();
 }
+
+/** 单次导入各类型数量上限（避免超大导入导致 Cloudflare Workers CPU 超时 CF1102） */
+const MAX_PER_TYPE: Record<string, number> = {
+  platforms: 500,
+  modelMaps: 1000,
+  apiKeys: 5000,
+  configs: 200,
+  auditLogs: 10000,
+  systemEvents: 5000,
+  requestLogs: 10000,
+};
+
+/** 单次导入总记录数上限 */
+const MAX_TOTAL_RECORDS = 50000;
 
 export default async function handler(
   req: NextApiRequest,
@@ -95,11 +108,24 @@ export default async function handler(
     }
 
     // 数据量上限检查：避免超大导入导致 Cloudflare Workers 超时（CF1102）
-    const requestLogCount = Array.isArray(body.requestLogs) ? body.requestLogs.length : 0;
-    if (requestLogCount > 10000) {
+    let totalRecordsCount = 0;
+    for (const [type, max] of Object.entries(MAX_PER_TYPE)) {
+      const arr = body[type];
+      if (!Array.isArray(arr)) continue;
+      const count = arr.length;
+      totalRecordsCount += count;
+      if (count > max) {
+        res.status(400).json({
+          success: false,
+          error: `${type} 数量 (${count}) 超过单次导入上限 (${max})，请分批导入`,
+        });
+        return;
+      }
+    }
+    if (totalRecordsCount > MAX_TOTAL_RECORDS) {
       res.status(400).json({
         success: false,
-        error: `请求日志数量 (${requestLogCount}) 超过上限 (10000)，请分批导入`,
+        error: `总记录数 (${totalRecordsCount}) 超过单次导入上限 (${MAX_TOTAL_RECORDS})，请分批导入`,
       });
       return;
     }
@@ -150,7 +176,6 @@ export default async function handler(
     }> = [
       { key: "platforms", data: body.platforms, fn: importPlatforms },
       { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
-      { key: "plans", data: body.plans, fn: importPlans },
       { key: "configs", data: body.configs, fn: importConfigs },
       { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
       { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
@@ -158,11 +183,8 @@ export default async function handler(
       { key: "requestLogs", data: body.requestLogs, fn: importRequestLogs },
     ];
 
-    // 计算总记录数
-    const totalRecords = steps.reduce((sum, s) => {
-      const arr = s.data;
-      return sum + (Array.isArray(arr) ? arr.length : 0);
-    }, 0);
+    // 总记录数（与上限检查一致：仅统计数组类型的记录）
+    const totalRecords = totalRecordsCount;
 
     const result: FullImportResult = {
       success: true,
@@ -266,6 +288,94 @@ function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
   return s.length > maxLen ? s.slice(0, maxLen) : s;
 }
 
+/** 合理时间戳下限：2024-01-01T00:00:00Z（秒）——早于项目存在的导入时间视为异常数据 */
+const MIN_VALID_TS = 1704067200;
+
+/** 枚举白名单：与运行期代码实际读取的值一致 */
+const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom"]);
+const VALID_KEY_STATUSES = new Set(["active", "disabled"]);
+const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
+const VALID_EVENT_LEVELS = new Set(["info", "warn", "error"]);
+
+/** Prisma Int 字段为 32 位有符号（TiDB/MySQL INT），超出会整批失败 */
+const MAX_INT_VALUE = 2147483647;
+
+/** Float 字段安全上界：双精度可精确表示范围内，避免科学计数法溢出 */
+const MAX_FLOAT_VALUE = 1e15;
+
+/** 非负整数（含 0）；null/undefined/空串/负数/NaN/超界/非数字返回 null */
+export function sanitizeNonNegativeInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_INT_VALUE ? Math.floor(n) : null;
+}
+
+/** 非负有限数值（Float 字段，如 quota/cost）；超界返回 null */
+export function sanitizeNonNegativeFloat(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_FLOAT_VALUE ? n : null;
+}
+
+/** 布尔值：仅接受 true/false，其余（含字符串 "false"）回退默认值 */
+export function sanitizeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+/** 枚举白名单：命中返回原值，否则回退默认值 */
+export function sanitizeEnum(
+  value: unknown,
+  valid: Set<string>,
+  fallback: string
+): string {
+  return typeof value === "string" && valid.has(value) ? value : fallback;
+}
+
+/** 字符串字段：非字符串返回空串；超长截断 */
+export function sanitizeString(value: unknown, maxLen = VARCHAR_MAX): string {
+  if (typeof value !== "string") return "";
+  return value.length > maxLen ? value.slice(0, maxLen) : value;
+}
+
+/** 可空字符串字段：非字符串或空串返回 null；超长截断 */
+export function sanitizeNullableString(
+  value: unknown,
+  maxLen = VARCHAR_MAX
+): string | null {
+  if (typeof value !== "string" || value === "") return null;
+  return value.length > maxLen ? value.slice(0, maxLen) : value;
+}
+
+/** HTTP 状态码：0~599 的非负整数，其余（负数/超范围/非数字）返回 0 */
+export function sanitizeHttpStatus(value: unknown): number {
+  const n = sanitizeNonNegativeInt(value);
+  return n !== null && n <= 599 ? n : 0;
+}
+
+/** 过期时间：ISO 字符串或秒级时间戳，合理范围（2024-01-01 ~ 10 年后）保留，非法返回 null */
+export function sanitizeExpiresAt(value: unknown): number | null {
+  const maxValid = Math.floor(Date.now() / 1000) + 10 * 365 * 86400;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value >= MIN_VALID_TS && value <= maxValid ? Math.floor(value) : null;
+  }
+  if (typeof value === "string") {
+    const ts = Math.floor(new Date(value).getTime() / 1000);
+    if (!isNaN(ts) && ts >= MIN_VALID_TS && ts <= maxValid) return ts;
+  }
+  return null;
+}
+
+/** forwardHeaders：仅接受合法 JSON 字符串数组，否则回退 "[]"（防脏数据影响头透传） */
+function sanitizeForwardHeaders(value: unknown): string {
+  if (typeof value !== "string" || value === "") return "[]";
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? value : "[]";
+  } catch {
+    return "[]";
+  }
+}
+
 /**
  * 规范化平台密钥为命名对象数组 JSON（兼容对象/字符串数组格式）
  *
@@ -336,14 +446,20 @@ async function importPlatforms(
   // 预加载已有平台名称，用于去重
   const existingNames = await db.platforms.findMany({ select: { name: true } });
   const existingNameSet = new Set(existingNames.map((r) => r.name));
+  // 批内去重：同一次导入中的重复名称只保留第一条
+  const batchSeenNames = new Set<string>();
 
   // SSRF 防护（含 DNS Rebinding 检测）
   const validPlatforms: Array<Record<string, unknown>> = [];
   for (const p of platforms) {
-    const name = p.name as string;
-    const baseUrl = p.baseUrl as string;
+    const name = sanitizeString(p.name);
     if (!name) {
       skipReasons["缺少必要字段 (name)"] = (skipReasons["缺少必要字段 (name)"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    if (existingNameSet.has(name) || batchSeenNames.has(name)) {
+      skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
       skipped++;
       continue;
     }
@@ -354,23 +470,21 @@ async function importPlatforms(
       skipped++;
       continue;
     }
-    if (existingNameSet.has(name)) {
-      skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
+    const baseUrl = sanitizeString(p.baseUrl);
+    if (!baseUrl) {
+      skipReasons["缺少 baseUrl 字段"] = (skipReasons["缺少 baseUrl 字段"] || 0) + 1;
       skipped++;
       continue;
     }
-    if (baseUrl) {
-      const urlCheck = await isSafeUrl(baseUrl);
-      if (!urlCheck.safe) {
-        skipReasons["URL 指向内网地址"] = (skipReasons["URL 指向内网地址"] || 0) + 1;
-        skipped++;
-        continue;
-      }
+    const urlCheck = await isSafeUrl(baseUrl);
+    if (!urlCheck.safe) {
+      skipReasons["URL 指向内网地址"] = (skipReasons["URL 指向内网地址"] || 0) + 1;
+      skipped++;
+      continue;
     }
-    validPlatforms.push({ ...p, _normalizedApiKeys: normalizedKeys });
+    batchSeenNames.add(name);
+    validPlatforms.push({ ...p, _name: name, _baseUrl: baseUrl, _normalizedApiKeys: normalizedKeys });
   }
-
-  skipped += platforms.length - validPlatforms.length;
 
   if (validPlatforms.length === 0) {
     return { imported, skipped, skipReasons };
@@ -382,17 +496,17 @@ async function importPlatforms(
     const batch = validPlatforms.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((p) => ({
       id: generateId(),
-      name: p.name as string,
-      baseUrl: p.baseUrl as string,
+      name: p._name as string,
+      baseUrl: p._baseUrl as string,
       // apiKeys 列在各方言均为长文本（LongText/Text），不截断，避免切断 JSON 导致密钥失效
       apiKeys: p._normalizedApiKeys as string,
-      type: (p.type as string) || "openai",
-      enabled: p.enabled !== false,
-      priority: (p.priority as number) ?? 0,
-      weight: (p.weight as number) ?? 1,
-      rpmLimit: (p.rpmLimit as number) ?? null,
-      tpmLimit: (p.tpmLimit as number) ?? null,
-      forwardHeaders: (p.forwardHeaders as string) || "[]",
+      type: sanitizeEnum(p.type, VALID_PLATFORM_TYPES, "openai"),
+      enabled: sanitizeBoolean(p.enabled, true),
+      priority: sanitizeNonNegativeInt(p.priority) ?? 0,
+      weight: sanitizeNonNegativeInt(p.weight) ?? 1,
+      rpmLimit: sanitizeNonNegativeInt(p.rpmLimit),
+      tpmLimit: sanitizeNonNegativeInt(p.tpmLimit),
+      forwardHeaders: sanitizeForwardHeaders(p.forwardHeaders),
       status: "healthy",
       failCount: 0,
       createdAt: now,
@@ -430,21 +544,29 @@ async function importModelMaps(
   // 预加载已有 alias，用于去重
   const existingAliases = await db.modelMappings.findMany({ select: { alias: true } });
   const existingAliasSet = new Set(existingAliases.map((r) => r.alias));
+  // 批内去重：同一次导入中的重复 alias 只保留第一条
+  const batchSeenAliases = new Set<string>();
 
-  const validMaps = modelMaps.filter((m) => {
-    const alias = m.alias as string;
+  // 外键校验：platformId 不存在时置 null，避免悬空引用导致路由 500（此模型不存在）
+  const existingPlatforms = await db.platforms.findMany({ select: { id: true } });
+  const validPlatformIds = new Set(existingPlatforms.map((r) => r.id));
+
+  const validMaps: Array<Record<string, unknown>> = [];
+  for (const m of modelMaps) {
+    const alias = sanitizeString(m.alias);
     if (!alias) {
       skipReasons["缺少 alias 字段"] = (skipReasons["缺少 alias 字段"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    if (existingAliasSet.has(alias)) {
+    if (existingAliasSet.has(alias) || batchSeenAliases.has(alias)) {
       skipReasons["alias 已存在"] = (skipReasons["alias 已存在"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    return true;
-  });
-
-  skipped += modelMaps.length - validMaps.length;
+    batchSeenAliases.add(alias);
+    validMaps.push(m);
+  }
 
   if (validMaps.length === 0) {
     return { imported, skipped, skipReasons };
@@ -453,14 +575,17 @@ async function importModelMaps(
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < validMaps.length; i += BATCH_SIZE) {
     const batch = validMaps.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((m) => ({
-      id: generateId(),
-      alias: m.alias as string,
-      targetModel: (m.targetModel as string) || (m.alias as string),
-      platformId: (m.platformId as string) || undefined,
-      createdAt: now,
-      updatedAt: now,
-    }));
+    const batchData = batch.map((m) => {
+      const rawPlatformId = sanitizeNullableString(m.platformId);
+      return {
+        id: generateId(),
+        alias: sanitizeString(m.alias),
+        targetModel: sanitizeString(m.targetModel) || sanitizeString(m.alias),
+        platformId: rawPlatformId && validPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
 
     try {
       const result = await db.modelMappings.createMany({ data: batchData });
@@ -468,73 +593,6 @@ async function importModelMaps(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入模型映射失败:", errMsg);
-      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
-      skipped += batch.length;
-    }
-  }
-
-  return { imported, skipped, skipReasons };
-}
-
-/**
- * 导入套餐模板
- *
- * 按名称去重，使用 createMany 批量执行
- */
-async function importPlans(
-  db: DbClient,
-  plans: Array<Record<string, unknown>>
-): Promise<ImportResult> {
-  let imported = 0;
-  let skipped = 0;
-  const skipReasons: Record<string, number> = {};
-
-  // 预加载已有名称，用于去重
-  const existingNames = await db.plans.findMany({ select: { name: true } });
-  const existingNameSet = new Set(existingNames.map((r) => r.name));
-
-  const validPlans = plans.filter((p) => {
-    const name = p.name as string;
-    if (!name) {
-      skipReasons["缺少 name 字段"] = (skipReasons["缺少 name 字段"] || 0) + 1;
-      return false;
-    }
-    if (existingNameSet.has(name)) {
-      skipReasons["名称已存在"] = (skipReasons["名称已存在"] || 0) + 1;
-      return false;
-    }
-    return true;
-  });
-
-  skipped += plans.length - validPlans.length;
-
-  if (validPlans.length === 0) {
-    return { imported, skipped, skipReasons };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  for (let i = 0; i < validPlans.length; i += BATCH_SIZE) {
-    const batch = validPlans.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((p) => ({
-      id: generateId(),
-      name: p.name as string,
-      tokenQuota: (p.tokenQuota as number) ?? 0,
-      callLimit: (p.callLimit as number) ?? null,
-      rpmLimit: (p.rpmLimit as number) ?? null,
-      tpmLimit: (p.tpmLimit as number) ?? null,
-      resetPeriod: (p.resetPeriod as string) || "monthly",
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-    try {
-      const result = await db.plans.createMany({ data: batchData });
-      imported += result.count;
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[import] 批量导入套餐失败:", errMsg);
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
       skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
@@ -560,55 +618,65 @@ async function importApiKeys(
   // 预加载已有 key 集合，用于去重
   const existingKeys = await db.apiKeys.findMany({ select: { key: true } });
   const existingKeySet = new Set(existingKeys.map((r) => r.key));
+  // 批内去重：同一次导入中的重复 key 只保留第一条（避免唯一约束失败毒死整批）
+  const batchSeenKeys = new Set<string>();
 
   // 逐条分析跳过原因
-  const validKeys = apiKeysData.filter((k) => {
-    const key = k.key as string;
-    if (!key) {
+  const validKeys: Array<Record<string, unknown>> = [];
+  for (const k of apiKeysData) {
+    const rawKey = k.key;
+    if (typeof rawKey !== "string" || rawKey.trim() === "") {
       skipReasons["缺少 key 字段"] = (skipReasons["缺少 key 字段"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    if (key.includes("***")) {
+    if (rawKey.includes("***")) {
       skipReasons["Key 已脱敏"] = (skipReasons["Key 已脱敏"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    if (existingKeySet.has(key)) {
+    // key 为唯一约束列（TiDB VARCHAR(191)），截断会使密钥永久失效且无提示，超长直接跳过
+    if (rawKey.length > VARCHAR_MAX) {
+      skipReasons["Key 超长"] = (skipReasons["Key 超长"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    if (existingKeySet.has(rawKey) || batchSeenKeys.has(rawKey)) {
       skipReasons["Key 已存在"] = (skipReasons["Key 已存在"] || 0) + 1;
-      return false;
+      skipped++;
+      continue;
     }
-    return true;
-  });
-
-  skipped += apiKeysData.length - validKeys.length;
+    batchSeenKeys.add(rawKey);
+    validKeys.push(k);
+  }
 
   if (validKeys.length === 0) {
-    return { imported, skipped };
+    return { imported, skipped, skipReasons };
   }
 
   // 批量插入
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < validKeys.length; i += BATCH_SIZE) {
     const batch = validKeys.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((k) => ({
-      id: generateId(),
-      key: k.key as string,
-      name: (k.name as string) || "导入的 Key",
-      planId: (k.planId as string) || null,
-      quota: k.quota ? Number(k.quota) : null,
-      usedTokens: Number(k.usedTokens) || 0,
-      rpmLimit: (k.rpmLimit as number) ?? null,
-      tpmLimit: (k.tpmLimit as number) ?? null,
-      callLimit: (k.callLimit as number) ?? null,
-      callUsed: 0,
-      tokenLimit: (k.tokenLimit as number) ?? null,
-      resetPeriod: (k.resetPeriod as string) || "monthly",
-      status: (k.status as string) || "active",
-      expiresAt: k.expiresAt
-        ? Math.floor(new Date(k.expiresAt as string).getTime() / 1000)
-        : null,
-      createdAt: now,
-      updatedAt: now,
-    }));
+    const batchData = batch.map((k) => {
+      return {
+        id: generateId(),
+        key: k.key as string,
+        name: sanitizeString(k.name) || "导入的 Key",
+        quota: sanitizeNonNegativeFloat(k.quota),
+        usedTokens: sanitizeNonNegativeInt(k.usedTokens) ?? 0,
+        rpmLimit: sanitizeNonNegativeInt(k.rpmLimit),
+        tpmLimit: sanitizeNonNegativeInt(k.tpmLimit),
+        callLimit: sanitizeNonNegativeInt(k.callLimit),
+        callUsed: 0,
+        tokenLimit: sanitizeNonNegativeInt(k.tokenLimit),
+        resetPeriod: sanitizeEnum(k.resetPeriod, VALID_RESET_PERIODS, "monthly"),
+        status: sanitizeEnum(k.status, VALID_KEY_STATUSES, "active"),
+        expiresAt: sanitizeExpiresAt(k.expiresAt),
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
 
     try {
       const result = await db.apiKeys.createMany({ data: batchData });
@@ -629,8 +697,12 @@ async function importApiKeys(
  * 导入系统配置
  *
  * 按 key 做 upsert（已存在则更新 value，不存在则创建）
- * 跳过敏感配置（admin_reset_password），insert 用 createMany，update 逐条执行
+ * 跳过敏感配置（admin_reset_password）与运行期关键配置（system:auto_model_id），
+ * 仅允许 system:* 前缀的键（与 /api/admin/config 的写入约束一致，其他键视为异常数据）
  */
+const SKIP_IMPORT_CONFIG_KEYS = new Set(["admin_reset_password", "system:auto_model_id"]);
+const IMPORT_CONFIG_PREFIX = "system:";
+
 async function importConfigs(
   db: DbClient,
   configs: Array<Record<string, unknown>>
@@ -648,17 +720,30 @@ async function importConfigs(
   const toUpdate: Array<Record<string, unknown>> = [];
 
   for (const c of configs) {
-    const key = c.key as string;
-    const value = c.value as string;
+    const key = typeof c.key === "string" ? c.key : "";
+    const value = c.value;
 
-    if (!key || !value) {
+    if (!key || typeof value !== "string" || value === "") {
       skipReasons["缺少必要字段 (key/value)"] = (skipReasons["缺少必要字段 (key/value)"] || 0) + 1;
       skipped++;
       continue;
     }
 
-    if (key === "admin_reset_password") {
-      skipReasons["敏感配置跳过"] = (skipReasons["敏感配置跳过"] || 0) + 1;
+    // configs.key 为唯一约束列（TiDB VARCHAR(191)），超长会毒化整批 createMany
+    if (key.length > VARCHAR_MAX) {
+      skipReasons["配置 key 超长"] = (skipReasons["配置 key 超长"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+
+    if (SKIP_IMPORT_CONFIG_KEYS.has(key)) {
+      skipReasons["敏感/运行期配置跳过"] = (skipReasons["敏感/运行期配置跳过"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+
+    if (!key.startsWith(IMPORT_CONFIG_PREFIX)) {
+      skipReasons["非 system:* 配置跳过"] = (skipReasons["非 system:* 配置跳过"] || 0) + 1;
       skipped++;
       continue;
     }
@@ -683,7 +768,10 @@ async function importConfigs(
       const result = await db.configs.createMany({ data: batchData });
       imported += result.count;
     } catch (err) {
-      console.error("[import] 批量插入配置失败:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量插入配置失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + toInsert.length;
       skipped += toInsert.length;
     }
   }
@@ -709,9 +797,6 @@ async function importConfigs(
 }
 
 // ==================== 导入审计日志 ====================
-
-/** 合理时间戳下限：2024-01-01T00:00:00Z（秒）——早于项目存在的导入时间视为异常数据 */
-const MIN_VALID_TS = 1704067200;
 
 /**
  * 将 ISO 时间字符串或 unix 时间戳转换为 unix 秒
@@ -769,9 +854,9 @@ async function importAuditLogs(
       return {
         id: generateId(),
         adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
-        action: log.action as string,
+        action: truncateStr(log.action),
         detail: truncateStr(log.detail),
-        ip: (log.ip as string) || null,
+        ip: sanitizeNullableString(log.ip, 45),
         createdAt: toUnixSeconds(log.createdAt),
       };
     });
@@ -821,7 +906,7 @@ async function importSystemEvents(
     const batch = validEvents.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((e) => ({
       id: generateId(),
-      level: (e.level as string) || "info",
+      level: sanitizeEnum(e.level, VALID_EVENT_LEVELS, "info"),
       message: truncateStr(e.message),
       detail: truncateStr(e.detail),
       createdAt: toUnixSeconds(e.createdAt),
@@ -847,7 +932,7 @@ async function importSystemEvents(
 /**
  * 导入请求日志
  *
- * 无外键依赖，Promise.all 并发插入（每批50条并行）
+ * 无外键依赖，createMany 分批顺序执行（每批 BATCH_SIZE 条）
  * 导出数据中 duration 字段映射为 latency
  */
 async function importRequestLogs(
@@ -864,14 +949,16 @@ async function importRequestLogs(
   const referencedPlatformIds = new Set<string>();
 
   for (const log of logs) {
-    if (!log.model) {
+    if (!sanitizeString(log.model)) {
       skipReasons["缺少 model 字段"] = (skipReasons["缺少 model 字段"] || 0) + 1;
       skipped++;
       continue;
     }
     validLogs.push(log);
-    if (log.keyId) referencedKeyIds.add(log.keyId as string);
-    if (log.platformId) referencedPlatformIds.add(log.platformId as string);
+    const keyId = sanitizeNullableString(log.keyId);
+    const platformId = sanitizeNullableString(log.platformId);
+    if (keyId) referencedKeyIds.add(keyId);
+    if (platformId) referencedPlatformIds.add(platformId);
   }
 
   // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
@@ -886,29 +973,29 @@ async function importRequestLogs(
     : [];
   const existingPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
 
-  // 构建安全的插入数据：外键不存在时置 null
+  // 构建安全的插入数据：外键不存在时置 null，数值字段钳制为合法范围，字符串截断防超长整批失败
   const buildValues = (log: Record<string, unknown>) => {
-    const rawKeyId = (log.keyId as string) || null;
-    const rawPlatformId = (log.platformId as string) || null;
+    const rawKeyId = sanitizeNullableString(log.keyId);
+    const rawPlatformId = sanitizeNullableString(log.platformId);
     return {
       id: generateId(),
       keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
-      keyName: (log.keyName as string) || null,
+      keyName: sanitizeNullableString(log.keyName),
       platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
-      model: log.model as string,
-      endpoint: (log.endpoint as string) || null,
-      method: (log.method as string) || null,
-      status: (log.status as number) || 0,
-      latency: (log.duration as number) || (log.latency as number) || 0,
-      tokens: (log.tokens as number) || 0,
-      promptTokens: (log.promptTokens as number) || 0,
-      completionTokens: (log.completionTokens as number) || 0,
-      ttft: (log.ttft as number) || 0,
-      cost: (log.cost as number) || 0,
-      isError: Boolean(log.isError),
-      ipAddress: (log.ipAddress as string) || null,
-      userAgent: (log.userAgent as string) || null,
-      errorMessage: (log.errorMessage as string) || null,
+      model: truncateStr(log.model),
+      endpoint: sanitizeNullableString(log.endpoint),
+      method: sanitizeNullableString(log.method, 10),
+      status: sanitizeHttpStatus(log.status),
+      latency: sanitizeNonNegativeInt(log.duration) ?? sanitizeNonNegativeInt(log.latency) ?? 0,
+      tokens: sanitizeNonNegativeInt(log.tokens) ?? 0,
+      promptTokens: sanitizeNonNegativeInt(log.promptTokens) ?? 0,
+      completionTokens: sanitizeNonNegativeInt(log.completionTokens) ?? 0,
+      ttft: sanitizeNonNegativeInt(log.ttft) ?? 0,
+      cost: sanitizeNonNegativeFloat(log.cost) ?? 0,
+      isError: sanitizeBoolean(log.isError, false),
+      ipAddress: sanitizeNullableString(log.ipAddress, 45),
+      userAgent: sanitizeNullableString(log.userAgent),
+      errorMessage: sanitizeNullableString(log.errorMessage),
       createdAt: toUnixSeconds(log.createdAt),
     };
   };

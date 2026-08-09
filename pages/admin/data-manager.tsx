@@ -61,13 +61,81 @@ interface ErrorEvent {
 const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
   platforms: { labelKey: "dmStepPlatforms" },
   modelMaps: { labelKey: "dmStepModelMaps" },
-  plans: { labelKey: "dmStepPlans" },
   configs: { labelKey: "dmStepConfigs" },
   apiKeys: { labelKey: "dmStepApiKeys" },
   auditLogs: { labelKey: "dmStepAuditLogs" },
   systemEvents: { labelKey: "dmStepSystemEvents" },
   requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
 };
+
+// ==================== 导入前预览分析 ====================
+
+interface ImportPreviewType {
+  count: number;
+  issues: number;
+}
+
+interface ImportPreview {
+  total: number;
+  issueTotal: number;
+  types: Record<string, ImportPreviewType>;
+}
+
+/** 各类型必填字段与去重键（与后端 import.ts 校验规则对应的轻量提示） */
+const PREVIEW_RULES: Record<
+  string,
+  { required: string[]; unique?: string; masked?: string }
+> = {
+  platforms: { required: ["name", "baseUrl"], unique: "name" },
+  modelMaps: { required: ["alias"], unique: "alias" },
+  configs: { required: ["key", "value"], unique: "key" },
+  apiKeys: { required: ["key"], unique: "key", masked: "key" },
+  auditLogs: { required: ["action"] },
+  systemEvents: { required: ["message"] },
+  requestLogs: { required: ["model"] },
+};
+
+/** 解析导入文件，统计各类型条数与可疑记录（缺必填字段/重复/脱敏） */
+function analyzeImportData(data: Record<string, unknown>): ImportPreview {
+  const types: Record<string, ImportPreviewType> = {};
+  let total = 0;
+  let issueTotal = 0;
+
+  for (const [type, rule] of Object.entries(PREVIEW_RULES)) {
+    const arr = data[type];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+
+    const seen = new Set<string>();
+    let issues = 0;
+    for (const item of arr) {
+      if (typeof item !== "object" || item === null) {
+        issues++;
+        continue;
+      }
+      const rec = item as Record<string, unknown>;
+      const missing = rule.required.some(
+        (f) => typeof rec[f] !== "string" || rec[f] === ""
+      );
+      const masked =
+        !!rule.masked &&
+        typeof rec[rule.masked] === "string" &&
+        (rec[rule.masked] as string).includes("***");
+      let duplicated = false;
+      if (rule.unique && typeof rec[rule.unique] === "string") {
+        const key = rec[rule.unique] as string;
+        duplicated = seen.has(key);
+        seen.add(key);
+      }
+      if (missing || masked || duplicated) issues++;
+    }
+
+    types[type] = { count: arr.length, issues };
+    total += arr.length;
+    issueTotal += issues;
+  }
+
+  return { total, issueTotal, types };
+}
 
 // ==================== 进度状态 ====================
 
@@ -96,6 +164,10 @@ export default function DataManagerPage() {
   const [totalRecords, setTotalRecords] = useState(0);
   const [stepProgressList, setStepProgressList] = useState<StepProgress[]>([]);
   const [currentStepKey, setCurrentStepKey] = useState<string | null>(null);
+
+  // 导入前预览状态（解析后先预览，确认后才写入）
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [pendingImport, setPendingImport] = useState<Record<string, unknown> | null>(null);
 
   /** 导出类型配置 */
   const exportOptions: {
@@ -160,7 +232,35 @@ export default function DataManagerPage() {
   };
 
   const processImportFile = useCallback(
-    async (file: File) => {
+    (file: File) => {
+      // 解析文件并生成预览，用户确认后再写入系统
+      file
+        .text()
+        .then((text) => {
+          const data = JSON.parse(text);
+
+          if (!data.version || !data.exportedAt) {
+            throw new Error(t("dmErrInvalidFormat"));
+          }
+
+          const preview = analyzeImportData(data);
+          if (preview.total === 0) {
+            message.info(t("dmPreviewEmpty"));
+            return;
+          }
+          setPendingImport(data);
+          setImportPreview(preview);
+        })
+        .catch((err) => {
+          message.error(err instanceof Error ? err.message : t("dmErrExport"));
+        });
+    },
+    [t]
+  );
+
+  /** 流式导入执行（解析与校验已在前置预览完成） */
+  const doImport = useCallback(
+    async (data: Record<string, unknown>) => {
       setImporting(true);
       setImportResult(null);
       setTotalProcessed(0);
@@ -169,14 +269,6 @@ export default function DataManagerPage() {
       setCurrentStepKey(null);
 
       try {
-        // 解析文件
-        const text = await file.text();
-        const data = JSON.parse(text);
-
-        if (!data.version || !data.exportedAt) {
-          throw new Error(t("dmErrInvalidFormat"));
-        }
-
         // 发起流式请求
         const res = await fetch("/api/admin/import", {
           method: "POST",
@@ -292,6 +384,20 @@ export default function DataManagerPage() {
     },
     [t]
   );
+
+  /** 用户确认预览后执行流式导入 */
+  const confirmImport = useCallback(() => {
+    if (!pendingImport) return;
+    setImportPreview(null);
+    setPendingImport(null);
+    doImport(pendingImport);
+  }, [pendingImport, doImport]);
+
+  /** 取消导入预览 */
+  const cancelImport = useCallback(() => {
+    setImportPreview(null);
+    setPendingImport(null);
+  }, []);
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -555,6 +661,56 @@ export default function DataManagerPage() {
                   </p>
                 </div>
               </div>
+
+              {/* 导入前预览（确认后才写入系统） */}
+              {importPreview && !importing && (
+                <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-zinc-400" />
+                    <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      {t("dmPreviewTitle")}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {Object.entries(importPreview.types).map(([key, v]) => (
+                      <div key={key} className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-600 dark:text-zinc-400">
+                          {t(`${STEP_LABELS[key]?.labelKey || key}`)}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500 dark:text-zinc-400 tabular-nums">
+                            {v.count.toLocaleString()} {t("dmPreviewRecords")}
+                          </span>
+                          {v.issues > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                              <AlertTriangle size={11} />
+                              {v.issues}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {importPreview.issueTotal > 0 && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                      {t("dmPreviewIssueHint")}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      variant="primary"
+                      icon={<Upload size={14} />}
+                      onClick={confirmImport}
+                      block
+                    >
+                      {t("dmPreviewConfirm")}
+                    </Button>
+                    <Button variant="secondary" onClick={cancelImport}>
+                      {t("dmPreviewCancel")}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* 流式导入进度 */}
               {importing && renderImportProgress()}

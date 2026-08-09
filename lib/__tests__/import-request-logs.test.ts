@@ -14,6 +14,16 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from "sql.js";
+import {
+  sanitizeNonNegativeInt,
+  sanitizeNonNegativeFloat,
+  sanitizeBoolean,
+  sanitizeEnum,
+  sanitizeString,
+  sanitizeNullableString,
+  sanitizeHttpStatus,
+  sanitizeExpiresAt,
+} from "../../pages/api/admin/import";
 
 let SQL: SqlJsStatic;
 
@@ -28,7 +38,7 @@ function createTestDb(): SqlJsDatabase {
   db.run(`
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '默认 Key',
-      plan_id TEXT, quota INTEGER, used_tokens INTEGER NOT NULL DEFAULT 0,
+      quota INTEGER, used_tokens INTEGER NOT NULL DEFAULT 0,
       rpm_limit INTEGER, tpm_limit INTEGER, call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
       token_limit INTEGER, reset_period TEXT NOT NULL DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
       expires_at INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
@@ -81,12 +91,24 @@ function importRequestLogs(
   let imported = 0;
   let skipped = 0;
 
-  const validLogs = logs.filter((log) => log.model);
+  const validLogs = logs.filter((log) => sanitizeString(log.model));
   skipped += logs.length - validLogs.length;
 
   // 校验外键
-  const referencedKeyIds = [...new Set(validLogs.map((l) => l.keyId).filter(Boolean) as string[])];
-  const referencedPlatformIds = [...new Set(validLogs.map((l) => l.platformId).filter(Boolean) as string[])];
+  const referencedKeyIds = [
+    ...new Set(
+      validLogs
+        .map((l) => sanitizeNullableString(l.keyId))
+        .filter((v): v is string => v !== null)
+    ),
+  ];
+  const referencedPlatformIds = [
+    ...new Set(
+      validLogs
+        .map((l) => sanitizeNullableString(l.platformId))
+        .filter((v): v is string => v !== null)
+    ),
+  ];
 
   const existingKeyIds = new Set<string>();
   const existingPlatformIds = new Set<string>();
@@ -103,28 +125,28 @@ function importRequestLogs(
   }
 
   const buildValues = (log: Record<string, unknown>) => {
-    const rawKeyId = (log.keyId as string) || null;
-    const rawPlatformId = (log.platformId as string) || null;
+    const rawKeyId = sanitizeNullableString(log.keyId);
+    const rawPlatformId = sanitizeNullableString(log.platformId);
     return {
       id: crypto.randomUUID(),
       keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
-      keyName: (log.keyName as string) || null,
+      keyName: sanitizeNullableString(log.keyName),
       platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
-      proxyId: (log.proxyId as string) || null,
-      model: log.model as string,
-      endpoint: (log.endpoint as string) || null,
-      method: (log.method as string) || null,
-      status: (log.status as number) || 0,
-      latency: (log.duration as number) || (log.latency as number) || 0,
-      tokens: (log.tokens as number) || 0,
-      promptTokens: (log.promptTokens as number) || 0,
-      completionTokens: (log.completionTokens as number) || 0,
-      ttft: (log.ttft as number) || 0,
-      cost: (log.cost as number) || 0,
-      isError: log.isError ? 1 : 0,
-      ipAddress: (log.ipAddress as string) || null,
-      userAgent: (log.userAgent as string) || null,
-      errorMessage: (log.errorMessage as string) || null,
+      proxyId: sanitizeNullableString(log.proxyId),
+      model: sanitizeString(log.model),
+      endpoint: sanitizeNullableString(log.endpoint),
+      method: sanitizeNullableString(log.method, 10),
+      status: sanitizeHttpStatus(log.status),
+      latency: sanitizeNonNegativeInt(log.duration) ?? sanitizeNonNegativeInt(log.latency) ?? 0,
+      tokens: sanitizeNonNegativeInt(log.tokens) ?? 0,
+      promptTokens: sanitizeNonNegativeInt(log.promptTokens) ?? 0,
+      completionTokens: sanitizeNonNegativeInt(log.completionTokens) ?? 0,
+      ttft: sanitizeNonNegativeInt(log.ttft) ?? 0,
+      cost: sanitizeNonNegativeFloat(log.cost) ?? 0,
+      isError: sanitizeBoolean(log.isError, false) ? 1 : 0,
+      ipAddress: sanitizeNullableString(log.ipAddress, 45),
+      userAgent: sanitizeNullableString(log.userAgent),
+      errorMessage: sanitizeNullableString(log.errorMessage),
       createdAt: toUnixSeconds(log.createdAt),
     };
   };
@@ -378,5 +400,172 @@ describe("toUnixSeconds：时间戳范围校验", () => {
     const result = toUnixSeconds("not-a-date");
     expect(result).toBeGreaterThanOrEqual(now - 5);
     expect(result).toBeLessThanOrEqual(now + 5);
+  });
+});
+
+// ==================== sanitize 工具函数（真实 import.ts 代码） ====================
+
+describe("sanitizeNonNegativeInt / sanitizeNonNegativeFloat：数值钳制", () => {
+  it("正常非负整数保留", () => {
+    expect(sanitizeNonNegativeInt(100)).toBe(100);
+    expect(sanitizeNonNegativeInt(0)).toBe(0);
+    expect(sanitizeNonNegativeInt(100.9)).toBe(100);
+    expect(sanitizeNonNegativeInt("42")).toBe(42);
+  });
+
+  it("负数/NaN/Infinity/非数字返回 null", () => {
+    expect(sanitizeNonNegativeInt(-1)).toBeNull();
+    expect(sanitizeNonNegativeInt("abc")).toBeNull();
+    expect(sanitizeNonNegativeInt(NaN)).toBeNull();
+    expect(sanitizeNonNegativeInt(Infinity)).toBeNull();
+    expect(sanitizeNonNegativeInt(null)).toBeNull();
+    expect(sanitizeNonNegativeInt(undefined)).toBeNull();
+    expect(sanitizeNonNegativeFloat(-0.5)).toBeNull();
+    expect(sanitizeNonNegativeFloat("x")).toBeNull();
+  });
+
+  it("超出 Int32/Float 安全范围返回 null（防整批 createMany 失败）", () => {
+    expect(sanitizeNonNegativeInt(2147483647)).toBe(2147483647);
+    expect(sanitizeNonNegativeInt(2147483648)).toBeNull();
+    expect(sanitizeNonNegativeInt(5_000_000_000)).toBeNull();
+    expect(sanitizeNonNegativeInt("1e308")).toBeNull();
+    expect(sanitizeNonNegativeFloat(1e15)).toBe(1e15);
+    expect(sanitizeNonNegativeFloat(1e20)).toBeNull();
+  });
+
+  it("浮点数值保留（Float 字段）", () => {
+    expect(sanitizeNonNegativeFloat(1.25)).toBe(1.25);
+    expect(sanitizeNonNegativeFloat("3.5")).toBe(3.5);
+    expect(sanitizeNonNegativeFloat(0)).toBe(0);
+  });
+});
+
+describe("sanitizeBoolean：仅接受 true/false", () => {
+  it("布尔值原样返回", () => {
+    expect(sanitizeBoolean(true, false)).toBe(true);
+    expect(sanitizeBoolean(false, true)).toBe(false);
+  });
+
+  it("字符串 'false' 等非布尔值回退默认值", () => {
+    expect(sanitizeBoolean("false", true)).toBe(true);
+    expect(sanitizeBoolean("true", false)).toBe(false);
+    expect(sanitizeBoolean(1, false)).toBe(false);
+    expect(sanitizeBoolean(undefined, true)).toBe(true);
+  });
+});
+
+describe("sanitizeEnum：白名单回退", () => {
+  const valid = new Set(["daily", "monthly", "never"]);
+
+  it("命中白名单返回原值", () => {
+    expect(sanitizeEnum("daily", valid, "monthly")).toBe("daily");
+    expect(sanitizeEnum("never", valid, "monthly")).toBe("never");
+  });
+
+  it("未命中回退默认值", () => {
+    expect(sanitizeEnum("weekly", valid, "monthly")).toBe("monthly");
+    expect(sanitizeEnum(123, valid, "monthly")).toBe("monthly");
+    expect(sanitizeEnum(undefined, valid, "monthly")).toBe("monthly");
+  });
+});
+
+describe("sanitizeString / sanitizeNullableString：类型与截断", () => {
+  it("非字符串返回空串/null", () => {
+    expect(sanitizeString(123)).toBe("");
+    expect(sanitizeString(null)).toBe("");
+    expect(sanitizeString(undefined)).toBe("");
+    expect(sanitizeNullableString(123)).toBeNull();
+    expect(sanitizeNullableString("")).toBeNull();
+  });
+
+  it("超长截断到 maxLen", () => {
+    expect(sanitizeString("a".repeat(300), 191).length).toBe(191);
+    expect(sanitizeNullableString("a".repeat(300), 10)).toBe("a".repeat(10));
+    expect(sanitizeNullableString("正常字符串", 10)).toBe("正常字符串");
+  });
+});
+
+describe("sanitizeHttpStatus：状态码范围", () => {
+  it("0~599 保留", () => {
+    expect(sanitizeHttpStatus(200)).toBe(200);
+    expect(sanitizeHttpStatus(599)).toBe(599);
+    expect(sanitizeHttpStatus(0)).toBe(0);
+  });
+
+  it("负数/超范围/非数字回退 0", () => {
+    expect(sanitizeHttpStatus(600)).toBe(0);
+    expect(sanitizeHttpStatus(-1)).toBe(0);
+    expect(sanitizeHttpStatus("abc")).toBe(0);
+    expect(sanitizeHttpStatus(undefined)).toBe(0);
+  });
+});
+
+describe("sanitizeExpiresAt：过期时间范围", () => {
+  it("合理秒级时间戳保留", () => {
+    const ts = Math.floor(Date.now() / 1000) + 86400;
+    expect(sanitizeExpiresAt(ts)).toBe(ts);
+  });
+
+  it("ISO 日期字符串转换", () => {
+    const ts = Math.floor(Date.now() / 1000) + 86400;
+    const iso = new Date(ts * 1000).toISOString();
+    expect(sanitizeExpiresAt(iso)).toBe(ts);
+  });
+
+  it("2009 年/未来 10 年后/非法输入返回 null", () => {
+    expect(sanitizeExpiresAt(1234483200)).toBeNull();
+    expect(sanitizeExpiresAt(4102444800)).toBeNull();
+    expect(sanitizeExpiresAt("not-a-date")).toBeNull();
+    expect(sanitizeExpiresAt(undefined)).toBeNull();
+  });
+});
+
+describe("requestLogs 导入：违规数据净化", () => {
+  it("负数/非数字数值钳制为 0，字符串 'false' 的 isError 不生效", () => {
+    const db = createTestDb();
+    const result = importRequestLogs(db, [
+      {
+        model: "gpt-4", status: -1, tokens: -100, latency: -5, cost: -0.5,
+        duration: "abc", isError: "false",
+      },
+    ]);
+    expect(result.imported).toBe(1);
+    expect(result.skipped).toBe(0);
+
+    const rows = db.exec(
+      "SELECT status, latency, tokens, cost, is_error FROM request_logs"
+    );
+    expect(rows[0].values[0]).toEqual([0, 0, 0, 0, 0]);
+    db.close();
+  });
+
+  it("状态码超过 599 钳制为 0", () => {
+    const db = createTestDb();
+    importRequestLogs(db, [{ model: "gpt-4", status: 600 }]);
+    const rows = db.exec("SELECT status FROM request_logs");
+    expect(rows[0].values[0][0]).toBe(0);
+    db.close();
+  });
+
+  it("非字符串 model 记录被跳过", () => {
+    const db = createTestDb();
+    const result = importRequestLogs(db, [
+      { model: 123, status: 200 },
+      { model: null, status: 200 },
+      { model: "gpt-4", status: 200 },
+    ]);
+    expect(result.imported).toBe(1);
+    expect(result.skipped).toBe(2);
+    db.close();
+  });
+
+  it("超长 method 截断到 10", () => {
+    const db = createTestDb();
+    importRequestLogs(db, [
+      { model: "gpt-4", method: "POST".repeat(20), status: 200 },
+    ]);
+    const rows = db.exec("SELECT method FROM request_logs");
+    expect((rows[0].values[0][0] as string).length).toBe(10);
+    db.close();
   });
 });
