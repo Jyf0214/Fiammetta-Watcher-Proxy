@@ -61,6 +61,12 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  * 解析真实客户端 IP（可信代理链）。
  *
  * 优先级：
+ * 0. EdgeOne 部署（DEPLOY_PLATFORM=edgeone，Makers 控制台环境变量，构建与运行时
+ *    共享）：请求必经 EO 边缘，EO-Client-IP / EO-Connecting-IP 由边缘强制注入且
+ *    客户端无法伪造，优先采信；X-Forwarded-For 由 EO 维护（首项为客户端真实 IP）
+ *    作为回退。仅此部署平台采信——其他平台（Docker 显式 DEPLOY_PLATFORM=docker、
+ *    CF、Vercel、直连、未设置）EO 头完全不可信（攻击者可任意伪造绕过限流），
+ *    一律忽略；
  * 1. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
  *    为 undefined，如 Cloudflare Pages/Workers）— 前置头由边缘强制注入且客户端
  *    无法伪造，采信 CF-Connecting-IP；
@@ -71,12 +77,29 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  *    取第一个不可信条目作为真实客户端；
  * 4. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
  *
- * 返回 null 仅发生在极端环境（无 CF 头且无 socket 地址）；调用方此时应跳过
+ * 返回 null 仅发生在极端环境（无 EO/CF 头且无 socket 地址）；调用方此时应跳过
  * 限流（fail-open），禁止把不同来源归入同一个共享桶——否则攻击者可预填共享
  * 桶制造全平台登录 DoS（历史漏洞：所有来源统一回退为 "unknown"）。
  */
 export function getClientIp(req: NextApiRequest): string | null {
   const socketIp = normalizeIp(req.socket?.remoteAddress ?? "");
+
+  // EdgeOne 部署：采信边缘强制注入的专属头（仅当 DEPLOY_PLATFORM=edgeone，
+  // 防止其他部署方案因伪造 EO 头绕过限流）
+  if (process.env.DEPLOY_PLATFORM === "edgeone") {
+    const eoIp =
+      firstHeaderValue(req.headers["eo-client-ip"]) ??
+      firstHeaderValue(req.headers["eo-connecting-ip"]);
+    if (eoIp) return normalizeIp(eoIp);
+    const eoXff = firstHeaderValue(req.headers["x-forwarded-for"]);
+    if (eoXff) {
+      const first = normalizeIp(eoXff.split(",")[0] ?? eoXff);
+      if (first) return first;
+    }
+    // EO 专属头缺失（异常形态）时回退 TCP 对端（边缘节点 IP），
+    // 不落入下方 CF-Connecting-IP 信任分支——EO 不注入该头，直连伪造不可信
+    return socketIp || null;
+  }
 
   const trustedProxies = (process.env.TRUSTED_PROXY_IPS ?? "")
     .split(",")

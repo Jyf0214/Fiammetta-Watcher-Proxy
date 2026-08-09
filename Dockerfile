@@ -28,6 +28,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV ENVIRONMENT=production
+# 部署平台：Docker 直连部署默认值（compose 或 docker run -e 可覆盖），
+# 登录限流等 IP 解析只信任 TCP 对端，忽略所有前置头
+ENV DEPLOY_PLATFORM=docker
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # wget 用于健康检查

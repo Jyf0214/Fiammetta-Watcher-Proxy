@@ -14,6 +14,9 @@ services:
       - NODE_ENV=production
       # 声明生产环境：登录 Cookie 附加 Secure、CSRF 校验走 isProd 分支
       - ENVIRONMENT=production
+      # 部署平台：Docker 直连部署，客户端可直达容器（无边缘注入可信头），
+      # 登录限流等 IP 解析只信任 TCP 对端，忽略所有前置头
+      - DEPLOY_PLATFORM=docker
       - PORT=${PORT:-3000}
       # 数据库类型：容器内置 PostgreSQL，固定 pg
       - DB_TYPE=pg
