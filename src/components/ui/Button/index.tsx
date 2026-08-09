@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { memo, forwardRef } from 'react';
-import { cn } from '@/lib/ui';
-import type { ButtonProps, ButtonVariant, ButtonSize, ButtonRounded } from './button-types';
-import { variantStyles, sizePadding, iconOnlySize, roundedStyles, BASE_BUTTON_CLASSES } from './button-styles';
-import { useAutoLoading } from './use-auto-loading';
-import { LoadingSpinner } from './LoadingSpinner';
+import { memo, forwardRef } from "react";
+import { cn } from "@/lib/ui";
+import type { ButtonProps, ButtonVariant, ButtonSize, ButtonRounded } from "./button-types";
+import { variantStyles, sizePadding, iconOnlySize, roundedStyles, BASE_BUTTON_CLASSES } from "./button-styles";
+import { useAutoLoading } from "./use-auto-loading";
+import { LoadingSpinner } from "./LoadingSpinner";
 
 export type { ButtonProps, ButtonVariant, ButtonSize, ButtonRounded };
 
@@ -27,7 +27,7 @@ function renderIcon(showLoading: boolean, icon: React.ReactNode) {
  */
 export const Button = memo(
   forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ children, variant = 'default', size = 'md', rounded, loading, autoLoading = true, icon, iconOnly, block, className, disabled, onClick, ...props }, ref) => {
+    ({ children, variant = "default", size = "md", rounded, loading, autoLoading = true, icon, iconOnly, block, className, disabled, onClick, ...props }, ref) => {
       const isIconOnly = iconOnly || (icon && !children);
       const isResponsiveIcon = !isIconOnly && !!icon && !!children;
       const { isLoading, handleClick, showLoading } = useAutoLoading(loading, autoLoading, disabled, onClick);
@@ -36,9 +36,9 @@ export const Button = memo(
         BASE_BUTTON_CLASSES,
         variantStyles[variant],
         isIconOnly ? iconOnlySize[size] : sizePadding[size],
-        roundedStyles[rounded ?? 'md'],
-        block && 'w-full',
-        !!isLoading && 'animate-btn-loading',
+        roundedStyles[rounded ?? "md"],
+        block && "w-full",
+        !!isLoading && "animate-btn-loading",
         isResponsiveIcon && `max-sm:w-auto ${iconOnlySize[size]}`,
         className,
       );
@@ -63,5 +63,5 @@ export const Button = memo(
   ),
 );
 
-Button.displayName = 'Button';
+Button.displayName = "Button";
 export default Button;

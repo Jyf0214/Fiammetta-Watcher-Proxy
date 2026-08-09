@@ -261,7 +261,6 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
 
   return (
     <>
-      {/* 统计卡片 — 与仪表盘 StatCard 视觉统一（ProCard p-3 / 动态字号 / 紧凑数字） */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         {statCards.map((card) => {
           const display = "display" in card ? card.display : null;

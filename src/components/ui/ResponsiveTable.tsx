@@ -1,10 +1,9 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-// @lobehub/ui 没有 Table / Pagination 组件，保留 antd
-import { Table, Pagination } from 'antd';
-import type { TableProps } from 'antd';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { Table, Pagination } from "antd";
+import type { TableProps } from "antd";
+import { useTranslation } from "react-i18next";
 
 /**
  * 精简列类型 — 只包含 ResponsiveTable 实际使用的属性，
@@ -16,9 +15,9 @@ type Col<T> = {
   responsive?: string[];
   title?: ReactNode;
   width?: number;
-  align?: 'left' | 'center' | 'right';
+  align?: "left" | "center" | "right";
   ellipsis?: boolean;
-  fixed?: 'left' | 'right';
+  fixed?: "left" | "right";
   render?: (value: unknown, record: T, index: number) => ReactNode;
 };
 
@@ -35,12 +34,12 @@ const BP: Record<string, number> = {
 /* ── 响应式屏幕宽度检测 ── */
 function useScreenWidth() {
   const [w, setW] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1024,
+    typeof window !== "undefined" ? window.innerWidth : 1024,
   );
   useEffect(() => {
     const h = () => setW(window.innerWidth);
-    window.addEventListener('resize', h);
-    return () => window.removeEventListener('resize', h);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
   }, []);
   return w;
 }
@@ -54,12 +53,12 @@ function colVisible<T>(col: Col<T>, sw: number): boolean {
 /* ── 提取单元格内容 ── */
 function cellOf<T>(col: Col<T>, record: T, idx: number): ReactNode {
   const val =
-    typeof col.dataIndex === 'string'
+    typeof col.dataIndex === "string"
       ? (record as Record<string, unknown>)[col.dataIndex]
       : undefined;
   if (col.render) return col.render(val, record, idx) as ReactNode;
-  if (val != null && val !== '') return String(val);
-  return '\u2014';
+  if (val != null && val !== "") return String(val);
+  return "\u2014";
 }
 
 /* ── 移动端卡片列表 ── */
@@ -77,15 +76,15 @@ function MobileCards<T>({
 
   const { titleCol, bodyCols, actionsCol } = useMemo(() => {
     const vis = columns.filter((c) => colVisible(c, sw));
-    const t = vis.find((c) => c.key !== 'actions' && c.dataIndex);
-    const a = vis.find((c) => c.key === 'actions');
+    const t = vis.find((c) => c.key !== "actions" && c.dataIndex);
+    const a = vis.find((c) => c.key === "actions");
     const b = vis.filter((c) => c !== t && c !== a);
     return { titleCol: t, bodyCols: b, actionsCol: a };
   }, [columns, sw]);
 
   const keyOf = useCallback(
     (r: T) => {
-      if (typeof rowKey === 'function') return rowKey(r);
+      if (typeof rowKey === "function") return rowKey(r);
       return String((r as Record<string, unknown>)[String(rowKey)]);
     },
     [rowKey],
@@ -122,7 +121,7 @@ function MobileCards<T>({
             {bodyCols.map((c) => (
               <div key={String(c.key ?? c.dataIndex)}>
                 <div className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 mb-0.5 leading-tight">
-                  {typeof c.title === 'string' ? c.title : String(c.key ?? '')}
+                  {typeof c.title === "string" ? c.title : String(c.key ?? "")}
                 </div>
                 <div className="text-sm text-zinc-700 dark:text-zinc-300 break-words leading-snug">
                   {cellOf(c, r, i)}
@@ -140,12 +139,12 @@ function MobileCards<T>({
 function useIsMobile() {
   const [m, setM] = useState(false);
   useEffect(() => {
-    const q = window.matchMedia('(max-width: 767px)');
+    const q = window.matchMedia("(max-width: 767px)");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setM(q.matches);
     const h = (e: MediaQueryListEvent) => setM(e.matches);
-    q.addEventListener('change', h);
-    return () => q.removeEventListener('change', h);
+    q.addEventListener("change", h);
+    return () => q.removeEventListener("change", h);
   }, []);
   return m;
 }
@@ -170,7 +169,7 @@ export function ResponsiveTable<T>(props: TableProps<T>) {
   const {
     columns = [],
     dataSource,
-    rowKey = 'id',
+    rowKey = "id",
     pagination,
     loading,
     scroll,
@@ -194,13 +193,13 @@ export function ResponsiveTable<T>(props: TableProps<T>) {
         )}
         {pagination !== false && pagination && (
           <div className="mt-4 flex justify-center items-center gap-4">
-            {typeof pagination === 'object' && pagination.showTotal && (
+            {typeof pagination === "object" && pagination.showTotal && (
               <span className="text-xs text-zinc-500 tabular-nums">
                 {pagination.showTotal(pagination.total ?? dataSource?.length ?? 0, [0, 0])}
               </span>
             )}
             <Pagination
-              {...(typeof pagination === 'object' ? pagination : {})}
+              {...(typeof pagination === "object" ? pagination : {})}
               showTotal={undefined}
               size="small"
             />

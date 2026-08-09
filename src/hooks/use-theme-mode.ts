@@ -1,31 +1,31 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY = 'theme-mode';
+const STORAGE_KEY = "theme-mode";
 
-type ThemeMode = 'light' | 'dark' | 'system';
+type ThemeMode = "light" | "dark" | "system";
 
 const CYCLE: Record<ThemeMode, ThemeMode> = {
-  light: 'dark',
-  dark: 'system',
-  system: 'light',
+  light: "dark",
+  dark: "system",
+  system: "light",
 };
 
 /** 根据 mode 判断当前实际是否深色 */
 function resolveDark(mode: ThemeMode, systemDark: boolean): boolean {
-  if (mode === 'system') return systemDark;
-  return mode === 'dark';
+  if (mode === "system") return systemDark;
+  return mode === "dark";
 }
 
 /** 将 <html> class 同步为 dark / 空 */
 function applyClass(dark: boolean) {
-  if (typeof document === 'undefined') return;
+  if (typeof document === "undefined") return;
   const html = document.documentElement;
   if (dark) {
-    html.classList.add('dark');
+    html.classList.add("dark");
   } else {
-    html.classList.remove('dark');
+    html.classList.remove("dark");
   }
 }
 
@@ -38,24 +38,24 @@ function applyClass(dark: boolean) {
  */
 export function useThemeMode() {
   const [mode, setModeState] = useState<ThemeMode>(() => {
-    if (typeof window === 'undefined') return 'system';
+    if (typeof window === "undefined") return "system";
     const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-    return saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
+    return saved && ["light", "dark", "system"].includes(saved) ? saved : "system";
   });
   const [systemDark, setSystemDark] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
   const [mounted, setMounted] = useState(false);
 
   // 初始化：监听系统偏好 + 标记已挂载
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener('change', handler);
+    mq.addEventListener("change", handler);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
-    return () => mq.removeEventListener('change', handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   // mode 或 systemDark 变化时同步 <html> class

@@ -1,7 +1,7 @@
 /**
  * 请求模板 CRUD API
  *
- * 模板数据存储在 D1 configs 表的 system:request_templates key 中，
+ * 模板数据存储在 configs 表的 system:request_templates key 中，
  * 以 JSON 数组字符串的形式保存所有模板。
  *
  * 支持操作：

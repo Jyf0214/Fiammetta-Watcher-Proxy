@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from "react";
 
 /**
  * 按钮自动加载状态管理 Hook
@@ -57,7 +57,7 @@ export function runWithMinLoadingDuration(
 
   try {
     const result = action();
-    if (result && typeof result.then === 'function') {
+    if (result && typeof result.then === "function") {
       void result.finally(release);
     } else {
       release();

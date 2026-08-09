@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";

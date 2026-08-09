@@ -13,7 +13,6 @@ import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { detectModelType } from "@/lib/detect-model-type";
 
-
 /** 生成唯一 ID（cuid 风格） */
 function generateId(): string {
   return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;

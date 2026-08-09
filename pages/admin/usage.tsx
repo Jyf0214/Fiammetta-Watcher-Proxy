@@ -212,11 +212,11 @@ export default function UsagePage() {
 
         {/* Tab 切换：Key 用量 / 平台用量 */}
         <Tabs
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            className="px-5 pt-2"
-            items={tabItems}
-          />
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          className="px-5 pt-2"
+          items={tabItems}
+        />
       </PageContainer>
     </AdminLayout>
   );

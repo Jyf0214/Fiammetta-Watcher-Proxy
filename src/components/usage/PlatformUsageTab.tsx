@@ -269,7 +269,6 @@ export default function PlatformUsageTab({
 
   return (
     <>
-      {/* 统计卡片 — 与仪表盘 StatCard 视觉统一（ProCard p-3 / 动态字号 / 紧凑数字） */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         {statCards.map((card) => {
           const displayVal = formatCompactNumber(card.value, t);

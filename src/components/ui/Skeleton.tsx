@@ -1,4 +1,4 @@
-import { cn } from '@/lib/ui';
+import { cn } from "@/lib/ui";
 
 export interface SkeletonProps {
   className?: string;
@@ -10,7 +10,7 @@ export interface SkeletonProps {
 export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
-      className={cn('bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse', className)}
+      className={cn("bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse", className)}
       aria-hidden="true"
     />
   );

@@ -1,18 +1,18 @@
-import { type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export type ButtonVariant =
-  | 'primary'
-  | 'default'
-  | 'secondary'
-  | 'danger'
-  | 'dangerGhost'
-  | 'ghost'
-  | 'link'
-  | 'success'
-  | 'warning'
-  | 'filled';
-export type ButtonSize = 'sm' | 'md' | 'lg';
-export type ButtonRounded = 'sm' | 'md' | 'lg' | 'full' | 'none';
+  | "primary"
+  | "default"
+  | "secondary"
+  | "danger"
+  | "dangerGhost"
+  | "ghost"
+  | "link"
+  | "success"
+  | "warning"
+  | "filled";
+export type ButtonSize = "sm" | "md" | "lg";
+export type ButtonRounded = "sm" | "md" | "lg" | "full" | "none";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode;
