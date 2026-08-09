@@ -2,8 +2,7 @@
  * API Key 认证与额度检查
  *
  * 从请求 Authorization 头提取 Bearer Token，验证 Key 有效性，
- * 检查额度、过期时间、调用次数限制。
- * 同时处理 Key 用量重置周期检查。
+ * 检查过期时间、调用次数限制（callLimit）与 Token 额度限制（tokenLimit）。
  */
 
 import { createDb } from "@/lib/prisma";
@@ -24,6 +23,7 @@ export interface ApiKeyRecord {
   rpmLimit: number | null;
   tpmLimit: number | null;
   callLimit: number | null;
+  tokenLimit: number | null;
   callUsed: number;
   resetPeriod: string | null;
   status: string;
@@ -57,81 +57,81 @@ export async function validateApiKey(
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-  // 查询 API Key（所有限额字段在 api_keys 中）
-  const apiKey = await prisma.apiKeys.findFirst({
-    where: { key: apiKeyStr },
-    select: {
-      id: true,
-      key: true,
-      name: true,
-      usedTokens: true,
-      tokenLimit: true,
-      rpmLimit: true,
-      tpmLimit: true,
-      callLimit: true,
-      callUsed: true,
-      resetPeriod: true,
-      status: true,
-      expiresAt: true,
-      updatedAt: true,
-    },
-  });
-
-  if (!apiKey || apiKey.status !== "active") {
-    return {
-      error: Response.json(
-        { error: { message: "无效的 API Key", type: "invalid_request_error" } },
-        { status: 401 }
-      ),
-    };
-  }
-
-  // 检查过期时间
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (apiKey.expiresAt !== null && apiKey.expiresAt < nowSec) {
-    return {
-      error: Response.json(
-        { error: { message: "API Key 已过期", type: "invalid_request_error" } },
-        { status: 401 }
-      ),
-    };
-  }
-
-  // 检查调用次数限制（直接使用 Key 级别 callLimit）
-  const effectiveCallLimit = apiKey.callLimit ?? null;
-  if (effectiveCallLimit !== null) {
-    const resetPeriod = apiKey.resetPeriod ?? "never";
-    const periodStart = getPeriodStart(resetPeriod);
-
-    const callCount = await prisma.requestLogs.count({
-      where: {
-        keyId: apiKey.id,
-        createdAt: { gte: periodStart },
+    // 查询 API Key（所有限额字段在 api_keys 中）
+    const apiKey = await prisma.apiKeys.findFirst({
+      where: { key: apiKeyStr },
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        usedTokens: true,
+        tokenLimit: true,
+        rpmLimit: true,
+        tpmLimit: true,
+        callLimit: true,
+        callUsed: true,
+        resetPeriod: true,
+        status: true,
+        expiresAt: true,
+        updatedAt: true,
       },
     });
 
-    if (callCount >= effectiveCallLimit) {
+    if (!apiKey || apiKey.status !== "active") {
       return {
         error: Response.json(
-          { error: { message: "API Key 调用次数已达上限", type: "invalid_request_error" } },
+          { error: { message: "无效的 API Key", type: "invalid_request_error" } },
+          { status: 401 }
+        ),
+      };
+    }
+
+    // 检查过期时间
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (apiKey.expiresAt !== null && apiKey.expiresAt < nowSec) {
+      return {
+        error: Response.json(
+          { error: { message: "API Key 已过期", type: "invalid_request_error" } },
+          { status: 401 }
+        ),
+      };
+    }
+
+    // 检查调用次数限制（直接使用 Key 级别 callLimit）
+    const effectiveCallLimit = apiKey.callLimit ?? null;
+    if (effectiveCallLimit !== null) {
+      const resetPeriod = apiKey.resetPeriod ?? "never";
+      const periodStart = getPeriodStart(resetPeriod);
+
+      const callCount = await prisma.requestLogs.count({
+        where: {
+          keyId: apiKey.id,
+          createdAt: { gte: periodStart },
+        },
+      });
+
+      if (callCount >= effectiveCallLimit) {
+        return {
+          error: Response.json(
+            { error: { message: "API Key 调用次数已达上限", type: "invalid_request_error" } },
+            { status: 429 }
+          ),
+        };
+      }
+    }
+
+    // 检查 Token 总额度限制（usedTokens 达到 tokenLimit 后拒绝新请求；0 表示不设限制）
+    const effectiveTokenLimit = apiKey.tokenLimit ?? null;
+    if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && apiKey.usedTokens >= effectiveTokenLimit) {
+      return {
+        error: Response.json(
+          { error: { message: "API Key Token 额度已达上限", type: "invalid_request_error" } },
           { status: 429 }
         ),
       };
     }
-  }
 
-  // 检查 Token 总额度限制（usedTokens 达到 tokenLimit 后拒绝新请求；0 表示不设限制）
-  const effectiveTokenLimit = apiKey.tokenLimit ?? null;
-  if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && apiKey.usedTokens >= effectiveTokenLimit) {
-    return {
-      error: Response.json(
-        { error: { message: "API Key Token 额度已达上限", type: "invalid_request_error" } },
-        { status: 429 }
-      ),
-    };
-  }
-
-  return { apiKey };
+    return { apiKey };
   } catch (err) {
     console.error("[auth] API Key 验证失败:", err instanceof Error ? err.message : String(err));
     return {

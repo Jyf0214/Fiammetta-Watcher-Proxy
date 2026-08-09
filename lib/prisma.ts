@@ -132,7 +132,13 @@ async function createPrismaInstance(
       if (!url) throw new Error("PG_URL 或 DATABASE_URL 未配置");
 
       const pool = new Pool({ connectionString: url });
-      const adapter = new PrismaPg(pool);
+      // pg 官方要求：空闲连接错误（数据库重启/网络闪断）必须显式消费，
+      // 否则 Node 视为未捕获 error 事件直接崩溃进程
+      pool.on("error", (err) => {
+        console.error("[prisma] PostgreSQL 连接池错误（空闲连接断开）:", err.message);
+      });
+      // pool 由本工厂创建，$disconnect 时应一并释放（默认不释放外部传入的 pool）
+      const adapter = new PrismaPg(pool, { disposeExternalPool: true });
       return new PrismaClient({ adapter });
     }
 
@@ -158,7 +164,11 @@ async function createPrismaInstance(
       }
 
       const pool = new Pool({ connectionString: resolved.connectionString, max: 1 });
-      const adapter = new PrismaPg(pool);
+      // 同直连分支：空闲连接错误必须显式消费，否则进程崩溃
+      pool.on("error", (err) => {
+        console.error("[prisma] Hyperdrive 连接池错误（空闲连接断开）:", err.message);
+      });
+      const adapter = new PrismaPg(pool, { disposeExternalPool: true });
       return new PrismaClient({ adapter });
     }
 

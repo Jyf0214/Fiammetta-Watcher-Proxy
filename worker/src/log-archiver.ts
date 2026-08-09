@@ -268,8 +268,6 @@ async function archiveSingleDay(
     if (log.latency > group.maxLatency) group.maxLatency = log.latency;
   }
 
-  const dayDateTs = dayStartTs;
-
   for (const group of groups.values()) {
     const avgTtft = group.ttftCount > 0 ? group.ttftSum / group.ttftCount : 0;
     const avgDuration = group.latencyCount > 0 ? group.latencySum / group.latencyCount : 0;
@@ -277,7 +275,7 @@ async function archiveSingleDay(
     // 查找已有聚合记录
     const existing = await prisma.dailyStats.findFirst({
       where: {
-        date: dayDateTs,
+        date: dayStartTs,
         keyId: group.keyId,
         model: group.model,
       },
@@ -298,8 +296,9 @@ async function archiveSingleDay(
     if (existing) {
       const oldTotalRequests = existing.totalRequests;
       const newTotalRequests = oldTotalRequests + group.totalRequests;
-      const existingTtftCount =
-        existing.avgTtft > 0 ? Math.round((existing.avgTtft * oldTotalRequests) / existing.avgTtft) : 0;
+      // daily_stats 未存储 ttft 样本计数，旧样本数用旧总请求数近似；
+      // avgTtft == 0 表示旧记录无 TTFT 样本（ttft > 0 才计入样本），此时权重取 0 避免被稀释
+      const existingTtftCount = existing.avgTtft > 0 ? oldTotalRequests : 0;
 
       const newAvgTtft =
         existingTtftCount + group.ttftCount > 0
@@ -308,9 +307,9 @@ async function archiveSingleDay(
           : 0;
 
       const newAvgDuration =
-        newTotalRequests > 0
+        oldTotalRequests + group.latencyCount > 0
           ? (existing.avgDuration * oldTotalRequests + group.latencySum) /
-            newTotalRequests
+            (oldTotalRequests + group.latencyCount)
           : 0;
 
       await prisma.dailyStats.update({
@@ -331,7 +330,7 @@ async function archiveSingleDay(
       await prisma.dailyStats.create({
         data: {
           id: `ds_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          date: dayDateTs,
+          date: dayStartTs,
           keyId: group.keyId,
           keyName: group.keyName,
           platformId: group.platformId,

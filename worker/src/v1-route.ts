@@ -21,7 +21,7 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 /**
  * 根据路径确定端点配置
  */
-function getEndpointConfig(pathname: string): ProxyConfig | null {
+export function getEndpointConfig(pathname: string): ProxyConfig | null {
   const endpoint = pathname.replace(/^\/v1/, "");
 
   switch (endpoint) {
@@ -71,6 +71,19 @@ function getApiKeyHeader(request: Request): string | null {
 }
 
 /**
+ * 将认证失败响应转为 Anthropic 协议错误格式（{type:"error",error:{type,message}}）
+ */
+async function anthropicAuthErrorResponse(authError: Response): Promise<Response> {
+  const errBody = (await authError.json().catch(() => ({}))) as {
+    error?: { message?: string };
+  };
+  return Response.json(
+    formatAnthropicError(authError.status, errBody?.error?.message || "认证失败"),
+    { status: authError.status }
+  );
+}
+
+/**
  * 处理 /v1/* 路由请求
  */
 export async function handleV1Route(
@@ -84,8 +97,7 @@ export async function handleV1Route(
   if (url.pathname === "/v1/messages/count_tokens" && request.method === "POST") {
     const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
     if ("error" in authResult) {
-      const errBody = await authResult.error.json().catch(() => ({})) as { error?: { message?: string } };
-      return Response.json(formatAnthropicError(authResult.error.status, errBody?.error?.message || "认证失败"), { status: authResult.error.status });
+      return anthropicAuthErrorResponse(authResult.error);
     }
     let body: Record<string, unknown>;
     // 与主路径一致：超大请求体（Content-Length 预检）直接拒绝，避免整体读入内存
@@ -124,8 +136,7 @@ export async function handleV1Route(
   if ("error" in authResult) {
     // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
     if (endpointConfig.protocol === "anthropic") {
-      const errBody = await authResult.error.json().catch(() => ({})) as { error?: { message?: string } };
-      return Response.json(formatAnthropicError(authResult.error.status, errBody?.error?.message || "认证失败"), { status: authResult.error.status });
+      return anthropicAuthErrorResponse(authResult.error);
     }
     return authResult.error;
   }

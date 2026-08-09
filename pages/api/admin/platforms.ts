@@ -12,6 +12,11 @@ import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 
+/** 生成唯一 ID（cuid 风格） */
+function newId(prefix = "c"): string {
+  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /**
  * GET /api/admin/platforms — 获取平台列表
  */
@@ -236,7 +241,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const now = Math.floor(Date.now() / 1000);
 
       // 生成唯一 ID（cuid 格式）
-      const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const id = newId();
 
       const db = await createDb();
 
@@ -264,7 +269,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // 审计日志
       await db.auditLogs.create({
         data: {
-          id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          id: newId(),
           adminId: getAuditAdminId(admin),
           action: "create_platform",
           detail: JSON.stringify({ platformId: id, name }),
@@ -279,18 +284,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         data: {
           id,
           name: name.trim(),
-          base_url: baseUrl.trim(),
+          baseUrl: baseUrl.trim(),
           type: platformType,
-          enabled: 1,
+          enabled: true,
           priority: priority ?? 0,
           weight: weight ?? 1,
-          rpm_limit: rpmLimit ?? null,
-          tpm_limit: tpmLimit ?? null,
+          rpmLimit: rpmLimit ?? null,
+          tpmLimit: tpmLimit ?? null,
           status: "healthy",
-          fail_count: 0,
-          forward_headers: normalizedForwardHeaders,
-          created_at: now,
-          updated_at: now,
+          failCount: 0,
+          forwardHeaders: normalizedForwardHeaders,
+          createdAt: now,
+          updatedAt: now,
         },
         message: "平台创建成功",
       });

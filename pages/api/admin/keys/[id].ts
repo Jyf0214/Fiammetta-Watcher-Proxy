@@ -106,7 +106,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (body.tokenLimit !== undefined) updateData.tokenLimit = body.tokenLimit ?? null;
     if (body.resetPeriod !== undefined) updateData.resetPeriod = body.resetPeriod;
     if (body.status !== undefined) updateData.status = body.status;
-    if (body.enabled !== undefined) updateData.enabled = body.enabled ? true : false;
+    if (body.enabled !== undefined) updateData.enabled = !!body.enabled;
     if (expiresAtTimestamp !== undefined) updateData.expiresAt = expiresAtTimestamp;
 
     const updated = await db.apiKeys.update({ where: { id }, data: updateData });

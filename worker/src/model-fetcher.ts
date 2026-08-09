@@ -5,7 +5,7 @@
  * 存入 platform_models 表，供路由引擎做模型感知路由。
  *
  * 策略：
- * - 每 10 分钟定时刷新
+ * - 每 6 小时定时刷新
  * - 拉取失败时保留旧数据不清理
  * - 使用事务替换每个平台的模型列表
  */
@@ -111,92 +111,92 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-  const platforms = await prisma.platforms.findMany({
-    where: { enabled: true },
-    select: {
-      id: true,
-      name: true,
-      baseUrl: true,
-      apiKeys: true,
-    },
-  });
+    const platforms = await prisma.platforms.findMany({
+      where: { enabled: true },
+      select: {
+        id: true,
+        name: true,
+        baseUrl: true,
+        apiKeys: true,
+      },
+    });
 
-  if (platforms.length === 0) return;
+    if (platforms.length === 0) return;
 
-  let totalModels = 0;
-  let successCount = 0;
+    let totalModels = 0;
+    let successCount = 0;
 
-  type PlatformSelect = { id: string; name: string; baseUrl: string; apiKeys: string };
-  type ExistingModel = { modelId: string; enabled: boolean; source: string };
+    type PlatformSelect = { id: string; name: string; baseUrl: string; apiKeys: string };
+    type ExistingModel = { modelId: string; enabled: boolean; source: string };
 
-  const results = await Promise.allSettled(
-    platforms.map(async (platform: PlatformSelect) => {
-      const models = await fetchPlatformModels(platform);
-      if (models === null) {
-        console.warn(
-          `[model-fetcher] 平台 ${platform.name}(${platform.id}) 模型拉取失败，保留旧数据`
+    const results = await Promise.allSettled(
+      platforms.map(async (platform: PlatformSelect) => {
+        const models = await fetchPlatformModels(platform);
+        if (models === null) {
+          console.warn(
+            `[model-fetcher] 平台 ${platform.name}(${platform.id}) 模型拉取失败，保留旧数据`
+          );
+          return;
+        }
+
+        // 事务内替换该平台的模型列表
+        const now = Math.floor(Date.now() / 1000);
+
+        // 查询已有模型，保留用户手动设置的 enabled 状态
+        const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
+          where: { platformId: platform.id },
+          select: { modelId: true, enabled: true, source: true },
+        });
+        const existingMap = new Map(
+          existingModels.map((m: ExistingModel) => [m.modelId, { enabled: m.enabled, source: m.source } as const])
         );
-        return;
-      }
 
-      // 事务内替换该平台的模型列表
-      const now = Math.floor(Date.now() / 1000);
-
-      // 查询已有模型，保留用户手动设置的 enabled 状态
-      const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
-        where: { platformId: platform.id },
-        select: { modelId: true, enabled: true, source: true },
-      });
-      const existingMap = new Map(
-        existingModels.map((m: ExistingModel) => [m.modelId, { enabled: m.enabled, source: m.source } as const])
-      );
-
-      // 删除旧的自动发现模型（保留手动添加的）
-      await prisma.platformModels.deleteMany({
-        where: { platformId: platform.id, source: "auto" },
-      });
-
-      // 批量插入新模型，保留已有模型的 enabled 状态
-      if (models.length > 0) {
-        const values = models.map((m) => {
-          const existing = existingMap.get(m.id);
-          return {
-            id: crypto.randomUUID(),
-            platformId: platform.id,
-            modelId: m.id,
-            ownedBy: m.owned_by ?? platform.name,
-            modelName: m.id,
-            type: detectModelType(m.id),
-            source: "auto" as const,
-            fetchedAt: now,
-            // 已有模型保留原 enabled 状态，新模型默认启用
-            enabled: existing ? existing.enabled : true,
-          };
+        // 删除旧的自动发现模型（保留手动添加的）
+        await prisma.platformModels.deleteMany({
+          where: { platformId: platform.id, source: "auto" },
         });
 
-        // 分批插入（D1 限制每次最多 100 条）
-        for (let i = 0; i < values.length; i += 100) {
-          await prisma.platformModels.createMany({
-            data: values.slice(i, i + 100),
+        // 批量插入新模型，保留已有模型的 enabled 状态
+        if (models.length > 0) {
+          const values = models.map((m) => {
+            const existing = existingMap.get(m.id);
+            return {
+              id: crypto.randomUUID(),
+              platformId: platform.id,
+              modelId: m.id,
+              ownedBy: m.owned_by ?? platform.name,
+              modelName: m.id,
+              type: detectModelType(m.id),
+              source: "auto" as const,
+              fetchedAt: now,
+              // 已有模型保留原 enabled 状态，新模型默认启用
+              enabled: existing ? existing.enabled : true,
+            };
           });
+
+          // 分批插入（D1 限制每次最多 100 条）
+          for (let i = 0; i < values.length; i += 100) {
+            await prisma.platformModels.createMany({
+              data: values.slice(i, i + 100),
+            });
+          }
         }
-      }
 
-      totalModels += models.length;
-      successCount++;
+        totalModels += models.length;
+        successCount++;
 
-      console.log(
-        `[model-fetcher] 平台 ${platform.name} 发现 ${models.length} 个模型`
-      );
-    })
-  );
+        console.log(
+          `[model-fetcher] 平台 ${platform.name} 发现 ${models.length} 个模型`
+        );
+      })
+    );
 
-  // 统计失败
-  const failedCount = results.filter((r) => r.status === "rejected").length;
+    // 统计失败
+    const failedCount = results.filter((r) => r.status === "rejected").length;
 
-  console.log(
-    `[model-fetcher] 完成: ${successCount} 个平台成功, ${failedCount} 个失败, 共发现 ${totalModels} 个模型`
-  );
+    console.log(
+      `[model-fetcher] 完成: ${successCount} 个平台成功, ${failedCount} 个失败, 共发现 ${totalModels} 个模型`
+    );
   } catch (err) {
     console.error("[model-fetcher] 模型拉取任务异常:", err instanceof Error ? err.message : String(err));
   }

@@ -11,7 +11,6 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
 
-
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -20,6 +19,11 @@ function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/** 生成唯一 ID（cuid 风格） */
+function newId(prefix = "c"): string {
+  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
@@ -151,8 +155,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.name !== undefined) updateData.name = escapeHtml(body.name);
     if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
-    if (body.enabled !== undefined)
-      updateData.enabled = body.enabled ? true : false;
+    if (body.enabled !== undefined) updateData.enabled = !!body.enabled;
     if (body.priority !== undefined) updateData.priority = body.priority;
     if (body.weight !== undefined) updateData.weight = body.weight;
     if (body.rpmLimit !== undefined)
@@ -299,7 +302,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     const now = Math.floor(Date.now() / 1000);
     await db.auditLogs.create({
       data: {
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        id: newId(),
         adminId: getAuditAdminId(admin),
         action: "update_platform",
         detail: JSON.stringify({ platformId: id, changes: sanitized }),
@@ -366,7 +369,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const now = Math.floor(Date.now() / 1000);
     await db.auditLogs.create({
       data: {
-        id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        id: newId(),
         adminId: getAuditAdminId(admin),
         action: "delete_platform",
         detail: JSON.stringify({ platformId: id }),

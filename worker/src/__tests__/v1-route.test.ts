@@ -1,36 +1,14 @@
 /**
  * v1-route 端点配置测试
  *
- * 测试 URL 路径到端点配置的映射
+ * 直接测试生产代码 v1-route.ts 导出的 getEndpointConfig（URL 路径 → 端点配置映射），
+ * 不再复制路由逻辑，避免实现分叉导致测试失守。
  */
 
 import { describe, it, expect } from "vitest";
-
-// 提取 getEndpointConfig 用于测试（该函数未导出，通过间接方式测试）
-// 这里直接测试路由逻辑的核心：路径匹配
+import { getEndpointConfig } from "../v1-route";
 
 describe("V1 端点路径匹配", () => {
-  // 模拟 getEndpointConfig 的核心逻辑
-  function getEndpointConfig(pathname: string) {
-    const endpoint = pathname.replace(/^\/v1/, "");
-    const endpoints: Record<string, { upstreamPath: string; supportsStreaming: boolean }> = {
-      "/chat/completions": { upstreamPath: "/chat/completions", supportsStreaming: true },
-      "/completions": { upstreamPath: "/completions", supportsStreaming: true },
-      "/embeddings": { upstreamPath: "/embeddings", supportsStreaming: false },
-      "/images/generations": { upstreamPath: "/images/generations", supportsStreaming: false },
-      "/images/edits": { upstreamPath: "/images/edits", supportsStreaming: false },
-      "/images/variations": { upstreamPath: "/images/variations", supportsStreaming: false },
-      "/audio/speech": { upstreamPath: "/audio/speech", supportsStreaming: false },
-      "/audio/transcriptions": { upstreamPath: "/audio/transcriptions", supportsStreaming: false },
-      "/audio/translations": { upstreamPath: "/audio/translations", supportsStreaming: false },
-      "/responses": { upstreamPath: "/responses", supportsStreaming: true },
-      "/models": { upstreamPath: "/models", supportsStreaming: false },
-    };
-    if (endpoint in endpoints) return endpoints[endpoint];
-    if (endpoint.startsWith("/models/")) return { upstreamPath: endpoint, supportsStreaming: false };
-    return null;
-  }
-
   it("chat/completions 匹配且支持流式", () => {
     const config = getEndpointConfig("/v1/chat/completions");
     expect(config).not.toBeNull();
@@ -71,6 +49,15 @@ describe("V1 端点路径匹配", () => {
     const config = getEndpointConfig("/v1/models/gpt-4o");
     expect(config).not.toBeNull();
     expect(config!.upstreamPath).toBe("/models/gpt-4o");
+  });
+
+  it("/v1/messages 匹配 Anthropic 协议并转换为 chat/completions", () => {
+    const config = getEndpointConfig("/v1/messages");
+    expect(config).not.toBeNull();
+    expect(config!.upstreamPath).toBe("/chat/completions");
+    expect(config!.supportsStreaming).toBe(true);
+    expect(config!.protocol).toBe("anthropic");
+    expect(typeof config!.buildUpstreamBody).toBe("function");
   });
 
   it("不支持的端点返回 null", () => {

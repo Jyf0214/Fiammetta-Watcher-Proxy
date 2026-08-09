@@ -90,79 +90,91 @@ export async function refreshCache(db: D1Database, env?: WorkerEnv): Promise<voi
 }
 
 /**
+ * 构建平台模型缓存（仅启用的模型，按平台分组）
+ *
+ * 启用的过滤由调用方查询条件（enabled: true）保证，此处仅负责分组。
+ */
+export function buildPlatformModelCache(
+  rows: Array<{ platformId: string; modelId: string }>
+): Map<string, Set<string>> {
+  const cache = new Map<string, Set<string>>();
+  for (const pm of rows) {
+    let set = cache.get(pm.platformId);
+    if (!set) {
+      set = new Set();
+      cache.set(pm.platformId, set);
+    }
+    set.add(pm.modelId);
+  }
+  return cache;
+}
+
+/**
  * 执行实际的缓存刷新
  */
 async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-  const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
-    await Promise.all([
-      // 查询启用的平台
-      prisma.platforms.findMany({
-        where: { enabled: true },
-      }),
-      // 查询所有模型映射
-      prisma.modelMappings.findMany(),
-      // 查询平台模型关联（仅启用的模型）
-      prisma.platformModels.findMany({
-        where: { enabled: true },
-        select: {
-          platformId: true,
-          modelId: true,
-        },
-      }),
-      // 查询自动模型 ID
-      getConfig(db, "system:auto_model_id", env),
-    ]);
+    const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
+      await Promise.all([
+        // 查询启用的平台
+        prisma.platforms.findMany({
+          where: { enabled: true },
+        }),
+        // 查询所有模型映射
+        prisma.modelMappings.findMany(),
+        // 查询平台模型关联（仅启用的模型）
+        prisma.platformModels.findMany({
+          where: { enabled: true },
+          select: {
+            platformId: true,
+            modelId: true,
+          },
+        }),
+        // 查询自动模型 ID
+        getConfig(db, "system:auto_model_id", env),
+      ]);
 
-  const newPlatforms: PlatformConfig[] = platformRows.map((p: any) => ({
-    id: p.id,
-    name: p.name,
-    baseUrl: p.baseUrl,
-    apiKeys: parseApiKeys(p.apiKeys),
-    type: p.type as PlatformConfig["type"],
-    enabled: p.enabled,
-    priority: p.priority,
-    weight: p.weight,
-    rpmLimit: p.rpmLimit,
-    tpmLimit: p.tpmLimit,
-    forwardHeaders: p.forwardHeaders,
-    status: p.status as PlatformConfig["status"],
-    failCount: p.failCount,
-    lastFailAt: p.lastFailAt,
-    cooldownEnd: p.cooldownEnd,
-  }));
+    const newPlatforms: PlatformConfig[] = platformRows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      baseUrl: p.baseUrl,
+      apiKeys: parseApiKeys(p.apiKeys),
+      type: p.type as PlatformConfig["type"],
+      enabled: p.enabled,
+      priority: p.priority,
+      weight: p.weight,
+      rpmLimit: p.rpmLimit,
+      tpmLimit: p.tpmLimit,
+      forwardHeaders: p.forwardHeaders,
+      status: p.status as PlatformConfig["status"],
+      failCount: p.failCount,
+      lastFailAt: p.lastFailAt,
+      cooldownEnd: p.cooldownEnd,
+    }));
 
-  const newModelMaps: ModelMapConfig[] = modelMapRows.map((m: any) => ({
-    id: m.id,
-    alias: m.alias,
-    targetModel: m.targetModel,
-    platformId: m.platformId,
-  }));
+    const newModelMaps: ModelMapConfig[] = modelMapRows.map((m) => ({
+      id: m.id,
+      alias: m.alias,
+      targetModel: m.targetModel,
+      platformId: m.platformId,
+    }));
 
-  // 构建平台模型缓存
-  const newPlatformModelCache = new Map<string, Set<string>>();
-  for (const pm of platformModelRows) {
-    let set = newPlatformModelCache.get(pm.platformId);
-    if (!set) {
-      set = new Set();
-      newPlatformModelCache.set(pm.platformId, set);
-    }
-    set.add(pm.modelId);
-  }
+    // 构建平台模型缓存
+    const newPlatformModelCache = buildPlatformModelCache(platformModelRows);
 
-  // 原子赋值
-  platformCache = newPlatforms;
-  modelMapCache = newModelMaps;
-  platformModelCache = newPlatformModelCache;
-  autoModelId = autoConfigValue;
-  lastRefresh = Date.now();
+    // 原子赋值
+    platformCache = newPlatforms;
+    modelMapCache = newModelMaps;
+    platformModelCache = newPlatformModelCache;
+    autoModelId = autoConfigValue;
+    lastRefresh = Date.now();
 
-  // 清理已删除平台的断路器条目，并从数据库同步熔断器状态
-  // （管理后台手动恢复平台后，内存熔断条目在此被清除，避免与库不一致）
-  cleanupStaleBreakers(platformRows.map((p: any) => p.id));
-  await syncCircuitBreakersFromDatabase(db, env);
+    // 清理已删除平台的断路器条目，并从数据库同步熔断器状态
+    // （管理后台手动恢复平台后，内存熔断条目在此被清除，避免与库不一致）
+    cleanupStaleBreakers(platformRows.map((p) => p.id));
+    await syncCircuitBreakersFromDatabase(db, env);
   } catch (err) {
     console.error("[router] 缓存刷新失败:", err instanceof Error ? err.message : String(err));
   }

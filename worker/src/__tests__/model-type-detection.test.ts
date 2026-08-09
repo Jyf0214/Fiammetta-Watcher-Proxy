@@ -1,9 +1,18 @@
 /**
  * 模型类型检测 + 路由缓存过滤测试
+ *
+ * 第二个 describe 直接测试生产代码 router.ts 导出的 buildPlatformModelCache
+ * （真实缓存构建逻辑），不再复制实现。启用的过滤由查询条件（enabled: true）保证，
+ * 函数本身只负责按平台分组。
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { detectModelType } from "@/lib/detect-model-type";
+import { buildPlatformModelCache } from "../router";
+
+vi.mock("@/lib/prisma", () => ({
+  createDb: vi.fn(),
+}));
 
 describe("detectModelType", () => {
   it("默认返回 chat", () => {
@@ -66,61 +75,30 @@ describe("detectModelType", () => {
   });
 });
 
-describe("模型启禁用过滤（模拟 Worker 逻辑）", () => {
-  interface MockModel {
-    platformId: string;
-    modelId: string;
-    enabled: boolean;
-  }
+describe("平台模型缓存构建（真实 buildPlatformModelCache）", () => {
+  it("按平台分组构建缓存", () => {
+    const cache = buildPlatformModelCache([
+      { platformId: "p1", modelId: "gpt-4o" },
+      { platformId: "p1", modelId: "embedding-3" },
+      { platformId: "p2", modelId: "model-c" },
+    ]);
 
-  // 模拟 Worker 的 refreshCache 过滤逻辑
-  function buildModelCache(models: MockModel[]): Map<string, Set<string>> {
-    const cache = new Map<string, Set<string>>();
-    for (const m of models) {
-      if (!m.enabled) continue; // 只缓存启用的模型
-      let set = cache.get(m.platformId);
-      if (!set) {
-        set = new Set();
-        cache.set(m.platformId, set);
-      }
-      set.add(m.modelId);
-    }
-    return cache;
-  }
-
-  it("禁用的模型不进入缓存", () => {
-    const models: MockModel[] = [
-      { platformId: "p1", modelId: "gpt-4o", enabled: true },
-      { platformId: "p1", modelId: "gpt-3.5-turbo", enabled: false },
-      { platformId: "p1", modelId: "embedding-3", enabled: true },
-    ];
-    const cache = buildModelCache(models);
-    const p1Models = cache.get("p1")!;
-
-    expect(p1Models.has("gpt-4o")).toBe(true);
-    expect(p1Models.has("gpt-3.5-turbo")).toBe(false); // 被过滤
-    expect(p1Models.has("embedding-3")).toBe(true);
-    expect(p1Models.size).toBe(2);
+    expect(cache.get("p1")?.has("gpt-4o")).toBe(true);
+    expect(cache.get("p1")?.has("embedding-3")).toBe(true);
+    expect(cache.get("p1")?.size).toBe(2);
+    expect(cache.get("p2")?.size).toBe(1);
   });
 
-  it("全部禁用时平台无模型", () => {
-    const models: MockModel[] = [
-      { platformId: "p1", modelId: "gpt-4o", enabled: false },
-    ];
-    const cache = buildModelCache(models);
-    expect(cache.has("p1")).toBe(false);
+  it("空输入返回空缓存", () => {
+    const cache = buildPlatformModelCache([]);
+    expect(cache.size).toBe(0);
   });
 
-  it("多平台独立过滤", () => {
-    const models: MockModel[] = [
-      { platformId: "p1", modelId: "model-a", enabled: true },
-      { platformId: "p2", modelId: "model-b", enabled: false },
-      { platformId: "p2", modelId: "model-c", enabled: true },
-    ];
-    const cache = buildModelCache(models);
-
+  it("同一平台重复模型按 Set 去重", () => {
+    const cache = buildPlatformModelCache([
+      { platformId: "p1", modelId: "gpt-4o" },
+      { platformId: "p1", modelId: "gpt-4o" },
+    ]);
     expect(cache.get("p1")?.size).toBe(1);
-    expect(cache.get("p2")?.size).toBe(1); // model-b 被过滤
-    expect(cache.get("p2")?.has("model-c")).toBe(true);
   });
 });

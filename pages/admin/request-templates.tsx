@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Form, Input, Select, Modal, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -71,40 +71,28 @@ export default function RequestTemplatesPage() {
   const [bodyJsonError, setBodyJsonError] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/admin/request-templates");
+      const res = await fetch("/api/admin/request-templates", { signal });
       const data = await res.json() as Record<string, any>;
       if (data.success) {
         setTemplates(data.data);
       }
-    } catch {
-      // 静默失败
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    const load = async () => {
-      try {
-        const res = await fetch("/api/admin/request-templates", { signal: controller.signal });
-        const data = await res.json() as Record<string, any>;
-        if (data.success) {
-          setTemplates(data.data);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    };
-    load();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async 数据获取在 await 后 setState，compiler lint 误报（facebook/react#34905）
+    fetchTemplates(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [fetchTemplates]);
 
   const openCreateModal = () => {
     setEditingTemplate(null);
