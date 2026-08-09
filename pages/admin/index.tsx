@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
 import { message } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -35,12 +33,10 @@ const MiniTrendChart = dynamic(() => import("@/components/MiniTrendChart"), {
 // ==================== 类型定义 ====================
 
 interface Stats {
-  totalPlatforms: number;
   activePlatforms: number;
   totalKeys: number;
   activeKeys: number;
   totalRequests: number;
-  errorRequests: number;
   totalTokens: number;
   avgTtft: number;
   avgDuration: number;

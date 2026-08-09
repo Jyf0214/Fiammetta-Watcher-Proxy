@@ -166,14 +166,6 @@ export async function loadTemplates(
   return templateCache;
 }
 
-/**
- * 手动清除缓存（模板更新后调用）
- */
-export function invalidateTemplateCache(): void {
-  templateCache = null;
-  lastRefresh = 0;
-}
-
 // ==================== 模板匹配与应用 ====================
 
 /**

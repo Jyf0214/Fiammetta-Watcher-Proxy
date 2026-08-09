@@ -1,75 +1,9 @@
 /**
- * Worker 内部类型定义
+ * Worker Cron 任务类型定义
  *
- * 包含平台配置、路由决策、速率限制结果等 Worker 专用类型。
- * 与 lib/types.ts 的共享类型区分，此处为 Worker 运行时特有。
+ * 仅保留 Cron 调度所需的运行时类型；
+ * 平台配置、路由决策、速率限制结果等运行时类型统一使用 @/lib/types。
  */
-
-// ==================== 平台配置（缓存用） ====================
-
-export interface PlatformConfig {
-  id: string;
-  name: string;
-  baseUrl: string;
-  /** 平台 API 密钥数组（命名对象 [{name, key, whitelisted}] 的 key 值），round-robin 轮询 */
-  apiKeys: string[];
-  type: "openai" | "azure" | "custom";
-  enabled: boolean;
-  priority: number;
-  weight: number;
-  rpmLimit: number | null;
-  tpmLimit: number | null;
-  forwardHeaders: string;
-  status: "healthy" | "degraded" | "down";
-  failCount: number;
-  lastFailAt: number | null;
-  cooldownEnd: number | null;
-}
-
-// ==================== 路由决策 ====================
-
-export interface RouteDecision {
-  platform: PlatformConfig;
-  targetModel: string;
-}
-
-// ==================== 模型映射配置（缓存用） ====================
-
-export interface ModelMapConfig {
-  id: string;
-  alias: string;
-  targetModel: string;
-  platformId: string | null;
-}
-
-// ==================== API Key（查询结果） ====================
-
-export interface ApiKeyRecord {
-  id: string;
-  key: string;
-  name: string;
-  enabled: number;
-  usedTokens: number;
-  rpmLimit: number | null;
-  tpmLimit: number | null;
-  callLimit: number | null;
-  callUsed: number;
-  resetPeriod: string | null;
-  expiresAt: number | null;
-  status: string;
-}
-
-// ==================== 速率限制结果 ====================
-
-export interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  resetAt: number;
-}
-
-// ==================== 熔断器状态 ====================
-
-export type CircuitBreakerState = "closed" | "open" | "half-open";
 
 // ==================== Cron 任务类型 ====================
 

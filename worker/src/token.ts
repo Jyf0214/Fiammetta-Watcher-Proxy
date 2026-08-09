@@ -149,7 +149,6 @@ function resolveStreamErrorStatus(error: Record<string, unknown> | undefined): n
  * 请求完成后异步更新 API Key 用量和日志。
  *
  * 关键设计：
- * - 用 ctx.waitUntil() 保护异步 DB 写入，防止 Worker 提前终止
  * - 记录 TTFT（首字延迟）：第一个非空 chunk 到达时的时间差
  * - SSE buffer 拼接：处理 chunk 在 JSON 中间截断的情况
  */
@@ -159,9 +158,7 @@ export function createUsageTransformer(params: {
   platformId: string;
   model: string;
   startTime: number;
-  kv: KVNamespace;
   db: D1Database;
-  ctx: ExecutionContext;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
   let sseBuffer = "";

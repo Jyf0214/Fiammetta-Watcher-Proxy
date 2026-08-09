@@ -35,9 +35,7 @@ async function runTransformer(
     platformId: "test-platform",
     model: "test-model",
     startTime: Date.now(),
-    kv: {} as KVNamespace,
     db: {} as D1Database,
-    ctx: {} as ExecutionContext,
     ...overrides,
   });
   await new ReadableStream<Uint8Array>({

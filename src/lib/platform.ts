@@ -66,13 +66,6 @@ export const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; labelKey: str
   moderation: { icon: Cpu,          labelKey: "typeModeration", color: "text-red-500",    bg: "bg-red-50 dark:bg-red-900/30" },
 };
 
-/** 根据模型 ID 猜测品牌首字母 */
-export function getModelBrand(modelId: string): string {
-  const parts = modelId.split("/");
-  const brand = parts.length > 1 ? parts[0] : modelId.split("-")[0];
-  return brand.slice(0, 2).toUpperCase();
-}
-
 // ---------- 表单 ----------
 
 /** forwardHeaders 数组/JSON 字符串 → 每行一个 Header 的文本 */

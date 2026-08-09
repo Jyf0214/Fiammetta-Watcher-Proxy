@@ -194,11 +194,6 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything());
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro-pages] 非流式 503 日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-    }));
     expect(logParams.status).toBe(503);
   });
 
@@ -222,11 +217,6 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything());
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro-pages] 流式 503 日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-    }));
     expect(logParams.status).toBe(503);
   });
 
@@ -257,13 +247,6 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     // 日志按流内 error.code 记录失败：503 + isError=true + tokens=0（修复前记录 200+isError=false）
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro-pages] 流内 error 日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-      tokens: logParams.tokens,
-      endpoint: logParams.endpoint,
-    }));
     expect(logParams.status).toBe(503);
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
@@ -302,12 +285,6 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     // 补记日志：status=504（修复前记录 200），isError=true，tokens=0
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro-pages] 空闲超时日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-      tokens: logParams.tokens,
-    }));
     expect(logParams.status).toBe(504);
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);

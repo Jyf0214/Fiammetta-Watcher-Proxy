@@ -10,9 +10,7 @@
  * - 如果上次更新日期与当前日期不在同一周期，则执行重置
  * - 重置时同时将 status 恢复为 active（防止因超限被禁用的 Key 在新周期仍被禁用）
  *
- * 两个入口：
- * 1. handleScheduledReset — Worker Cron Trigger 调用（批量重置所有 Key）
- * 2. checkAndResetApiKey — 请求处理时调用（检查单个 Key）
+ * 入口：handleScheduledReset — Worker Cron Trigger 调用（批量重置所有 Key）
  */
 
 import { createDb } from "@/lib/prisma";
@@ -53,66 +51,6 @@ export function getPeriodStart(resetPeriod: string): number {
   }
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   return Math.floor(start.getTime() / 1000);
-}
-
-/**
- * 检查单个 API Key 是否需要重置，并在必要时执行重置
- */
-export async function checkAndResetApiKey(
-  db: D1Database,
-  apiKeyId: string,
-  env?: WorkerEnv
-): Promise<boolean> {
-  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-  try {
-    const apiKey = await prisma.apiKeys.findFirst({
-      where: { id: apiKeyId },
-      select: {
-        id: true,
-        resetPeriod: true,
-        usedTokens: true,
-        status: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!apiKey || !needsReset(apiKey)) {
-      return false;
-    }
-
-    const periodStart = getPeriodStart(apiKey.resetPeriod!);
-    const currentTime = Math.floor(Date.now() / 1000);
-
-    await prisma.apiKeys.update({
-      where: { id: apiKeyId },
-      data: {
-        usedTokens: 0,
-        ...(apiKey.status === "disabled" ? { status: "active" } : {}),
-        updatedAt: currentTime,
-      },
-    });
-
-    // 删除当前周期之前的请求日志
-    await prisma.requestLogs.deleteMany({
-      where: {
-        keyId: apiKeyId,
-        createdAt: { lt: periodStart },
-      },
-    });
-
-    console.log(
-      `[key-reset] 请求时重置 Key ${apiKeyId.slice(0, 8)}... ` +
-        `resetPeriod=${apiKey.resetPeriod} usedTokens=${apiKey.usedTokens}→0`
-    );
-
-    return true;
-  } catch (error) {
-    console.error(
-      `[key-reset] 检查重置失败 (keyId=${apiKeyId}):`,
-      error instanceof Error ? error.message : String(error)
-    );
-    return false;
-  }
 }
 
 /**

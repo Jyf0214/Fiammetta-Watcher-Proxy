@@ -526,12 +526,6 @@ describe("proxyV1Request 流式挂起空闲超时", () => {
     // 补记日志：status=504（修复前记录 200），isError=true，tokens=0
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro] 空闲超时日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-      tokens: logParams.tokens,
-    }));
     expect(logParams.status).toBe(504);
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);

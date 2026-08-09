@@ -228,32 +228,6 @@ async function parseRequestBody<T>(
   return { body };
 }
 
-// ==================== 速率限制检查 ====================
-
-function _checkRateLimits(
-  platform: { id: string; rpmLimit: number | null; tpmLimit: number | null },
-  apiKey: ApiKeyRecord
-): { allowed: true } | { error: Response } {
-  // 平台级 RPM
-  if (platform.rpmLimit !== null) {
-    // 这里需要 KV，但静态检查不通过 KV（KV 是异步的）
-    // 实际检查在 proxyV1Request 中通过 KV 完成
-  }
-
-  // Key 级调用次数检查
-  const effectiveCallLimit = apiKey.callLimit ?? null;
-  if (effectiveCallLimit !== null && apiKey.callUsed >= effectiveCallLimit) {
-    return {
-      error: Response.json(
-        { error: { message: "API Key 调用次数已达上限", type: "invalid_request_error" } },
-        { status: 429 }
-      ),
-    };
-  }
-
-  return { allowed: true };
-}
-
 // ==================== 统一代理入口 ====================
 
 export interface ProxyConfig {
@@ -391,7 +365,6 @@ export async function proxyV1Request(
   // ── 5. 上游错误自动重试（429/401/403：同平台换 Key → 换平台，最多 3 次）──
   const MAX_UPSTREAM_RETRIES = 3;
   const isStream = config.supportsStreaming !== false && body.stream === true;
-  const requestModel = requestedModel;
 
   let currentPlatform = route.platform;
   const currentTargetModel = route.targetModel;
@@ -460,7 +433,7 @@ export async function proxyV1Request(
     // 应用请求模板
     try {
       const templates = await loadTemplates(env.DB, workerEnv);
-      const applicable = getApplicableTemplates(templates, requestModel);
+      const applicable = getApplicableTemplates(templates, requestedModel);
       if (applicable.length > 0) {
         upstreamBody = applyTemplates(upstreamBody, applicable);
       }
@@ -536,9 +509,8 @@ export async function proxyV1Request(
       const handled = await handleUpstreamResponse(
         upstreamResponse,
         currentPlatform,
-        currentKey,
         apiKey,
-        requestModel,
+        requestedModel,
         config,
         isStream,
         startTime,
@@ -800,7 +772,6 @@ function createAnthropicStreamTransformer(
 async function handleUpstreamResponse(
   upstreamResponse: Response,
   platform: { id: string; name: string },
-  upstreamKey: string,
   apiKey: ApiKeyRecord,
   requestedModel: string,
   config: ProxyConfig,
@@ -878,9 +849,7 @@ async function handleUpstreamResponse(
       platformId: platform.id,
       model: requestedModel,
       startTime,
-      kv: env.KV,
       db: env.DB,
-      ctx,
       env: workerEnv,
     });
 

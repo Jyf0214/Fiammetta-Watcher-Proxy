@@ -2,9 +2,8 @@
  * GET /api/admin/stats — 获取仪表盘统计数据
  *
  * 返回：
- * - 平台数量（总数 + 启用数）
- * - API Key 数量（总数 + 活跃数）
- * - 请求总数、错误数、总 token
+ * - 启用平台数、API Key 数量（总数 + 活跃数）
+ * - 请求总数、总 token
  * - 平均 TTFT 和平均耗时
  */
 
@@ -27,16 +26,12 @@ export default async function handler(
 
     // 并行查询所有统计数据
     const [
-      totalPlatforms,
       activePlatforms,
       totalKeys,
       activeKeys,
       requestAgg,
-      errorCount,
       perfAgg,
     ] = await Promise.all([
-      // 平台总数
-      db.platforms.count(),
       // 启用的平台数
       db.platforms.count({ where: { enabled: true } }),
       // API Key 总数
@@ -48,8 +43,6 @@ export default async function handler(
         db.requestLogs.count(),
         db.requestLogs.aggregate({ _sum: { tokens: true } }),
       ]),
-      // 错误请求数
-      db.requestLogs.count({ where: { isError: true } }),
       // 性能统计：在数据库层面聚合，避免全量拉取
       db.requestLogs.aggregate({
         where: { isError: false },
@@ -71,12 +64,10 @@ export default async function handler(
     res.status(200).json({
       success: true,
       data: {
-        totalPlatforms,
         activePlatforms,
         totalKeys,
         activeKeys,
         totalRequests,
-        errorRequests: errorCount,
         totalTokens: sumTokens,
         avgTtft,
         avgDuration,

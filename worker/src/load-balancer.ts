@@ -31,15 +31,6 @@ const DEFAULT_COOLDOWN_MS = 60_000;
 const DEFAULT_HALF_OPEN_MAX = 3;
 
 /**
- * 获取平台熔断器状态（纯查询，无副作用）
- */
-export function getCircuitBreakerState(platformId: string): CircuitBreakerState {
-  const entry = breakers.get(platformId);
-  if (!entry) return "closed";
-  return entry.state;
-}
-
-/**
  * 检查并更新平台熔断器状态（具有副作用：open → half-open 转换）
  */
 export function checkAndUpdateCircuitBreakerState(

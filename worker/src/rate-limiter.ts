@@ -97,29 +97,6 @@ export async function checkPlatformTpm(
 }
 
 /**
- * 记录平台实际 token 用量（追溯性 TPM 追踪）
- */
-export async function recordPlatformTokens(
-  platformId: string,
-  tpmLimit: number | null,
-  tokenCount: number,
-  kv: KVNamespace
-): Promise<void> {
-  if (tokenCount <= 0 || tpmLimit === null) return;
-
-  const now = Date.now();
-  const windowStart = Math.floor(now / WINDOW_MS) * WINDOW_MS;
-  const key = `${TPM_PREFIX}platform:${platformId}:${windowStart}`;
-
-  const current = await kv.get(key, { type: "text" });
-  const currentTokens = current ? parseInt(current, 10) : 0;
-
-  await kv.put(key, String(currentTokens + tokenCount), {
-    expirationTtl: 120,
-  });
-}
-
-/**
  * 检查 API Key 级 RPM 限制
  */
 export async function checkApiKeyRpm(
@@ -187,27 +164,4 @@ export async function checkApiKeyTpm(
     remaining: tpmLimit - currentTokens - tokenCount,
     resetAt: windowStart + WINDOW_MS,
   };
-}
-
-/**
- * 记录 API Key 实际 token 用量
- */
-export async function recordApiKeyTokens(
-  apiKeyId: string,
-  tpmLimit: number | null,
-  tokenCount: number,
-  kv: KVNamespace
-): Promise<void> {
-  if (tokenCount <= 0 || tpmLimit === null) return;
-
-  const now = Date.now();
-  const windowStart = Math.floor(now / WINDOW_MS) * WINDOW_MS;
-  const key = `${TPM_PREFIX}key:${apiKeyId}:${windowStart}`;
-
-  const current = await kv.get(key, { type: "text" });
-  const currentTokens = current ? parseInt(current, 10) : 0;
-
-  await kv.put(key, String(currentTokens + tokenCount), {
-    expirationTtl: 120,
-  });
 }

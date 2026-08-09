@@ -70,13 +70,6 @@ export function isKeyWhitelisted(key: string): boolean {
   return whitelistedKeys.has(key);
 }
 
-/**
- * 获取当前白名单（只读副本）
- */
-export function getWhitelist(): string[] {
-  return Array.from(whitelistedKeys);
-}
-
 // ==================== Key 封禁机制（429 专用） ====================
 
 /**

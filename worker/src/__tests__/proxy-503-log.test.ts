@@ -176,11 +176,6 @@ describe("上游 503 时日志记录状态码重现", () => {
     expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB);
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro] 非流式 503 日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-    }));
     expect(logParams.status).toBe(503);
   });
 
@@ -207,11 +202,6 @@ describe("上游 503 时日志记录状态码重现", () => {
     expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB);
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro] 流式 503 日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-    }));
     expect(logParams.status).toBe(503);
   });
 
@@ -236,12 +226,6 @@ describe("上游 503 时日志记录状态码重现", () => {
     // 日志 status 与实际下发一致：502（修复前记录上游的 200）
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    console.log("[repro] 空响应耗尽日志参数:", JSON.stringify({
-      status: logParams.status,
-      isError: logParams.isError,
-      errorMessage: logParams.errorMessage,
-      tokens: logParams.tokens,
-    }));
     expect(logParams.status).toBe(502);
     expect(logParams.isError).toBe(true);
     expect(logParams.errorMessage).toContain("空响应");
@@ -284,12 +268,6 @@ describe("上游 503 时日志记录状态码重现", () => {
     expect(prismaSpy.apiKeys.update).not.toHaveBeenCalled();
     expect(prismaSpy.requestLogs.create).toHaveBeenCalledTimes(1);
     const logData = prismaSpy.requestLogs.create.mock.calls[0][0].data;
-    console.log("[repro] 流内 error 日志参数:", JSON.stringify({
-      status: logData.status,
-      isError: logData.isError,
-      errorMessage: logData.errorMessage,
-      tokens: logData.tokens,
-    }));
     expect(logData.status).toBe(503);
     expect(logData.isError).toBe(true);
     expect(logData.tokens).toBe(0);
