@@ -68,14 +68,9 @@ export default async function handler(
     const avgTtft = perfCount > 0 ? Math.round(sumTtft / perfCount) : 0;
     const avgDuration = perfCount > 0 ? Math.round(sumLatency / perfCount) : 0;
 
-    // 查询管理员信息（能查到说明 D1 已连接）
-    const adminInfo = await db.admins.findMany({ take: 1, select: { username: true } });
-
     res.status(200).json({
       success: true,
       data: {
-        dbConnected: true,
-        adminUsername: adminInfo[0]?.username || "",
         totalPlatforms,
         activePlatforms,
         totalKeys,
