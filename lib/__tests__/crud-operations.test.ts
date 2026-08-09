@@ -2,59 +2,26 @@
  * Prisma Client 操作测试
  *
  * 验证 Prisma 生成的客户端可以正常执行增删改查操作。
- * 使用 Prisma libSQL adapter + 内存数据库（支持 RETURNING *）。
+ * 数据库使用虚拟 PostgreSQL（PGlite 内存实例，仅存在于测试进程），
+ * 表结构由 prisma migrate diff 从 prisma/schema.pg.prisma 派生，
+ * 经 lib/prisma 真实 createDb 工厂（pg 方言）连接——与生产完全同源。
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "../../src/generated/d1/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { createTestDb } from "./helpers/test-pg-db";
 
-let prisma: PrismaClient;
+let prisma: Awaited<ReturnType<typeof createTestDb>>["db"];
+let cleanup: () => Promise<void>;
 
 beforeAll(async () => {
-  const adapter = new PrismaLibSql({ url: "file::memory:" });
-  prisma = new PrismaClient({ adapter });
-
-  // 创建测试表（与 Prisma schema 一致）
-  const tables = [
-    `CREATE TABLE IF NOT EXISTS admins (
-      id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
-    )`,
-    `CREATE TABLE IF NOT EXISTS api_keys (
-      id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      used_tokens INTEGER NOT NULL DEFAULT 0,
-      token_limit INTEGER, rpm_limit INTEGER, tpm_limit INTEGER,
-      call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
-      reset_period TEXT DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
-      expires_at INTEGER, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
-    )`,
-    `CREATE TABLE IF NOT EXISTS request_logs (
-      id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT, proxy_id TEXT,
-      model TEXT NOT NULL, endpoint TEXT, method TEXT, status INTEGER NOT NULL,
-      latency INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
-      prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
-      ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error INTEGER NOT NULL DEFAULT 0,
-      ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL DEFAULT 0
-    )`,
-    `CREATE TABLE IF NOT EXISTS platforms (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
-      api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai',
-      enabled INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
-      weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
-      forward_headers TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'healthy',
-      fail_count INTEGER NOT NULL DEFAULT 0, last_fail_at INTEGER, cooldown_end INTEGER,
-      created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
-    )`,
-  ];
-  for (const sql of tables) {
-    await prisma.$executeRawUnsafe(sql);
-  }
-});
+  const created = await createTestDb();
+  prisma = created.db;
+  cleanup = created.cleanup;
+}, 120_000);
 
 afterAll(async () => {
-  if (prisma) await prisma.$disconnect();
-});
+  await cleanup();
+}, 120_000);
 
 // ==================== 测试 ====================
 

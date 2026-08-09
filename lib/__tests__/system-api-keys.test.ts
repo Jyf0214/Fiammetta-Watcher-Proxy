@@ -6,52 +6,18 @@
  * - pages/api/admin/system-keys.ts 的 generateSystemKey（密钥格式）
  * - system_api_keys 与 api_keys 表完全隔离
  *
- * 数据库使用 Prisma libSQL adapter + 内存库；createDb 经 vi.mock 注入内存库，
- * 数据读写全部经 Prisma ORM 模型 API；建表 DDL 为内存库初始化所需（固定常量，无注入面）。
+ * 数据库使用虚拟 PostgreSQL（PGlite 内存实例，仅存在于测试进程），
+ * 表结构由 prisma migrate diff 从 prisma/schema.pg.prisma 派生；
+ * createTestDb 经 lib/prisma 真实 createDb 工厂建立 pg 缓存后，
+ * 将 PG_URL 写入 process.env，被测代码的无参 createDb() 命中同一实例。
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { PrismaClient } from "../../src/generated/d1/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import type { NextApiRequest } from "next";
 import { validateSystemApiKey } from "../../src/lib/admin-system-auth";
 import { generateSystemKey } from "../../pages/api/admin/system-keys";
-import { createDb } from "@/lib/prisma";
-
-vi.mock("@/lib/prisma", () => ({
-  createDb: vi.fn(),
-}));
-
-const mockedCreateDb = vi.mocked(createDb);
-
-/** 创建内存测试库（Prisma libsql adapter），建表 DDL 与 prisma/schema.d1.prisma 对齐 */
-async function createTestDb(): Promise<PrismaClient> {
-  const adapter = new PrismaLibSql({ url: "file::memory:" });
-  const db = new PrismaClient({ adapter });
-
-  await db.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS system_api_keys (
-      id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      enabled BOOLEAN NOT NULL DEFAULT 1, last_used_at INTEGER,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-    CREATE INDEX IF NOT EXISTS idx_system_api_keys_key ON system_api_keys(key);
-  `);
-  await db.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS api_keys (
-      id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      used_tokens INTEGER NOT NULL DEFAULT 0,
-      token_limit INTEGER, rpm_limit INTEGER, tpm_limit INTEGER,
-      call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
-      reset_period TEXT DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
-      expires_at INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `);
-  return db;
-}
+import { createTestDb } from "./helpers/test-pg-db";
+import type { Database } from "@/lib/prisma";
 
 /** 构造带 Authorization 头的请求对象 */
 function authReq(authHeader: string | null): NextApiRequest {
@@ -60,12 +26,35 @@ function authReq(authHeader: string | null): NextApiRequest {
   } as unknown as NextApiRequest;
 }
 
-let db: PrismaClient;
+let db: Database;
+let cleanup: () => Promise<void>;
+let savedPgUrl: string | undefined;
+let savedDbType: string | undefined;
+
+beforeAll(async () => {
+  const created = await createTestDb();
+  db = created.db;
+  cleanup = created.cleanup;
+  // 被测代码 validateSystemApiKey 内部调用无参 createDb()：显式固定方言与连接串，
+  // 不隐式依赖 .env.local 内容，保证其命中本测试的虚拟库实例
+  savedPgUrl = process.env.PG_URL;
+  savedDbType = process.env.DB_TYPE;
+  process.env.PG_URL = created.url;
+  process.env.DB_TYPE = "pg";
+}, 120_000);
 
 beforeEach(async () => {
-  db = await createTestDb();
-  mockedCreateDb.mockResolvedValue(db);
+  await db.systemApiKeys.deleteMany({});
+  await db.apiKeys.deleteMany({});
 });
+
+afterAll(async () => {
+  if (savedPgUrl === undefined) delete process.env.PG_URL;
+  else process.env.PG_URL = savedPgUrl;
+  if (savedDbType === undefined) delete process.env.DB_TYPE;
+  else process.env.DB_TYPE = savedDbType;
+  await cleanup();
+}, 120_000);
 
 // ==================== system_api_keys：schema 兼容性 ====================
 

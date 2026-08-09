@@ -122,22 +122,30 @@ try {
 
 // ==================== 4. 为未使用的方言生成空 stub ====================
 
-const STUB_CONTENT = `// 自动生成的空 stub — 未使用的 Prisma client 不打包到构建产物中
-// 导出占位 PrismaClient，满足 lib/prisma.ts 的动态 import 类型检查
-export class PrismaClient {
-  constructor(..._args: unknown[]) {
-    throw new Error("此方言未启用，请切换 DB_TYPE");
-  }
-}
+/**
+ * stub 转发当前启用方言（dialect.dir）的真实 client 类型。
+ * lib/prisma.ts 对 d1 方言做了静态类型导入（import type { PrismaClient }、
+ * export type { Prisma }），占位对象缺少 Prisma 命名空间与模型方法类型，
+ * 会导致 DB_TYPE≠d1 时构建类型检查失败（如 pg 本地开发）。各方言 schema
+ * 结构一致，转发真实类型即可满足类型检查；type-only 导入在编译期擦除，
+ * 不会把真实 client 打进未启用方言的模块。
+ */
+function buildStubContent(realDir) {
+  return `// 自动生成的空 stub — 未使用的 Prisma client 不打包到构建产物中
+// 类型转发自当前启用方言（${realDir}/client，各方言 schema 结构一致），
+// 满足 lib/prisma.ts 对 d1 方言的静态类型导入
+export { PrismaClient } from "../${realDir}/client";
+export type { Prisma } from "../${realDir}/client";
 `;
+}
 
 for (const [key, d] of Object.entries(DIALECTS)) {
   if (key === dbType || (dbType === "hyperdrive" && key === "pg")) continue;
   const stubDir = resolve(GENERATED_ROOT, d.dir);
   if (!existsSync(stubDir)) {
     mkdirSync(stubDir, { recursive: true });
-    writeFileSync(resolve(stubDir, "client.ts"), STUB_CONTENT);
-    console.log(`已生成 stub: src/generated/${d.dir}/client.ts`);
+    writeFileSync(resolve(stubDir, "client.ts"), buildStubContent(dialect.dir));
+    console.log(`已生成 stub: src/generated/${d.dir}/client.ts（转发 ${dialect.dir} 类型）`);
   }
 }
 

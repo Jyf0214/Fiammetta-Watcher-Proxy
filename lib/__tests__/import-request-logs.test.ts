@@ -10,17 +10,12 @@
  * 6. 6961 条批量场景
  * 7. sanitize 工具边界（上界/枚举/布尔/状态码/时间戳）
  *
- * 数据库使用 Prisma libSQL adapter + 磁盘临时库（libsql createMany 走事务独立连接，
- * 内存库每连接独立会丢失建表结果，故不用 file::memory:），
- * 数据读写全部经 Prisma ORM 模型 API；建表 DDL 为测试库初始化所需（固定常量，无注入面）。
+ * 数据库使用虚拟 PostgreSQL（PGlite 内存实例，仅存在于测试进程），
+ * 表结构由 prisma migrate diff 从 prisma/schema.pg.prisma 派生，
+ * 经 lib/prisma 真实 createDb 工厂（pg 方言）连接；数据读写全部经 Prisma ORM 模型 API。
  */
 
-import { describe, it, expect, afterAll } from "vitest";
-import { PrismaClient } from "../../src/generated/d1/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import {
   importRequestLogs,
   toUnixSeconds,
@@ -33,60 +28,32 @@ import {
   sanitizeHttpStatus,
   sanitizeExpiresAt,
 } from "../../pages/api/admin/import";
+import { createTestDb } from "./helpers/test-pg-db";
+import type { Database } from "@/lib/prisma";
 
-/** 测试库临时文件（afterAll 统一清理） */
-const dbFiles: string[] = [];
+let db: Database;
+let cleanup: () => Promise<void>;
 
-/**
- * 创建测试库（Prisma libsql adapter），建表 DDL 与 prisma/schema.d1.prisma 对齐。
- * 使用磁盘临时文件而非 file::memory:——libsql 的 createMany 走事务（独立连接），
- * 内存库每连接独立，事务连接看不到建表结果；磁盘文件多连接共享。
- */
-async function createTestDb(): Promise<PrismaClient> {
-  const dbPath = join(tmpdir(), `import-request-logs-${Date.now()}-${dbFiles.length}.db`);
-  dbFiles.push(dbPath);
-  const adapter = new PrismaLibSql({ url: `file:${dbPath}` });
-  const db = new PrismaClient({ adapter });
+beforeAll(async () => {
+  const created = await createTestDb();
+  db = created.db;
+  cleanup = created.cleanup;
+}, 120_000);
 
-  await db.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS api_keys (
-      id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '默认 Key',
-      used_tokens INTEGER NOT NULL DEFAULT 0,
-      rpm_limit INTEGER, tpm_limit INTEGER, call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
-      token_limit INTEGER, reset_period TEXT NOT NULL DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
-      expires_at INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `);
-  await db.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS platforms (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
-      api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai',
-      enabled INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
-      weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
-      forward_headers TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'healthy',
-      fail_count INTEGER NOT NULL DEFAULT 0, last_fail_at INTEGER, cooldown_end INTEGER,
-      created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-  await db.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS request_logs (
-      id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT,
-      model TEXT NOT NULL, endpoint TEXT, method TEXT, status INTEGER NOT NULL,
-      latency INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
-      prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
-      ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error BOOLEAN NOT NULL DEFAULT 0,
-      ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL
-    )
-  `);
-  return db;
-}
+beforeEach(async () => {
+  await db.requestLogs.deleteMany({});
+  await db.apiKeys.deleteMany({});
+  await db.platforms.deleteMany({});
+});
+
+afterAll(async () => {
+  await cleanup();
+}, 120_000);
 
 // ==================== requestLogs 导入：外键校验 ====================
 
 describe("requestLogs 导入：外键校验", () => {
   it("keyId/platformId 存在时正常插入", async () => {
-    const db = await createTestDb();
     await db.apiKeys.create({ data: { id: "key-001", key: "test-key", name: "Test Key" } });
     await db.platforms.create({
       data: { id: "plat-001", name: "Test Platform", baseUrl: "http://test.com", apiKeys: "[]", forwardHeaders: "[]" },
@@ -109,8 +76,6 @@ describe("requestLogs 导入：外键校验", () => {
   });
 
   it("keyId/platformId 不存在时置 null（不报外键错误）", async () => {
-    const db = await createTestDb();
-
     const result = await importRequestLogs(db, [
       {
         keyId: "non-existent-key", platformId: "non-existent-platform", model: "gpt-4",
@@ -126,7 +91,6 @@ describe("requestLogs 导入：外键校验", () => {
   });
 
   it("混合场景：部分 keyId 存在，部分不存在", async () => {
-    const db = await createTestDb();
     await db.apiKeys.create({ data: { id: "key-001", key: "test-key", name: "Test Key" } });
     await db.platforms.create({
       data: { id: "plat-001", name: "Test Platform", baseUrl: "http://test.com", apiKeys: "[]", forwardHeaders: "[]" },
@@ -155,7 +119,6 @@ describe("requestLogs 导入：外键校验", () => {
 
 describe("requestLogs 导入：字段映射", () => {
   it("duration 映射为 latency", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [
       { model: "gpt-4", status: 200, duration: 16685, tokens: 788, promptTokens: 728, completionTokens: 60, createdAt: "2026-07-19T05:56:17.010Z" },
     ]);
@@ -167,7 +130,6 @@ describe("requestLogs 导入：字段映射", () => {
   });
 
   it("ISO 日期字符串转为 unix 秒", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [
       { model: "gpt-4", status: 200, duration: 100, createdAt: "2026-07-19T05:56:17.010Z" },
     ]);
@@ -178,7 +140,6 @@ describe("requestLogs 导入：字段映射", () => {
   });
 
   it("无 model 字段的记录被跳过", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [
       { status: 200, duration: 100 },
       { model: "gpt-4", status: 200, duration: 100 },
@@ -188,7 +149,6 @@ describe("requestLogs 导入：字段映射", () => {
   });
 
   it("字段缺失时使用默认值", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [{ model: "gpt-4" }]);
     expect(result.imported).toBe(1);
     const rows = await db.requestLogs.findMany({
@@ -200,12 +160,11 @@ describe("requestLogs 导入：字段映射", () => {
 
 // ==================== requestLogs 导入：批量场景 ====================
 
-// 6961 条 × 磁盘临时库的批量写在全量并发下较慢，放宽超时
+// 6961 条 × 虚拟 PG 的批量写在全量并发下较慢，放宽超时
 const BULK_TIMEOUT = 30_000;
 
 describe("requestLogs 导入：批量场景", () => {
   it("6961 条记录 — 外键全部存在时成功", async () => {
-    const db = await createTestDb();
     await db.apiKeys.create({ data: { id: "cmr98pf8c0003c901nu8icnev", key: "test-key", name: "Test Key" } });
     await db.platforms.create({
       data: { id: "cmrewguvw006qeo01bnj25l6w", name: "Platform A", baseUrl: "http://a.com", apiKeys: "[]", forwardHeaders: "[]" },
@@ -233,8 +192,6 @@ describe("requestLogs 导入：批量场景", () => {
   }, BULK_TIMEOUT);
 
   it("6961 条记录 — 外键全部不存在时也能成功（置 null）", async () => {
-    const db = await createTestDb();
-
     const logs: Array<Record<string, unknown>> = [];
     for (let i = 0; i < 6961; i++) {
       logs.push({
@@ -413,7 +370,6 @@ describe("sanitizeExpiresAt：过期时间范围", () => {
 
 describe("requestLogs 导入：违规数据净化", () => {
   it("负数/非数字数值钳制为 0，字符串 'false' 的 isError 不生效", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [
       {
         model: "gpt-4", status: -1, tokens: -100, latency: -5, cost: -0.5,
@@ -430,14 +386,12 @@ describe("requestLogs 导入：违规数据净化", () => {
   });
 
   it("状态码超过 599 钳制为 0", async () => {
-    const db = await createTestDb();
     await importRequestLogs(db, [{ model: "gpt-4", status: 600 }]);
     const rows = await db.requestLogs.findMany({ select: { status: true } });
     expect(rows[0].status).toBe(0);
   });
 
   it("非字符串 model 记录被跳过", async () => {
-    const db = await createTestDb();
     const result = await importRequestLogs(db, [
       { model: 123, status: 200 },
       { model: null, status: 200 },
@@ -448,15 +402,10 @@ describe("requestLogs 导入：违规数据净化", () => {
   });
 
   it("超长 method 截断到 10", async () => {
-    const db = await createTestDb();
     await importRequestLogs(db, [
       { model: "gpt-4", method: "POST".repeat(20), status: 200 },
     ]);
     const rows = await db.requestLogs.findMany({ select: { method: true } });
     expect((rows[0].method as string).length).toBe(10);
   });
-});
-
-afterAll(() => {
-  for (const f of dbFiles) rmSync(f, { force: true });
 });

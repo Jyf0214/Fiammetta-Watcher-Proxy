@@ -1,6 +1,24 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+
+// 测试环境加载 .env.local（本地开发 PG 配置），供 createDb() 动态解析数据库类型与连接串。
+// 注意：加载后 DATABASE_URL 会进入所有测试 worker 的 process.env——测试文件必须显式
+// 传 env（如 createTestDb 的 PG_URL）或先建立缓存，禁止无参 createDb() 直接读写开发库。
+function loadEnvLocal() {
+  const envFile = resolve(__dirname, ".env.local");
+  if (!existsSync(envFile)) return;
+  for (const line of readFileSync(envFile, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+loadEnvLocal();
 
 export default defineConfig({
   resolve: {

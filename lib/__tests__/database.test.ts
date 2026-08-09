@@ -27,8 +27,8 @@ describe("Prisma 工厂 (createDb)", () => {
   it("缺失 D1 binding 时抛出错误", async () => {
     const { createDb } = await import("../prisma");
 
-    // 非 Cloudflare 环境，没有 D1 binding
-    await expect(createDb()).rejects.toThrow("D1 数据库未配置");
+    // 显式指定 d1 方言且无 DB binding（不依赖进程环境变量）
+    await expect(createDb({ DB_TYPE: "d1" })).rejects.toThrow("D1 数据库未配置");
   });
 
   it("disconnectDb 是幂等的（多次调用不报错）", async () => {
