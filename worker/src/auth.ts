@@ -14,13 +14,12 @@ import { getPeriodStart } from "./key-reset";
  * API Key 查询结果类型
  *
  * 所有限额字段内联在 api_keys 表中。
- * quota（token 配额）、rpm_limit、tpm_limit、call_limit 直接使用 Key 级别值。
+ * rpm_limit、tpm_limit、call_limit 直接使用 Key 级别值。
  */
 export interface ApiKeyRecord {
   id: string;
   key: string;
   name: string;
-  quota: number | null;
   usedTokens: number;
   rpmLimit: number | null;
   tpmLimit: number | null;
@@ -65,8 +64,8 @@ export async function validateApiKey(
       id: true,
       key: true,
       name: true,
-      quota: true,
       usedTokens: true,
+      tokenLimit: true,
       rpmLimit: true,
       tpmLimit: true,
       callLimit: true,
@@ -119,6 +118,17 @@ export async function validateApiKey(
         ),
       };
     }
+  }
+
+  // 检查 Token 总额度限制（usedTokens 达到 tokenLimit 后拒绝新请求；0 表示不设限制）
+  const effectiveTokenLimit = apiKey.tokenLimit ?? null;
+  if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && apiKey.usedTokens >= effectiveTokenLimit) {
+    return {
+      error: Response.json(
+        { error: { message: "API Key Token 额度已达上限", type: "invalid_request_error" } },
+        { status: 429 }
+      ),
+    };
   }
 
   return { apiKey };
