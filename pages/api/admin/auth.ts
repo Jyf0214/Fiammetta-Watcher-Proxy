@@ -65,19 +65,23 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  *    共享）：请求必经 EO 边缘，EO-Client-IP / EO-Connecting-IP 由边缘强制注入且
  *    客户端无法伪造，优先采信；X-Forwarded-For 由 EO 维护（首项为客户端真实 IP）
  *    作为回退。仅此部署平台采信——其他平台（Docker 显式 DEPLOY_PLATFORM=docker、
- *    CF、Vercel、直连、未设置）EO 头完全不可信（攻击者可任意伪造绕过限流），
- *    一律忽略；
- * 1. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
+ *    CF、直连、未设置）EO 头完全不可信（攻击者可任意伪造绕过限流），一律忽略；
+ * 1. Vercel 部署（DEPLOY_PLATFORM=vercel）：Vercel 边缘强制覆盖 X-Forwarded-For
+ *    为真实客户端公网 IP 且不转发外部 IP（防 IP 伪造），并注入同值的
+ *    x-vercel-forwarded-for / x-real-ip；x-vercel-forwarded-for 为 Vercel 专属头
+ *   （上层代理覆盖 XFF 时仍保留真实值），优先采信，回退 XFF / X-Real-IP。
+ *    仅此部署平台采信（其他平台可任意伪造这些头）；
+ * 2. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
  *    为 undefined，如 Cloudflare Pages/Workers）— 前置头由边缘强制注入且客户端
  *    无法伪造，采信 CF-Connecting-IP；
- * 2. 直连（socket 对端不在 TRUSTED_PROXY_IPS 内）— X-Forwarded-For /
+ * 3. 直连（socket 对端不在 TRUSTED_PROXY_IPS 内）— X-Forwarded-For /
  *    CF-Connecting-IP 等前置头完全不可信（攻击者可任意伪造），直接使用 TCP
  *    对端地址（攻击者无法伪造 socket 地址）；
- * 3. 经可信代理（socket 对端在 TRUSTED_PROXY_IPS 内）— 从右向左跳过可信代理，
+ * 4. 经可信代理（socket 对端在 TRUSTED_PROXY_IPS 内）— 从右向左跳过可信代理，
  *    取第一个不可信条目作为真实客户端；
- * 4. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
+ * 5. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
  *
- * 返回 null 仅发生在极端环境（无 EO/CF 头且无 socket 地址）；调用方此时应跳过
+ * 返回 null 仅发生在极端环境（无平台头且无 socket 地址）；调用方此时应跳过
  * 限流（fail-open），禁止把不同来源归入同一个共享桶——否则攻击者可预填共享
  * 桶制造全平台登录 DoS（历史漏洞：所有来源统一回退为 "unknown"）。
  */
@@ -98,6 +102,25 @@ export function getClientIp(req: NextApiRequest): string | null {
     }
     // EO 专属头缺失（异常形态）时回退 TCP 对端（边缘节点 IP），
     // 不落入下方 CF-Connecting-IP 信任分支——EO 不注入该头，直连伪造不可信
+    return socketIp || null;
+  }
+
+  // Vercel 部署：Vercel 边缘强制覆盖 X-Forwarded-For 为真实客户端公网 IP
+  // （不转发外部 IP，防 IP 伪造），并注入同值的 x-vercel-forwarded-for /
+  // x-real-ip。x-vercel-forwarded-for 为 Vercel 专属头（上层代理覆盖 XFF 时
+  // 仍保留真实值），优先采信。仅当 DEPLOY_PLATFORM=vercel 时采信，防止
+  // 其他部署方案因伪造这些头绕过限流
+  if (process.env.DEPLOY_PLATFORM === "vercel") {
+    const vercelIp =
+      firstHeaderValue(req.headers["x-vercel-forwarded-for"]) ??
+      firstHeaderValue(req.headers["x-forwarded-for"]) ??
+      firstHeaderValue(req.headers["x-real-ip"]);
+    if (vercelIp) {
+      const first = normalizeIp(vercelIp.split(",")[0] ?? vercelIp);
+      if (first) return first;
+    }
+    // Vercel 头缺失（异常形态）时回退 TCP 对端（Vercel 内部地址），
+    // 不落入下方 CF-Connecting-IP 信任分支——Vercel 不注入该头，直连伪造不可信
     return socketIp || null;
   }
 
