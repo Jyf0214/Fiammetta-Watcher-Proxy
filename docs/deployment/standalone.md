@@ -65,10 +65,12 @@ EOF
 ## 第四步：构建并启动
 
 ```bash
-npm run build
+DB_PUSH=1 npm run build
 npx next start
 ```
 
+- 首次部署请设置 `DB_PUSH=1`：构建期间会对 `DATABASE_URL` 指向的数据库自动执行 `prisma db push` 同步表结构（幂等，可重复执行）
+- 未设置 `DB_PUSH=1` 时构建不会触碰数据库（CI 环境构建时自动执行，无需设置）
 - 监听端口由 `PORT` 控制（默认 `3000`）
 - 启动命令用 `npx next start`（`npm start` 不可用）
 

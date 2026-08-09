@@ -55,11 +55,11 @@ curl -X POST https://your-domain/v1/chat/completions \
 |--------|-------------|
 | 400 | Invalid request parameters |
 | 401 | Invalid, expired, or disabled API key |
-| 403 | API key disabled |
+| 413 | Request body too large |
 | 429 | Rate limit exceeded (RPM/TPM) |
-| 500 | Internal server error |
-| 502 | Upstream platform error |
-| 503 | All platforms unavailable (circuit breaker or offline) |
+| 500 | Internal server error (incl. no usable API key on any platform, model not found) |
+| 502 | Upstream platform error (incl. empty upstream response) |
+| 504 | Upstream request or response timeout |
 
 ## Cron API
 
@@ -115,8 +115,8 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 |----------|--------|-------------|
 | `/api/admin/request-templates` | GET | List all request templates |
 | `/api/admin/request-templates` | POST | Create request template |
-| `/api/admin/request-templates/{id}` | PUT | Update request template |
-| `/api/admin/request-templates/{id}` | DELETE | Delete request template |
+| `/api/admin/request-templates` | PUT | Update request template (id in request body or query) |
+| `/api/admin/request-templates` | DELETE | Delete request template (id in request body or query) |
 
 ### System Keys
 
@@ -124,7 +124,7 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 |----------|--------|-------------|
 | `/api/admin/system-keys` | GET | List all system keys |
 | `/api/admin/system-keys` | POST | Create system key |
-| `/api/admin/system-keys/{id}` | PUT | Update system key |
+| `/api/admin/system-keys/{id}` | PATCH | Update system key |
 | `/api/admin/system-keys/{id}` | DELETE | Delete system key |
 
 ### Monitoring & Statistics

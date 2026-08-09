@@ -6,9 +6,9 @@ The FWP admin panel is organized into 4 sections: **Overview**, **Manage**, **Mo
 
 The dashboard provides a global view of system status:
 
-- **Platform stats**: Total platforms, active platforms, health distribution
-- **Key stats**: Total keys, active keys
-- **Request stats**: Total requests, error requests, success rate
+- **Platform stats**: Active platforms
+- **Key stats**: Active keys
+- **Request stats**: Total requests
 - **Token stats**: Total token consumption
 - **Performance**: Average TTFT, average request duration
 - **Trend charts**: Mini trend charts for each metric
@@ -70,7 +70,6 @@ API Keys are client credentials for accessing FWP.
 | Field | Description | Required |
 |-------|-------------|----------|
 | Name | Custom identifier | Yes |
-| Plan | Bind to a plan template (overrides custom values below) | No |
 | Token Quota | Total token usage limit | No (default 0) |
 | Call Limit | Total call count limit | No (default 0) |
 | RPM Limit | Requests per minute limit | No (default 0) |
@@ -81,8 +80,6 @@ API Keys are client credentials for accessing FWP.
 ### Quota Rules
 
 - Value of `0` means unlimited
-- When `planId` is not set, custom values are used
-- When `planId` is set, plan template values take priority (unless custom values are explicitly set)
 
 ### Auto Reset
 
@@ -94,7 +91,7 @@ Based on `resetPeriod`:
 ### Key States
 
 - **Enabled**: Accepts requests normally
-- **Disabled**: Rejects all requests (returns 403)
+- **Disabled**: Rejects all requests (returns 401)
 - **Expired**: Auto-disabled after expiry date
 - **Over Limit**: Rejects requests when token or call limits are reached
 
@@ -185,8 +182,8 @@ Events are classified by severity:
 ### Export
 
 Three export types:
-- **System Config**: Platforms, API keys, model maps, plans
-- **Business Data**: Request logs, daily stats, audit logs, system events
+- **System Config**: Platforms, model maps, config entries
+- **Business Data**: API keys, request logs, daily stats, audit logs, system events
 - **All**: Everything above
 
 Exports as JSON files.
@@ -203,4 +200,3 @@ Import results show imported and skipped counts per data type.
 ## System Settings
 
 - System status overview (database connection, platform count, key count)
-- Admin password change

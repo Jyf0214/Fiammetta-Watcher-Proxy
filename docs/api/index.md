@@ -55,11 +55,11 @@ curl -X POST https://your-domain/v1/chat/completions \
 |--------|------|
 | 400 | 请求参数错误 |
 | 401 | API Key 无效、已过期或已禁用 |
-| 403 | API Key 已禁用 |
+| 413 | 请求体过大 |
 | 429 | 速率限制（RPM/TPM 超限） |
-| 500 | 服务器内部错误 |
-| 502 | 上游平台错误 |
-| 503 | 所有平台不可用（熔断或离线） |
+| 500 | 服务器内部错误（含所有平台无可用 Key、模型不存在） |
+| 502 | 上游平台错误（含上游返回空响应） |
+| 504 | 上游请求或响应超时 |
 
 ## 定时任务 API
 
@@ -115,8 +115,8 @@ curl -X POST https://your-domain/v1/chat/completions \
 |------|------|------|
 | `/api/admin/request-templates` | GET | 获取所有请求模板 |
 | `/api/admin/request-templates` | POST | 创建请求模板 |
-| `/api/admin/request-templates/{id}` | PUT | 更新请求模板 |
-| `/api/admin/request-templates/{id}` | DELETE | 删除请求模板 |
+| `/api/admin/request-templates` | PUT | 更新请求模板（id 在请求体或查询参数中） |
+| `/api/admin/request-templates` | DELETE | 删除请求模板（id 在请求体或查询参数中） |
 
 ### 系统密钥 API
 
@@ -124,7 +124,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 |------|------|------|
 | `/api/admin/system-keys` | GET | 获取所有系统密钥 |
 | `/api/admin/system-keys` | POST | 创建系统密钥 |
-| `/api/admin/system-keys/{id}` | PUT | 更新系统密钥 |
+| `/api/admin/system-keys/{id}` | PATCH | 更新系统密钥 |
 | `/api/admin/system-keys/{id}` | DELETE | 删除系统密钥 |
 
 ### 监控统计 API

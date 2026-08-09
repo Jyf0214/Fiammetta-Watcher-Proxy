@@ -44,7 +44,6 @@ export interface ApiKeyConfig {
   id: string;
   key: string;
   name: string;
-  planId: string | null;
   /** 额度（REAL 类型，D1 返回 number） */
   quota: number | null;
   /** 已使用 token 数 */
@@ -52,28 +51,12 @@ export interface ApiKeyConfig {
   rpmLimit: number | null;
   tpmLimit: number | null;
   callLimit: number | null;
-  /** 总 token 限制（null 表示使用 Plan 默认值） */
+  /** 总 token 限制（null 表示不限制） */
   tokenLimit: number | null;
   callUsed: number;
   resetPeriod: ResetPeriod;
   status: ApiKeyStatus;
   expiresAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-// ==================== 套餐类型 ====================
-
-export interface PlanConfig {
-  id: string;
-  name: string;
-  /** 总 token 额度 */
-  tokenQuota: number;
-  callLimit: number;
-  rpmLimit: number;
-  tpmLimit: number;
-  resetPeriod: ResetPeriod;
-  enabled: boolean;
   createdAt: number;
   updatedAt: number;
 }

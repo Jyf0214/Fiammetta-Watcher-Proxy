@@ -33,7 +33,7 @@ Requests → Next.js service
 - The whole application runs in one service (serverless functions on Vercel / EdgeOne, or your own server)
 - You provide the database yourself: TiDB Cloud (free tier), MariaDB or PostgreSQL, connected via a connection string
 - Scheduled tasks have no built-in scheduler — an external service must call the endpoints on schedule (see each platform's guide)
-- Rate-limit counters reset on service restarts (cold start) — expected, and it does not affect functionality
+- On non-Cloudflare platforms the admin API rate limit (in-process sliding window) resets on service restarts (cold start) — expected, and it does not affect functionality; the login rate limit is stored in the database and survives restarts
 
 ## Platform Differences at a Glance
 
@@ -41,7 +41,8 @@ Requests → Next.js service
 |------|-----------|------------------|-----------|
 | Database | built-in D1 (free) | self-provided TiDB / MariaDB / PostgreSQL | self-provided |
 | Scheduled tasks | built-in, free | external scheduler (Vercel Cron needs Pro) | system cron |
-| Login rate limit | survives restarts | resets on restart | resets on restart |
+| Login rate limit | survives restarts (stored in DB) | survives restarts (stored in DB) | survives restarts (stored in DB) |
+| Admin API rate limit | persisted in KV, survives restarts | in-memory, resets on restart | in-memory, resets on restart |
 
 > Admin login rate limit: 5 failed attempts within 30 minutes temporarily blocks login — wait a while and try again.
 

@@ -51,30 +51,12 @@ model platforms {
   @@map("platforms")
 }
 
-// ==================== 套餐模板 ====================
-
-model plans {
-  id          String  @id
-  name        String  @unique
-  tokenQuota  Int     @default(0) @map("token_quota")
-  callLimit   Int     @default(0) @map("call_limit")
-  rpmLimit    Int     @default(0) @map("rpm_limit")
-  tpmLimit    Int     @default(0) @map("tpm_limit")
-  resetPeriod String  @default("monthly") @map("reset_period")
-  enabled     Boolean @default(true)
-  createdAt   Int     @default(0) @map("created_at")
-  updatedAt   Int     @default(0) @map("updated_at")
-
-  @@map("plans")
-}
-
 // ==================== API 密钥 ====================
 
 model apiKeys {
   id              String   @id
   key             String   @unique
   name            String
-  planId          String?  @map("plan_id")
   quota           Float?
   usedTokens      Int      @default(0) @map("used_tokens")
   tokenLimit      Int?     @map("token_limit")

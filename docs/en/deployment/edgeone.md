@@ -45,7 +45,7 @@ EdgeOne has no built-in scheduled tasks — call the `/api/cron/*` endpoints fro
 | Check | Method |
 |-------|--------|
 | Health | `curl -H "Authorization: Bearer <system-api-key>" https://your-domain.com/api/health` → `{"status":"ok",...}` (admin auth required) |
-| Proxy | `curl https://your-domain.com/v1/models` (401 without API Key is expected) |
+| Proxy | `curl https://your-domain.com/v1/models` (no API Key needed — a 200 model list is expected; only POST proxy endpoints require auth) |
 | Admin panel | `/admin`, log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` |
 | Database | Open Models / Logs pages in the admin panel and confirm reads/writes work |
 

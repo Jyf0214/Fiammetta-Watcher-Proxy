@@ -22,13 +22,11 @@ curl https://example.com/v1/models \
     {
       "id": "gpt-4o",
       "object": "model",
-      "created": 1234567890,
       "owned_by": "openai"
     },
     {
       "id": "claude-3-5-sonnet",
       "object": "model",
-      "created": 1234567890,
       "owned_by": "anthropic"
     }
   ]

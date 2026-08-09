@@ -11,7 +11,7 @@ Support major AI platforms with a unified OpenAI-compatible format:
 
 ## Smart Routing
 
-- **Priority routing**: Lower number = higher priority
+- **Priority routing**: Higher number = higher priority
 - **Weight routing**: Distribute requests by weight ratio
 - **Failover**: Automatically switch when a platform fails
 - **Circuit breaking**: Pause requests after consecutive failures
@@ -28,7 +28,6 @@ Support major AI platforms with a unified OpenAI-compatible format:
 ## API Key Management
 
 - **Multi-level quotas**: Token limits, call limits, RPM/TPM
-- **Plan templates**: Predefined quota templates for quick key creation
 - **Auto-reset**: Monthly/daily/never reset cycles
 - **Expiry management**: Set expiration dates, auto-disable
 

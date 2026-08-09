@@ -1,7 +1,7 @@
 /**
  * API Key 管理 — 列表与创建
  *
- * GET  /api/admin/keys — 获取 API Key 列表（含套餐信息，密钥掩码处理）
+ * GET  /api/admin/keys — 获取 API Key 列表（密钥掩码处理）
  * POST /api/admin/keys — 创建新 API Key
  *
  * 主分支对应文件：src/app/api/admin/keys/route.ts
@@ -68,7 +68,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const body = req.body as any;
-    const { name, planId, quota, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt } = body;
+    const { name, quota, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt } = body;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return res.status(400).json({ success: false, error: { message: "Key 名称不能为空", type: "invalid_request_error" } });
@@ -98,14 +98,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ success: false, error: { message: "Token 限制必须是非负整数", type: "invalid_request_error" } });
     }
 
-    if (planId !== undefined && planId !== null) {
-      const db = await createDb();
-      const planExists = await db.plans.findFirst({ where: { id: planId } });
-      if (!planExists) {
-        return res.status(400).json({ success: false, error: { message: "指定的 planId 对应的套餐不存在", type: "invalid_request_error" } });
-      }
-    }
-
     let expiresAtTimestamp: number | null = null;
     if (expiresAt) {
       const parsed = new Date(expiresAt);
@@ -122,7 +114,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
     const newKey = await db.apiKeys.create({
       data: {
-        id: keyId, key: keyValue, name: name.trim(), planId: planId ?? null,
+        id: keyId, key: keyValue, name: name.trim(),
         quota: quota ?? null, usedTokens: 0, rpmLimit: rpmLimit ?? null,
         tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
         tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",

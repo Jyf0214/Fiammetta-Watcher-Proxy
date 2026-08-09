@@ -12,7 +12,7 @@ Go to "Platform Management" in the admin panel and click "Add Platform".
 | Base URL | Platform API address |
 | API Key | Platform authentication key |
 | Type | OpenAI / Anthropic / Google, etc. |
-| Priority | Lower number = higher priority |
+| Priority | Higher number = higher priority |
 | Weight | Routing distribution ratio |
 | RPM Limit | Requests per minute limit |
 | TPM Limit | Tokens per minute limit |

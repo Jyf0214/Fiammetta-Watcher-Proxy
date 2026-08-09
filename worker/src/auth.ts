@@ -13,7 +13,7 @@ import { getPeriodStart } from "./key-reset";
 /**
  * API Key 查询结果类型
  *
- * D1 中没有独立的 plans 表，所有限额字段内联在 api_keys 表中。
+ * 所有限额字段内联在 api_keys 表中。
  * quota（token 配额）、rpm_limit、tpm_limit、call_limit 直接使用 Key 级别值。
  */
 export interface ApiKeyRecord {
@@ -58,7 +58,7 @@ export async function validateApiKey(
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-  // 查询 API Key（D1 无 plans 表，所有限额字段在 api_keys 中）
+  // 查询 API Key（所有限额字段在 api_keys 中）
   const apiKey = await prisma.apiKeys.findFirst({
     where: { key: apiKeyStr },
     select: {
@@ -98,7 +98,7 @@ export async function validateApiKey(
     };
   }
 
-  // 检查调用次数限制（D1 无 plans 表，直接使用 Key 级别 callLimit）
+  // 检查调用次数限制（直接使用 Key 级别 callLimit）
   const effectiveCallLimit = apiKey.callLimit ?? null;
   if (effectiveCallLimit !== null) {
     const resetPeriod = apiKey.resetPeriod ?? "never";

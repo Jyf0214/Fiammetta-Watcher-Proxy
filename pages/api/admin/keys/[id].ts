@@ -99,10 +99,6 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
         return res.status(400).json({ success: false, error: { message: "重置周期必须是 monthly、daily 或 never", type: "invalid_request_error" } });
       }
     }
-    if (body.planId !== undefined && body.planId !== null) {
-      const planExists = await db.plans.findFirst({ where: { id: body.planId } });
-      if (!planExists) return res.status(400).json({ success: false, error: { message: "指定的 planId 对应的套餐不存在", type: "invalid_request_error" } });
-    }
 
     let expiresAtTimestamp: number | null | undefined;
     if (body.expiresAt !== undefined) {
@@ -118,7 +114,6 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     const currentTime = now();
     const updateData: Record<string, unknown> = { updatedAt: currentTime };
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.planId !== undefined) updateData.planId = body.planId ?? null;
     if (body.quota !== undefined) updateData.quota = body.quota ?? null;
     if (body.rpmLimit !== undefined) updateData.rpmLimit = body.rpmLimit ?? null;
     if (body.tpmLimit !== undefined) updateData.tpmLimit = body.tpmLimit ?? null;

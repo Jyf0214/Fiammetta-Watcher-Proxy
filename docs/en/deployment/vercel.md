@@ -24,7 +24,7 @@ See [Cron Tasks](/en/api/cron) for the business logic and endpoints of the 3 sch
 
 ### Option A: Vercel Cron (Pro plan required)
 
-Not available on the Hobby plan. Create `vercel.json` in the project root (the repo does not ship one — create it yourself):
+The Hobby plan allows at most one cron trigger per day; the 6-hourly / hourly schedules this project needs require the Pro plan. Create `vercel.json` in the project root (the repo does not ship one — create it yourself):
 
 ```json
 {

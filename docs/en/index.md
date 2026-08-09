@@ -25,7 +25,7 @@ features:
     details: Detailed request logs, token usage tracking, TTFT latency, and platform comparison analytics
   - icon: ✓
     title: Flexible Key Management
-    details: Multi-level quota control, plan templates, auto-reset, and expiry management for hundreds of API keys
+    details: Multi-level quota control, auto-reset, and expiry management for hundreds of API keys
   - icon: ✓
     title: Security Built-in
     details: JWT authentication, rate limiting, CORS, CSP headers, and SQL injection protection

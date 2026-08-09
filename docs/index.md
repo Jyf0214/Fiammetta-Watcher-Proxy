@@ -25,7 +25,7 @@ features:
     details: 详细的请求日志、Token 用量统计、TTFT 延迟追踪、平台对比分析
   - icon: ✓
     title: 灵活的 Key 管理
-    details: 多级配额控制、套餐模板、自动重置、过期管理，轻松管理数百个 API Key
+    details: 多级配额控制、自动重置、过期管理，轻松管理数百个 API Key
   - icon: ✓
     title: 安全防护
     details: JWT 认证、速率限制、CORS 配置、CSP 安全头、SQL 注入防护

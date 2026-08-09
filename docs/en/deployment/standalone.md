@@ -65,10 +65,12 @@ EOF
 ## Step 4: Build and Start
 
 ```bash
-npm run build
+DB_PUSH=1 npm run build
 npx next start
 ```
 
+- For the first deployment set `DB_PUSH=1`: during the build it runs `prisma db push` against `DATABASE_URL` to create/sync the schema (idempotent, safe to re-run)
+- Without `DB_PUSH=1` the build never touches the database (CI environments run db push automatically)
 - Port is controlled by `PORT` (default `3000`)
 - Start with `npx next start` (`npm start` does not work)
 

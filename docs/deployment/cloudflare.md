@@ -44,7 +44,7 @@ Actions 页面 → 左侧 Deploy 工作流 → Run workflow → **分支选择 `
 | 检查项 | 地址 |
 |--------|------|
 | 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://<项目名>.pages.dev/api/health` → `{"status":"ok",...}`（需管理员认证） |
-| 代理可用 | `https://<worker名>.<账号>.workers.dev/v1/models`（无 API Key 返回 401 即正常） |
+| 代理可用 | `https://<worker名>.<账号>.workers.dev/v1/models`（无需 API Key，返回 200 模型列表即正常；只有 POST 代理接口需要认证） |
 | 管理后台 | `https://<项目名>.pages.dev/admin`，用 Secrets 里的账号密码登录 |
 
 > Worker 与 Pages 的域名在 Dashboard → Workers & Pages 中查看。生产环境建议绑定自定义域名（Dashboard → 项目 → Custom domains）。
@@ -120,15 +120,20 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 
 ### 6. 配置 Pages 后台凭据与绑定
 
-Pages 需要数据库/缓存绑定和后台登录凭据。导出两个环境变量后运行：
+Pages 需要数据库/缓存绑定和后台登录凭据。导出第一步创建的 ID 与后台凭据后运行：
 
 ```bash
 export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx
+# D1_ID / KV_ID 为第 1 步创建资源时输出的 ID（post 强制要求 KV_ID，缺失会失败；
+# post-deploy 靠 D1_ID/KV_ID 配置 Pages 绑定，缺失会把 Pages 的 D1/KV 绑定清空）
+export D1_ID=你的-d1-database-id KV_ID=你的-kv-namespace-id
+# 后台登录凭据（post 会写入 Pages 的 Secrets；ADMIN_PASSWORD 缺失则直接失败）
+export ADMIN_USERNAME=admin ADMIN_PASSWORD=你的后台密码
 python3 deploy/init.py post
 python3 deploy/init.py post-deploy
 ```
 
-（本地运行前需 `pip install requests`。也可以在 Dashboard → Workers & Pages → 项目 → Settings 中手动配置。）
+（本地运行前需 `pip install requests`。也可以跳过以上命令，在 Dashboard → Workers & Pages → 项目 → Settings 中手动配置绑定与环境变量。）
 
 ## 定时任务
 

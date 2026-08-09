@@ -53,25 +53,10 @@ CREATE TABLE "proxies" (
 );
 
 -- CreateTable
-CREATE TABLE "plans" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "token_quota" INTEGER NOT NULL DEFAULT 0,
-    "call_limit" INTEGER NOT NULL DEFAULT 0,
-    "rpm_limit" INTEGER NOT NULL DEFAULT 0,
-    "tpm_limit" INTEGER NOT NULL DEFAULT 0,
-    "reset_period" TEXT NOT NULL DEFAULT 'monthly',
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "created_at" INTEGER NOT NULL DEFAULT 0,
-    "updated_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
 CREATE TABLE "api_keys" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "key" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "plan_id" TEXT,
     "quota" REAL,
     "used_tokens" INTEGER NOT NULL DEFAULT 0,
     "token_limit" INTEGER,
@@ -217,9 +202,6 @@ CREATE UNIQUE INDEX "proxy_pools_name_key" ON "proxy_pools"("name");
 
 -- CreateIndex
 CREATE INDEX "proxies_pool_id_enabled_status_idx" ON "proxies"("pool_id", "enabled", "status");
-
--- CreateIndex
-CREATE UNIQUE INDEX "plans_name_key" ON "plans"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "api_keys_key_key" ON "api_keys"("key");

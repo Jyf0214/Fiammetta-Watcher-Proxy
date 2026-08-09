@@ -45,7 +45,7 @@ EdgeOne 无内置定时任务，用外部调度服务定时请求 `/api/cron/*` 
 | 检查项 | 方法 |
 |--------|------|
 | 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://你的域名/api/health` → `{"status":"ok",...}`（需管理员认证） |
-| 代理可用 | `curl https://你的域名/v1/models`（无 API Key 返回 401 即正常） |
+| 代理可用 | `curl https://你的域名/v1/models`（无需 API Key，返回 200 模型列表即正常；只有 POST 代理接口需要认证） |
 | 管理后台 | 浏览器访问 `/admin`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 |
 | 数据库 | 登录后台 → 模型/日志页面确认数据读写正常 |
 

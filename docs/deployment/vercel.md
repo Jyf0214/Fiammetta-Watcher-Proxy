@@ -24,7 +24,7 @@ Settings → Environment Variables 中配置（`DB_TYPE` 不能为 `d1`），完
 
 ### 方式 A：Vercel Cron（需 Pro 计划）
 
-Hobby 计划不支持。在项目根目录创建 `vercel.json`（仓库中没有，需自行创建）：
+Hobby 计划每天最多触发 1 次定时任务，本项目所需的每 6 小时 / 每小时频率需要 Pro 计划。在项目根目录创建 `vercel.json`（仓库中没有，需自行创建）：
 
 ```json
 {

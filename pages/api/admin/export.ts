@@ -5,7 +5,7 @@
  *
  * 查询参数：
  * - type: 导出类型（system/data/all），默认 all
- *   - system: 平台、模型映射、代理、代理池、配置、套餐
+ *   - system: 平台、模型映射、配置
  *   - data: API Keys、请求日志、每日统计、审计日志、系统事件
  *   - all: 以上全部
  *
@@ -83,18 +83,6 @@ export default async function handler(
         platformId: m.platformId,
       }));
 
-      // 套餐模板
-      const plans = await db.plans.findMany();
-
-      exportData.plans = plans.map((p) => ({
-        name: p.name,
-        tokenQuota: p.tokenQuota,
-        callLimit: p.callLimit,
-        rpmLimit: p.rpmLimit,
-        tpmLimit: p.tpmLimit,
-        resetPeriod: p.resetPeriod,
-      }));
-
       // 系统配置（跳过敏感配置，如 admin_reset_password——与 import 的跳过逻辑对齐，
       // 避免导出文件泄露凭据或经导入误恢复）
       const configs = await db.configs.findMany();
@@ -116,7 +104,6 @@ export default async function handler(
         id: k.id,
         key: k.key,
         name: k.name,
-        planId: k.planId,
         quota: k.quota,
         usedTokens: k.usedTokens,
         rpmLimit: k.rpmLimit,

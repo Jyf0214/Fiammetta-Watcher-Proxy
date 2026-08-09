@@ -14,10 +14,10 @@ Client Request → Analyze Request → Select Best Platform/Model → Forward Re
 
 ### Priority-based
 
-Lower priority number = higher priority:
+Higher priority number = higher priority:
 
 ```
-Platform A (priority=1) > Platform B (priority=2) > Platform C (priority=3)
+Platform A (priority=3) > Platform B (priority=2) > Platform C (priority=1)
 ```
 
 ### Weight-based

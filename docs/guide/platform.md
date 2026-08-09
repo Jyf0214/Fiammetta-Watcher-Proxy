@@ -12,7 +12,7 @@
 | Base URL | 平台 API 地址 |
 | API Key | 平台的认证密钥 |
 | 平台类型 | OpenAI / Anthropic / Google 等 |
-| 优先级 | 数值越小优先级越高 |
+| 优先级 | 数值越大优先级越高 |
 | 权重 | 路由分配比例 |
 | RPM 限制 | 每分钟请求数限制 |
 | TPM 限制 | 每分钟 Token 数限制 |

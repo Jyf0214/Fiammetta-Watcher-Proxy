@@ -14,10 +14,10 @@
 
 ### 基于优先级
 
-优先级数值越小，优先级越高：
+优先级数值越大，优先级越高：
 
 ```
-平台A (priority=1) > 平台B (priority=2) > 平台C (priority=3)
+平台A (priority=3) > 平台B (priority=2) > 平台C (priority=1)
 ```
 
 ### 基于权重

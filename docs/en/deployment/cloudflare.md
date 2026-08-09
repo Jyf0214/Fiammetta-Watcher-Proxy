@@ -44,7 +44,7 @@ It automatically: creates the database and cache resources → builds → deploy
 | Check | URL |
 |-------|-----|
 | Health | `curl -H "Authorization: Bearer <system-api-key>" https://<project>.pages.dev/api/health` → `{"status":"ok",...}` (admin auth required) |
-| Proxy | `https://<worker>.<account>.workers.dev/v1/models` (401 without API Key is expected) |
+| Proxy | `https://<worker>.<account>.workers.dev/v1/models` (no API Key needed — a 200 model list is expected; only POST proxy endpoints require auth) |
 | Admin panel | `https://<project>.pages.dev/admin`, log in with the credentials from Secrets |
 
 > Worker/Pages domains are listed in Dashboard → Workers & Pages. For production, bind a custom domain (Dashboard → project → Custom domains).
@@ -120,15 +120,21 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 
 ### 6. Configure Pages Credentials and Bindings
 
-Pages needs database/cache bindings and admin credentials. Export the two environment variables and run:
+Pages needs database/cache bindings and admin credentials. Export the resource IDs created in step 1 and the admin credentials, then run:
 
 ```bash
 export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx
+# D1_ID / KV_ID are the IDs output when creating the resources in step 1
+# (post requires KV_ID or it fails; post-deploy uses D1_ID/KV_ID to configure
+# the Pages bindings — missing IDs will wipe the Pages D1/KV bindings)
+export D1_ID=your-d1-database-id KV_ID=your-kv-namespace-id
+# Admin credentials (post writes them into the Pages Secrets; deployment fails without ADMIN_PASSWORD)
+export ADMIN_USERNAME=admin ADMIN_PASSWORD=your-admin-password
 python3 deploy/init.py post
 python3 deploy/init.py post-deploy
 ```
 
-(Run `pip install requests` first when doing this locally. Alternatively, configure everything manually in Dashboard → Workers & Pages → project → Settings.)
+(Run `pip install requests` first when doing this locally. Alternatively, skip these commands and configure the bindings and env vars manually in Dashboard → Workers & Pages → project → Settings.)
 
 ## Scheduled Tasks
 

@@ -1,171 +1,72 @@
 # Docker 部署
 
-在自有服务器 / VPS 上用容器运行 FWP，适合需要开箱即用、环境隔离的场景。支持 PostgreSQL（内置或外部）与外部 TiDB / MariaDB 数据库。
+::: warning 当前状态
+官方预构建镜像已发布：`ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` — 直接拉取运行即可。生产环境建议优先选择 [Cloudflare](/deployment/cloudflare) 或 [Vercel](/deployment/vercel)。
+:::
 
 ::: tip 分支说明
-本文档对应 `canary` 分支代码。仓库的 `main` / `stable` 分支是旧版本，与本系列文档不符，请使用 `canary` 分支。
+镜像由仓库 **`stable` 分支**（v1.0.x）构建，包含自动建表、管理员初始化和 `/setup` 引导页等自身功能。本系列其他部署指南基于 `canary` 分支（v2.0.x），功能集有所不同。需要使用最新功能请走 [Node.js 直接部署](/deployment/standalone)。
 :::
 
-::: warning 与旧版镜像的区别
-本页不再提供预构建镜像（旧版 `ghcr.io/jyf0214/fiammetta-watcher-proxy` 由已落后的 `stable` 分支构建）。请按本页方式**本地构建**当前代码的镜像。旧版镜像包含 `/setup` 引导页，canary **没有**该页面，数据库连接串必须在环境变量中直接配置。
-:::
+## 使用预构建镜像
 
-## 环境要求
-
-| 依赖 | 说明 |
-|------|------|
-| Docker | 20.10+（含 Compose v2） |
-| 数据库 | 方式一内置 PostgreSQL；方式二需自备 TiDB / MariaDB / PostgreSQL，可远程连接 |
-
-> 容器内**不支持** `DB_TYPE=d1`（D1 仅存在于 Cloudflare 运行时）。
-
-## 方式一：docker compose 一键部署（内置 PostgreSQL）
-
-### 第一步：克隆项目
+官方镜像发布在 GHCR，无需本地构建：
 
 ```bash
-git clone -b canary https://github.com/Jyf0214/Fiammetta-Watcher-Proxy.git
-cd Fiammetta-Watcher-Proxy
-```
-
-### 第二步：创建 .env 配置文件
-
-```bash
-cat > .env << 'EOF'
-# ===== 数据库（内置 PostgreSQL） =====
-POSTGRES_USER=fwp
-POSTGRES_PASSWORD=你的数据库密码
-POSTGRES_DB=fiammetta_proxy
-
-# ===== 管理后台登录 =====
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的管理员密码
-
-# ===== 安全 =====
-JWT_SECRET=至少32字符的随机密钥
-
-# ===== Cron 认证（可选） =====
-CRON_SECRET=随机密钥
-
-# ===== 服务（可选） =====
-# PORT=3000
-EOF
-```
-
-### 第三步：构建并启动
-
-```bash
-docker compose up -d --build
-```
-
-- 首次启动会构建镜像并自动创建数据库表结构，无需手动执行建表
-- 应用监听 `3000` 端口（可用 `PORT` 修改）
-- 数据库端口仅绑定 `127.0.0.1`，外部无法直连
-
-### 第四步：访问管理后台
-
-```
-http://localhost:3000/admin
-```
-
-用 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录。
-
-### 查看日志与停止
-
-```bash
-docker compose logs -f app   # 实时日志
-docker compose down          # 停止（数据保留在 volume 中）
-```
-
-## 方式二：docker compose standalone + 外部数据库
-
-已有 TiDB / MariaDB / PostgreSQL 实例时，只运行应用容器（不内置数据库）。
-
-### 第一步：创建 .env 配置文件
-
-```bash
-cat > .env << 'EOF'
-# ===== 数据库（外部实例） =====
-DATABASE_URL=postgresql://用户:密码@主机:5432/数据库名
-# 数据库类型，可选，默认 pg。必须与连接串协议匹配：
-#   postgresql:// 配 pg，mysql:// 配 tidb，mariadb:// 配 mariadb
-# DB_TYPE=tidb
-
-# ===== 管理后台登录 =====
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的管理员密码
-
-# ===== 安全 =====
-JWT_SECRET=至少32字符的随机密钥
-
-# ===== Cron 认证（可选） =====
-CRON_SECRET=随机密钥
-
-# ===== 服务（可选） =====
-# PORT=3000
-EOF
-```
-
-### 第二步：构建并启动
-
-```bash
-docker compose -f docker-compose.standalone.yml up -d --build
-```
-
-- 首次启动会自动同步外部数据库表结构（幂等），无需手动建表
-- `DB_TYPE` 同时决定构建期生成的数据库驱动（compose 构建参数）与运行时类型，**必须与连接串协议匹配**（`postgresql://` 配 `pg`，`mysql://` 配 `tidb`，`mariadb://` 配 `mariadb`）
-- 应用监听 `3000` 端口（可用 `PORT` 修改）
-
-### 备选：不用 compose 直接 docker run
-
-```bash
-docker build --build-arg DB_TYPE=pg -t fiammetta-watcher-proxy .
+docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
 ```
 
 ```bash
 docker run -d \
   -p 3000:3000 \
-  -e DB_TYPE=pg \
-  -e DATABASE_URL=postgresql://用户:密码@主机:端口/数据库名 \
+  -e DATABASE_URL=postgresql://user:pass@host:5432/dbname \
   -e ADMIN_USERNAME=admin \
-  -e ADMIN_PASSWORD=你的管理员密码 \
+  -e ADMIN_PASSWORD=你的密码 \
   -e JWT_SECRET=至少32字符的随机密钥 \
-  -e CRON_SECRET=随机密钥 \
-  fiammetta-watcher-proxy
+  ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
 ```
 
-- `--build-arg DB_TYPE` 决定构建期生成的数据库驱动，**必须与运行时 `DB_TYPE` 一致**（`pg` / `mariadb` / `tidb`）
-- 未设置 `DB_TYPE` 时启动脚本会按 `DATABASE_URL` 协议自动推断
+- 数据库类型根据连接串自动识别（`postgresql://`、`mysql://` 或 `mariadb://`）
+- 首次启动自动建表并初始化管理员，无需其他操作
+- `JWT_SECRET` 必填且至少 32 字符（见[环境变量](/deployment/env)）— 缺失会导致登录失败
 
-## 环境变量
+### 用预构建镜像 docker compose
 
-| 变量 | 说明 | 必填 | 默认值 |
-|------|------|------|--------|
-| `DB_TYPE` | 数据库类型：`tidb` / `mariadb` / `pg`（容器内不支持 `d1`） | 是 | compose 默认 `pg`；docker run 未设置时按 `DATABASE_URL` 推断 |
-| `DATABASE_URL` | 数据库连接串 | 是 | — |
-| `ADMIN_USERNAME` | 管理后台登录用户名 | 是 | `admin`（compose） |
-| `ADMIN_PASSWORD` | 管理后台登录密码 | 是 | — |
-| `JWT_SECRET` | 登录签名密钥，至少 32 字符 | 是 | — |
-| `CRON_SECRET` | 定时任务端点访问密钥（未配置时 `/api/cron/*` 返回 403 禁用） | 否 | — |
-| `PORT` | 监听端口 | 否 | `3000` |
+```yaml
+services:
+  app:
+    image: ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://fwp:password@db:5432/fwp
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=secure-password
+      - JWT_SECRET=random-secret-32+chars
+    depends_on:
+      db:
+        condition: service_healthy
 
-完整变量参考见 [环境变量](/deployment/env)。
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=fwp
+      - POSTGRES_USER=fwp
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fwp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-## 配置定时任务
-
-容器内不运行 cron，定时任务通过 HTTP 端点暴露，用宿主机系统 cron（`crontab -e`）定时调用（端点、频率与认证见 [Cron 任务说明](/api/cron)）：
-
-**crontab 示例**：
-
+volumes:
+  pgdata:
 ```
-0 */6 * * * curl -fsS http://localhost:3000/api/cron/model-fetch -H "Authorization: Bearer 你的CRON_SECRET"
-0 * * * *   curl -fsS http://localhost:3000/api/cron/key-reset   -H "Authorization: Bearer 你的CRON_SECRET"
-0 3 * * *   curl -fsS http://localhost:3000/api/cron/log-archive -H "Authorization: Bearer 你的CRON_SECRET"
-```
 
-## 常见问题排查
-
-数据库连接失败、端口占用、内存不足等通用问题的排查步骤见 [常见问题排查](/deployment/troubleshooting)。
+> 数据库连接失败、端口冲突等问题见 [常见问题排查](/deployment/troubleshooting)。
 
 ## 相关文档
 

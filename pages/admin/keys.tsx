@@ -17,7 +17,6 @@ interface ApiKeyItem {
   id: string;
   key: string;
   name: string;
-  planId: string | null;
   usedTokens: number;
   tokenLimit: number | null;
   callLimit: number | null;
