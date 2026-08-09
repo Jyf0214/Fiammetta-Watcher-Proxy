@@ -6,7 +6,6 @@
  * - pageSize: 每页条数，默认 20，最大 100
  * - status: HTTP 状态码筛选
  * - isError: 是否错误（true/false）
- * - type: events — 查询系统事件
  * - keyId: 按 API Key 筛选
  * - startDate: 起始日期（ISO 格式或 YYYY-MM-DD）
  * - endDate: 结束日期（ISO 格式或 YYYY-MM-DD，含当天全部）
@@ -36,58 +35,11 @@ export default async function handler(
     );
     const status = req.query.status as string | undefined;
     const isError = req.query.isError as string | undefined;
-    const type = req.query.type as string | undefined;
     const keyId = req.query.keyId as string | undefined;
     const startDateStr = req.query.startDate as string | undefined;
     const endDateStr = req.query.endDate as string | undefined;
 
     const offset = (page - 1) * pageSize;
-
-    // ---------- 系统事件查询 ----------
-    if (type === "events") {
-      const where: Prisma.systemEventsWhereInput = {};
-
-      if (isError === "true") {
-        where.level = { in: ["error", "critical"] };
-      } else if (isError === "false") {
-        where.level = { in: ["info", "warning"] };
-      }
-
-      const [items, total] = await Promise.all([
-        db.systemEvents.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          take: pageSize,
-          skip: offset,
-          select: {
-            id: true,
-            level: true,
-            message: true,
-            detail: true,
-            createdAt: true,
-          },
-        }),
-        db.systemEvents.count({ where }),
-      ]);
-
-      res.status(200).json({
-        success: true,
-        data: {
-          items: items.map((e) => ({
-            id: e.id,
-            level: e.level,
-            message: e.message,
-            detail: e.detail,
-            createdAt: new Date(e.createdAt * 1000).toISOString(),
-          })),
-          total,
-          page,
-          pageSize,
-          totalPages: Math.ceil(total / pageSize),
-        },
-      });
-      return;
-    }
 
     // ---------- 请求日志查询 ----------
     const where: Prisma.requestLogsWhereInput = {};

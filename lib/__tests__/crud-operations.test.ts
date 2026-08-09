@@ -23,7 +23,7 @@ beforeAll(async () => {
     )`,
     `CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      quota REAL, used_tokens INTEGER NOT NULL DEFAULT 0,
+      used_tokens INTEGER NOT NULL DEFAULT 0,
       token_limit INTEGER, rpm_limit INTEGER, tpm_limit INTEGER,
       call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
       reset_period TEXT DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',

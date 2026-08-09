@@ -135,7 +135,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/admin/usage` | GET | 获取用量数据 |
 | `/api/admin/usage/trend` | GET | 获取用量趋势（支持 period 参数） |
 | `/api/admin/usage/platform` | GET | 按平台维度获取用量 |
-| `/api/admin/logs` | GET | 获取请求日志（支持分页，`?type=events` 查系统事件） |
+| `/api/admin/logs` | GET | 获取请求日志（支持分页） |
 | `/api/admin/logs/archive` | POST | 手动触发日志归档 |
 | `/api/admin/audit` | GET | 获取审计日志（支持分页） |
 
@@ -148,9 +148,3 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/admin/export` | GET | 导出数据（支持 type 参数） |
 | `/api/admin/import` | POST | 导入数据 |
 | `/api/health` | GET | 健康检查（数据库类型与连接状态，需管理员认证） |
-
-### 公开 API（无需认证）
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/config` | GET | 获取公开配置 |

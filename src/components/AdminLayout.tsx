@@ -10,8 +10,6 @@ import {
   Key,
   FileText,
   ScrollText,
-  Settings,
-  Bell,
   LogOut,
   Menu,
   X,
@@ -46,10 +44,8 @@ const menuItems: MenuItem[] = [
   { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
   { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor" },
   { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
-  { key: "events", icon: Bell, href: "/admin/events", group: "monitor" },
   { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system" },
   { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system" },
-  { key: "system", icon: Settings, href: "/admin/system", group: "system" },
 ];
 
 const groupI18nKeys: Record<string, string> = {
@@ -200,8 +196,6 @@ function TopHeader({
     "/admin/usage": "usage",
     "/admin/logs": "logs",
     "/admin/audit": "audit",
-    "/admin/system": "system",
-    "/admin/events": "events",
     "/admin/data-manager": "dataManager",
     "/admin/system-keys": "systemKeys",
   };

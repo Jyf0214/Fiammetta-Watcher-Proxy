@@ -20,7 +20,7 @@ function maskKey(key: string): string {
   return "***";
 }
 
-function generateSystemKey(): string {
+export function generateSystemKey(): string {
   const array = new Uint8Array(24);
   crypto.getRandomValues(array);
   const hex = Array.from(array).map((b) => b.toString(16).padStart(2, "0")).join("");

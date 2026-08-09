@@ -38,7 +38,6 @@ interface FullImportResult {
     apiKeys?: ImportResult;
     configs?: ImportResult;
     auditLogs?: ImportResult;
-    systemEvents?: ImportResult;
     requestLogs?: ImportResult;
   };
 }
@@ -64,7 +63,6 @@ const MAX_PER_TYPE: Record<string, number> = {
   apiKeys: 5000,
   configs: 200,
   auditLogs: 10000,
-  systemEvents: 5000,
   requestLogs: 10000,
 };
 
@@ -179,7 +177,6 @@ export default async function handler(
       { key: "configs", data: body.configs, fn: importConfigs },
       { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
       { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
-      { key: "systemEvents", data: body.systemEvents, fn: importSystemEvents },
       { key: "requestLogs", data: body.requestLogs, fn: importRequestLogs },
     ];
 
@@ -295,7 +292,6 @@ const MIN_VALID_TS = 1704067200;
 const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom"]);
 const VALID_KEY_STATUSES = new Set(["active", "disabled"]);
 const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
-const VALID_EVENT_LEVELS = new Set(["info", "warn", "error"]);
 
 /** Prisma Int 字段为 32 位有符号（TiDB/MySQL INT），超出会整批失败 */
 const MAX_INT_VALUE = 2147483647;
@@ -310,7 +306,7 @@ export function sanitizeNonNegativeInt(value: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= MAX_INT_VALUE ? Math.floor(n) : null;
 }
 
-/** 非负有限数值（Float 字段，如 quota/cost）；超界返回 null */
+/** 非负有限数值（Float 字段，如 cost）；超界返回 null */
 export function sanitizeNonNegativeFloat(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -663,7 +659,6 @@ async function importApiKeys(
         id: generateId(),
         key: k.key as string,
         name: sanitizeString(k.name) || "导入的 Key",
-        quota: sanitizeNonNegativeFloat(k.quota),
         usedTokens: sanitizeNonNegativeInt(k.usedTokens) ?? 0,
         rpmLimit: sanitizeNonNegativeInt(k.rpmLimit),
         tpmLimit: sanitizeNonNegativeInt(k.tpmLimit),
@@ -805,7 +800,7 @@ async function importConfigs(
  * 超出范围（如备份文件中的 2009 年测试数据 1234483200）回退为
  * 当前时间，防止异常时间在日志归档时污染 daily_stats 统计。
  */
-function toUnixSeconds(value: unknown): number {
+export function toUnixSeconds(value: unknown): number {
   const now = Math.floor(Date.now() / 1000);
   const maxValidTs = now + 86400;
   if (typeof value === "number" && value > 1_000_000_000) {
@@ -876,57 +871,6 @@ async function importAuditLogs(
   return { imported, skipped, skipReasons };
 }
 
-// ==================== 导入系统事件 ====================
-
-/**
- * 导入系统事件
- *
- * 无外键依赖，使用 createMany 批量执行
- */
-async function importSystemEvents(
-  db: DbClient,
-  events: Array<Record<string, unknown>>
-): Promise<ImportResult> {
-  let imported = 0;
-  let skipped = 0;
-  const skipReasons: Record<string, number> = {};
-
-  // 分离有效和无效记录，逐条记录跳过原因
-  const validEvents: Array<Record<string, unknown>> = [];
-  for (const e of events) {
-    if (!e.message) {
-      skipReasons["缺少 message 字段"] = (skipReasons["缺少 message 字段"] || 0) + 1;
-      skipped++;
-    } else {
-      validEvents.push(e);
-    }
-  }
-
-  for (let i = 0; i < validEvents.length; i += BATCH_SIZE) {
-    const batch = validEvents.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((e) => ({
-      id: generateId(),
-      level: sanitizeEnum(e.level, VALID_EVENT_LEVELS, "info"),
-      message: truncateStr(e.message),
-      detail: truncateStr(e.detail),
-      createdAt: toUnixSeconds(e.createdAt),
-    }));
-
-    try {
-      const result = await db.systemEvents.createMany({ data: batchData });
-      imported += result.count;
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[import] 系统事件批量写入失败:", errMsg);
-      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
-      skipped += batch.length;
-    }
-  }
-
-  return { imported, skipped, skipReasons };
-}
-
 // ==================== 导入请求日志 ====================
 
 /**
@@ -935,7 +879,7 @@ async function importSystemEvents(
  * 无外键依赖，createMany 分批顺序执行（每批 BATCH_SIZE 条）
  * 导出数据中 duration 字段映射为 latency
  */
-async function importRequestLogs(
+export async function importRequestLogs(
   db: DbClient,
   logs: Array<Record<string, unknown>>
 ): Promise<ImportResult> {

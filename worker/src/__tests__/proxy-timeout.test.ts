@@ -111,7 +111,6 @@ const apiKey = {
   id: "key-id",
   key: "sk-client-key",
   name: "client",
-  quota: null,
   usedTokens: 0,
   rpmLimit: null,
   tpmLimit: null,

@@ -44,8 +44,6 @@ export interface ApiKeyConfig {
   id: string;
   key: string;
   name: string;
-  /** 额度（REAL 类型，D1 返回 number） */
-  quota: number | null;
   /** 已使用 token 数 */
   usedTokens: number;
   rpmLimit: number | null;
@@ -99,19 +97,6 @@ export interface AuditLogEntry {
   /** 操作详情（JSON 字符串） */
   detail: string | null;
   ip: string | null;
-  createdAt: number;
-}
-
-// ==================== 系统事件类型 ====================
-
-export type EventLevel = "info" | "warning" | "error" | "critical";
-
-export interface SystemEventEntry {
-  id: string;
-  level: EventLevel;
-  message: string;
-  /** 详细信息（JSON 字符串） */
-  detail: string | null;
   createdAt: number;
 }
 

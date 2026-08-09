@@ -6,7 +6,6 @@
  * - API Key 数量（总数 + 活跃数）
  * - 请求总数、错误数、总 token
  * - 平均 TTFT 和平均耗时
- * - 最近 10 条系统事件
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -35,7 +34,6 @@ export default async function handler(
       requestAgg,
       errorCount,
       perfAgg,
-      recentEvents,
     ] = await Promise.all([
       // 平台总数
       db.platforms.count(),
@@ -57,11 +55,6 @@ export default async function handler(
         where: { isError: false },
         _count: { id: true },
         _sum: { ttft: true, latency: true },
-      }),
-      // 最近 10 条系统事件
-      db.systemEvents.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 10,
       }),
     ]);
 
@@ -92,12 +85,6 @@ export default async function handler(
         totalTokens: sumTokens,
         avgTtft,
         avgDuration,
-        recentEvents: recentEvents.map((e: { id: string; level: string; message: string; createdAt: number }) => ({
-          id: e.id,
-          level: e.level,
-          message: e.message,
-          createdAt: new Date(e.createdAt * 1000).toISOString(),
-        })),
       },
     });
   } catch (err) {

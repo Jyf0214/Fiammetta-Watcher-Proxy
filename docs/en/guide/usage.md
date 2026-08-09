@@ -12,7 +12,6 @@ The dashboard provides a global view of system status:
 - **Token stats**: Total token consumption
 - **Performance**: Average TTFT, average request duration
 - **Trend charts**: Mini trend charts for each metric
-- **Recent events**: Latest system events
 
 The dashboard auto-refreshes every 30 seconds. Supports grid view and detail view modes.
 
@@ -169,21 +168,13 @@ Records all admin operations:
 
 Each entry includes operator, action type, details, and client IP.
 
-### System Events
-
-Events are classified by severity:
-- **info**: System initialization, config changes
-- **warning**: Platform degradation, key quota approaching limits
-- **error**: Platform failures, request anomalies
-- **critical**: All platforms unavailable
-
 ## Data Management
 
 ### Export
 
 Three export types:
 - **System Config**: Platforms, model maps, config entries
-- **Business Data**: API keys, request logs, daily stats, audit logs, system events
+- **Business Data**: API keys, request logs, daily stats, audit logs
 - **All**: Everything above
 
 Exports as JSON files.

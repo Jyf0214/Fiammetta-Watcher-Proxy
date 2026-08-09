@@ -1,20 +1,29 @@
 /**
  * requestLogs 导入逻辑测试
  *
- * 验证：
+ * 直接验证生产代码 pages/api/admin/import.ts 的 importRequestLogs / toUnixSeconds / sanitize 工具：
  * 1. 外键校验 — keyId/platformId 不存在时置 null（避免 FOREIGN KEY 约束失败）
  * 2. duration → latency 映射
  * 3. ISO 日期 → unix 秒
  * 4. 无 model 记录被跳过
  * 5. 字段缺失时使用默认值
  * 6. 6961 条批量场景
+ * 7. sanitize 工具边界（上界/枚举/布尔/状态码/时间戳）
  *
- * 使用 sql.js（纯 JS SQLite）搭建真实数据库，含 FOREIGN KEY 约束
+ * 数据库使用 Prisma libSQL adapter + 磁盘临时库（libsql createMany 走事务独立连接，
+ * 内存库每连接独立会丢失建表结果，故不用 file::memory:），
+ * 数据读写全部经 Prisma ORM 模型 API；建表 DDL 为测试库初始化所需（固定常量，无注入面）。
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from "sql.js";
+import { describe, it, expect, afterAll } from "vitest";
+import { PrismaClient } from "../../src/generated/d1/client";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
 import {
+  importRequestLogs,
+  toUnixSeconds,
   sanitizeNonNegativeInt,
   sanitizeNonNegativeFloat,
   sanitizeBoolean,
@@ -25,168 +34,65 @@ import {
   sanitizeExpiresAt,
 } from "../../pages/api/admin/import";
 
-let SQL: SqlJsStatic;
+/** 测试库临时文件（afterAll 统一清理） */
+const dbFiles: string[] = [];
 
-beforeAll(async () => {
-  SQL = await initSqlJs();
-});
+/**
+ * 创建测试库（Prisma libsql adapter），建表 DDL 与 prisma/schema.d1.prisma 对齐。
+ * 使用磁盘临时文件而非 file::memory:——libsql 的 createMany 走事务（独立连接），
+ * 内存库每连接独立，事务连接看不到建表结果；磁盘文件多连接共享。
+ */
+async function createTestDb(): Promise<PrismaClient> {
+  const dbPath = join(tmpdir(), `import-request-logs-${Date.now()}-${dbFiles.length}.db`);
+  dbFiles.push(dbPath);
+  const adapter = new PrismaLibSql({ url: `file:${dbPath}` });
+  const db = new PrismaClient({ adapter });
 
-/** 创建含外键约束的测试数据库 */
-function createTestDb(): SqlJsDatabase {
-  const db = new SQL.Database();
-  db.run("PRAGMA foreign_keys = ON");
-  db.run(`
+  await db.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '默认 Key',
-      quota INTEGER, used_tokens INTEGER NOT NULL DEFAULT 0,
+      used_tokens INTEGER NOT NULL DEFAULT 0,
       rpm_limit INTEGER, tpm_limit INTEGER, call_limit INTEGER, call_used INTEGER NOT NULL DEFAULT 0,
       token_limit INTEGER, reset_period TEXT NOT NULL DEFAULT 'monthly', status TEXT NOT NULL DEFAULT 'active',
       expires_at INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
+    )
+  `);
+  await db.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS platforms (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, api_key TEXT NOT NULL,
-      api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai', enabled INTEGER NOT NULL DEFAULT 1,
-      priority INTEGER NOT NULL DEFAULT 0, weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
-      forward_headers TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'healthy', fail_count INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
+      api_keys TEXT NOT NULL DEFAULT '[]', type TEXT NOT NULL DEFAULT 'openai',
+      enabled INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
+      weight INTEGER NOT NULL DEFAULT 1, rpm_limit INTEGER, tpm_limit INTEGER,
+      forward_headers TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'healthy',
+      fail_count INTEGER NOT NULL DEFAULT 0, last_fail_at INTEGER, cooldown_end INTEGER,
+      created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await db.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS request_logs (
-      id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT, proxy_id TEXT,
+      id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT,
       model TEXT NOT NULL, endpoint TEXT, method TEXT, status INTEGER NOT NULL,
       latency INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
       prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
-      ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error INTEGER NOT NULL DEFAULT 0,
-      ip_address TEXT, user_agent TEXT, error_message TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE SET NULL,
-      FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE SET NULL
-    );
+      ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error BOOLEAN NOT NULL DEFAULT 0,
+      ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL
+    )
   `);
   return db;
 }
 
-/** ISO 字符串或 unix 时间戳 → unix 秒（与 import.ts 保持一致，超出合理范围回退当前时间） */
-function toUnixSeconds(value: unknown): number {
-  const now = Math.floor(Date.now() / 1000);
-  const maxValidTs = now + 86400;
-  if (typeof value === "number" && value > 1_000_000_000) {
-    return value >= 1704067200 && value <= maxValidTs ? value : now;
-  }
-  if (typeof value === "string") {
-    const ts = Math.floor(new Date(value).getTime() / 1000);
-    if (!isNaN(ts) && ts >= 1704067200 && ts <= maxValidTs) return ts;
-  }
-  return now;
-}
-
-/**
- * 模拟 importRequestLogs 核心逻辑（与 import.ts 保持一致）
- * 外键校验 + duration→latency + buildValues
- */
-function importRequestLogs(
-  db: SqlJsDatabase,
-  logs: Array<Record<string, unknown>>
-): { imported: number; skipped: number } {
-  let imported = 0;
-  let skipped = 0;
-
-  const validLogs = logs.filter((log) => sanitizeString(log.model));
-  skipped += logs.length - validLogs.length;
-
-  // 校验外键
-  const referencedKeyIds = [
-    ...new Set(
-      validLogs
-        .map((l) => sanitizeNullableString(l.keyId))
-        .filter((v): v is string => v !== null)
-    ),
-  ];
-  const referencedPlatformIds = [
-    ...new Set(
-      validLogs
-        .map((l) => sanitizeNullableString(l.platformId))
-        .filter((v): v is string => v !== null)
-    ),
-  ];
-
-  const existingKeyIds = new Set<string>();
-  const existingPlatformIds = new Set<string>();
-
-  if (referencedKeyIds.length > 0) {
-    const placeholders = referencedKeyIds.map(() => "?").join(",");
-    const rows = db.exec(`SELECT id FROM api_keys WHERE id IN (${placeholders})`, referencedKeyIds);
-    if (rows.length > 0) rows[0].values.forEach((r) => existingKeyIds.add(r[0] as string));
-  }
-  if (referencedPlatformIds.length > 0) {
-    const placeholders = referencedPlatformIds.map(() => "?").join(",");
-    const rows = db.exec(`SELECT id FROM platforms WHERE id IN (${placeholders})`, referencedPlatformIds);
-    if (rows.length > 0) rows[0].values.forEach((r) => existingPlatformIds.add(r[0] as string));
-  }
-
-  const buildValues = (log: Record<string, unknown>) => {
-    const rawKeyId = sanitizeNullableString(log.keyId);
-    const rawPlatformId = sanitizeNullableString(log.platformId);
-    return {
-      id: crypto.randomUUID(),
-      keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
-      keyName: sanitizeNullableString(log.keyName),
-      platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
-      proxyId: sanitizeNullableString(log.proxyId),
-      model: sanitizeString(log.model),
-      endpoint: sanitizeNullableString(log.endpoint),
-      method: sanitizeNullableString(log.method, 10),
-      status: sanitizeHttpStatus(log.status),
-      latency: sanitizeNonNegativeInt(log.duration) ?? sanitizeNonNegativeInt(log.latency) ?? 0,
-      tokens: sanitizeNonNegativeInt(log.tokens) ?? 0,
-      promptTokens: sanitizeNonNegativeInt(log.promptTokens) ?? 0,
-      completionTokens: sanitizeNonNegativeInt(log.completionTokens) ?? 0,
-      ttft: sanitizeNonNegativeInt(log.ttft) ?? 0,
-      cost: sanitizeNonNegativeFloat(log.cost) ?? 0,
-      isError: sanitizeBoolean(log.isError, false) ? 1 : 0,
-      ipAddress: sanitizeNullableString(log.ipAddress, 45),
-      userAgent: sanitizeNullableString(log.userAgent),
-      errorMessage: sanitizeNullableString(log.errorMessage),
-      createdAt: toUnixSeconds(log.createdAt),
-    };
-  };
-
-  const insertSql = `INSERT INTO request_logs
-    (id, key_id, key_name, platform_id, proxy_id, model, endpoint, method, status,
-     latency, tokens, prompt_tokens, completion_tokens, ttft, cost, is_error,
-     ip_address, user_agent, error_message, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-  for (const log of validLogs) {
-    const v = buildValues(log);
-    try {
-      db.run(insertSql, [
-        v.id, v.keyId, v.keyName, v.platformId, v.proxyId, v.model,
-        v.endpoint, v.method, v.status, v.latency, v.tokens, v.promptTokens,
-        v.completionTokens, v.ttft, v.cost, v.isError, v.ipAddress,
-        v.userAgent, v.errorMessage, v.createdAt,
-      ]);
-      imported++;
-    } catch (err: any) {
-      console.error("[test] requestLog insert failed:", err.message);
-      skipped++;
-    }
-  }
-
-  return { imported, skipped };
-}
-
-// ==================== 测试 ====================
+// ==================== requestLogs 导入：外键校验 ====================
 
 describe("requestLogs 导入：外键校验", () => {
-  it("keyId/platformId 存在时正常插入", () => {
-    const db = createTestDb();
-    db.run("INSERT INTO api_keys (id, key, name) VALUES (?, ?, ?)", ["key-001", "test-key", "Test Key"]);
-    db.run("INSERT INTO platforms (id, name, base_url, api_key) VALUES (?, ?, ?, ?)", [
-      "plat-001", "Test Platform", "http://test.com", "sk-test",
-    ]);
+  it("keyId/platformId 存在时正常插入", async () => {
+    const db = await createTestDb();
+    await db.apiKeys.create({ data: { id: "key-001", key: "test-key", name: "Test Key" } });
+    await db.platforms.create({
+      data: { id: "plat-001", name: "Test Platform", baseUrl: "http://test.com", apiKeys: "[]", forwardHeaders: "[]" },
+    });
 
-    const result = importRequestLogs(db, [
+    const result = await importRequestLogs(db, [
       {
         keyId: "key-001", platformId: "plat-001", model: "gpt-4",
         status: 200, tokens: 100, duration: 500, createdAt: "2026-07-19T00:00:00.000Z",
@@ -196,15 +102,16 @@ describe("requestLogs 导入：外键校验", () => {
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(0);
 
-    const rows = db.exec("SELECT key_id, platform_id, model, latency FROM request_logs");
-    expect(rows[0].values[0]).toEqual(["key-001", "plat-001", "gpt-4", 500]);
-    db.close();
+    const rows = await db.requestLogs.findMany({
+      select: { keyId: true, platformId: true, model: true, latency: true },
+    });
+    expect(rows[0]).toEqual({ keyId: "key-001", platformId: "plat-001", model: "gpt-4", latency: 500 });
   });
 
-  it("keyId/platformId 不存在时置 null（不报外键错误）", () => {
-    const db = createTestDb();
+  it("keyId/platformId 不存在时置 null（不报外键错误）", async () => {
+    const db = await createTestDb();
 
-    const result = importRequestLogs(db, [
+    const result = await importRequestLogs(db, [
       {
         keyId: "non-existent-key", platformId: "non-existent-platform", model: "gpt-4",
         status: 200, tokens: 100, duration: 500, createdAt: "2026-07-19T00:00:00.000Z",
@@ -214,19 +121,18 @@ describe("requestLogs 导入：外键校验", () => {
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(0);
 
-    const rows = db.exec("SELECT key_id, platform_id FROM request_logs");
-    expect(rows[0].values[0]).toEqual([null, null]);
-    db.close();
+    const rows = await db.requestLogs.findMany({ select: { keyId: true, platformId: true } });
+    expect(rows[0]).toEqual({ keyId: null, platformId: null });
   });
 
-  it("混合场景：部分 keyId 存在，部分不存在", () => {
-    const db = createTestDb();
-    db.run("INSERT INTO api_keys (id, key, name) VALUES (?, ?, ?)", ["key-001", "test-key", "Test Key"]);
-    db.run("INSERT INTO platforms (id, name, base_url, api_key) VALUES (?, ?, ?, ?)", [
-      "plat-001", "Test Platform", "http://test.com", "sk-test",
-    ]);
+  it("混合场景：部分 keyId 存在，部分不存在", async () => {
+    const db = await createTestDb();
+    await db.apiKeys.create({ data: { id: "key-001", key: "test-key", name: "Test Key" } });
+    await db.platforms.create({
+      data: { id: "plat-001", name: "Test Platform", baseUrl: "http://test.com", apiKeys: "[]", forwardHeaders: "[]" },
+    });
 
-    const result = importRequestLogs(db, [
+    const result = await importRequestLogs(db, [
       { keyId: "key-001", platformId: "plat-001", model: "gpt-4", status: 200, duration: 500, createdAt: "2026-07-19T00:00:00.000Z" },
       { keyId: "non-existent", platformId: "non-existent", model: "gpt-3.5", status: 200, duration: 200, createdAt: "2026-07-19T01:00:00.000Z" },
       { keyId: "key-001", platformId: "non-existent", model: "claude-3", status: 200, duration: 1000, createdAt: "2026-07-19T02:00:00.000Z" },
@@ -235,71 +141,78 @@ describe("requestLogs 导入：外键校验", () => {
     expect(result.imported).toBe(3);
     expect(result.skipped).toBe(0);
 
-    const rows = db.exec("SELECT key_id, platform_id, model, latency FROM request_logs ORDER BY created_at");
-    expect(rows[0].values[0]).toEqual(["key-001", "plat-001", "gpt-4", 500]);
-    expect(rows[0].values[1]).toEqual([null, null, "gpt-3.5", 200]);
-    expect(rows[0].values[2]).toEqual(["key-001", null, "claude-3", 1000]);
-    db.close();
+    const rows = await db.requestLogs.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { keyId: true, platformId: true, model: true, latency: true },
+    });
+    expect(rows[0]).toEqual({ keyId: "key-001", platformId: "plat-001", model: "gpt-4", latency: 500 });
+    expect(rows[1]).toEqual({ keyId: null, platformId: null, model: "gpt-3.5", latency: 200 });
+    expect(rows[2]).toEqual({ keyId: "key-001", platformId: null, model: "claude-3", latency: 1000 });
   });
 });
 
+// ==================== requestLogs 导入：字段映射 ====================
+
 describe("requestLogs 导入：字段映射", () => {
-  it("duration 映射为 latency", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [
+  it("duration 映射为 latency", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [
       { model: "gpt-4", status: 200, duration: 16685, tokens: 788, promptTokens: 728, completionTokens: 60, createdAt: "2026-07-19T05:56:17.010Z" },
     ]);
     expect(result.imported).toBe(1);
-    const rows = db.exec("SELECT latency, tokens, prompt_tokens, completion_tokens FROM request_logs");
-    expect(rows[0].values[0]).toEqual([16685, 788, 728, 60]);
-    db.close();
+    const rows = await db.requestLogs.findMany({
+      select: { latency: true, tokens: true, promptTokens: true, completionTokens: true },
+    });
+    expect(rows[0]).toEqual({ latency: 16685, tokens: 788, promptTokens: 728, completionTokens: 60 });
   });
 
-  it("ISO 日期字符串转为 unix 秒", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [
+  it("ISO 日期字符串转为 unix 秒", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [
       { model: "gpt-4", status: 200, duration: 100, createdAt: "2026-07-19T05:56:17.010Z" },
     ]);
     expect(result.imported).toBe(1);
-    const rows = db.exec("SELECT created_at FROM request_logs");
+    const rows = await db.requestLogs.findMany({ select: { createdAt: true } });
     const expectedTs = Math.floor(new Date("2026-07-19T05:56:17.010Z").getTime() / 1000);
-    expect(rows[0].values[0][0]).toBe(expectedTs);
-    db.close();
+    expect(rows[0].createdAt).toBe(expectedTs);
   });
 
-  it("无 model 字段的记录被跳过", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [
+  it("无 model 字段的记录被跳过", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [
       { status: 200, duration: 100 },
       { model: "gpt-4", status: 200, duration: 100 },
     ]);
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(1);
-    db.close();
   });
 
-  it("字段缺失时使用默认值", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [{ model: "gpt-4" }]);
+  it("字段缺失时使用默认值", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [{ model: "gpt-4" }]);
     expect(result.imported).toBe(1);
-    const rows = db.exec("SELECT status, latency, tokens, prompt_tokens, completion_tokens, ttft, cost, is_error FROM request_logs");
-    expect(rows[0].values[0]).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
-    db.close();
+    const rows = await db.requestLogs.findMany({
+      select: { status: true, latency: true, tokens: true, promptTokens: true, completionTokens: true, ttft: true, cost: true, isError: true },
+    });
+    expect(rows[0]).toEqual({ status: 0, latency: 0, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, cost: 0, isError: false });
   });
 });
 
+// ==================== requestLogs 导入：批量场景 ====================
+
+// 6961 条 × 磁盘临时库的批量写在全量并发下较慢，放宽超时
+const BULK_TIMEOUT = 30_000;
+
 describe("requestLogs 导入：批量场景", () => {
-  it("6961 条记录 — 外键全部存在时成功", () => {
-    const db = createTestDb();
-    db.run("INSERT INTO api_keys (id, key, name) VALUES (?, ?, ?)", [
-      "cmr98pf8c0003c901nu8icnev", "test-key", "Test Key",
-    ]);
-    db.run("INSERT INTO platforms (id, name, base_url, api_key) VALUES (?, ?, ?, ?)", [
-      "cmrewguvw006qeo01bnj25l6w", "Platform A", "http://a.com", "sk-a",
-    ]);
-    db.run("INSERT INTO platforms (id, name, base_url, api_key) VALUES (?, ?, ?, ?)", [
-      "cmra4pg1u0000er01k73pzpik", "Platform B", "http://b.com", "sk-b",
-    ]);
+  it("6961 条记录 — 外键全部存在时成功", async () => {
+    const db = await createTestDb();
+    await db.apiKeys.create({ data: { id: "cmr98pf8c0003c901nu8icnev", key: "test-key", name: "Test Key" } });
+    await db.platforms.create({
+      data: { id: "cmrewguvw006qeo01bnj25l6w", name: "Platform A", baseUrl: "http://a.com", apiKeys: "[]", forwardHeaders: "[]" },
+    });
+    await db.platforms.create({
+      data: { id: "cmra4pg1u0000er01k73pzpik", name: "Platform B", baseUrl: "http://b.com", apiKeys: "[]", forwardHeaders: "[]" },
+    });
 
     const logs: Array<Record<string, unknown>> = [];
     for (let i = 0; i < 6961; i++) {
@@ -312,17 +225,15 @@ describe("requestLogs 导入：批量场景", () => {
       });
     }
 
-    const result = importRequestLogs(db, logs);
+    const result = await importRequestLogs(db, logs);
     expect(result.imported).toBe(6961);
     expect(result.skipped).toBe(0);
 
-    const countResult = db.exec("SELECT COUNT(*) FROM request_logs");
-    expect(countResult[0].values[0][0]).toBe(6961);
-    db.close();
-  });
+    expect(await db.requestLogs.count()).toBe(6961);
+  }, BULK_TIMEOUT);
 
-  it("6961 条记录 — 外键全部不存在时也能成功（置 null）", () => {
-    const db = createTestDb();
+  it("6961 条记录 — 外键全部不存在时也能成功（置 null）", async () => {
+    const db = await createTestDb();
 
     const logs: Array<Record<string, unknown>> = [];
     for (let i = 0; i < 6961; i++) {
@@ -333,40 +244,18 @@ describe("requestLogs 导入：批量场景", () => {
       });
     }
 
-    const result = importRequestLogs(db, logs);
+    const result = await importRequestLogs(db, logs);
     expect(result.imported).toBe(6961);
     expect(result.skipped).toBe(0);
 
-    const countResult = db.exec("SELECT COUNT(*) FROM request_logs WHERE key_id IS NULL AND platform_id IS NULL");
-    expect(countResult[0].values[0][0]).toBe(6961);
-    db.close();
-  });
-
-  it("不开启外键约束时，旧 ID 也能插入（D1 默认行为）", () => {
-    const db = new SQL.Database(); // 无 PRAGMA foreign_keys = ON
-    db.run(`
-      CREATE TABLE api_keys (id TEXT PRIMARY KEY, key TEXT NOT NULL, name TEXT NOT NULL);
-      CREATE TABLE platforms (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL);
-      CREATE TABLE request_logs (
-        id TEXT PRIMARY KEY, key_id TEXT, key_name TEXT, platform_id TEXT, proxy_id TEXT,
-        model TEXT NOT NULL, endpoint TEXT, method TEXT, status INTEGER NOT NULL,
-        latency INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
-        prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
-        ttft INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, is_error INTEGER NOT NULL DEFAULT 0,
-        ip_address TEXT, user_agent TEXT, error_message TEXT, created_at INTEGER NOT NULL,
-        FOREIGN KEY (key_id) REFERENCES api_keys(id),
-        FOREIGN KEY (platform_id) REFERENCES platforms(id)
-      );
-    `);
-
-    // SQLite 默认不开启外键约束，旧 ID 也能插入
-    const result = importRequestLogs(db, [
-      { keyId: "old-id-123", platformId: "old-plat-456", model: "gpt-4", status: 200, duration: 100, createdAt: "2026-07-19T00:00:00Z" },
-    ]);
-    expect(result.imported).toBe(1);
-    db.close();
-  });
+    const nullCount = await db.requestLogs.count({
+      where: { keyId: null, platformId: null },
+    });
+    expect(nullCount).toBe(6961);
+  }, BULK_TIMEOUT);
 });
+
+// ==================== toUnixSeconds：时间戳范围校验（真实生产代码） ====================
 
 describe("toUnixSeconds：时间戳范围校验", () => {
   it("合理范围内的秒级时间戳原样保留", () => {
@@ -520,10 +409,12 @@ describe("sanitizeExpiresAt：过期时间范围", () => {
   });
 });
 
+// ==================== requestLogs 导入：违规数据净化（真实生产函数 + ORM 断言） ====================
+
 describe("requestLogs 导入：违规数据净化", () => {
-  it("负数/非数字数值钳制为 0，字符串 'false' 的 isError 不生效", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [
+  it("负数/非数字数值钳制为 0，字符串 'false' 的 isError 不生效", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [
       {
         model: "gpt-4", status: -1, tokens: -100, latency: -5, cost: -0.5,
         duration: "abc", isError: "false",
@@ -532,40 +423,40 @@ describe("requestLogs 导入：违规数据净化", () => {
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(0);
 
-    const rows = db.exec(
-      "SELECT status, latency, tokens, cost, is_error FROM request_logs"
-    );
-    expect(rows[0].values[0]).toEqual([0, 0, 0, 0, 0]);
-    db.close();
+    const rows = await db.requestLogs.findMany({
+      select: { status: true, latency: true, tokens: true, cost: true, isError: true },
+    });
+    expect(rows[0]).toEqual({ status: 0, latency: 0, tokens: 0, cost: 0, isError: false });
   });
 
-  it("状态码超过 599 钳制为 0", () => {
-    const db = createTestDb();
-    importRequestLogs(db, [{ model: "gpt-4", status: 600 }]);
-    const rows = db.exec("SELECT status FROM request_logs");
-    expect(rows[0].values[0][0]).toBe(0);
-    db.close();
+  it("状态码超过 599 钳制为 0", async () => {
+    const db = await createTestDb();
+    await importRequestLogs(db, [{ model: "gpt-4", status: 600 }]);
+    const rows = await db.requestLogs.findMany({ select: { status: true } });
+    expect(rows[0].status).toBe(0);
   });
 
-  it("非字符串 model 记录被跳过", () => {
-    const db = createTestDb();
-    const result = importRequestLogs(db, [
+  it("非字符串 model 记录被跳过", async () => {
+    const db = await createTestDb();
+    const result = await importRequestLogs(db, [
       { model: 123, status: 200 },
       { model: null, status: 200 },
       { model: "gpt-4", status: 200 },
     ]);
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(2);
-    db.close();
   });
 
-  it("超长 method 截断到 10", () => {
-    const db = createTestDb();
-    importRequestLogs(db, [
+  it("超长 method 截断到 10", async () => {
+    const db = await createTestDb();
+    await importRequestLogs(db, [
       { model: "gpt-4", method: "POST".repeat(20), status: 200 },
     ]);
-    const rows = db.exec("SELECT method FROM request_logs");
-    expect((rows[0].values[0][0] as string).length).toBe(10);
-    db.close();
+    const rows = await db.requestLogs.findMany({ select: { method: true } });
+    expect((rows[0].method as string).length).toBe(10);
   });
+});
+
+afterAll(() => {
+  for (const f of dbFiles) rmSync(f, { force: true });
 });

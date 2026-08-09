@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "key" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "quota" REAL,
     "used_tokens" INTEGER NOT NULL DEFAULT 0,
     "token_limit" INTEGER,
     "rpm_limit" INTEGER,
@@ -134,15 +133,6 @@ CREATE TABLE IF NOT EXISTS "configs" (
 );
 
 -- CreateTable
-CREATE TABLE IF NOT EXISTS "system_events" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "level" TEXT NOT NULL,
-    "message" TEXT NOT NULL,
-    "detail" TEXT,
-    "created_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
 CREATE TABLE IF NOT EXISTS "audit_logs" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "admin_id" TEXT,
@@ -150,20 +140,6 @@ CREATE TABLE IF NOT EXISTS "audit_logs" (
     "detail" TEXT,
     "ip" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "request_templates" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "description" TEXT,
-    "method" TEXT NOT NULL DEFAULT 'POST',
-    "endpoint" TEXT NOT NULL DEFAULT 'all',
-    "headers" TEXT NOT NULL,
-    "body_template" TEXT,
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "created_at" INTEGER NOT NULL DEFAULT 0,
-    "updated_at" INTEGER NOT NULL DEFAULT 0
 );
 
 -- CreateIndex
@@ -222,12 +198,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "daily_stats_date_key_id_model_key" ON "daily_
 
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "configs_key_key" ON "configs"("key");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "system_events_level_idx" ON "system_events"("level");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "system_events_created_at_idx" ON "system_events"("created_at");
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "audit_logs_admin_id_idx" ON "audit_logs"("admin_id");

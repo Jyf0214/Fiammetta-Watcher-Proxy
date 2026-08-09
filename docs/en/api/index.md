@@ -135,7 +135,7 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 | `/api/admin/usage` | GET | Usage data |
 | `/api/admin/usage/trend` | GET | Usage trend (supports period parameter) |
 | `/api/admin/usage/platform` | GET | Usage by platform |
-| `/api/admin/logs` | GET | Request logs (paginated, `?type=events` for system events) |
+| `/api/admin/logs` | GET | Request logs (paginated) |
 | `/api/admin/logs/archive` | POST | Trigger log archival |
 | `/api/admin/audit` | GET | Audit logs (paginated) |
 
@@ -148,9 +148,3 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 | `/api/admin/export` | GET | Export data (supports type parameter) |
 | `/api/admin/import` | POST | Import data |
 | `/api/health` | GET | Health check (db type + connection status, admin auth required) |
-
-### Public API (No Auth Required)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/config` | GET | Get public config |

@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { message } from "antd";
 import { Button } from "@/components/ui/Button";
-import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
@@ -45,12 +44,6 @@ interface Stats {
   totalTokens: number;
   avgTtft: number;
   avgDuration: number;
-  recentEvents: Array<{
-    id: string;
-    level: string;
-    message: string;
-    createdAt: string;
-  }>;
 }
 
 interface TrendPoint {
@@ -375,24 +368,6 @@ function DashboardContent() {
           })}
         </div>
       )}
-
-      {/* 最近事件 */}
-      <ProCard
-        title={
-          <span className="font-semibold text-zinc-900">
-            {t("recentEvents")}
-          </span>
-        }
-      >
-        <ResponsiveTable
-          dataSource={stats?.recentEvents || []}
-          rowKey="id"
-          pagination={false}
-          size="small"
-          timeline
-          timelineFields={{ level: "level", message: "message", time: "createdAt" }}
-        />
-      </ProCard>
     </PageContainer>
   );
 }

@@ -59,7 +59,6 @@ model apiKeys {
   id              String   @id
   key             String   @unique
   name            String
-  quota           Float?
   usedTokens      Int      @default(0) @map("used_tokens")
   tokenLimit      Int?     @map("token_limit")
   rpmLimit        Int?     @map("rpm_limit")
@@ -193,20 +192,6 @@ model configs {
   @@map("configs")
 }
 
-// ==================== 系统事件 ====================
-
-model systemEvents {
-  id        String @id
-  level     String
-  message   String @db.Text
-  detail    String? @db.Text
-  createdAt Int    @default(0) @map("created_at")
-
-  @@index([level])
-  @@index([createdAt])
-  @@map("system_events")
-}
-
 // ==================== 审计日志 ====================
 
 model auditLogs {
@@ -222,21 +207,4 @@ model auditLogs {
   // 登录限流"先写后查"与预检按 action+ip+createdAt 查询，复合索引避免全表扫描
   @@index([action, ip, createdAt])
   @@map("audit_logs")
-}
-
-// ==================== 请求模板 ====================
-
-model requestTemplates {
-  id           String  @id
-  name         String
-  description  String? @db.Text
-  method       String  @default("POST")
-  endpoint     String  @default("all")
-  headers      String @db.Text
-  bodyTemplate String? @db.Text @map("body_template")
-  enabled      Boolean @default(true)
-  createdAt    Int     @default(0) @map("created_at")
-  updatedAt    Int     @default(0) @map("updated_at")
-
-  @@map("request_templates")
 }

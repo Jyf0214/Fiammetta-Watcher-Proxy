@@ -49,7 +49,6 @@ export interface ApiKeyRecord {
   key: string;
   name: string;
   enabled: number;
-  quota: number | null;
   usedTokens: number;
   rpmLimit: number | null;
   tpmLimit: number | null;

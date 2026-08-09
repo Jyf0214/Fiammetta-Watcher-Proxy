@@ -6,7 +6,7 @@
  * 查询参数：
  * - type: 导出类型（system/data/all），默认 all
  *   - system: 平台、模型映射、配置
- *   - data: API Keys、请求日志、每日统计、审计日志、系统事件
+ *   - data: API Keys、请求日志、每日统计、审计日志
  *   - all: 以上全部
  *
  * 返回 JSON 文件下载，Content-Type: application/json
@@ -104,7 +104,6 @@ export default async function handler(
         id: k.id,
         key: k.key,
         name: k.name,
-        quota: k.quota,
         usedTokens: k.usedTokens,
         rpmLimit: k.rpmLimit,
         tpmLimit: k.tpmLimit,
@@ -168,21 +167,6 @@ export default async function handler(
           detail: l.detail,
           ip: l.ip,
           createdAt: l.createdAt,
-        }));
-
-      // 系统事件（最近 30 天，最多 2000 条）
-      const systemEventsData = await db.systemEvents.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 2000,
-      });
-
-      exportData.systemEvents = systemEventsData
-        .filter((e) => e.createdAt >= thirtyDaysAgo)
-        .map((e) => ({
-          level: e.level,
-          message: e.message,
-          detail: e.detail,
-          createdAt: e.createdAt,
         }));
     }
 

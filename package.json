@@ -21,7 +21,6 @@
     "prepare": "git config core.hooksPath .githooks && node scripts/prepare-db.mjs"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.3.2",
     "@cloudflare/workers-types": "^5.20260721.1",
     "@prisma/adapter-d1": "^7.9.0",
     "@prisma/adapter-mariadb": "7.9.0",

@@ -68,7 +68,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const body = req.body as any;
-    const { name, quota, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt } = body;
+    const { name, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt } = body;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return res.status(400).json({ success: false, error: { message: "Key 名称不能为空", type: "invalid_request_error" } });
@@ -82,9 +82,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ success: false, error: { message: "重置周期必须是 monthly、daily 或 never", type: "invalid_request_error" } });
     }
 
-    if (quota !== undefined && quota !== null && (typeof quota !== "number" || !Number.isFinite(quota) || quota < 0)) {
-      return res.status(400).json({ success: false, error: { message: "配额必须是非负数", type: "invalid_request_error" } });
-    }
     if (rpmLimit !== undefined && rpmLimit !== null && (typeof rpmLimit !== "number" || !Number.isFinite(rpmLimit) || rpmLimit < 0)) {
       return res.status(400).json({ success: false, error: { message: "RPM 限制必须是非负数", type: "invalid_request_error" } });
     }
@@ -115,7 +112,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const newKey = await db.apiKeys.create({
       data: {
         id: keyId, key: keyValue, name: name.trim(),
-        quota: quota ?? null, usedTokens: 0, rpmLimit: rpmLimit ?? null,
+        usedTokens: 0, rpmLimit: rpmLimit ?? null,
         tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
         tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
         status: "active", expiresAt: expiresAtTimestamp,

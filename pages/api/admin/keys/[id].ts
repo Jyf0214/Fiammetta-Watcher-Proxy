@@ -1,7 +1,6 @@
 /**
  * API Key 管理 — 单个 Key 操作
  *
- * GET    /api/admin/keys/[id] — 获取单个 Key 详情
  * PUT    /api/admin/keys/[id] — 更新 API Key 属性
  * DELETE /api/admin/keys/[id] — 删除 API Key（级联删除关联日志）
  *
@@ -36,7 +35,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!id) return res.status(400).json({ success: false, error: { message: "缺少 Key ID", type: "invalid_request_error" } });
 
   switch (req.method) {
-    case "GET": return handleGet(req, res, admin, id);
     case "PUT":
       if (!checkCsrfOrigin(req, res)) return;
       return handlePut(req, res, admin, id);
@@ -44,20 +42,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!checkCsrfOrigin(req, res)) return;
       return handleDelete(req, res, admin, id);
     default:
-      res.setHeader("Allow", ["GET", "PUT", "DELETE"]);
+      res.setHeader("Allow", ["PUT", "DELETE"]);
       return res.status(405).json({ success: false, error: "Method not allowed" });
-  }
-}
-
-async function handleGet(req: NextApiRequest, res: NextApiResponse, admin: { adminId: string; username: string }, id: string) {
-  try {
-    const db = await createDb();
-    const key = await db.apiKeys.findFirst({ where: { id } });
-    if (!key) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
-    return res.status(200).json({ success: true, data: { ...key, key: maskKey(key.key) } });
-  } catch (err) {
-    console.error("[GET /api/admin/keys/[id]] 获取 Key 详情失败:", err instanceof Error ? err.message : String(err));
-    return res.status(500).json({ success: false, error: { message: "获取 Key 详情失败", type: "server_error" } });
   }
 }
 
@@ -68,7 +54,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
     const body = req.body as any;
-    const numericFields = ["quota", "rpmLimit", "tpmLimit", "callLimit"] as const;
+    const numericFields = ["rpmLimit", "tpmLimit", "callLimit"] as const;
     for (const field of numericFields) {
       if (body[field] !== undefined && body[field] !== null) {
         if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
@@ -114,7 +100,6 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     const currentTime = now();
     const updateData: Record<string, unknown> = { updatedAt: currentTime };
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.quota !== undefined) updateData.quota = body.quota ?? null;
     if (body.rpmLimit !== undefined) updateData.rpmLimit = body.rpmLimit ?? null;
     if (body.tpmLimit !== undefined) updateData.tpmLimit = body.tpmLimit ?? null;
     if (body.callLimit !== undefined) updateData.callLimit = body.callLimit ?? null;

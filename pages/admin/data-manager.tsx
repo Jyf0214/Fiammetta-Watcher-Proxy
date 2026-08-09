@@ -64,7 +64,6 @@ const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
   configs: { labelKey: "dmStepConfigs" },
   apiKeys: { labelKey: "dmStepApiKeys" },
   auditLogs: { labelKey: "dmStepAuditLogs" },
-  systemEvents: { labelKey: "dmStepSystemEvents" },
   requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
 };
 
@@ -91,7 +90,6 @@ const PREVIEW_RULES: Record<
   configs: { required: ["key", "value"], unique: "key" },
   apiKeys: { required: ["key"], unique: "key", masked: "key" },
   auditLogs: { required: ["action"] },
-  systemEvents: { required: ["message"] },
   requestLogs: { required: ["model"] },
 };
 
