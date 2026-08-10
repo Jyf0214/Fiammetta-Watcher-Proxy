@@ -524,8 +524,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const v1 = (req.query.v1 as string[])?.join("/") || "";
     const full = `/v1/${v1}`;
-    if (full === "/v1/models" && req.method === "GET") return await handleModelsList(res);
-    if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(decodeURIComponent(full.slice("/v1/models/".length)), res); }
     // Anthropic /v1/messages/count_tokens：不转发上游，直接估算 token 数
     if (full === "/v1/messages/count_tokens" && req.method === "POST") {
       // 该分支提前 return，先给 cfg 赋值：意外异常也被外层 catch 按 anthropic 协议格式化
@@ -563,6 +561,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       return;
     }
+    // GET /v1/models 与 /v1/models/:model — 与其余端点一致放在认证之后：
+    // 未认证时不泄露模型清单与平台名（历史漏洞：认证前直接返回列表，可
+    // 匿名枚举模型 ID/owned_by，并经响应数据外带盲 SSRF 探测结果）
+    if (full === "/v1/models" && req.method === "GET") return await handleModelsList(res);
+    if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(decodeURIComponent(full.slice("/v1/models/".length)), res); }
     await proxyV1RequestPages(req, res, cfg, auth.apiKey);
   } catch (err) {
     console.error("[v1-proxy] 未捕获异常:", err);

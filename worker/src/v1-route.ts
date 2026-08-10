@@ -120,6 +120,17 @@ export async function handleV1Route(
     );
   }
 
+  // 验证 API Key（models 端点同样需要认证，防止匿名枚举模型/平台名——
+  // 与 Pages 入口一致，认证通过后才处理 /v1/models 与 /v1/models/:model）
+  const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
+  if ("error" in authResult) {
+    // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
+    if (endpointConfig.protocol === "anthropic") {
+      return anthropicAuthErrorResponse(authResult.error);
+    }
+    return authResult.error;
+  }
+
   // GET /v1/models — 返回模型列表
   if (url.pathname === "/v1/models" && request.method === "GET") {
     return handleModelsList(env.DB, env);
@@ -129,16 +140,6 @@ export async function handleV1Route(
   if (url.pathname.startsWith("/v1/models/") && request.method === "GET") {
     const modelId = decodeURIComponent(url.pathname.slice("/v1/models/".length));
     return handleModelDetail(modelId, env.DB, env);
-  }
-
-  // 验证 API Key
-  const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
-  if ("error" in authResult) {
-    // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
-    if (endpointConfig.protocol === "anthropic") {
-      return anthropicAuthErrorResponse(authResult.error);
-    }
-    return authResult.error;
   }
 
   // 代理转发
