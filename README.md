@@ -3,9 +3,11 @@
 [English](README_EN.md) | 简体中文
 
 > [!TIP]
-> **注意：项目处于开发阶段，功能不稳定，暂不建议用于生产环境。如需使用，请切换到 `stable` 分支，通过 Docker 方式部署。**
+> **注意：项目处于开发阶段，功能不稳定，暂不建议用于生产环境。**
+> 不稳定版本（当前分支）同样支持 Docker 构建部署，但尚未提供自动构建的预构建镜像，需自行构建；
+> 稳定版提供预构建镜像 `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest`，可直接拉取运行。
 
-LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。部署在 Cloudflare 全球边缘网络。
+LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。可部署在 Cloudflare、EdgeOne、Vercel 或自有服务器（Docker）。
 
 **部署教程请见：[https://jyf0214.github.io/Fiammetta-Watcher-Proxy/](https://jyf0214.github.io/Fiammetta-Watcher-Proxy/)**
 
@@ -21,10 +23,10 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 ## 架构
 
 ```
-用户请求 → Cloudflare Worker（代理 v1/* + Cron 任务）
-         → Cloudflare Pages（管理后台 + API 路由）
-         → D1 / TiDB / MariaDB / PostgreSQL（通过 lib/prisma.ts 统一工厂）
-         → KV 命名空间（登录限流 + 熔断状态）
+用户请求 → 代理入口（CF 部署：Worker 代理 v1/* + Cron 任务；其他平台：Next.js 路由）
+         → 管理后台（Next.js 16 + API 路由）
+         → D1 / TiDB / MariaDB / PostgreSQL（lib/prisma.ts 统一工厂，按 DB_TYPE 切换）
+         → 限流与 Key 封禁状态（CF 部署存于 KV，其他平台为进程内存储）
 ```
 
 ## 数据库支持
@@ -35,7 +37,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 |---------|--------|--------|------|------|
 | `d1`（默认） | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | CF |
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | 所有平台 |
-| `mariadb` | MariaDB / 纯 MySQL | `@prisma/adapter-mariadb` | TCP | 仅非 CF（EdgeOne/Vercel/纯 Node） |
+| `mariadb` | MariaDB / 纯 MySQL | `@prisma/adapter-mariadb` | TCP | 仅非 CF（EdgeOne/Vercel/Docker/纯 Node） |
 | `pg` | PostgreSQL 直连 | `@prisma/adapter-pg` | TCP | 所有平台 |
 
 > **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。`mariadb` 驱动走 TCP，仅适用于 MariaDB/纯 MySQL 直连，且**仅支持非 CF 平台**（CF 构建会将 mariadb 驱动排除在产物外）。免费版 Workers 存在 CPU/请求限制，批量导入日志（多条记录写入）时 API 可能超时不可用。
@@ -103,6 +105,22 @@ python3 deploy/init.py post
 npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main
 ```
 
+### 方式三：Docker 部署
+
+不稳定版本（当前分支）支持 Docker 构建部署，但尚未提供自动构建的预构建镜像，需自行构建（构建期通过 `DB_TYPE` 参数选择数据库方言，与运行时一致）：
+
+```bash
+# 内置 PostgreSQL，快速体验
+docker compose up -d --build
+
+# 使用外部数据库（自备 PostgreSQL / TiDB / MariaDB）
+docker compose -f docker-compose.standalone.yml up -d --build
+```
+
+- 需在 `.env` 中配置数据库密码、`ADMIN_USERNAME` / `ADMIN_PASSWORD`、`JWT_SECRET` 等必填项
+- 容器启动时自动同步数据库表结构，管理员账号通过环境变量认证（无 `/setup` 引导页）
+- 稳定版预构建镜像 `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` 可直接拉取运行，详细步骤见部署教程
+
 ### 环境变量
 
 | 变量 | 说明 |
@@ -125,10 +143,10 @@ npm run test         # 运行测试
 
 ## 技术栈
 
-- **运行时**: Cloudflare Workers + Pages（OpenNext）
+- **运行时**: Cloudflare Workers + Pages（OpenNext）/ EdgeOne / Vercel / Docker（Next.js standalone）
 - **框架**: Next.js 16 + React 19
 - **数据库**: Cloudflare D1 / TiDB Cloud / MariaDB / PostgreSQL（Prisma 7 ORM + Driver Adapters）
-- **缓存**: Cloudflare KV
+- **缓存**: Cloudflare KV（CF 部署）
 - **UI**: Ant Design 6 + Tailwind CSS
 - **图表**: Recharts
 - **认证**: JWT（jose）
