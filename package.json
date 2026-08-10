@@ -1,6 +1,6 @@
 {
   "name": "fiammetta-watcher",
-  "version": "3.0.0",
+  "version": "3.1.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
