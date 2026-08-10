@@ -91,12 +91,15 @@ async function runServer() {
     password: PASSWORD,
     persistent: true,
   });
-  if (!existsSync(DB_DIR)) {
+  // 以 PG_VERSION 判断是否已 initdb：--ensure 会先创建数据目录（空目录），
+  // 仅判目录存在会误跳过 initialise()，导致 start() 对未初始化的空目录失败
+  if (!existsSync(resolve(DB_DIR, "PG_VERSION"))) {
     console.log(
       "[dev-db] 首次初始化嵌入式 PostgreSQL（下载二进制 + initdb，约 1-2 分钟）..."
     );
+    await pg.initialise();
   }
-  await pg.initialise();
+  // 数据目录已初始化时跳过 initialise()（initdb 不允许非空目录），直接启动
   await pg.start();
   try {
     await pg.createDatabase(APP_DB);
@@ -141,6 +144,8 @@ async function ensure() {
   }
   if (!existsSync(DB_DIR)) mkdirSync(DB_DIR, { recursive: true });
   const log = createWriteStream(LOG_FILE, { flags: "a" });
+  // Node 24 起 spawn 的 stdio 传流要求已打开（fd 有效），等待 open 事件
+  await new Promise((r) => log.once("open", r));
   const child = spawn(
     process.execPath,
     [fileURLToPath(import.meta.url), "--server"],
