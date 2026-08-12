@@ -107,8 +107,8 @@ function DashboardContent() {
   }, [trendRaw]);
 
   // 数据更新成功后记录最后刷新时间
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stats) setLastRefreshed(new Date());
   }, [stats]);
 

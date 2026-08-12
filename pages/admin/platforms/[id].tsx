@@ -107,10 +107,10 @@ export default function PlatformDetailPage() {
   }, [isNew, syncedForNew, form, defaultKeyName]);
 
   // 详情加载完成：将平台配置同步进表单（同一 id 只同步一次，之后的重新验证不覆盖用户编辑）
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useLayoutEffect(() => {
     if (isNew || !platform || !id) return;
     if (syncedForId === id) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSyncedForId(id);
     form.setFieldsValue({ ...platform, forwardHeaders: parseForwardHeaders(platform.forwardHeaders) });
     const parsed = parseNamedKeys(platform, t("keyNamePrefix"));
