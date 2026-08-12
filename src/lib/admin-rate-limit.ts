@@ -98,7 +98,7 @@ export async function checkAdminRateLimit(
 
     return true;
   } catch {
-    // KV 异常不阻塞请求
-    return true;
+    // KV 异常时降级为进程内窗口，避免限流完全失效（fail-open → 内存兜底）
+    return checkMemoryWindow(adminId, res);
   }
 }

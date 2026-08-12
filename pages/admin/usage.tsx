@@ -16,12 +16,15 @@ import KeyUsageTab from "@/components/usage/KeyUsageTab";
 import PlatformUsageTab from "@/components/usage/PlatformUsageTab";
 import AdminLayout from "@/components/AdminLayout";
 
-const UsageChart = dynamic(() => import("@/components/usage/UsageChart"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-[220px] sm:h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />
-  ),
-});
+const UsageChart = dynamic(
+  () => import("@/components/usage/charts").then((m) => m.UsageChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[220px] sm:h-[320px] bg-zinc-50 dark:bg-zinc-800/50 rounded-xl animate-pulse" />
+    ),
+  }
+);
 
 // ==================== 类型定义 ====================
 

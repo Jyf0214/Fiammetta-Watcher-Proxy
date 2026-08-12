@@ -24,11 +24,14 @@ import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import AdminLayout from "@/components/AdminLayout";
 
-// 懒加载迷你趋势图组件
-const MiniTrendChart = dynamic(() => import("@/components/MiniTrendChart"), {
-  ssr: false,
-  loading: () => <div className="w-20 h-8 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />,
-});
+// 懒加载迷你趋势图组件（与用量页共享同一图表模块，复用同一份 recharts chunk）
+const MiniTrendChart = dynamic(
+  () => import("@/components/usage/charts").then((m) => m.MiniTrendChart),
+  {
+    ssr: false,
+    loading: () => <div className="w-20 h-8 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />,
+  }
+);
 
 // ==================== 类型定义 ====================
 
