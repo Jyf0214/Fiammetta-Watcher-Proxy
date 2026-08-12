@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { Form, message } from "antd";
 import Switch from "@/components/ui/Switch";
@@ -13,6 +13,7 @@ import { ModelsPanel } from "@/components/platform/ModelsPanel";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 import {
   parseNamedKeys,
@@ -29,97 +30,91 @@ export default function PlatformDetailPage() {
   const isNew = id === "new";
 
   const [form] = Form.useForm();
-  const [platforms, setPlatforms] = useState<Platform[]>([]);
-  const [platform, setPlatform] = useState<Platform | null>(null);
-  const [listLoading, setListLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(!isNew);
   const defaultKeyName = useCallback((i: number) => `${t("keyNamePrefix")}${i}`, [t]);
   const [namedKeys, setNamedKeys] = useState<NamedApiKey[]>([{ name: defaultKeyName(1), key: "" }]);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
 
-  // 模型状态
-  const [models, setModels] = useState<ModelItem[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
+  // 模型操作状态
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
-  // id 变化时重置详情状态（渲染期调整，避免 effect 内同步 setState，防止旧平台数据串写）
+  // ===== 数据层（SWR）：列表 / 详情 / 模型三路并行，key 含 id 变化时自动重新请求 =====
+  // 列表 key 与平台列表页（/admin/platforms）共享同一缓存：详情页左侧栏与列表页数据自动一致
+  const listKey = "/api/admin/platforms";
+  // 详情与模型仅在非新建模式下请求（key 为 null 时不发请求）
+  const detailKey = !id || isNew ? null : `/api/admin/platforms/${id}`;
+  const modelsKey = !id || isNew ? null : `/api/admin/platforms/${id}/models`;
+
+  const {
+    data: platforms,
+    error: listError,
+    isValidating: listLoading,
+    mutate: mutateList,
+  } = useApi<Platform[]>(listKey);
+
+  const {
+    data: platform,
+    error: detailError,
+    isLoading: detailLoading,
+    mutate: mutateDetail,
+  } = useApi<Platform | null>(detailKey);
+
+  const {
+    data: models,
+    error: modelsError,
+    isValidating: modelsLoading,
+    mutate: mutateModels,
+  } = useApi<ModelItem[]>(modelsKey);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
+  useEffect(() => {
+    if (listError && listError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [listError, t]);
+  useEffect(() => {
+    if (detailError && detailError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [detailError, t]);
+  useEffect(() => {
+    if (modelsError && modelsError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [modelsError, t]);
+
+  // id 变化时重置表单同步标记（渲染期调整，避免 effect 内同步 setState，防止旧平台数据串写）
   const [prevId, setPrevId] = useState(id);
+  const [syncedForId, setSyncedForId] = useState<string | null>(null);
+  const [syncedForNew, setSyncedForNew] = useState(false);
   if (prevId !== id) {
     setPrevId(id);
-    setPlatform(null);
-    setModels([]);
+    setSyncedForId(null);
+    setSyncedForNew(false);
   }
 
-  // ---------- 数据加载 ----------
-  const fetchList = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch("/api/admin/platforms", { signal });
-      const data = (await res.json()) as Record<string, any>;
-      if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common:error"));
-    } finally {
-      if (!signal?.aborted) setListLoading(false);
-    }
-  }, [t]);
-
-  const fetchModels = useCallback(async (platformId: string, signal?: AbortSignal) => {
-    setModelsLoading(true);
-    try {
-      const res = await fetch(`/api/admin/platforms/${platformId}/models`, { signal });
-      const data = (await res.json()) as Record<string, any>;
-      if (data.success) setModels(data.data || []);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      message.error(t("common:error"));
-    } finally {
-      if (!signal?.aborted) setModelsLoading(false);
-    }
-  }, [t]);
-
+  // 新增模式：进入时初始化默认表单值（仅一次，重复渲染不覆盖）
   useEffect(() => {
-    if (!id) return;
-    const controller = new AbortController();
-    const { signal } = controller;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async 数据获取在 await 后 setState，compiler lint 误报（facebook/react#34905）
-    fetchList(signal);
-    if (isNew) {
-      setDetailLoading(false);
-      form.resetFields();
-      form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
-      setNamedKeys([{ name: defaultKeyName(1), key: "" }]);
-      return () => controller.abort();
-    }
-    setDetailLoading(true);
-    (async () => {
-      try {
-        const res = await fetch(`/api/admin/platforms/${id}`, { signal });
-        const data = (await res.json()) as Record<string, any>;
-        if (data.success && data.data) {
-          const p = data.data as Platform;
-          setPlatform(p);
-          form.setFieldsValue({ ...p, forwardHeaders: parseForwardHeaders(p.forwardHeaders) });
-          const parsed = parseNamedKeys(p, t("keyNamePrefix"));
-          setNamedKeys(parsed.length > 0 ? parsed : [{ name: defaultKeyName(1), key: "" }]);
-          fetchModels(id, signal);
-        } else {
-          if (!signal.aborted) message.error(data.error || t("common:error"));
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common:error"));
-      } finally {
-        if (!signal.aborted) setDetailLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, [id, fetchList, fetchModels, form, isNew, t, defaultKeyName]);
+    if (!isNew || syncedForNew) return;
+    setSyncedForNew(true);
+    form.resetFields();
+    form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
+    setNamedKeys([{ name: defaultKeyName(1), key: "" }]);
+  }, [isNew, syncedForNew, form, defaultKeyName]);
+
+  // 详情加载完成：将平台配置同步进表单（同一 id 只同步一次，之后的重新验证不覆盖用户编辑）
+  useLayoutEffect(() => {
+    if (isNew || !platform || !id) return;
+    if (syncedForId === id) return;
+    setSyncedForId(id);
+    form.setFieldsValue({ ...platform, forwardHeaders: parseForwardHeaders(platform.forwardHeaders) });
+    const parsed = parseNamedKeys(platform, t("keyNamePrefix"));
+    setNamedKeys(parsed.length > 0 ? parsed : [{ name: defaultKeyName(1), key: "" }]);
+  }, [platform, id, isNew, syncedForId, form, t, defaultKeyName]);
 
   // ---------- 密钥编辑 ----------
   const addNamedKey = () => {
@@ -198,16 +193,14 @@ export default function PlatformDetailPage() {
       if (data.success) {
         message.success(data.message);
         if (isNew) {
+          // 新建成功后列表缓存需刷新，跳回列表页时展示最新数据
+          mutateList();
           router.push("/admin/platforms");
           return;
         }
-        const updated: Platform = {
-          ...(platform as Platform),
-          ...values,
-          apiKeys: values.apiKeys ?? (platform as Platform).apiKeys,
-        };
-        setPlatform(updated);
-        setPlatforms((prev) => prev.map((p) => (p.id === id ? updated : p)));
+        // 重新拉取详情与列表（表单已同步过该 id，不会被覆盖）
+        mutateDetail();
+        mutateList();
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -227,6 +220,8 @@ export default function PlatformDetailPage() {
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(t("deleteSuccess"));
+        // 删除后刷新列表缓存，跳回列表页时不显示已删平台
+        mutateList();
         router.push("/admin/platforms");
       } else {
         message.error(data.error || t("common:error"));
@@ -249,8 +244,8 @@ export default function PlatformDetailPage() {
       });
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
-        setPlatform((prev) => (prev ? { ...prev, enabled } : prev));
-        setPlatforms((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
+        mutateDetail();
+        mutateList();
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -270,7 +265,7 @@ export default function PlatformDetailPage() {
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(data.message);
-        fetchModels(id);
+        mutateModels();
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -293,7 +288,7 @@ export default function PlatformDetailPage() {
       if (data.success) {
         message.success(data.message);
         setNewModelId("");
-        fetchModels(id);
+        mutateModels();
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -310,7 +305,7 @@ export default function PlatformDetailPage() {
         { method: "DELETE" }
       );
       const data = (await res.json()) as Record<string, any>;
-      if (data.success) fetchModels(id);
+      if (data.success) mutateModels();
       else message.error(data.error || t("deleteFailed"));
     } catch {
       message.error(t("common:error"));
@@ -328,7 +323,11 @@ export default function PlatformDetailPage() {
       });
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
-        setModels((prev) => prev.map((m) => (m.modelId === modelId ? { ...m, enabled } : m)));
+        // 本地更新缓存（不发请求），与开关即时反馈一致
+        mutateModels(
+          (prev) => prev?.map((m) => (m.modelId === modelId ? { ...m, enabled } : m)),
+          { revalidate: false }
+        );
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -350,7 +349,10 @@ export default function PlatformDetailPage() {
       });
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
-        setModels((prev) => prev.map((m) => ({ ...m, enabled })));
+        mutateModels(
+          (prev) => prev?.map((m) => ({ ...m, enabled })),
+          { revalidate: false }
+        );
       } else {
         message.error(data.error || t("common:error"));
       }
@@ -365,7 +367,7 @@ export default function PlatformDetailPage() {
   const configForm = (
     <PlatformConfigForm
       form={form}
-      editing={platform}
+      editing={platform ?? null}
       namedKeys={namedKeys}
       onAddKey={addNamedKey}
       onRemoveKey={removeNamedKey}
@@ -388,7 +390,7 @@ export default function PlatformDetailPage() {
         {/* 左侧：桌面端平台列表栏 */}
         <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6">
           <PlatformList
-            platforms={platforms}
+            platforms={platforms ?? []}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
             className="h-[calc(100vh-100px)] overflow-y-auto"
@@ -447,7 +449,7 @@ export default function PlatformDetailPage() {
                 {/* 模型列表（下）— 对照 ProviderDetail 的 ModelList */}
                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <ModelsPanel
-                    models={models}
+                    models={models ?? []}
                     loading={modelsLoading}
                     refreshing={refreshing}
                     newModelId={newModelId}
