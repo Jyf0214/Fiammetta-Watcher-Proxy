@@ -1,19 +1,17 @@
 /**
- * Worker 入口 — 处理 v1 代理请求 + Cron 定时任务
+ * Worker 入口（lite 版）— 纯负载均衡代理 + 平台信息拉取
  *
- * 职责：
- * - /v1/* 路径 → handleV1Route（API 代理）
- * - 其他路径 → 404
- * - scheduled 事件 → Cron 任务分发（模型发现、Key 重置、日志归档）
+ * VERSION=lite 时构建使用（见 scripts/worker-lite-gate.sh），以最小化 CPU 运行时间：
+ * - /v1/* 路径 → 单次尝试代理（不重试、不封禁、不熔断、不评分、不按优先级）
+ * - scheduled 事件 → 仅模型发现（拉取平台信息）；评分/Key 重置/日志归档均不注册
+ * - 只写请求日志（request_logs），不做 Key 用量更新、速率限制、模板注入
  *
- * D1 和 KV 通过 Wrangler Bindings 注入。
+ * 与全量版 index.ts 刻意保持独立：lite 构建不引入评分/熔断器/归档相关代码。
  */
 
-import { handleV1Route } from "./v1-route";
+import { handleV1RouteLite } from "./v1-route-lite";
 import { classifyCronExpression } from "./types";
 import { fetchAllPlatformModels } from "./model-fetcher";
-import { handleScheduledReset } from "./key-reset";
-import { runArchiveTask } from "./log-archiver";
 import { loadWhitelist, loadKeyStatusFromKV } from "./platform-keys";
 import { syncWorkerEnv } from "./env-sync";
 import { formatAnthropicError } from "@/lib/anthropic";
@@ -38,7 +36,7 @@ export default {
     const url = new URL(request.url);
 
     try {
-      // 首次请求时加载白名单与 Key 封禁状态（懒初始化）
+      // 首次请求时加载白名单与 Key 封禁状态（懒初始化；lite 只读不写）
       if (!whitelistLoaded) {
         whitelistLoaded = true;
         ctx.waitUntil(
@@ -59,7 +57,7 @@ export default {
 
       // v1 代理路由
       if (url.pathname.startsWith("/v1/")) {
-        return await handleV1Route(request, env, ctx);
+        return await handleV1RouteLite(request, env, ctx);
       }
 
       return new Response(
@@ -70,12 +68,12 @@ export default {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const errorStack = err instanceof Error ? err.stack : undefined;
       console.error(
-        `[worker] 未捕获异常: ${url.pathname} ${request.method}`,
+        `[worker-lite] 未捕获异常: ${url.pathname} ${request.method}`,
         errorMessage,
         errorStack
       );
       // Anthropic 端点（/v1/messages、count_tokens）意外异常按协议格式化，
-      // 与 Pages 入口外层 catch 行为一致
+      // 与全量版入口外层 catch 行为一致
       if (url.pathname === "/v1/messages" || url.pathname === "/v1/messages/count_tokens") {
         return Response.json(formatAnthropicError(500, "服务器内部错误"), { status: 500 });
       }
@@ -92,12 +90,10 @@ export default {
   },
 
   /**
-   * Cron 定时任务处理
+   * Cron 定时任务处理（lite：仅模型发现，其余任务一律不执行）
    *
-   * 根据 cron 表达式自动分发到对应任务：
-   * 模型发现（每 6 小时）
-   * Key 用量重置（每小时）
-   * 日志归档（每天凌晨 3 点）
+   * 注册的 cron 表达式由 wrangler-lite 配置裁剪为模型发现一项；
+   * 这里对未知表达式仅告警，不执行任何评分/重置/归档逻辑。
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // 与 fetch 入口一致，先同步环境变量（Cron 触发时同样需要正确的数据库连接）
@@ -109,14 +105,9 @@ export default {
       case "model-fetch":
         ctx.waitUntil(fetchAllPlatformModels(env.DB, env));
         break;
-      case "key-reset":
-        ctx.waitUntil(handleScheduledReset(env.DB, env));
-        break;
-      case "log-archive":
-        ctx.waitUntil(runArchiveTask(env.DB, env));
-        break;
       default:
-        console.warn(`[cron] 未知的 cron 表达式: ${event.cron}`);
+        // lite 版不注册评分/Key 重置/日志归档任务，其余表达式视为无效
+        console.warn(`[worker-lite] 忽略非模型发现任务: ${event.cron}`);
     }
   },
 };

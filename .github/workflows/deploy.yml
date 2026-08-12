@@ -26,6 +26,8 @@ jobs:
       DEPLOY_PLATFORM: cf
       DATABASE_URL: ${{ secrets.DATABASE_URL || 'file:./placeholder.db' }}
       DB_TYPE: ${{ secrets.DB_TYPE || 'd1' }}
+      # 版本选择（仓库变量）：latest（默认，全量 Worker）或 lite（精简 Worker：仅负载均衡 + 模型发现 + 写日志，最小化 CPU）
+      VERSION: ${{ vars.VERSION || 'latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +100,10 @@ jobs:
           echo "✓ Pages 构建完成（build-gate 已移除 v1/cron 路由）"
 
       # ==================== 部署 Worker ====================
+
+      # VERSION=lite 时切换为精简 Worker（仅负载均衡 + 模型发现 + 写日志）；latest 为 no-op
+      - name: Worker Lite Gate
+        run: bash scripts/worker-lite-gate.sh
 
       - name: Deploy Worker
         env:

@@ -131,7 +131,7 @@ export async function recordRequestLog(params: {
  * 此时 HTTP 头无法反映失败。code 为 400-599 的整数才视为有效状态码，
  * 否则返回 null（调用方回退到 200 成功路径）。
  */
-function resolveStreamErrorStatus(error: Record<string, unknown> | undefined): number | null {
+export function resolveStreamErrorStatus(error: Record<string, unknown> | undefined): number | null {
   if (!error || typeof error !== "object") return null;
   const raw = (error as Record<string, unknown>).code;
   const code =

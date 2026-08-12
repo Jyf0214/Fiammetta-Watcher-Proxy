@@ -223,12 +223,13 @@ describe("上游 503 时日志记录状态码重现", () => {
 
     // 下游收到 502
     expect(res.status).toBe(502);
-    // 日志 status 与实际下发一致：502（修复前记录上游的 200）
-    expect(recordRequestLog).toHaveBeenCalledTimes(1);
-    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    expect(logParams.status).toBe(502);
-    expect(logParams.isError).toBe(true);
-    expect(logParams.errorMessage).toContain("空响应");
+    // 每次失败尝试均独立记日志（重试覆盖的错误平台也进入错误统计）：
+    // 3 次尝试日志（空响应，status 502）+ 最终 502 日志
+    expect(recordRequestLog).toHaveBeenCalledTimes(4);
+    const lastCall = vi.mocked(recordRequestLog).mock.calls[3];
+    expect(lastCall[0].status).toBe(502);
+    expect(lastCall[0].isError).toBe(true);
+    expect(lastCall[0].errorMessage).toContain("空响应");
   });
 
   it("修复验证：上游 200+SSE 流内为 error 事件（无 token）→ flush 日志记 error.code=503+isError=true", async () => {

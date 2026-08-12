@@ -20,6 +20,8 @@ import {
   checkApiKeyTpm,
 } from "./rate-limiter";
 import { createUsageTransformer, recordRequestLog } from "./token";
+import { withIdleTimeout } from "./stream-guard";
+import type { ProxyConfig } from "./endpoints";
 import { extractForwardableHeaders } from "./forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
@@ -78,77 +80,9 @@ function v1ErrorResponse(
 }
 
 // ==================== 流式空闲超时 ====================
+// withIdleTimeout 已移至 stream-guard.ts（lite 版 Worker 共用），此处 re-export 保持兼容
 
-/**
- * 空闲超时保护流：距上一次收到数据超过 idleMs 时终止流（流式响应专用）
- *
- * 与 fetch 的总超时不同：持续传输数据的正常长流不受影响，
- * 只有"上游挂起不吐数据"（如免费模型排队空转、连接半开）才会被切断，
- * 避免函数被无数据流无限占用（此前实测挂起可达 15 分钟）。
- *
- * @param onTimeout 超时回调（用于补记请求日志；输入流正常结束时不会触发）
- */
-export function withIdleTimeout(
-  stream: ReadableStream<Uint8Array>,
-  idleMs: number,
-  onTimeout?: () => void
-): ReadableStream<Uint8Array> {
-  const reader = stream.getReader();
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let finished = false;
-
-  const clearTimer = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-
-  const armTimer = (controller: ReadableStreamDefaultController<Uint8Array>) => {
-    clearTimer();
-    timer = setTimeout(() => {
-      if (finished) return;
-      finished = true;
-      onTimeout?.();
-      // 取消上游读取、释放上游连接（与 Pages 版看门狗 r.cancel() 行为对齐）；
-      // pending read 会 reject 进入 start 的 catch，那里已做二次 error 防重入
-      reader.cancel().catch(() => {});
-      controller.error(new DOMException("上游响应空闲超时", "TimeoutError"));
-    }, idleMs);
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      armTimer(controller);
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            finished = true;
-            clearTimer();
-            controller.close();
-            break;
-          }
-          armTimer(controller);
-          controller.enqueue(value);
-        }
-      } catch (err) {
-        finished = true;
-        clearTimer();
-        try {
-          controller.error(err);
-        } catch {
-          // 超时路径已主动 error（reader.cancel 导致的 read reject），忽略二次 error
-        }
-      }
-    },
-    cancel(reason) {
-      finished = true;
-      clearTimer();
-      return reader.cancel(reason);
-    },
-  });
-}
+export { withIdleTimeout };
 
 // ==================== 上游超时与重试配置 ====================
 
@@ -229,23 +163,9 @@ async function parseRequestBody<T>(
 }
 
 // ==================== 统一代理入口 ====================
+// ProxyConfig 类型已移至 endpoints.ts（lite 版 Worker 共用），此处 re-export 保持兼容
 
-export interface ProxyConfig {
-  /** 上游路径，如 "/chat/completions"、"/embeddings" */
-  upstreamPath: string;
-  /** 是否支持流式响应 */
-  supportsStreaming?: boolean;
-  /** 允许的模型类型 */
-  allowedModelTypes?: string[];
-  /** 代理协议：anthropic 时做 /v1/messages ↔ /chat/completions 双向转换 */
-  protocol?: "openai" | "anthropic";
-  /** 额外的请求体校验 */
-  validateBody?: (body: Record<string, unknown>) => Response | null;
-  /** 构建上游请求体（Anthropic 分支在解析后立即调用，把下游格式转为 OpenAI 格式） */
-  buildUpstreamBody?: (
-    body: Record<string, unknown>
-  ) => Record<string, unknown>;
-}
+export type { ProxyConfig } from "./endpoints";
 
 /**
  * 处理一个 V1 代理请求
@@ -302,6 +222,29 @@ export async function proxyV1Request(
     : await routeRequest("__any__", env.DB, workerEnv);
 
   if (!route) {
+    // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
+    try {
+      await recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: null,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status: 500,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage: "此模型不存在",
+        db: env.DB,
+        env: workerEnv,
+      });
+    } catch (logError) {
+      console.error(`${logTag} 日志写入失败:`, logError);
+    }
     return v1ErrorResponse(config, 500, "此模型不存在", "server_error");
   }
 
@@ -312,6 +255,29 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformRpm.allowed) {
+    // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
+    try {
+      await recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: route.platform.id,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status: 429,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage: "上游平台请求频率超限",
+        db: env.DB,
+        env: workerEnv,
+      });
+    } catch (logError) {
+      console.error(`${logTag} 日志写入失败:`, logError);
+    }
     return v1ErrorResponse(config, 429, "上游平台请求频率超限", "rate_limit_error", {
       retry_after: Math.ceil((platformRpm.resetAt - Date.now()) / 1000),
     });
@@ -345,6 +311,29 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformTpm.allowed) {
+    // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
+    try {
+      await recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: route.platform.id,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status: 429,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage: "上游平台 Token 速率超限",
+        db: env.DB,
+        env: workerEnv,
+      });
+    } catch (logError) {
+      console.error(`${logTag} 日志写入失败:`, logError);
+    }
     return v1ErrorResponse(config, 429, "上游平台 Token 速率超限", "rate_limit_error", {
       retry_after: Math.ceil((platformTpm.resetAt - Date.now()) / 1000),
     });
@@ -405,6 +394,29 @@ export async function proxyV1Request(
         `${logTag} 所有平台均无可用 Key，` +
         `已检查 ${availablePlatforms.length + 1} 个平台`
       );
+      // 全部平台无可用 Key：平台维度未知记 null（配置问题，不计入任何平台评分）
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: null,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: 500,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: "所有平台均无可用 API Key",
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      }
       return v1ErrorResponse(config, 500, "所有平台均无可用 API Key", "server_error");
     }
   }
@@ -424,6 +436,29 @@ export async function proxyV1Request(
         `封禁: ${platformKeys.filter((k) => isKeyBanned(k, currentPlatform.id)).length}，` +
         `降级: ${platformKeys.filter((k) => isKeyDeprioritized(k, currentPlatform.id)).length}）`
       );
+      // 当前平台 Key 耗尽（同平台换 Key 失败）：计入该平台错误统计
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: currentPlatform.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: 500,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: `平台 "${currentPlatform.name}" 无可用 API Key`,
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      }
       return v1ErrorResponse(config, 500, `平台 "${currentPlatform.name}" 无可用 API Key`, "server_error");
     }
 
@@ -463,6 +498,28 @@ export async function proxyV1Request(
     // SSRF 防护：校验上游 URL
     const urlCheck = isSafeUpstreamUrl(currentPlatform.baseUrl);
     if (!urlCheck.safe) {
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: currentPlatform.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: 400,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: `上游 URL 不安全: ${urlCheck.reason}`,
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      }
       return v1ErrorResponse(config, 400, `上游 URL 不安全: ${urlCheck.reason}`, "invalid_request_error");
     }
 
@@ -587,6 +644,30 @@ export async function proxyV1Request(
 
     // ── 429/401/403/空响应：封禁当前 Key 并尝试切换 ──
     if (attempt < MAX_UPSTREAM_RETRIES) {
+      // 本次尝试失败独立记日志：被重试覆盖的错误平台也必须进入平台错误统计，
+      // 否则评分只见最终成功平台、错误率被严重低估
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: currentPlatform.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: isEmptyResponse ? 502 : upstreamResponse.status,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upstreamResponse.status}（已封禁该 Key 并重试切换）`,
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      }
       // 封禁该 Key 5 分钟（内存 + KV 持久化，管理后台可见）
       await banKey(currentKey, undefined, currentPlatform.id, env.KV);
       console.log(
@@ -937,10 +1018,11 @@ async function handleUpstreamResponse(
     }
 
     clearTimeout(upstreamTimeoutId);
-    await recordSuccess(platform.id, env.DB);
+    // 不阻塞首字节：multipart 响应同样在返回 Response 前把写库后置到 waitUntil（与流式分支一致）
+    ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
 
-    try {
-      await recordRequestLog({
+    ctx.waitUntil(
+      recordRequestLog({
         keyId: apiKey.id,
         keyName: apiKey.name,
         platformId: platform.id,
@@ -956,10 +1038,10 @@ async function handleUpstreamResponse(
         isError: false,
         db: env.DB,
         env: workerEnv,
-      });
-    } catch (logError) {
-      console.error(`${logTag} 日志写入失败:`, logError);
-    }
+      }).catch((logError) => {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      })
+    );
 
     // 把已读到的第一块拼回流头部，继续透传
     const multipartPadded = new ReadableStream<Uint8Array>({
@@ -1026,7 +1108,8 @@ async function handleUpstreamResponse(
 
       if (extracted.totalTokens > 0) {
         const { updateKeyUsage } = await import("./token");
-        await updateKeyUsage(apiKey.id, extracted.totalTokens, env.DB, workerEnv);
+        // 不阻塞响应：用量更新是独立写库，后置到 waitUntil（与流式分支一致）
+        ctx.waitUntil(updateKeyUsage(apiKey.id, extracted.totalTokens, env.DB, workerEnv).catch(() => {}));
       }
     }
   } catch {
@@ -1040,8 +1123,9 @@ async function handleUpstreamResponse(
         convertOpenAIResponse(JSON.parse(responseBody) as Record<string, unknown>, requestedModel)
       );
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
-      try {
-        await recordRequestLog({
+      // 不阻塞响应：成功日志/熔断记录后置到 waitUntil（与流式分支一致）
+      ctx.waitUntil(
+        recordRequestLog({
           keyId: apiKey.id,
           keyName: apiKey.name,
           platformId: platform.id,
@@ -1057,11 +1141,11 @@ async function handleUpstreamResponse(
           isError: false,
           db: env.DB,
           env: workerEnv,
-        });
-      } catch (logError) {
-        console.error(`${logTag} 日志写入失败:`, logError);
-      }
-      await recordSuccess(platform.id, env.DB);
+        }).catch((logError) => {
+          console.error(`${logTag} 日志写入失败:`, logError);
+        })
+      );
+      ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
       return new Response(converted, {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -1098,8 +1182,9 @@ async function handleUpstreamResponse(
     }
   }
 
-  try {
-    await recordRequestLog({
+  // 不阻塞响应：成功日志/熔断记录后置到 waitUntil（与流式分支一致）
+  ctx.waitUntil(
+    recordRequestLog({
       keyId: apiKey.id,
       keyName: apiKey.name,
       platformId: platform.id,
@@ -1115,12 +1200,12 @@ async function handleUpstreamResponse(
       isError: false,
       db: env.DB,
       env: workerEnv,
-    });
-  } catch (logError) {
-    console.error(`${logTag} 日志写入失败:`, logError);
-  }
+    }).catch((logError) => {
+      console.error(`${logTag} 日志写入失败:`, logError);
+    })
+  );
 
-  await recordSuccess(platform.id, env.DB);
+  ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
 
   return new Response(responseBody, {
     status: upstreamResponse.status,

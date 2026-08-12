@@ -1,32 +1,33 @@
 /**
- * V1 路由分发器
+ * V1 路由分发器（lite 版）
  *
- * 处理 /v1/* 路径的请求分发：
- * - 解析 URL 路径确定端点
+ * 处理 /v1/* 路径的请求分发（与全量版 v1-route.ts 语义一致）：
+ * - 解析 URL 路径确定端点（复用 endpoints.ts 端点表）
  * - GET /v1/models → 模型列表
- * - POST /v1/* → API Key 验证 + 代理转发
+ * - POST /v1/* → API Key 验证 + 单次代理转发
  *
- * 作为 router 和 proxy 之间的桥梁，避免循环依赖
+ * lite 构建不引入全量版 router/proxy（无评分/熔断/重试代码）。
  */
 
 import { validateApiKey } from "./auth";
-import { proxyV1Request } from "./proxy";
-import { getEndpointConfig, type ProxyConfig } from "./endpoints";
-import { refreshCache, getPlatformCache, getPlatformModelCache } from "./router";
-import { estimateInputTokens, formatAnthropicError } from "@/lib/anthropic";
+import { proxyV1RequestLite } from "./proxy-lite";
+import { getEndpointConfig } from "./endpoints";
+import {
+  refreshCacheLite,
+  getPlatformCacheLite,
+  getPlatformModelCacheLite,
+} from "./router-lite";
+import { formatAnthropicError, estimateInputTokens } from "@/lib/anthropic";
 import type { WorkerEnv } from "./config";
 
-// 兼容旧导入路径（测试与外部模块从 ./v1-route 引用端点配置）
-export { getEndpointConfig, type ProxyConfig };
-
-/** 请求体大小上限（与 proxy.ts 的 parseRequestBody 保持一致） */
+/** 请求体大小上限（与 proxy-lite.ts 保持一致） */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 /**
  * 提取 API Key：兼容 Anthropic 客户端（x-api-key 头）与 OpenAI 客户端（Authorization: Bearer）
  */
 function getApiKeyHeader(request: Request): string | null {
-  // authorization 优先（OpenAI 惯例），回退 x-api-key（Anthropic 惯例）——与 Pages 入口一致
+  // authorization 优先（OpenAI 惯例），回退 x-api-key（Anthropic 惯例）——与全量版一致
   return request.headers.get("authorization") || request.headers.get("x-api-key");
 }
 
@@ -44,9 +45,9 @@ async function anthropicAuthErrorResponse(authError: Response): Promise<Response
 }
 
 /**
- * 处理 /v1/* 路由请求
+ * 处理 /v1/* 路由请求（lite）
  */
-export async function handleV1Route(
+export async function handleV1RouteLite(
   request: Request,
   env: { DB: D1Database; KV: KVNamespace } & WorkerEnv,
   ctx: ExecutionContext
@@ -80,8 +81,7 @@ export async function handleV1Route(
     );
   }
 
-  // 验证 API Key（models 端点同样需要认证，防止匿名枚举模型/平台名——
-  // 与 Pages 入口一致，认证通过后才处理 /v1/models 与 /v1/models/:model）
+  // 验证 API Key（models 端点同样需要认证，防止匿名枚举模型/平台名）
   const authResult = await validateApiKey(getApiKeyHeader(request), env.DB, env);
   if ("error" in authResult) {
     // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
@@ -93,28 +93,28 @@ export async function handleV1Route(
 
   // GET /v1/models — 返回模型列表
   if (url.pathname === "/v1/models" && request.method === "GET") {
-    return handleModelsList(env.DB, env);
+    return handleModelsListLite(env.DB, env);
   }
 
   // GET /v1/models/:model — 返回单个模型信息
   if (url.pathname.startsWith("/v1/models/") && request.method === "GET") {
     const modelId = decodeURIComponent(url.pathname.slice("/v1/models/".length));
-    return handleModelDetail(modelId, env.DB, env);
+    return handleModelDetailLite(modelId, env.DB, env);
   }
 
-  // 代理转发
-  return proxyV1Request(request, endpointConfig, authResult.apiKey, env, ctx);
+  // 代理转发（单次尝试）
+  return proxyV1RequestLite(request, endpointConfig, authResult.apiKey, env, ctx);
 }
 
 /**
  * GET /v1/models — 返回所有可用模型列表
  */
-async function handleModelsList(db: D1Database, env?: WorkerEnv): Promise<Response> {
-  await refreshCache(db, env);
+async function handleModelsListLite(db: D1Database, env?: WorkerEnv): Promise<Response> {
+  await refreshCacheLite(db, env);
 
   const models: Array<{ id: string; object: string; owned_by: string }> = [];
-  const platformCache = getPlatformCache();
-  const platformModelCache = getPlatformModelCache();
+  const platformCache = getPlatformCacheLite();
+  const platformModelCache = getPlatformModelCacheLite();
 
   for (const [platformId, modelSet] of platformModelCache) {
     const platform = platformCache.find((p) => p.id === platformId);
@@ -131,15 +131,15 @@ async function handleModelsList(db: D1Database, env?: WorkerEnv): Promise<Respon
 /**
  * GET /v1/models/:model — 返回单个模型信息
  */
-async function handleModelDetail(
+async function handleModelDetailLite(
   modelId: string,
   db: D1Database,
   env?: WorkerEnv
 ): Promise<Response> {
-  await refreshCache(db, env);
+  await refreshCacheLite(db, env);
 
-  const platformCache = getPlatformCache();
-  const platformModelCache = getPlatformModelCache();
+  const platformCache = getPlatformCacheLite();
+  const platformModelCache = getPlatformModelCacheLite();
 
   for (const [platformId, modelSet] of platformModelCache) {
     if (modelSet.has(modelId)) {
