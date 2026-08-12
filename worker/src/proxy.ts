@@ -41,9 +41,14 @@ import type { WorkerEnv } from "./config";
 function extractUpstreamErrorMessage(text: string): string {
   try {
     const parsed = JSON.parse(text);
-    const message =
-      parsed?.error?.message || parsed?.message || parsed?.detail || "";
-    return String(message).substring(0, 500) || "上游服务返回错误";
+    // parsed?.detail 可能是数组（FastAPI 标准格式）或对象，不能直接 String()，否则变成 "[object Object]"
+    const raw = parsed?.error?.message || parsed?.message || parsed?.detail || "";
+    if (typeof raw === "string") return raw.substring(0, 500);
+    if (Array.isArray(raw)) return raw.map((r: unknown) => {
+      const s = (r as Record<string, unknown>)?.msg || (r as Record<string, unknown>)?.detail || String(r);
+      return typeof s === "string" ? s : "";
+    }).filter(Boolean).join("; ").substring(0, 500);
+    return String(raw).substring(0, 500);
   } catch {
     return "上游服务返回未知错误";
   }
@@ -911,13 +916,23 @@ async function handleUpstreamResponse(
         controller.enqueue(firstChunk.value);
       },
       pull(controller) {
-        return streamReader.read().then(({ done, value }) => {
-          if (done) {
-            controller.close();
-          } else {
-            controller.enqueue(value);
+        return streamReader.read().then(
+          ({ done, value }) => {
+            if (done) {
+              controller.close();
+            } else {
+              controller.enqueue(value);
+            }
+          },
+          (err) => {
+            // 上游流被取消（空闲超时切断）时 pending read 会 reject；控制器已关闭则忽略
+            try {
+              controller.error(err);
+            } catch {
+              // 控制器已关闭/error（cancel 路径），忽略二次错误
+            }
           }
-        });
+        );
       },
       cancel(reason) {
         return streamReader.cancel(reason);
