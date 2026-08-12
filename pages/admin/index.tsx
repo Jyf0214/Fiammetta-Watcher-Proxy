@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useState, useLayoutEffect, useCallback, useMemo } from "react";
 import { message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -107,6 +107,7 @@ function DashboardContent() {
   }, [trendRaw]);
 
   // 数据更新成功后记录最后刷新时间
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useLayoutEffect(() => {
     if (stats) setLastRefreshed(new Date());
   }, [stats]);
