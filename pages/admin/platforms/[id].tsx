@@ -98,8 +98,9 @@ export default function PlatformDetailPage() {
   }
 
   // 新增模式：进入时初始化默认表单值（仅一次，重复渲染不覆盖）
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isNew || syncedForNew) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSyncedForNew(true);
     form.resetFields();
     form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
