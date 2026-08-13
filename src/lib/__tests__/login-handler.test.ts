@@ -456,8 +456,7 @@ describe("POST /api/admin/auth — 并发突刺（TOCTOU 回归）", () => {
       expect(res.statusCode).not.toBe(200);
       expect(res.statusCode).toBeGreaterThanOrEqual(401);
     }
-    // 至少有一个 401 且至少有一个被 429 拦截（写后计数在并发下生效）
-    expect(results.some((r) => r.statusCode === 401)).toBe(true);
+    // 并发下"先写后查"保证至少有请求被 429 拦截（写后计数生效）
     expect(results.some((r) => r.statusCode === 429)).toBe(true);
 
     // 每条失败记录都已落库

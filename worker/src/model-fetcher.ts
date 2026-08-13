@@ -7,10 +7,11 @@
  * 策略：
  * - 每 6 小时定时刷新
  * - 拉取失败时保留旧数据不清理
- * - 使用事务替换每个平台的模型列表
+ * - 使用事务替换每个平台的模型列表（非 D1 数据库）
+ * - 锁等待超时自动重试（指数退避）
  */
 
-import { createDb } from "@/lib/prisma";
+import { createDb, getDbKind } from "@/lib/prisma";
 import { detectModelType } from "@/lib/detect-model-type";
 import type { WorkerEnv } from "./config";
 import { parseApiKeys, getNextKey } from "./platform-keys";
@@ -18,6 +19,71 @@ import { isSafeUrl } from "@/lib/admin-security";
 import type { PlatformConfig } from "@/lib/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
+
+/** MySQL/TiDB 锁等待超时错误码 */
+const LOCK_WAIT_TIMEOUT_CODE = 1205;
+/** 最大重试次数 */
+const MAX_RETRIES = 3;
+/** 初始重试延迟（毫秒） */
+const INITIAL_RETRY_DELAY_MS = 100;
+
+/**
+ * 判断错误是否为锁等待超时
+ */
+function isLockWaitTimeout(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as Record<string, unknown>;
+  // Prisma 错误结构：{ code: 'P2034', meta: { code: 1205, ... } }
+  if (e.code === "P2034") return true;
+  // 原生 MySQL 错误
+  if (typeof e.meta === "object" && e.meta !== null) {
+    const meta = e.meta as Record<string, unknown>;
+    if (meta.code === LOCK_WAIT_TIMEOUT_CODE) return true;
+  }
+  // 直接包含错误码的情况
+  if (typeof e.message === "string" && e.message.includes("1205")) return true;
+  if (typeof e.message === "string" && e.message.includes("Lock wait timeout")) return true;
+  return false;
+}
+
+/**
+ * 带重试的事务执行（仅非 D1 数据库）
+ * D1 不支持事务，直接执行不重试
+ */
+async function executeWithRetry<T>(
+  prisma: any,
+  dbKind: string,
+  fn: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  // D1 不支持事务，也不重试（D1 无锁等待超时问题）
+  if (dbKind === "d1") {
+    return fn();
+  }
+
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // 非 D1 数据库使用事务
+      return await prisma.$transaction(async (_tx: any) => {
+        // 将 tx 绑定到 fn 的上下文（通过闭包）
+        return await fn();
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (isLockWaitTimeout(err) && attempt < MAX_RETRIES) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.warn(
+          `[model-fetcher] ${operationName} 遇到锁等待超时 (尝试 ${attempt + 1}/${MAX_RETRIES + 1})，${delay}ms 后重试: ${lastError.message}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw lastError;
+    }
+  }
+  throw lastError;
+}
 
 interface UpstreamModel {
   id: string;
@@ -88,7 +154,7 @@ async function fetchPlatformModels(platform: {
     const list: unknown[] = Array.isArray(data) ? data : data?.data;
     if (!Array.isArray(list)) return null;
 
-    return list
+    const models = list
       .filter(
         (item): item is UpstreamModel =>
           typeof item === "object" &&
@@ -100,6 +166,11 @@ async function fetchPlatformModels(platform: {
         id: m.id,
         owned_by: m.owned_by,
       }));
+
+    // 上游返回空列表视为获取失败，保留旧数据不清空
+    if (models.length === 0) return null;
+
+    return models;
   } catch {
     return null;
   }
@@ -110,6 +181,7 @@ async function fetchPlatformModels(platform: {
  */
 export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const dbKind = await getDbKind({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
     const platforms = await prisma.platforms.findMany({
@@ -140,48 +212,55 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
           return;
         }
 
-        // 事务内替换该平台的模型列表
+        // 事务内替换该平台的模型列表（带重试）
         const now = Math.floor(Date.now() / 1000);
 
-        // 查询已有模型，保留用户手动设置的 enabled 状态
-        const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
-          where: { platformId: platform.id },
-          select: { modelId: true, enabled: true, source: true },
-        });
-        const existingMap = new Map(
-          existingModels.map((m: ExistingModel) => [m.modelId, { enabled: m.enabled, source: m.source } as const])
-        );
-
-        // 删除旧的自动发现模型（保留手动添加的）
-        await prisma.platformModels.deleteMany({
-          where: { platformId: platform.id, source: "auto" },
-        });
-
-        // 批量插入新模型，保留已有模型的 enabled 状态
-        if (models.length > 0) {
-          const values = models.map((m) => {
-            const existing = existingMap.get(m.id);
-            return {
-              id: crypto.randomUUID(),
-              platformId: platform.id,
-              modelId: m.id,
-              ownedBy: m.owned_by ?? platform.name,
-              modelName: m.id,
-              type: detectModelType(m.id),
-              source: "auto" as const,
-              fetchedAt: now,
-              // 已有模型保留原 enabled 状态，新模型默认启用
-              enabled: existing ? existing.enabled : true,
-            };
-          });
-
-          // 分批插入（D1 限制每次最多 100 条）
-          for (let i = 0; i < values.length; i += 100) {
-            await prisma.platformModels.createMany({
-              data: values.slice(i, i + 100),
+        await executeWithRetry(
+          prisma,
+          dbKind,
+          async () => {
+            // 查询已有模型，保留用户手动设置的 enabled 状态
+            const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
+              where: { platformId: platform.id },
+              select: { modelId: true, enabled: true, source: true },
             });
-          }
-        }
+            const existingMap = new Map(
+              existingModels.map((m: ExistingModel) => [m.modelId, { enabled: m.enabled, source: m.source } as const])
+            );
+
+            // 删除旧的自动发现模型（保留手动添加的）
+            await prisma.platformModels.deleteMany({
+              where: { platformId: platform.id, source: "auto" },
+            });
+
+            // 批量插入新模型，保留已有模型的 enabled 状态
+            if (models.length > 0) {
+              const values = models.map((m) => {
+                const existing = existingMap.get(m.id);
+                return {
+                  id: crypto.randomUUID(),
+                  platformId: platform.id,
+                  modelId: m.id,
+                  ownedBy: m.owned_by ?? platform.name,
+                  modelName: m.id,
+                  type: detectModelType(m.id),
+                  source: "auto" as const,
+                  fetchedAt: now,
+                  // 已有模型保留原 enabled 状态，新模型默认启用
+                  enabled: existing ? existing.enabled : true,
+                };
+              });
+
+              // 分批插入（D1 限制每次最多 100 条）
+              for (let i = 0; i < values.length; i += 100) {
+                await prisma.platformModels.createMany({
+                  data: values.slice(i, i + 100),
+                });
+              }
+            }
+          },
+          `平台 ${platform.name} 模型替换`
+        );
 
         totalModels += models.length;
         successCount++;

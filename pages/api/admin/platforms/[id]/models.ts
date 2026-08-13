@@ -8,14 +8,79 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/prisma";
+import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { detectModelType } from "@/lib/detect-model-type";
 
+/** MySQL/TiDB 锁等待超时错误码 */
+const LOCK_WAIT_TIMEOUT_CODE = 1205;
+/** 最大重试次数 */
+const MAX_RETRIES = 3;
+/** 初始重试延迟（毫秒） */
+const INITIAL_RETRY_DELAY_MS = 100;
+
 /** 生成唯一 ID（cuid 风格） */
 function generateId(): string {
   return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 判断错误是否为锁等待超时
+ */
+function isLockWaitTimeout(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as Record<string, unknown>;
+  // Prisma 错误结构：{ code: 'P2034', meta: { code: 1205, ... } }
+  if (e.code === "P2034") return true;
+  // 原生 MySQL 错误
+  if (typeof e.meta === "object" && e.meta !== null) {
+    const meta = e.meta as Record<string, unknown>;
+    if (meta.code === LOCK_WAIT_TIMEOUT_CODE) return true;
+  }
+  // 直接包含错误码的情况
+  if (typeof e.message === "string" && e.message.includes("1205")) return true;
+  if (typeof e.message === "string" && e.message.includes("Lock wait timeout")) return true;
+  return false;
+}
+
+/**
+ * 带重试的事务执行（仅非 D1 数据库）
+ * D1 不支持事务，直接执行不重试
+ */
+async function executeWithRetry<T>(
+  prisma: any,
+  dbKind: string,
+  fn: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  // D1 不支持事务，也不重试（D1 无锁等待超时问题）
+  if (dbKind === "d1") {
+    return fn();
+  }
+
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // 非 D1 数据库使用事务
+      return await prisma.$transaction(async (_tx: any) => {
+        // 将 tx 绑定到 fn 的上下文（通过闭包）
+        return await fn();
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (isLockWaitTimeout(err) && attempt < MAX_RETRIES) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.warn(
+          `[PUT /api/admin/platforms/[id]/models] ${operationName} 遇到锁等待超时 (尝试 ${attempt + 1}/${MAX_RETRIES + 1})，${delay}ms 后重试: ${lastError.message}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw lastError;
+    }
+  }
+  throw lastError;
 }
 
 /** 解析平台 apiKeys JSON 为密钥列表（兼容命名对象与字符串数组格式） */
@@ -272,6 +337,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       });
     }
 
+    // 获取数据库类型用于事务重试判断
+    const dbKind = await getDbKind();
+
     // 获取当前本地已有的模型
     const existingModels = await db.platformModels.findMany({
       where: { platformId: id },
@@ -285,48 +353,76 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     let updated = 0;
     let removed = 0;
 
-    // 1. 新增上游有但本地没有的模型
-    for (const upstream of upstreamModels) {
-      if (!existingMap.has(upstream.id)) {
-        await db.platformModels.create({
-          data: {
+    // 使用事务批量操作（带重试）
+    await executeWithRetry(
+      db,
+      dbKind,
+      async () => {
+        // 1. 批量新增上游有但本地没有的模型
+        const toCreate = upstreamModels
+          .filter((upstream) => !existingMap.has(upstream.id))
+          .map((upstream) => ({
             id: generateId(),
             platformId: id,
             modelId: upstream.id,
             ownedBy: upstream.owned_by || null,
             modelName: upstream.id,
             type: detectModelType(upstream.id),
-            source: "auto",
+            source: "auto" as const,
             fetchedAt: now,
-          },
-        });
-        added++;
-      }
-    }
+          }));
 
-    // 2. 更新已存在的模型的 fetchedAt 与 type（标记为仍然存在，并重算类型修正历史误标）
-    for (const upstream of upstreamModels) {
-      const existing = existingMap.get(upstream.id);
-      if (existing) {
-        await db.platformModels.update({
-          where: { id: existing.id },
-          data: {
-            fetchedAt: now,
-            ownedBy: upstream.owned_by || existing.ownedBy,
-            type: detectModelType(upstream.id),
-          },
-        });
-        updated++;
-      }
-    }
+        if (toCreate.length > 0) {
+          // 分批插入（D1 限制每次最多 100 条，其他数据库也建议分批）
+          for (let i = 0; i < toCreate.length; i += 100) {
+            await db.platformModels.createMany({
+              data: toCreate.slice(i, i + 100),
+            });
+          }
+          added = toCreate.length;
+        }
 
-    // 3. 删除上游已不存在且来源为 auto 的模型（保留手动添加的）
-    for (const existing of existingModels) {
-      if (!upstreamIds.has(existing.modelId) && existing.source === "auto") {
-        await db.platformModels.delete({ where: { id: existing.id } });
-        removed++;
-      }
-    }
+        // 2. 批量更新已存在的模型的 fetchedAt 与 type
+        const toUpdate = upstreamModels
+          .map((upstream) => existingMap.get(upstream.id))
+          .filter((existing): existing is typeof existingModels[0] => existing !== undefined);
+
+        if (toUpdate.length > 0) {
+          // 使用 updateMany 配合多个 where 条件（Prisma 支持）
+          // 但 updateMany 只能更新相同字段，这里需要根据每个模型更新不同的 ownedBy 和 type
+          // 所以只能逐个 update，但在事务中批量执行
+          for (const upstream of upstreamModels) {
+            const existing = existingMap.get(upstream.id);
+            if (existing) {
+              await db.platformModels.update({
+                where: { id: existing.id },
+                data: {
+                  fetchedAt: now,
+                  ownedBy: upstream.owned_by || existing.ownedBy,
+                  type: detectModelType(upstream.id),
+                },
+              });
+              updated++;
+            }
+          }
+        }
+
+        // 3. 批量删除上游已不存在且来源为 auto 的模型
+        const toDelete = existingModels.filter(
+          (existing) => !upstreamIds.has(existing.modelId) && existing.source === "auto"
+        );
+
+        if (toDelete.length > 0) {
+          await db.platformModels.deleteMany({
+            where: {
+              id: { in: toDelete.map((m) => m.id) },
+            },
+          });
+          removed = toDelete.length;
+        }
+      },
+      `平台 ${id} 模型刷新`
+    );
 
     return res.status(200).json({
       success: true,

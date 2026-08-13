@@ -161,8 +161,6 @@
     "testModelTitle": "Model Availability Test",
     "testModelSelectModel": "Select model",
     "testModelStart": "Start test",
-    "testModelPass": "Pass",
-    "testModelFail": "Fail",
     "testModelNoKeys": "No API keys configured",
     "testModelNoChatModels": "No chat models to test",
     "searchPlaceholder": "Search providers…",

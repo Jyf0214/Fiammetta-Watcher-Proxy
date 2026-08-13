@@ -161,8 +161,6 @@
     "testModelTitle": "模型可用性测试",
     "testModelSelectModel": "选择模型",
     "testModelStart": "开始测试",
-    "testModelPass": "通过",
-    "testModelFail": "失败",
     "testModelNoKeys": "该平台未配置密钥",
     "testModelNoChatModels": "无 chat 类型模型可测试",
     "searchPlaceholder": "搜索服务商…",
