@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Input, Popconfirm, message } from "antd";
+import { Input, Popconfirm, message, Modal, Select, Alert } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
 import {
@@ -17,14 +17,26 @@ import {
   Mic,
   Video,
   ToggleLeft,
+  Zap,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/ui";
 import { MODEL_TYPE_CONFIG, type ModelItem } from "@/lib/platform";
 import { ModelIcon } from "@/components/platform/ModelIcon";
 
+export interface TestResult {
+  name: string;
+  keyMasked: string;
+  status: "ok" | "error";
+  httpStatus: number;
+  latencyMs: number;
+  error?: string;
+}
+
 /**
- * 模型管理面板 — 标题工具条 + 带图标类型 Tabs + 已启用/已禁用分组（对照参考 ModelList）
+ * 模型管理面板 — 标题工具条 + 带图标类型 Tabs + 已启用/已禁用分组
  */
 export function ModelsPanel({
   models,
@@ -39,6 +51,9 @@ export function ModelsPanel({
   onToggleAll,
   togglingAll,
   togglingModelId,
+  onTestModel,
+  testLoading,
+  testResults,
 }: {
   models: ModelItem[];
   loading: boolean;
@@ -52,10 +67,17 @@ export function ModelsPanel({
   onToggleAll: (enabled: boolean) => void;
   togglingAll: boolean;
   togglingModelId: string | null;
+  onTestModel: (modelId: string) => void;
+  testLoading: boolean;
+  testResults: TestResult[] | null;
 }) {
   const { t } = useTranslation("platform");
   const [typeFilter, setTypeFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
+  const [testModalOpen, setTestModalOpen] = useState(false);
+  const [testModelId, setTestModelId] = useState<string | undefined>(undefined);
+
+  const chatModels = useMemo(() => models.filter((m) => m.type === "chat"), [models]);
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = { all: models.length };
@@ -217,6 +239,18 @@ export function ModelsPanel({
           >
             {t("refreshModels")}
           </Button>
+          <Button
+            variant="default"
+            size="sm"
+            icon={<Zap size={13} />}
+            onClick={() => {
+              setTestModelId(chatModels[0]?.modelId);
+              setTestModalOpen(true);
+            }}
+            disabled={chatModels.length === 0}
+          >
+            {t("testModel")}
+          </Button>
         </div>
       </div>
 
@@ -308,6 +342,94 @@ export function ModelsPanel({
           )}
         </>
       )}
+
+      {/* 模型可用性测试 Modal */}
+      <Modal
+        title={t("testModelTitle")}
+        open={testModalOpen}
+        onCancel={() => setTestModalOpen(false)}
+        footer={null}
+        width={520}
+        destroyOnClose
+      >
+        {chatModels.length === 0 ? (
+          <p className="text-center py-6 text-sm text-zinc-400">{t("testModelNoChatModels")}</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Select
+                value={testModelId}
+                onChange={setTestModelId}
+                className="flex-1"
+                placeholder={t("testModelSelectModel")}
+                options={chatModels.map((m) => ({ label: m.modelId, value: m.modelId }))}
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                loading={testLoading}
+                disabled={!testModelId}
+                onClick={() => testModelId && onTestModel(testModelId)}
+                icon={<Zap size={13} />}
+              >
+                {t("testModelStart")}
+              </Button>
+            </div>
+
+            {testResults && testResults.length === 0 && !testLoading && (
+              <p className="text-center py-4 text-sm text-zinc-400">{t("testModelNoKeys")}</p>
+            )}
+
+            {testResults && testResults.length > 0 && (
+              <div className="space-y-2">
+                {testResults.map((r, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-3 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700"
+                  >
+                    <div className="flex-shrink-0 mt-0.5">
+                      {r.status === "ok" ? (
+                        <CheckCircle size={16} className="text-emerald-500" />
+                      ) : (
+                        <XCircle size={16} className="text-red-500" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                          {r.name}
+                        </span>
+                        <span className="text-xs text-zinc-400 tabular-nums">
+                          {r.latencyMs}ms
+                        </span>
+                      </div>
+                      <div className="text-xs text-zinc-400 mt-0.5">
+                        {r.keyMasked}
+                        {r.httpStatus > 0 && (
+                          <span className="ml-2">HTTP {r.httpStatus}</span>
+                        )}
+                      </div>
+                      {r.error && (
+                        <div className="mt-2">
+                          <Alert
+                            type="error"
+                            showIcon
+                            message={
+                              <pre className="text-xs whitespace-pre-wrap break-all m-0">
+                                {r.error}
+                              </pre>
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

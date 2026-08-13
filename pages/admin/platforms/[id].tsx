@@ -9,7 +9,7 @@ import {
   type Platform,
 } from "@/components/platform/PlatformList";
 import { PlatformConfigForm } from "@/components/platform/PlatformConfigForm";
-import { ModelsPanel } from "@/components/platform/ModelsPanel";
+import { ModelsPanel, type TestResult } from "@/components/platform/ModelsPanel";
 import { ArrowLeft, RefreshCw, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -42,6 +42,10 @@ export default function PlatformDetailPage() {
   const [newModelId, setNewModelId] = useState("");
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
+
+  // 模型测试状态
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResults, setTestResults] = useState<TestResult[] | null>(null);
 
   // ===== 数据层（SWR）：列表 / 详情 / 模型三路并行，key 含 id 变化时自动重新请求 =====
   // 列表 key 与平台列表页（/admin/platforms）共享同一缓存：详情页左侧栏与列表页数据自动一致
@@ -285,6 +289,29 @@ export default function PlatformDetailPage() {
   };
 
   // ---------- 模型操作 ----------
+  const handleTestModel = async (modelId: string) => {
+    if (!id || isNew) return;
+    setTestLoading(true);
+    setTestResults(null);
+    try {
+      const res = await fetch(`/api/admin/platforms/${id}/test-model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId }),
+      });
+      const data = (await res.json()) as Record<string, any>;
+      if (data.success) {
+        setTestResults(data.data as TestResult[]);
+      } else {
+        message.error(data.error || t("common:error"));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   const handleRefreshModels = async () => {
     if (!id || isNew) return;
     setRefreshing(true);
@@ -523,6 +550,9 @@ export default function PlatformDetailPage() {
                     onToggleAll={handleToggleAll}
                     togglingAll={togglingAll}
                     togglingModelId={togglingModelId}
+                    onTestModel={handleTestModel}
+                    testLoading={testLoading}
+                    testResults={testResults}
                   />
                 </div>
               </div>
