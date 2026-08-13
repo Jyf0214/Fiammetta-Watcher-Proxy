@@ -135,7 +135,7 @@ export function ModelsPanel({
               type="button"
               onClick={() => copyModelId(model.modelId)}
               title={t("copyModelIdTip")}
-              className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+              className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
             >
               {model.modelId}
             </button>

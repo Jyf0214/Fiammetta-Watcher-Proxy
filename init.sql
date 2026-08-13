@@ -120,8 +120,10 @@ CREATE TABLE IF NOT EXISTS "daily_stats" (
     "total_completion_tokens" INTEGER NOT NULL DEFAULT 0,
     "avg_ttft" REAL NOT NULL DEFAULT 0,
     "avg_duration" REAL NOT NULL DEFAULT 0,
+    "avg_tps" REAL NOT NULL DEFAULT 0,
     "max_ttft" INTEGER NOT NULL DEFAULT 0,
     "max_duration" INTEGER NOT NULL DEFAULT 0,
+    "max_tps" REAL NOT NULL DEFAULT 0,
     "created_at" INTEGER NOT NULL DEFAULT 0
 );
 

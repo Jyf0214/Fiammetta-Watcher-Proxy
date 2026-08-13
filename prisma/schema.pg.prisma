@@ -171,8 +171,10 @@ model dailyStats {
   totalCompletionTokens Int     @default(0) @map("total_completion_tokens")
   avgTtft               Float   @default(0) @map("avg_ttft")
   avgDuration           Float   @default(0) @map("avg_duration")
+  avgTps                Float   @default(0) @map("avg_tps")
   maxTtft               Int    @default(0) @map("max_ttft")
   maxDuration           Int     @default(0) @map("max_duration")
+  maxTps                Float   @default(0) @map("max_tps")
   createdAt             Int     @default(0) @map("created_at")
 
   @@unique([date, keyId, model])

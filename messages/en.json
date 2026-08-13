@@ -269,6 +269,8 @@
     "errorRequests": "Errors",
     "avgTtft": "TTFT",
     "avgDuration": "Duration",
+    "avgTps": "TPS",
+    "maxTps": "Peak TPS",
     "manualArchive": "Archive Now",
     "archiving": "Archiving...",
     "archiveSuccess": "Archive completed",
@@ -301,6 +303,7 @@
     "periodMonth": "Last 30 Days",
     "trendTitle": "Requests & Token Trend",
     "requests": "Requests",
+    "tps": "TPS",
     "tabKey": "Key Usage",
     "tabPlatform": "Platform Usage",
     "trendEmptyHint": "Data will appear here after sending API requests"
@@ -308,6 +311,7 @@
   "dashboard": {
     "avgTtft": "TTFT",
     "avgDuration": "Duration",
+    "avgTps": "TPS",
     "totalRequests": "Total Requests",
     "totalTokens": "Total Tokens",
     "activeKeys": "Active Keys",

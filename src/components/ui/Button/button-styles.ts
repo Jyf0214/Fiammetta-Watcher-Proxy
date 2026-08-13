@@ -26,9 +26,9 @@ export const iconOnlySize: Record<ButtonSize, string> = {
 };
 
 export const roundedStyles: Record<ButtonRounded, string> = {
-  sm: "rounded-lg",
-  md: "rounded-xl",
-  lg: "rounded-2xl",
+  sm: "rounded-md",
+  md: "rounded-lg",
+  lg: "rounded-lg",
   full: "rounded-full",
   none: "rounded-none",
 };

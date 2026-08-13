@@ -35,6 +35,7 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  tps: number;
 }
 
 // ==================== 页面组件 ====================
@@ -72,7 +73,10 @@ export default function UsagePage() {
     const data = trendData ?? [];
     const totalRequests = data.reduce((s, d) => s + d.requests, 0);
     const totalTokens = data.reduce((s, d) => s + d.tokens, 0);
-    return { totalRequests, totalTokens };
+    const avgTps = data.length > 0
+      ? Math.round((data.reduce((s, d) => s + (d.tps || 0), 0) / data.length) * 100) / 100
+      : 0;
+    return { totalRequests, totalTokens, avgTps };
   }, [trendData]);
 
   const tabItems = [
@@ -187,6 +191,14 @@ export default function UsagePage() {
                 </p>
                 <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                   {trendSummary.totalTokens.toLocaleString()}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-zinc-400">
+                  {t("tps")}
+                </p>
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  {trendSummary.avgTps.toFixed(1)}
                 </p>
               </div>
             </div>

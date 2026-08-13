@@ -15,7 +15,7 @@ import type { NamedApiKey } from "@/lib/platform";
 import { BrandAvatar, StatusDot, type Platform } from "@/components/platform/PlatformList";
 
 /**
- * 平台配置表单 — 白卡 + 细边框 + 轻阴影 + 字段说明（对照参考 ProviderConfig 卡片）
+ * 平台配置表单 — 白卡 + 细边框 + 轻阴影 + 字段说明
  * 首个卡片头部 = 品牌图标 + 名称 + 状态 + 启停开关（桌面端，移动端由返回条承担）
  */
 export function PlatformConfigForm({
@@ -69,7 +69,7 @@ export function PlatformConfigForm({
 
   return (
     <Form form={form} layout="vertical" onFinish={onSubmit} className="space-y-5">
-      {/* 组 1：基本信息（头部对照参考 ProviderConfig 分组标题） */}
+      {/* 组 1：基本信息 */}
       <div className={formGroup}>
         {editing && (
           <div className="hidden lg:flex items-center gap-3 pb-5 mb-5 border-b border-zinc-100 dark:border-zinc-800">

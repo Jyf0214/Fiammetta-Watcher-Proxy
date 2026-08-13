@@ -19,16 +19,16 @@ export default function AuthCard({
   return (
     <div className="w-full max-w-[480px]">
       {/* 标题区域 */}
-      <div className="mb-14">
+      <div className="mb-12">
         {title && (
-          <div className="mb-5">
-            <span className="block text-4xl font-bold leading-[1.6] tracking-tight text-zinc-900 dark:text-zinc-100">
+          <div className="mb-4">
+            <span className="block text-2xl font-bold leading-[1.4] tracking-tight text-zinc-900 dark:text-zinc-100">
               {title}
             </span>
           </div>
         )}
         {subtitle && (
-          <span className="block text-lg leading-[1.7] text-zinc-500 dark:text-zinc-400">
+          <span className="block text-sm leading-[1.6] text-zinc-500 dark:text-zinc-400">
             {subtitle}
           </span>
         )}

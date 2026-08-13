@@ -269,6 +269,8 @@
     "errorRequests": "错误数",
     "avgTtft": "TTFT",
     "avgDuration": "耗时",
+    "avgTps": "TPS",
+    "maxTps": "峰值 TPS",
     "manualArchive": "立即归档",
     "archiving": "归档中...",
     "archiveSuccess": "归档完成",
@@ -301,6 +303,7 @@
     "periodMonth": "最近 30 天",
     "trendTitle": "请求与 Token 趋势",
     "requests": "请求数",
+    "tps": "TPS",
     "tabKey": "Key 用量",
     "tabPlatform": "平台用量",
     "trendEmptyHint": "发送 API 请求后数据将在此显示"
@@ -308,6 +311,7 @@
   "dashboard": {
     "avgTtft": "TTFT",
     "avgDuration": "耗时",
+    "avgTps": "TPS",
     "totalRequests": "总请求数",
     "totalTokens": "总 Token 用量",
     "activeKeys": "活跃 Key 数",

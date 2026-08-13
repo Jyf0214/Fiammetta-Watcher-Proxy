@@ -16,7 +16,7 @@ export default function RouteLoading() {
       aria-label={t("loading")}
     >
       {/* 顶栏骨架 — 与 TopHeader 一致：移动端全宽、桌面端从侧边栏（64 = 16rem）右侧开始 */}
-      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center px-4 lg:pl-64 lg:pr-6">
+      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800 flex items-center px-4 lg:pl-64 lg:pr-6">
         <Skeleton className="h-4 w-28" />
       </div>
 
@@ -35,12 +35,12 @@ export default function RouteLoading() {
           {/* 统计卡片网格 */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 rounded-xl bg-white dark:bg-zinc-800" />
+              <Skeleton key={i} className="h-20 rounded-xl bg-white dark:bg-zinc-900" />
             ))}
           </div>
 
           {/* 列表块 */}
-          <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-800" />
+          <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-900" />
         </div>
       </div>
     </div>

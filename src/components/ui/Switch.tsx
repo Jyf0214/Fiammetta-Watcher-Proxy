@@ -49,12 +49,12 @@ export default function Switch({
       onClick={toggle}
       onKeyDown={handleKeyDown}
       className={`
-        group relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer items-center
-        rounded-full border-2 border-transparent transition-all duration-200 ease-in-out
-        focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500
+        group relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer items-center
+        rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out
+        focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-400
         ${checked
-          ? "bg-blue-500"
-          : "bg-zinc-200 dark:bg-zinc-600"
+          ? "bg-zinc-900 dark:bg-zinc-100"
+          : "bg-zinc-200 dark:bg-zinc-700"
         }
         ${disabled || loading
           ? "cursor-not-allowed opacity-50"
@@ -65,15 +65,15 @@ export default function Switch({
     >
       <span
         className={`
-          pointer-events-none inline-flex h-[16px] w-[16px] items-center justify-center
+          pointer-events-none inline-flex h-[18px] w-[18px] items-center justify-center
           rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out
-          ${checked ? "translate-x-[18px]" : "translate-x-[2px]"}
+          ${checked ? "translate-x-[20px]" : "translate-x-[2px]"}
           ${loading ? "animate-pulse" : ""}
         `}
       >
         {loading && (
           <svg
-            className="absolute inset-0 h-full w-full animate-spin text-blue-400"
+            className="absolute inset-0 h-full w-full animate-spin text-zinc-400"
             viewBox="0 0 24 24"
             fill="none"
           >

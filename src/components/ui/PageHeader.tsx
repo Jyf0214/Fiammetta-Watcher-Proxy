@@ -29,15 +29,15 @@ export function PageHeader({
   return (
     <div className={cn("flex items-center justify-between", className)}>
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800">
           {icon}
         </div>
         <div>
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
+          <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
             {title}
           </h1>
           {description && (
-            <p className="text-zinc-500 dark:text-zinc-400 text-xs">
+            <p className="text-zinc-400 dark:text-zinc-500 text-xs">
               {description}
             </p>
           )}

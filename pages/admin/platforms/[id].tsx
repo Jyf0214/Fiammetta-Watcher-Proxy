@@ -535,7 +535,7 @@ export default function PlatformDetailPage() {
                 {/* 配置表单（上）— 卡片头部含品牌/名称/状态/启停开关 */}
                 {configForm}
 
-                {/* 模型列表（下）— 对照 ProviderDetail 的 ModelList */}
+                {/* 模型列表 */}
                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <ModelsPanel
                     models={models ?? []}

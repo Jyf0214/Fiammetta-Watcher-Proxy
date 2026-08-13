@@ -8,7 +8,7 @@ import AdminLayout from "@/components/AdminLayout";
 import { PlatformList, type Platform } from "@/components/platform/PlatformList";
 
 /**
- * 平台列表页 — LobeChat 风格分组列表
+ * 平台列表页 — 分组列表
  * 整行点击进入独立路由 /admin/platforms/[id]（桌面端右侧展示详情，移动端全屏）
  */
 export default function PlatformsPage() {

@@ -58,9 +58,9 @@ export interface ModelItem {
 }
 
 export const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; labelKey: string; color: string; bg: string }> = {
-  chat:       { icon: MessageSquare, labelKey: "typeChat",       color: "text-blue-500",   bg: "bg-blue-50 dark:bg-blue-900/30" },
+  chat:       { icon: MessageSquare, labelKey: "typeChat",       color: "text-zinc-600 dark:text-zinc-400",   bg: "bg-zinc-100 dark:bg-zinc-800" },
   embedding:  { icon: Layers,       labelKey: "typeEmbedding",  color: "text-cyan-500",   bg: "bg-cyan-50 dark:bg-cyan-900/30" },
-  image:      { icon: Image,        labelKey: "typeImage",      color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30" },
+  image:      { icon: Image,        labelKey: "typeImage",      color: "text-slate-500",  bg: "bg-slate-100 dark:bg-slate-800/50" },
   audio:      { icon: Mic,          labelKey: "typeAudio",      color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30" },
   video:      { icon: Box,          labelKey: "typeVideo",      color: "text-pink-500",   bg: "bg-pink-50 dark:bg-pink-900/30" },
   moderation: { icon: Cpu,          labelKey: "typeModeration", color: "text-red-500",    bg: "bg-red-50 dark:bg-red-900/30" },

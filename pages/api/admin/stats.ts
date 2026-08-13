@@ -46,6 +46,7 @@ interface StatsData {
   totalTokens: number;
   avgTtft: number;
   avgDuration: number;
+  avgTps: number;
 }
 
 /**
@@ -106,6 +107,7 @@ export default async function handler(
           totalTokens: true,
           avgTtft: true,
           avgDuration: true,
+          avgTps: true,
         },
       }),
       // 明细（未归档，含今日）：请求总数 + 总 token（含错误请求）
@@ -114,11 +116,11 @@ export default async function handler(
         _count: { id: true },
         _sum: { tokens: true },
       }),
-      // 明细性能统计：非错误请求的 TTFT/延迟总和（保持原接口口径）
+      // 明细性能统计：非错误请求的 TTFT/延迟/输出Token 总和（保持原接口口径）
       db.requestLogs.aggregate({
         where: { createdAt: { gte: detailSince }, isError: false },
         _count: { id: true },
-        _sum: { ttft: true, latency: true },
+        _sum: { ttft: true, latency: true, completionTokens: true },
       }),
     ]);
 
@@ -135,6 +137,8 @@ export default async function handler(
     let histPerfCount = 0;
     let histTtftSum = 0;
     let histLatencySum = 0;
+    let histTpsSum = 0;
+    let histTpsCount = 0;
     for (const row of histRows) {
       const perfCount = row.totalRequests - row.errorRequests;
       histRequests += row.totalRequests;
@@ -142,6 +146,11 @@ export default async function handler(
       histPerfCount += perfCount;
       if (row.avgTtft > 0) histTtftSum += row.avgTtft * perfCount;
       if (row.avgDuration > 0) histLatencySum += row.avgDuration * perfCount;
+      // avgTps > 0 表示有 TPS 样本，用 perfCount 近似样本数做加权平均
+      if (row.avgTps > 0) {
+        histTpsSum += row.avgTps * perfCount;
+        histTpsCount += perfCount;
+      }
     }
 
     // ---- 明细部分（request_logs，最近 RETENTION_DAYS 天）----
@@ -150,6 +159,7 @@ export default async function handler(
     const detailPerfCount = perfAgg._count.id ?? 0;
     const detailTtftSum = perfAgg._sum.ttft ?? 0;
     const detailLatencySum = perfAgg._sum.latency ?? 0;
+    const detailCompletionTokens = perfAgg._sum.completionTokens ?? 0;
 
     // ---- 汇总 ----
     const totalRequests = histRequests + detailCount;
@@ -160,6 +170,14 @@ export default async function handler(
     const avgTtft = perfCount > 0 ? Math.round(ttftSum / perfCount) : 0;
     const avgDuration = perfCount > 0 ? Math.round(latencySum / perfCount) : 0;
 
+    // TPS 汇总：历史加权平均 + 明细加权平均（completionTokens / latency_seconds）
+    // 明细 TPS = 总输出Token / 总耗时秒数，本身已是加权平均，计为 1 个样本
+    const detailTpsCount = detailLatencySum > 0 ? 1 : 0;
+    const detailTpsSum = detailLatencySum > 0 ? (detailCompletionTokens / (detailLatencySum / 1000)) : 0;
+    const totalTpsCount = histTpsCount + detailTpsCount;
+    const totalTpsSum = histTpsSum + detailTpsSum;
+    const avgTps = totalTpsCount > 0 ? Math.round((totalTpsSum / totalTpsCount) * 100) / 100 : 0;
+
     const data: StatsData = {
       activePlatforms,
       totalKeys,
@@ -168,6 +186,7 @@ export default async function handler(
       totalTokens,
       avgTtft,
       avgDuration,
+      avgTps,
     };
 
     statsCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };

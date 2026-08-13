@@ -53,8 +53,10 @@ interface ArchiveEntry {
   totalCompletionTokens: number;
   avgTtft: number;
   avgDuration: number;
+  avgTps: number;
   maxTtft: number;
   maxDuration: number;
+  maxTps: number;
 }
 
 interface KeyOption {
@@ -508,6 +510,22 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
         return "-";
       },
     },
+    {
+      title: t("avgTps"),
+      dataIndex: "avgTps",
+      key: "avgTps",
+      width: 90,
+      align: "right",
+      render: (v: number) => v > 0 ? v.toFixed(1) : "-",
+    },
+    {
+      title: t("maxTps"),
+      dataIndex: "maxTps",
+      key: "maxTps",
+      width: 90,
+      align: "right",
+      render: (v: number) => v > 0 ? v.toFixed(1) : "-",
+    },
   ];
 
   return (
@@ -581,7 +599,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
           onChange: setPage,
           showTotal: (count) => t("common:pagination", { count }),
         }}
-        scroll={{ x: 1300 }}
+        scroll={{ x: 1500 }}
       />
     </>
   );

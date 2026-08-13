@@ -30,6 +30,8 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  tpsSum: number;
+  tpsCount: number;
 }
 
 export default async function handler(
@@ -102,6 +104,8 @@ export default async function handler(
         existing.tokens += point.tokens;
         existing.promptTokens += point.promptTokens;
         existing.completionTokens += point.completionTokens;
+        existing.tpsSum += point.tpsSum;
+        existing.tpsCount += point.tpsCount;
       } else {
         groups.set(dateKey, { ...point });
       }
@@ -130,15 +134,19 @@ export default async function handler(
           totalTokens: true,
           totalPromptTokens: true,
           totalCompletionTokens: true,
+          avgTps: true,
         },
       });
       for (const row of histRows) {
         // 错误请求 tokens 恒为 0，totalTokens 可近似非错误请求 tokens
+        const perfCount = row.totalRequests - row.errorRequests;
         addToGroup(dateKeyOf(row.date), {
           requests: row.totalRequests - row.errorRequests,
           tokens: row.totalTokens,
           promptTokens: row.totalPromptTokens,
           completionTokens: row.totalCompletionTokens,
+          tpsSum: row.avgTps * perfCount,
+          tpsCount: row.avgTps > 0 ? perfCount : 0,
         });
       }
     }
@@ -162,6 +170,7 @@ export default async function handler(
             tokens: true,
             promptTokens: true,
             completionTokens: true,
+            latency: true,
             createdAt: true,
           },
           orderBy: { createdAt: "asc" },
@@ -169,11 +178,16 @@ export default async function handler(
           skip,
         });
         for (const log of batch) {
+          // 单请求 TPS = completionTokens / (latency / 1000)
+          const hasTps = log.latency > 0 && log.completionTokens > 0;
+          const tps = hasTps ? log.completionTokens / (log.latency / 1000) : 0;
           addToGroup(dateKeyOf(log.createdAt), {
             requests: 1,
             tokens: log.tokens ?? 0,
             promptTokens: log.promptTokens ?? 0,
             completionTokens: log.completionTokens ?? 0,
+            tpsSum: tps,
+            tpsCount: hasTps ? 1 : 0,
           });
         }
         if (batch.length < PAGE_SIZE) break;
@@ -190,6 +204,7 @@ export default async function handler(
         tokens: data.tokens,
         promptTokens: data.promptTokens,
         completionTokens: data.completionTokens,
+        tps: data.tpsCount > 0 ? Math.round((data.tpsSum / data.tpsCount) * 100) / 100 : 0,
       }));
 
     res.status(200).json({ success: true, data: trend });

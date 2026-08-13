@@ -19,6 +19,7 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  tps: number;
 }
 
 interface UsageChartProps {
@@ -87,11 +88,12 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
     [data, granularity]
   );
 
-  const { maxRequests, maxTokens } = useMemo(() => {
-    if (!chartData.length) return { maxRequests: 0, maxTokens: 0 };
+  const { maxRequests, maxTokens, maxTps } = useMemo(() => {
+    if (!chartData.length) return { maxRequests: 0, maxTokens: 0, maxTps: 0 };
     return {
       maxRequests: Math.max(...chartData.map((d) => d.requests)),
       maxTokens: Math.max(...chartData.map((d) => d.tokens)),
+      maxTps: Math.max(...chartData.map((d) => d.tps)),
     };
   }, [chartData]);
 
@@ -116,7 +118,7 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             tickLine={false}
             axisLine={false}
             tickFormatter={(v: number) => formatCompact(v, t)}
-            tickCount={calcNiceTicks(maxRequests, 0)}
+            tickCount={calcNiceTicks(Math.max(maxRequests, maxTps), 0)}
             width={50}
           />
           <YAxis
@@ -150,6 +152,17 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
             name={t("totalTokens")}
             stroke="#10b981"
             strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4 }}
+          />
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="tps"
+            name={t("tps")}
+            stroke="#14b8a6"
+            strokeWidth={2}
+            strokeDasharray="4 2"
             dot={false}
             activeDot={{ r: 4 }}
           />

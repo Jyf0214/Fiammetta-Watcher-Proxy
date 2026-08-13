@@ -323,7 +323,7 @@ export default function AutoModelPage() {
                     key={m.modelId}
                     className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
                       isOn
-                        ? "bg-blue-50/60 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/40"
+                        ? "bg-zinc-50 dark:bg-zinc-800/50 border-zinc-300 dark:border-zinc-700"
                         : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
                     }`}
                   >

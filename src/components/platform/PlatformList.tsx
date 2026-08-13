@@ -34,8 +34,8 @@ const BRAND_STYLE: Record<string, { box: string; text: string }> = {
     text: "text-white dark:text-zinc-900",
   },
   azure: {
-    box: "bg-blue-500",
-    text: "text-white",
+    box: "bg-zinc-700 dark:bg-zinc-300",
+    text: "text-white dark:text-zinc-900",
   },
   custom: {
     box: "bg-zinc-200 dark:bg-zinc-700",
@@ -79,7 +79,7 @@ export function StatusDot({ status, enabled }: { status: string; enabled: boolea
   return <span className={cn("w-2 h-2 rounded-full shrink-0", color)} />;
 }
 
-/** 单个列表行 — 图标 + 名称 + 状态点，整行点击进入独立路由（对照 ProviderMenu 的 NavItem 行） */
+/** 单个列表行 — 图标 + 名称 + 状态点，整行点击进入独立路由 */
 function PlatformRow({
   platform,
   active,
@@ -95,16 +95,15 @@ function PlatformRow({
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
-        // 选中态用蓝色指示条 + 蓝调底色，与 hover 拉开档位；border-l-2 常驻避免选中行内容偏移 2px
         active
-          ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-400"
+          ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-900 dark:border-zinc-100"
           : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       )}
     >
       <BrandAvatar name={platform.name} type={platform.type} size="sm" />
       <span className={cn(
         "flex-1 min-w-0 text-sm truncate",
-        active ? "text-blue-700 dark:text-blue-300 font-medium" : "text-zinc-800 dark:text-zinc-200"
+        active ? "text-zinc-900 dark:text-zinc-100 font-medium" : "text-zinc-700 dark:text-zinc-300"
       )}>
         {platform.name}
       </span>
@@ -122,7 +121,7 @@ interface PlatformListProps {
 }
 
 /**
- * LobeChat 风格平台列表 — 顶部搜索+新建工具条 + 全部/已启用/已禁用分组折叠行列表
+ * 平台列表 — 顶部搜索+新建工具条 + 全部/已启用/已禁用分组折叠行列表
  * 整行点击跳转独立路由 /admin/platforms/[id]
  */
 export function PlatformList({
@@ -172,7 +171,7 @@ export function PlatformList({
   const goPlatform = (id: string) => router.push(`/admin/platforms/${id}`);
   const goCreate = () => router.push("/admin/platforms/new");
 
-  /** 分组折叠列表（对照 ProviderMenu 的 Accordion 分组） */
+  /** 分组折叠列表 */
   const renderGroup = (key: "enabled" | "disabled", label: string, items: Platform[]) => {
     if (items.length === 0) return null;
     const isCollapsed = collapsed[key] && !searching;
@@ -258,14 +257,14 @@ export function PlatformList({
             </div>
           ) : (
             <>
-              {/* “全部”行（对照 ProviderMenu 的 All 项）：点击回到列表页全量视图；选中态与平台行统一蓝色方案 */}
+              {/* "全部"行：点击回到列表页全量视图 */}
               <button
                 type="button"
                 onClick={() => router.push("/admin/platforms")}
                 className={cn(
                   "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
                   !activeId
-                    ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-400"
+                    ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-900 dark:border-zinc-100"
                     : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 )}
               >
@@ -275,8 +274,8 @@ export function PlatformList({
                 <span className={cn(
                   "flex-1 min-w-0 text-sm truncate",
                   !activeId
-                    ? "text-blue-700 dark:text-blue-300 font-medium"
-                    : "text-zinc-800 dark:text-zinc-200"
+                    ? "text-zinc-900 dark:text-zinc-100 font-medium"
+                    : "text-zinc-700 dark:text-zinc-300"
                 )}>
                   {t("groupAll")}
                 </span>

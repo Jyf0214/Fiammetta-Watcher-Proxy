@@ -231,6 +231,9 @@ async function archiveSingleDay(
       latencyCount: number;
       maxTtft: number;
       maxLatency: number;
+      tpsSum: number;
+      tpsCount: number;
+      maxTps: number;
     }
   >();
 
@@ -254,6 +257,9 @@ async function archiveSingleDay(
         latencyCount: 0,
         maxTtft: 0,
         maxLatency: 0,
+        tpsSum: 0,
+        tpsCount: 0,
+        maxTps: 0,
       };
       groups.set(groupKey, group);
     }
@@ -272,11 +278,20 @@ async function archiveSingleDay(
     }
     if (log.ttft > group.maxTtft) group.maxTtft = log.ttft;
     if (log.latency > group.maxLatency) group.maxLatency = log.latency;
+    // TPS = 每秒输出 Token 数（completionTokens / latency_seconds）
+    // 只对有有效耗时和输出 token 的请求计算
+    if (log.latency > 0 && log.completionTokens > 0) {
+      const tps = log.completionTokens / (log.latency / 1000);
+      group.tpsSum += tps;
+      group.tpsCount++;
+      if (tps > group.maxTps) group.maxTps = tps;
+    }
   }
 
   for (const group of groups.values()) {
     const avgTtft = group.ttftCount > 0 ? group.ttftSum / group.ttftCount : 0;
     const avgDuration = group.latencyCount > 0 ? group.latencySum / group.latencyCount : 0;
+    const avgTps = group.tpsCount > 0 ? group.tpsSum / group.tpsCount : 0;
 
     // 查找已有聚合记录
     const existing = await prisma.dailyStats.findFirst({
@@ -294,8 +309,10 @@ async function archiveSingleDay(
         totalCompletionTokens: true,
         avgTtft: true,
         avgDuration: true,
+        avgTps: true,
         maxTtft: true,
         maxDuration: true,
+        maxTps: true,
       },
     });
 
@@ -318,6 +335,14 @@ async function archiveSingleDay(
             (oldTotalRequests + group.latencyCount)
           : 0;
 
+      // TPS 加权平均：旧样本数用旧 TPS 样本近似（avgTps > 0 表示有 TPS 样本）
+      const existingTpsCount = existing.avgTps > 0 ? oldTotalRequests : 0;
+      const newAvgTps =
+        existingTpsCount + group.tpsCount > 0
+          ? (existing.avgTps * existingTpsCount + group.tpsSum) /
+            (existingTpsCount + group.tpsCount)
+          : 0;
+
       await prisma.dailyStats.update({
         where: { id: existing.id },
         data: {
@@ -328,8 +353,10 @@ async function archiveSingleDay(
           totalCompletionTokens: existing.totalCompletionTokens + group.totalCompletionTokens,
           avgTtft: newAvgTtft,
           avgDuration: newAvgDuration,
+          avgTps: newAvgTps,
           maxTtft: Math.max(existing.maxTtft, group.maxTtft),
           maxDuration: Math.max(existing.maxDuration, group.maxLatency),
+          maxTps: Math.max(existing.maxTps, group.maxTps),
         },
       });
     } else {
@@ -348,8 +375,10 @@ async function archiveSingleDay(
           totalCompletionTokens: group.totalCompletionTokens,
           avgTtft,
           avgDuration,
+          avgTps,
           maxTtft: group.maxTtft,
           maxDuration: group.maxLatency,
+          maxTps: group.maxTps,
           createdAt: Math.floor(Date.now() / 1000),
         },
       });

@@ -19,8 +19,8 @@ import {
   Zap,
   Download,
   Database,
-  Wifi,
   WifiOff,
+  Settings,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -71,19 +71,14 @@ function SidebarItem({
     <Link
       href={item.href}
       onClick={onClick}
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative ${
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group relative ${
         isActive
-          ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium"
-          : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
+          ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium"
+          : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
       }`}
     >
-      <Icon className="w-5 h-5 shrink-0" />
+      <Icon className="w-[18px] h-[18px] shrink-0" />
       <span className="text-sm">{t(item.key)}</span>
-      {isActive && (
-        <div className="absolute right-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
-        </div>
-      )}
     </Link>
   );
 }
@@ -150,23 +145,22 @@ function SidebarUserMenu({
 }) {
   return (
     <div className="mt-auto pt-4 border-t border-zinc-200 dark:border-zinc-800">
-      <div className="px-3 py-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 mb-3">
+      <div className="px-3 py-2 mb-1">
         {username ? (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm">
+            <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-semibold text-xs">
               {username.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
                 {username}
               </div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">{t("administrator")}</div>
+              <div className="text-xs text-zinc-400 dark:text-zinc-500">{t("administrator")}</div>
             </div>
           </div>
         ) : (
-          // 认证结果未返回时的轻量占位，避免用户名区空白闪烁
           <div className="flex items-center gap-3" aria-busy="true">
-            <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
+            <div className="w-7 h-7 rounded-lg bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
             <div className="flex-1 space-y-2">
               <div className="h-3.5 w-24 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
               <div className="h-3 w-16 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
@@ -177,9 +171,9 @@ function SidebarUserMenu({
       <button
         onClick={onLogout}
         disabled={logoutLoading}
-        className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all disabled:opacity-50"
+        className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors disabled:opacity-50"
       >
-        <LogOut className="w-5 h-5" />
+        <LogOut className="w-[18px] h-[18px]" />
         <span className="text-sm">{t("logout")}</span>
       </button>
     </div>
@@ -214,20 +208,19 @@ function TopHeader({
   const breadcrumb = t(breadcrumbKey);
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 z-40">
+    <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800 z-40">
       <div className="h-full px-4 lg:pl-64 lg:pr-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={onToggleSidebar}
             className="lg:hidden p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
-            <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+            <Menu className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
           </button>
-          <nav className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-            <span className="hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
-              {t("systemConfig")}
-            </span>
-            <span className="text-zinc-300 dark:text-zinc-600">›</span>
+          <nav className="flex items-center gap-1.5 text-sm text-zinc-400 dark:text-zinc-500">
+            <Settings className="w-4 h-4 hidden sm:block" />
+            <span className="hidden sm:inline">{t("systemConfig")}</span>
+            <ChevronRight className="w-3.5 h-3.5 hidden sm:block text-zinc-300 dark:text-zinc-600" />
             <span className="font-medium text-zinc-900 dark:text-zinc-100">{breadcrumb}</span>
           </nav>
         </div>
@@ -354,15 +347,15 @@ export default function AdminLayout({
   const sidebarContent = (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800">
       {/* 品牌头 */}
-      <div className="h-16 flex items-center gap-3 px-4 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
+      <div className="h-16 flex items-center gap-2.5 px-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs shadow-sm">
           FW
         </div>
         <div className="flex flex-col">
           <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
             {t("common:brandName")}
           </span>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 leading-tight">
+          <span className="text-xs text-zinc-400 dark:text-zinc-500 leading-tight">
             {t("common:brandSub")}
           </span>
         </div>
@@ -370,14 +363,17 @@ export default function AdminLayout({
 
       {/* 服务状态 */}
       {healthStatus && (
-        <div className="px-3 py-3">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 text-xs">
+        <div className="px-3 py-2.5">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 text-xs">
             <div className="flex items-center gap-1.5 flex-1">
               <Database className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-zinc-600 dark:text-zinc-400">{healthStatus.dbType}</span>
+              <span className="text-zinc-500 dark:text-zinc-400">{healthStatus.dbType}</span>
             </div>
             {healthStatus.status === "ok" ? (
-              <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
             ) : (
               <WifiOff className="w-3.5 h-3.5 text-red-500" />
             )}

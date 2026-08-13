@@ -16,6 +16,7 @@ import {
   Clock,
   Grid,
   List,
+  Gauge,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -44,6 +45,7 @@ interface Stats {
   totalTokens: number;
   avgTtft: number;
   avgDuration: number;
+  avgTps: number;
 }
 
 interface TrendPoint {
@@ -56,6 +58,7 @@ interface TrendApiPoint {
   date: string;
   requests: number;
   tokens: number;
+  tps: number;
 }
 
 /** 视图模式 */
@@ -91,10 +94,12 @@ function DashboardContent() {
       tokens: [],
       avgTtft: [],
       avgDuration: [],
+      avgTps: [],
     };
     for (const point of trendRaw) {
       const reqs = point.requests || 0;
       const toks = point.tokens || 0;
+      const tps = point.tps || 0;
 
       // 请求数和 Token 用量：使用 API 原始聚合值
       trends.requests.push({ date: point.date, value: reqs });
@@ -102,6 +107,9 @@ function DashboardContent() {
 
       // 平均 TTFT / 耗时：API 未返回逐时段数据，不伪造
       // 保持空数组，图表组件会优雅降级
+
+      // TPS 趋势
+      trends.avgTps.push({ date: point.date, value: tps });
     }
     return trends;
   }, [trendRaw]);
@@ -145,15 +153,15 @@ function DashboardContent() {
       title: t("activePlatforms"),
       value: stats?.activePlatforms ?? 0,
       icon: <Cloud />,
-      color: "bg-blue-50",
-      iconColor: "text-blue-500",
+      color: "bg-zinc-100 dark:bg-zinc-800",
+      iconColor: "text-zinc-600 dark:text-zinc-400",
     },
     {
       key: "keys",
       title: t("activeKeys"),
       value: stats?.activeKeys ?? 0,
       icon: <Key />,
-      color: "bg-emerald-50",
+      color: "bg-emerald-50 dark:bg-emerald-900/20",
       iconColor: "text-emerald-500",
     },
     {
@@ -161,8 +169,8 @@ function DashboardContent() {
       title: t("totalRequests"),
       value: stats?.totalRequests ?? 0,
       icon: <Globe />,
-      color: "bg-purple-50",
-      iconColor: "text-purple-500",
+      color: "bg-slate-100 dark:bg-slate-800/50",
+      iconColor: "text-slate-500",
     },
     {
       key: "tokens",
@@ -190,17 +198,26 @@ function DashboardContent() {
       iconColor: "text-cyan-500",
       get display() { return formatDuration(this.value, t); },
     },
+    {
+      key: "avgTps",
+      title: t("avgTps"),
+      value: stats?.avgTps ?? 0,
+      icon: <Gauge />,
+      color: "bg-teal-50",
+      iconColor: "text-teal-500",
+    },
   ];
 
   // 获取图表颜色（与卡片配色统一）
   const getChartColor = (key: string): string => {
     const colorMap: Record<string, string> = {
-      platforms: "#3b82f6",
+      platforms: "#71717a",
       keys: "#10b981",
-      requests: "#8b5cf6",
+      requests: "#64748b",
       tokens: "#f59e0b",
       avgTtft: "#f97316",
       avgDuration: "#06b6d4",
+      avgTps: "#14b8a6",
     };
     return colorMap[key] || "#6b7280";
   };

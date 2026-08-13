@@ -13,14 +13,14 @@ interface AuthLayoutProps {
 export default function AuthLayout({ children }: AuthLayoutProps) {
   const { t } = useTranslation("common");
   return (
-    <div className="relative min-h-screen w-full flex flex-col bg-zinc-50 dark:bg-zinc-950 p-4 sm:p-6 md:p-8">
-      <div className="relative overflow-hidden border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 flex flex-col flex-1">
+    <div className="relative min-h-screen w-full flex flex-col bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900 p-4 sm:p-6 md:p-8">
+      <div className="relative overflow-hidden border border-zinc-200/80 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 flex flex-col flex-1 shadow-lg">
         {/* 品牌标题 */}
-        <div className="flex items-center gap-2 w-full px-5 py-4">
-          <div className="w-7 h-7 bg-zinc-900 dark:bg-zinc-100 rounded-xl flex items-center justify-center">
-            <Server className="text-white dark:text-zinc-900 text-xs" />
+        <div className="flex items-center gap-2.5 w-full px-5 py-4">
+          <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center shadow-sm">
+            <Server className="text-white text-xs" />
           </div>
-          <span className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+          <span className="text-base font-bold text-zinc-900 dark:text-zinc-100">
             {t("brandName")}
           </span>
         </div>
