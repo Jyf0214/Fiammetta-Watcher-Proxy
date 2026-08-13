@@ -8,11 +8,29 @@
  * 聚合粒度：
  * - today: 按小时聚合（显示 24 小时趋势）
  * - week/month/all: 按天聚合
+ *
+ * 性能说明（2026-08-12 优化）：
+ * - 历史数据（已归档）从 daily_stats 聚合表读取，不再分页拉取全表日志。
+ *   界限与 pages/api/admin/stats.ts 一致：明细下界 = 今日 UTC 零点 -
+ *   RETENTION_DAYS × 86400，该界限前的数据读 daily_stats、之后读 request_logs。
+ * - daily_stats.totalTokens 可近似非错误请求 tokens：错误日志 tokens 恒为 0，
+ *   而 trend 只统计 isError:false 的请求。
+ * - 未归档明细（最近 RETENTION_DAYS 天）只做 createdAt 范围过滤，
+ *   走 @@index([createdAt]) 索引。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
+import { RETENTION_DAYS } from "../../../../worker/src/log-archiver";
+
+/** 趋势点数据（响应结构） */
+interface TrendPoint {
+  requests: number;
+  tokens: number;
+  promptTokens: number;
+  completionTokens: number;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -47,35 +65,96 @@ export default async function handler(
         startTimestamp = now - 30 * 24 * 60 * 60;
         break;
       default: {
-        // all：取最早请求时间
-        const earliest = await orm.requestLogs.findMany({
-          orderBy: { createdAt: "asc" },
-          take: 1,
-          select: { createdAt: true },
-        });
-        startTimestamp = earliest[0]?.createdAt || (now - 30 * 24 * 60 * 60);
+        // all：取最早请求时间（request_logs 与 daily_stats 中更早者）
+        const [earliestLog, earliestHist] = await Promise.all([
+          orm.requestLogs.findMany({
+            orderBy: { createdAt: "asc" },
+            take: 1,
+            select: { createdAt: true },
+          }),
+          orm.dailyStats.findMany({
+            orderBy: { date: "asc" },
+            take: 1,
+            select: { date: true },
+          }),
+        ]);
+        startTimestamp = Math.min(
+          earliestLog[0]?.createdAt ?? now,
+          earliestHist[0]?.date ?? now
+        );
       }
     }
 
     // 根据 period 决定聚合粒度：today 按小时，其他按天
     const isHourly = period === "today";
 
-    // 使用 Prisma ORM 查询所有匹配记录，只 select 聚合所需字段。
+    // 归档/明细切分界限（与 stats.ts / log-archiver.ts 一致，见文件头说明）
+    const todayStart = now - (now % 86400);
+    const detailSince = todayStart - RETENTION_DAYS * 86400;
+
+    // JS 按日期分组（键格式：today 用 'YYYY-MM-DD HH:00'，其他用 'YYYY-MM-DD'，本地时区）
+    const groups = new Map<string, TrendPoint>();
+
+    function addToGroup(dateKey: string, point: TrendPoint) {
+      const existing = groups.get(dateKey);
+      if (existing) {
+        existing.requests += point.requests;
+        existing.tokens += point.tokens;
+        existing.promptTokens += point.promptTokens;
+        existing.completionTokens += point.completionTokens;
+      } else {
+        groups.set(dateKey, { ...point });
+      }
+    }
+
+    function dateKeyOf(tsSec: number) {
+      const d = new Date(tsSec * 1000);
+      if (isHourly) {
+        const hour = String(d.getHours()).padStart(2, "0");
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hour}:00`;
+      }
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+
+    // ---- 历史部分（daily_stats，仅 period=all 且存在早于明细下界的数据时触发）----
+    if (startTimestamp < detailSince) {
+      const histRows = await orm.dailyStats.findMany({
+        where: {
+          date: { gte: startTimestamp, lt: detailSince },
+          ...(keyId ? { keyId } : {}),
+        },
+        select: {
+          date: true,
+          totalRequests: true,
+          errorRequests: true,
+          totalTokens: true,
+          totalPromptTokens: true,
+          totalCompletionTokens: true,
+        },
+      });
+      for (const row of histRows) {
+        // 错误请求 tokens 恒为 0，totalTokens 可近似非错误请求 tokens
+        addToGroup(dateKeyOf(row.date), {
+          requests: row.totalRequests - row.errorRequests,
+          tokens: row.totalTokens,
+          promptTokens: row.totalPromptTokens,
+          completionTokens: row.totalCompletionTokens,
+        });
+      }
+    }
+
+    // ---- 明细部分（request_logs，最近 RETENTION_DAYS 天）----
+    // 保留期与 period 范围取交集：下限取两者较晚者
+    const detailStart = Math.max(startTimestamp, detailSince);
     // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
     // 必须分页循环拉取，否则统计只覆盖最早/最新 10000 条。
     const PAGE_SIZE = 10000;
-    const logs: Array<{
-      tokens: number;
-      promptTokens: number;
-      completionTokens: number;
-      createdAt: number;
-    }> = [];
     {
       let skip = 0;
       for (;;) {
         const batch = await orm.requestLogs.findMany({
           where: {
-            createdAt: { gte: startTimestamp },
+            createdAt: { gte: detailStart },
             isError: false,
             ...(keyId ? { keyId } : {}),
           },
@@ -89,50 +168,16 @@ export default async function handler(
           take: PAGE_SIZE,
           skip,
         });
-        logs.push(...batch);
+        for (const log of batch) {
+          addToGroup(dateKeyOf(log.createdAt), {
+            requests: 1,
+            tokens: log.tokens ?? 0,
+            promptTokens: log.promptTokens ?? 0,
+            completionTokens: log.completionTokens ?? 0,
+          });
+        }
         if (batch.length < PAGE_SIZE) break;
         skip += PAGE_SIZE;
-      }
-    }
-
-    // 在 JS 中按日期分组并聚合
-    const groups = new Map<
-      string,
-      { requests: number; tokens: number; promptTokens: number; completionTokens: number }
-    >();
-
-    for (const log of logs) {
-      // createdAt 是 Unix 秒时间戳，转为 JS Date
-      const d = new Date(log.createdAt * 1000);
-
-      // 按 strftime 格式生成日期键：today 用 'YYYY-MM-DD HH:00'，其他用 'YYYY-MM-DD'
-      let dateKey: string;
-      if (isHourly) {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        const hour = String(d.getHours()).padStart(2, "0");
-        dateKey = `${year}-${month}-${day} ${hour}:00`;
-      } else {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        dateKey = `${year}-${month}-${day}`;
-      }
-
-      const existing = groups.get(dateKey);
-      if (existing) {
-        existing.requests += 1;
-        existing.tokens += log.tokens ?? 0;
-        existing.promptTokens += log.promptTokens ?? 0;
-        existing.completionTokens += log.completionTokens ?? 0;
-      } else {
-        groups.set(dateKey, {
-          requests: 1,
-          tokens: log.tokens ?? 0,
-          promptTokens: log.promptTokens ?? 0,
-          completionTokens: log.completionTokens ?? 0,
-        });
       }
     }
 

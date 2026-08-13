@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 import { PlatformList, type Platform } from "@/components/platform/PlatformList";
@@ -12,29 +13,18 @@ import { PlatformList, type Platform } from "@/components/platform/PlatformList"
  */
 export default function PlatformsPage() {
   const { t } = useTranslation("common");
-  const [platforms, setPlatforms] = useState<Platform[]>([]);
-  const [loading, setLoading] = useState(true);
 
+  // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
+  const { data: platforms, error, isLoading, isValidating } = useApi<Platform[]>("/api/admin/platforms");
+
+  // 请求失败提示
   useEffect(() => {
-    const controller = new AbortController();
-    const fetchPlatforms = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/admin/platforms", { signal: controller.signal });
-        const data = await res.json() as Record<string, any>;
-        if (data.success && Array.isArray(data.data)) setPlatforms(data.data);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("error"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    };
-    fetchPlatforms();
-    return () => controller.abort();
-  }, [t]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("error"));
+    }
+  }, [error, t]);
 
-  if (loading && platforms.length === 0) {
+  if (isLoading && !platforms) {
     return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
   }
 
@@ -42,8 +32,8 @@ export default function PlatformsPage() {
     <AdminLayout>
       <div className="max-w-2xl mx-auto">
         <PlatformList
-          platforms={platforms}
-          loading={loading}
+          platforms={platforms ?? []}
+          loading={isValidating}
           className="rounded-xl shadow-sm overflow-hidden"
         />
       </div>

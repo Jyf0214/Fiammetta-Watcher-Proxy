@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "last_fail_at" INTEGER,
     "cooldown_end" INTEGER,
     "forward_headers" TEXT NOT NULL,
+    "inject_stream_options" BOOLEAN NOT NULL DEFAULT true,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

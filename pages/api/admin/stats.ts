@@ -5,11 +5,54 @@
  * - 启用平台数、API Key 数量（总数 + 活跃数）
  * - 请求总数、总 token
  * - 平均 TTFT 和平均耗时
+ *
+ * 性能说明（2026-08-12 优化）：
+ * - 历史数据（已归档）从 daily_stats 聚合表读取，不再对 request_logs 全表扫描
+ * - 未归档明细（最近 RETENTION_DAYS 天，界限与 worker/src/log-archiver.ts 归档
+ *   条件一致）只做 createdAt 范围聚合（走 @@index([createdAt]) 索引）
+ * - 聚合结果内存缓存 25s，吸收仪表盘 30s 自动刷新与高频手动刷新
+ *
+ * 归档/明细切分语义（与 log-archiver 对齐）：
+ * - 归档按 UTC 天整块处理：所有"天开始时间戳 <= 归档截止天"的日志会被聚合进
+ *   daily_stats 并从 request_logs 删除；因此 request_logs 只保留最近约
+ *   RETENTION_DAYS 天（按 UTC 天粒度）的明细，daily_stats 只含更早的历史。
+ * - 明细下界 = 今日 UTC 零点 - RETENTION_DAYS × 86400。归档最晚只能删到
+ *   "今日零点 - RETENTION_DAYS 天"这一整天（即使归档今天已跑，daily_stats 的
+ *   最大 date 也只到该天，而该天日志已删除），所以该界限与归档无重叠、无遗漏。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
+import { RETENTION_DAYS } from "../../../worker/src/log-archiver";
+
+/**
+ * 缓存 TTL：25s。
+ *
+ * 前端仪表盘 30s 自动刷新（pages/admin/index.tsx AUTO_REFRESH_INTERVAL），
+ * 若缓存 TTL 大于刷新间隔（如 60s），每次自动刷新都会命中缓存拿到旧值，
+ * 数据在两次刷新间整体平移一个 TTL 周期；取 25s < 30s 保证每次自动刷新
+ * 都必然触发重新计算，数据最大陈旧 25s，同时仍能吸收 30s 窗口内的重复
+ * 手动刷新/多标签页请求，DB 压力约为原来的 1/2 以下。
+ */
+const CACHE_TTL_MS = 25_000;
+
+/** 仪表盘统计数据（响应结构，与前端 pages/admin/index.tsx Stats 类型一致） */
+interface StatsData {
+  activePlatforms: number;
+  totalKeys: number;
+  activeKeys: number;
+  totalRequests: number;
+  totalTokens: number;
+  avgTtft: number;
+  avgDuration: number;
+}
+
+/**
+ * 模块级内存缓存（单实例内跨请求共享）。
+ * 多实例部署下各实例缓存独立、数值最大偏差 25s——仪表盘为非强一致数据，可接受。
+ */
+let statsCache: { data: StatsData; expiresAt: number } | null = null;
 
 export default async function handler(
   req: NextApiRequest,
@@ -22,14 +65,28 @@ export default async function handler(
   }
 
   try {
+    // 命中缓存直接返回，不查库（平台数/Key 数等小表查询也一并跳过）
+    if (statsCache && statsCache.expiresAt > Date.now()) {
+      res.status(200).json({ success: true, data: statsCache.data });
+      return;
+    }
+
     const db = await createDb();
+
+    // 今日 UTC 零点（秒）。归档按 UTC 天切分，统计界限必须同用 UTC 天，否则
+    // 本地时区与归档时区不一致会导致重复/遗漏
+    const now = Math.floor(Date.now() / 1000);
+    const todayStart = now - (now % 86400);
+    // 未归档明细下界：与 log-archiver 的归档截止天对齐（见文件头说明）
+    const detailSince = todayStart - RETENTION_DAYS * 86400;
 
     // 并行查询所有统计数据
     const [
       activePlatforms,
       totalKeys,
       activeKeys,
-      requestAgg,
+      histRows,
+      detailAgg,
       perfAgg,
     ] = await Promise.all([
       // 启用的平台数
@@ -38,41 +95,84 @@ export default async function handler(
       db.apiKeys.count(),
       // 活跃 API Key 数
       db.apiKeys.count({ where: { status: "active" } }),
-      // 请求总数 + 总 token
-      Promise.all([
-        db.requestLogs.count(),
-        db.requestLogs.aggregate({ _sum: { tokens: true } }),
-      ]),
-      // 性能统计：在数据库层面聚合，避免全量拉取
+      // 历史（已归档）：daily_stats 全量行，在 JS 中累加。
+      // 行数 = 归档天数 × (keyId, model) 组合数，管理后台规模下为万级；
+      // 不直接用 SQL aggregate 是因为 avgTtft/avgDuration 是均值，
+      // 加权平均需要逐行取 avg × 样本数，SQL 无法表达乘积和
+      db.dailyStats.findMany({
+        select: {
+          totalRequests: true,
+          errorRequests: true,
+          totalTokens: true,
+          avgTtft: true,
+          avgDuration: true,
+        },
+      }),
+      // 明细（未归档，含今日）：请求总数 + 总 token（含错误请求）
       db.requestLogs.aggregate({
-        where: { isError: false },
+        where: { createdAt: { gte: detailSince } },
+        _count: { id: true },
+        _sum: { tokens: true },
+      }),
+      // 明细性能统计：非错误请求的 TTFT/延迟总和（保持原接口口径）
+      db.requestLogs.aggregate({
+        where: { createdAt: { gte: detailSince }, isError: false },
         _count: { id: true },
         _sum: { ttft: true, latency: true },
       }),
     ]);
 
-    const totalRequests = requestAgg[0];
-    const sumTokens = requestAgg[1]._sum.tokens ?? 0;
+    // ---- 历史部分（daily_stats）累加 ----
+    // 平均 TTFT/延迟的历史近似：
+    // daily_stats 未存"ttft > 0 的样本数"，且未按 isError 区分样本（归档时所有
+    // 请求都参与均值，错误请求的 ttft=0 也会稀释 daily_stats 的 avgTtft）。
+    // 这里用每行 (totalRequests - errorRequests) 作为非错误请求数近似，并仅对
+    // avgTtft > 0 的行把 avgTtft × 该数计入分子——与明细部分"ttft=0 贡献 0
+    // 分子但计入分母"的稀释语义一致，是现有接口 avgTtft 口径在归档数据上的
+    // 最佳近似（与 log-archiver 合并旧记录时"用总请求数近似样本数"同级）。
+    let histRequests = 0;
+    let histTokens = 0;
+    let histPerfCount = 0;
+    let histTtftSum = 0;
+    let histLatencySum = 0;
+    for (const row of histRows) {
+      const perfCount = row.totalRequests - row.errorRequests;
+      histRequests += row.totalRequests;
+      histTokens += row.totalTokens;
+      histPerfCount += perfCount;
+      if (row.avgTtft > 0) histTtftSum += row.avgTtft * perfCount;
+      if (row.avgDuration > 0) histLatencySum += row.avgDuration * perfCount;
+    }
 
-    // 从聚合结果计算平均值（仅统计 ttft > 0 / latency > 0 的记录）
-    const perfCount = perfAgg._count.id ?? 0;
-    const sumTtft = perfAgg._sum.ttft ?? 0;
-    const sumLatency = perfAgg._sum.latency ?? 0;
-    const avgTtft = perfCount > 0 ? Math.round(sumTtft / perfCount) : 0;
-    const avgDuration = perfCount > 0 ? Math.round(sumLatency / perfCount) : 0;
+    // ---- 明细部分（request_logs，最近 RETENTION_DAYS 天）----
+    const detailCount = detailAgg._count.id ?? 0;
+    const detailTokens = detailAgg._sum.tokens ?? 0;
+    const detailPerfCount = perfAgg._count.id ?? 0;
+    const detailTtftSum = perfAgg._sum.ttft ?? 0;
+    const detailLatencySum = perfAgg._sum.latency ?? 0;
 
-    res.status(200).json({
-      success: true,
-      data: {
-        activePlatforms,
-        totalKeys,
-        activeKeys,
-        totalRequests,
-        totalTokens: sumTokens,
-        avgTtft,
-        avgDuration,
-      },
-    });
+    // ---- 汇总 ----
+    const totalRequests = histRequests + detailCount;
+    const totalTokens = histTokens + detailTokens;
+    const perfCount = histPerfCount + detailPerfCount;
+    const ttftSum = histTtftSum + detailTtftSum;
+    const latencySum = histLatencySum + detailLatencySum;
+    const avgTtft = perfCount > 0 ? Math.round(ttftSum / perfCount) : 0;
+    const avgDuration = perfCount > 0 ? Math.round(latencySum / perfCount) : 0;
+
+    const data: StatsData = {
+      activePlatforms,
+      totalKeys,
+      activeKeys,
+      totalRequests,
+      totalTokens,
+      avgTtft,
+      avgDuration,
+    };
+
+    statsCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+
+    res.status(200).json({ success: true, data });
   } catch (err) {
     console.error("[GET /api/admin/stats] 获取统计数据失败:", err);
     res.status(500).json({ success: false, error: "获取统计数据失败" });

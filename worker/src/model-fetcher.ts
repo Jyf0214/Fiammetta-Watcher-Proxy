@@ -60,6 +60,7 @@ async function fetchPlatformModels(platform: {
     rpmLimit: null,
     tpmLimit: null,
     forwardHeaders: "[]",
+    injectStreamOptions: true,
     status: "healthy",
     failCount: 0,
     lastFailAt: null,

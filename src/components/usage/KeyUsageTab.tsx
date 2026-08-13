@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Tag, Tooltip, message, type TableColumnsType } from "antd";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ProCard } from "@/components/ui/ProCard";
@@ -6,6 +6,7 @@ import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format
 import { useTranslation } from "react-i18next";
 import { Zap, TrendingUp, Cloud, Clock } from "lucide-react";
 import "@/lib/i18n";
+import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 
 interface KeyUsage {
   id: string;
@@ -35,45 +36,32 @@ interface KeyUsageTabProps {
 
 export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
   const { t } = useTranslation("usage");
-  const [data, setData] = useState<KeyUsage[]>([]);
-  const [loading, setLoading] = useState(true);
 
+  // 数据层：key 含 period，切换周期时 SWR 自动重新请求
+  const { data, error, isValidating, mutate } = useApi<KeyUsage[]>(
+    `/api/admin/usage?period=${period}`
+  );
+
+  // 父页面刷新按钮（refreshKey 计数）触发重新验证
+  useRefreshKey(refreshKey, mutate);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ period });
-        const res = await fetch(`/api/admin/usage?${params}`, {
-          signal: controller.signal,
-        });
-        const json: Record<string, any> = await res.json();
-        if (json.success && Array.isArray(json.data)) {
-          setData(json.data);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common:error"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    };
-
-    fetchData();
-    return () => controller.abort();
-  }, [period, t, refreshKey]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [error, t]);
 
   // 汇总
   const summary = useMemo(
     () => ({
-      totalRequests: data.reduce((s, k) => s + k.stats.totalRequests, 0),
-      totalTokens: data.reduce((s, k) => s + k.stats.totalTokens, 0),
-      activeKeys: data.filter((k) => k.status === "active").length,
+      totalRequests: (data ?? []).reduce((s, k) => s + k.stats.totalRequests, 0),
+      totalTokens: (data ?? []).reduce((s, k) => s + k.stats.totalTokens, 0),
+      activeKeys: (data ?? []).filter((k) => k.status === "active").length,
       avgTtft:
-        data.length > 0
+        (data ?? []).length > 0
           ? Math.round(
-              data.reduce((s, k) => s + k.stats.avgTtft, 0) / data.length
+              (data ?? []).reduce((s, k) => s + k.stats.avgTtft, 0) / (data ?? []).length
             )
           : 0,
     }),
@@ -101,7 +89,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       key: "activeKeys",
       title: t("activeKeys"),
       value: summary.activeKeys,
-      suffix: `/ ${data.length}`,
+      suffix: `/ ${(data ?? []).length}`,
       icon: <Cloud />,
       bgColor: "bg-purple-50",
       iconColor: "text-purple-500",
@@ -294,9 +282,9 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       {/* 明细表格 */}
       <ResponsiveTable
         columns={columns}
-        dataSource={data}
+        dataSource={data ?? []}
         rowKey="id"
-        loading={loading}
+        loading={isValidating}
         pagination={{
           pageSize: 20,
           showTotal: (count) => t("common:pagination", { count }),

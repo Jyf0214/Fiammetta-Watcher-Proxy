@@ -35,6 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           id: true, name: true, baseUrl: true, apiKeys: true,
           type: true, enabled: true, priority: true, weight: true,
           rpmLimit: true, tpmLimit: true, forwardHeaders: true,
+          injectStreamOptions: true,
           status: true, failCount: true, lastFailAt: true, cooldownEnd: true,
           createdAt: true, updatedAt: true,
         },
@@ -94,6 +95,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rpmLimit,
         tpmLimit,
         forwardHeaders,
+        injectStreamOptions,
       } = body;
 
       // 输入校验
@@ -261,6 +263,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           status: "healthy",
           failCount: 0,
           forwardHeaders: normalizedForwardHeaders,
+          injectStreamOptions: injectStreamOptions !== false,
           createdAt: now,
           updatedAt: now,
         },
@@ -294,6 +297,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           status: "healthy",
           failCount: 0,
           forwardHeaders: normalizedForwardHeaders,
+          injectStreamOptions: injectStreamOptions !== false,
           createdAt: now,
           updatedAt: now,
         },

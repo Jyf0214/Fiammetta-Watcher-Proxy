@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import KeyUsageTab from "@/components/usage/KeyUsageTab";
@@ -40,49 +41,27 @@ interface TrendPoint {
 
 export default function UsagePage() {
   const { t } = useTranslation("usage");
-  const [trendData, setTrendData] = useState<TrendPoint[]>([]);
-  const [trendLoading, setTrendLoading] = useState(true);
-  const [trendError, setTrendError] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>("month");
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<string>("key");
 
-  // 获取趋势数据
+  // 趋势数据：key 含 period，切换周期时 SWR 自动重新请求
+  const {
+    data: trendData,
+    error: trendError,
+    isValidating: trendLoading,
+    mutate: mutateTrend,
+  } = useApi<TrendPoint[]>(`/api/admin/usage/trend?period=${period}`);
+
+  // 刷新按钮（refreshKey 计数）触发趋势与子 Tab（各自内部监听）重新验证
+  useRefreshKey(refreshKey, mutateTrend);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchTrend = async () => {
-      setTrendLoading(true);
-      setTrendError(null);
-      try {
-        const params = new URLSearchParams({ period });
-        const res = await fetch(`/api/admin/usage/trend?${params}`, {
-          signal: controller.signal,
-        });
-        const data = await res.json() as Record<string, any>;
-        if (!res.ok || !data.success) {
-          const errMsg = data.error || t("httpError", { status: res.status });
-          console.error("[usage trend] load failed:", errMsg, data);
-          setTrendError(errMsg);
-          return;
-        }
-        if (Array.isArray(data.data)) {
-          setTrendData(data.data);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error("[usage trend] request error:", errMsg, err);
-        setTrendError(errMsg);
-        message.error(t("dashboard:fetchFailed"));
-      } finally {
-        if (!controller.signal.aborted) setTrendLoading(false);
-      }
-    };
-
-    fetchTrend();
-    return () => controller.abort();
-  }, [period, t, refreshKey]);
+    if (trendError && trendError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("dashboard:fetchFailed"));
+    }
+  }, [trendError, t]);
 
   const handleRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -90,8 +69,9 @@ export default function UsagePage() {
 
   // 汇总趋势数据（给图表上方的总览用）
   const trendSummary = useMemo(() => {
-    const totalRequests = trendData.reduce((s, d) => s + d.requests, 0);
-    const totalTokens = trendData.reduce((s, d) => s + d.tokens, 0);
+    const data = trendData ?? [];
+    const totalRequests = data.reduce((s, d) => s + d.requests, 0);
+    const totalTokens = data.reduce((s, d) => s + d.tokens, 0);
     return { totalRequests, totalTokens };
   }, [trendData]);
 
@@ -163,7 +143,7 @@ export default function UsagePage() {
                 {t("dashboard:fetchFailed")}
               </p>
               <p className="text-xs text-zinc-400 max-w-md text-center">
-                {trendError}
+                {trendError?.message}
               </p>
               <Button
                 variant="ghost"
@@ -175,7 +155,7 @@ export default function UsagePage() {
                 {t("common:retry")}
               </Button>
             </div>
-          ) : trendData.length === 0 ? (
+          ) : (trendData ?? []).length === 0 ? (
             <div className="h-[220px] sm:h-[320px] flex flex-col items-center justify-center gap-2">
               <BarChart3 className="text-3xl text-zinc-300" />
               <p className="text-sm text-zinc-400">
@@ -187,11 +167,11 @@ export default function UsagePage() {
             </div>
           ) : (
             <UsageChart
-              data={trendData}
+              data={trendData ?? []}
               granularity={period === "today" ? "hourly" : "daily"}
             />
           )}
-          {trendData.length > 0 && (
+          {(trendData?.length ?? 0) > 0 && (
             <div className="flex items-center justify-center gap-8 pt-3 border-t border-zinc-50 dark:border-zinc-700">
               <div className="text-center">
                 <p className="text-xs text-zinc-400">

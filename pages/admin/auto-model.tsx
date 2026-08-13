@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Input, Checkbox, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -9,6 +9,9 @@ import { Zap, Copy, Check, RefreshCw, Database, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
+import useSWR from "swr";
+import { useApi, apiFetcher, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
+import { type Platform } from "@/components/platform/PlatformList";
 import AdminLayout from "@/components/AdminLayout";
 
 interface PlatformModel {
@@ -24,82 +27,79 @@ export default function AutoModelPage() {
   const { t } = useTranslation("system");
 
   // 自动模型 ID 状态
-  const [autoModelId, setAutoModelId] = useState<string | null>(null);
   const [autoModelLoading, setAutoModelLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  // 平台模型发现状态
-  const [models, setModels] = useState<PlatformModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
 
   // 模型选择状态：行 id 为唯一勾选来源（同一 modelId 可存在于多个平台行），保存时派生 modelId 集合
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [selectedModelsLoading, setSelectedModelsLoading] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+
+  // ===== 数据层（SWR）：config 与 platforms 并行拉取，平台模型并行批量请求 =====
+
+  // config：自动模型 ID 与已保存的选择（原串行链第一步）
+  const { data: config, mutate: mutateConfig } = useApi<Record<string, string>>("/api/admin/config");
+  const autoModelId = config?.["system:auto_model_id"] ?? null;
   // config 中已保存的选择（部分平台加载失败时用于兜底保留，避免保存静默丢配置）
-  const [savedModelIds, setSavedModelIds] = useState<string[]>([]);
+  const savedModelIds = useMemo(() => {
+    const saved = config?.["system:auto_model_selected"];
+    if (!saved) return [] as string[];
+    try {
+      return JSON.parse(saved) as string[];
+    } catch {
+      return [] as string[];
+    }
+  }, [config]);
 
+  // 平台列表（原串行链第二步）
+  const { data: platforms, error: platformsError } = useApi<Platform[]>("/api/admin/platforms");
   useEffect(() => {
-    const controller = new AbortController();
+    if (platformsError && platformsError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [platformsError, t]);
 
-    const fetchAllData = async () => {
-      setModelsLoading(true);
-      let savedSelected: string[] = [];
-      try {
-        const res = await fetch("/api/admin/config", { signal: controller.signal });
-        const data: Record<string, any> = await res.json();
-        if (data.success && data.data) {
-          setAutoModelId(data.data["system:auto_model_id"] || null);
-          const savedModels = data.data["system:auto_model_selected"];
-          if (savedModels) {
-            try {
-              savedSelected = JSON.parse(savedModels);
-            } catch {
-              savedSelected = [];
-            }
+  // 各平台模型（原串行 N+1 第三步 → 并行）：platforms 就绪后一次性并行请求所有平台的模型，
+  // 单个平台失败不影响其他平台（与原行为一致）。key 为 URL 列表的 JSON 序列化，
+  // platforms 变化（增删平台）时自动重新请求。
+  const modelsKey =
+    platforms && platforms.length > 0
+      ? JSON.stringify(platforms.map((p) => `/api/admin/platforms/${p.id}/models`))
+      : null;
+  const { data: models, isLoading: modelsLoading } = useSWR<PlatformModel[]>(
+    modelsKey,
+    async (key: string) => {
+      const urls: string[] = JSON.parse(key);
+      const groups = await Promise.all(
+        urls.map(async (url) => {
+          try {
+            const list = (await apiFetcher<PlatformModel[]>(url)) ?? [];
+            // 从 URL 提取平台 id 并合并平台名（原 for 循环内 push 时附加）
+            const platformId = url.split("/")[4];
+            const name = platforms?.find((p) => p.id === platformId)?.name ?? platformId;
+            return list.map((m) => ({ ...m, platform: { name } }));
+          } catch {
+            return []; // 单个平台失败不影响其他
           }
-          setSavedModelIds(savedSelected);
-        }
-      } catch {
-        // 静默失败
-      }
+        })
+      );
+      return groups.flat();
+    }
+  );
 
-      try {
-        const pRes = await fetch("/api/admin/platforms", { signal: controller.signal });
-        const pData: Record<string, any> = await pRes.json();
-        if (pData.success && Array.isArray(pData.data)) {
-          const allModels: PlatformModel[] = [];
-          for (const platform of pData.data) {
-            try {
-              const mRes = await fetch(`/api/admin/platforms/${platform.id}/models`, { signal: controller.signal });
-              const mData: Record<string, any> = await mRes.json();
-              if (mData.success && Array.isArray(mData.data)) {
-                for (const m of mData.data) {
-                  allModels.push({ ...m, platform: { name: platform.name } });
-                }
-              }
-            } catch {
-              // 单个平台失败不影响其他
-            }
-          }
-          setModels(allModels);
-          // 已保存的模型选择扩散为对应行勾选（同一模型在多平台的全部行，代表该模型在路由池）
-          setSelectedKeys(
-            allModels
-              .filter((m) => savedSelected.includes(m.modelId))
-              .map((m) => m.id)
-          );
-        }
-      } catch {
-        message.error(t("common:error"));
-      } finally {
-        setModelsLoading(false);
-      }
-    };
-
-    fetchAllData();
-    return () => controller.abort();
-  }, [t]);
+  // 已保存的模型选择扩散为对应行勾选（同一模型在多平台的全部行，代表该模型在路由池）。
+  // 仅在 config 与 models 首次就绪时执行一次，之后不覆盖用户手动勾选。
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (!initializedRef.current && config !== undefined && (models ?? []).length > 0) {
+      initializedRef.current = true;
+      setSelectedKeys(
+        (models ?? [])
+          .filter((m) => savedModelIds.includes(m.modelId))
+          .map((m) => m.id)
+      );
+    }
+  }, [config, models, savedModelIds]);
 
   /** 重新生成自动模型 ID */
   const regenerateAutoModelId = async () => {
@@ -117,7 +117,7 @@ export default function AutoModelPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        setAutoModelId(newId);
+        mutateConfig(); // 重新拉取 config，autoModelId 由 SWR 数据驱动更新
         message.success(t("autoModelRegenerated"));
       } else {
         message.error(data.error || t("common:error"));
@@ -147,13 +147,13 @@ export default function AutoModelPage() {
     setSelectedModelsLoading(true);
     try {
       const visibleIds = new Set(
-        models
+        (models ?? [])
           .filter((m) => selectedKeys.includes(m.id))
           .map((m) => m.modelId)
       );
       const modelIds = Array.from(
         new Set([
-          ...savedModelIds.filter((id) => !models.some((m) => m.modelId === id)),
+          ...savedModelIds.filter((id) => !(models ?? []).some((m) => m.modelId === id)),
           ...visibleIds,
         ])
       );
@@ -167,6 +167,7 @@ export default function AutoModelPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
+        mutateConfig(); // 重新拉取 config，更新 savedModelIds 兜底值
         message.success(t("autoModelSelectedSaved"));
       } else {
         message.error(data.error || t("common:error"));
@@ -192,8 +193,8 @@ export default function AutoModelPage() {
   /** 表格内搜索：按模型 ID / 平台名过滤 */
   const filteredModels = useMemo(() => {
     const q = modelSearch.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter(
+    if (!q) return models ?? [];
+    return (models ?? []).filter(
       (m) =>
         m.modelId.toLowerCase().includes(q) ||
         m.platform.name.toLowerCase().includes(q)

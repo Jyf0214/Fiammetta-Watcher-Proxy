@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/router";
 import { Tag, message, type TableColumnsType } from "antd";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -9,6 +8,7 @@ import { RefreshCw, History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -67,47 +67,25 @@ const ACTION_COLOR: Record<string, string> = {
 
 function AuditContent() {
   const { t } = useTranslation("audit");
-  const router = useRouter();
-  const [logs, setLogs] = useState<AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [refreshKey, setRefreshKey] = useState(0);
 
+  // 审计日志：key 含分页参数，翻页时 SWR 自动重新请求
+  const auditKey = `/api/admin/audit?page=${page}&pageSize=20`;
+  const { data, error, isLoading, isValidating, mutate } = useApi<{
+    items: AuditEntry[];
+    total: number;
+  }>(auditKey);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchLogs = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/admin/audit?page=${page}&pageSize=20`, { signal: controller.signal });
-        if (res.status === 401) {
-          message.warning(t("auth:unauthorized"));
-          router.push("/admin/login");
-          return;
-        }
-        const data: any = await res.json();
-        if (data.success) {
-          if (data.data?.items) setLogs(data.data.items);
-          if (data.data) setTotal(data.data.total);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common:error"));
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchLogs();
-    return () => controller.abort();
-  }, [page, router, t, refreshKey]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [error, t]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+    mutate();
+  }, [mutate]);
 
   /** 获取操作名称的 i18n 标签 */
   const getActionLabel = (action: string): string => {
@@ -157,7 +135,7 @@ function AuditContent() {
     },
   ];
 
-  if (loading && logs.length === 0) {
+  if (isLoading && !data) {
     return <GlobalLoading size="large" />;
   }
 
@@ -168,7 +146,7 @@ function AuditContent() {
         title={t("admin:audit")}
         description={t("admin:auditDesc")}
         extra={
-          <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={loading}>
+          <Button variant="default" onClick={handleRefresh} icon={<RefreshCw size={14} />} disabled={isValidating}>
             {t("common:refresh")}
           </Button>
         }
@@ -176,12 +154,12 @@ function AuditContent() {
 
       <ResponsiveTable
         columns={columns}
-        dataSource={logs}
+        dataSource={data?.items ?? []}
         rowKey="id"
-        loading={loading}
+        loading={isValidating}
         pagination={{
           current: page,
-          total,
+          total: data?.total ?? 0,
           pageSize: 20,
           onChange: setPage,
           showTotal: (count) => t("common:pagination", { count }),

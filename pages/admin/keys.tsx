@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, message } from "antd";
 import { Plus, Trash2, Copy, Key, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime, formatDate } from "@/lib/timezone";
+import { useApi } from "@/hooks/use-api";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -99,8 +100,8 @@ export default function KeysPage() {
   const { t } = useTranslation("apikey");
   /** 构建期内联的部署平台（cf / edgeone / vercel / 空=自托管或本地） */
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
-  const [keys, setKeys] = useState<ApiKeyItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
+  const { data: keys, isLoading, isValidating, mutate } = useApi<ApiKeyItem[]>("/api/admin/keys");
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<ApiKeyItem | null>(null);
   const [form] = Form.useForm();
@@ -108,21 +109,6 @@ export default function KeysPage() {
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
   const [togglingId, setTogglingId] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/admin/keys", { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data: any) => {
-        if (data.success && Array.isArray(data.data)) setKeys(data.data);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [refreshKey]);
-
-  const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const handleToggle = async (item: ApiKeyItem) => {
     const newStatus = item.status === "active" ? "disabled" : "active";
@@ -136,7 +122,7 @@ export default function KeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(newStatus === "active" ? t("statusActive") : t("statusDisabled"));
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error?.message || t("common:operationFailed"));
       }
@@ -182,7 +168,7 @@ export default function KeysPage() {
         if (data.success) {
           message.success(t("updateSuccess"));
           setModalOpen(false);
-          handleRefresh();
+          mutate();
         } else {
           message.error(data.error?.message);
         }
@@ -199,7 +185,7 @@ export default function KeysPage() {
           form.resetFields();
           setNewKeyValue(data.data.key);
           setNewKeyVisible(true);
-          handleRefresh();
+          mutate();
         } else {
           message.error(data.error?.message);
         }
@@ -217,7 +203,7 @@ export default function KeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("deleteSuccess"));
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error?.message || t("common:error"));
       }
@@ -324,7 +310,7 @@ export default function KeysPage() {
     },
   ];
 
-  if (loading && keys.length === 0) {
+  if (isLoading && !keys) {
     return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
   }
 
@@ -355,10 +341,10 @@ export default function KeysPage() {
 
         {/* 移动端：卡片列表 */}
         <div className="sm:hidden space-y-3 mb-6">
-          {keys.length === 0 && !loading ? (
+          {(keys ?? []).length === 0 && !isValidating ? (
             <div className="text-center py-12 text-sm text-zinc-400">{t("noApiKey")}</div>
           ) : (
-            keys.map((apiKey) => (
+            (keys ?? []).map((apiKey) => (
               <ApiKeyCard
                 key={apiKey.id}
                 apiKey={apiKey}
@@ -376,9 +362,9 @@ export default function KeysPage() {
           <ProCard>
             <ResponsiveTable
               columns={columns}
-              dataSource={keys}
+              dataSource={keys ?? []}
               rowKey="id"
-              loading={loading}
+              loading={isValidating}
               pagination={{
                 pageSize: 20,
                 showTotal: (total) => t("common:pagination", { count: total }),

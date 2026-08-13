@@ -247,4 +247,60 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.platformId).toBe("test-platform");
     expect(logParams.isError).toBe(true);
   });
+
+  it("流式请求 injectStreamOptions=true：请求体包含 stream_options", async () => {
+    // 确保路由返回有效平台且存在可用 Key（避免上一测试的 mockReturnValue(null) 残留）
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(routeRequestLite).mockResolvedValue(makeRoute() as never);
+
+    let capturedBody: Record<string, unknown> | null = null;
+    const streamMock = vi.fn().mockImplementation(async (url: string, opts: RequestInit) => {
+      capturedBody = JSON.parse(opts.body as string) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ id: "x", choices: [{ delta: { content: "hi" } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", streamMock);
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [], stream: true }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!["stream_options"]).toEqual({ include_usage: true });
+  });
+
+  it("流式请求 injectStreamOptions=false：请求体不包含 stream_options", async () => {
+    const streamMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "x", choices: [{ delta: { content: "hi" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", streamMock);
+
+    vi.mocked(routeRequestLite).mockResolvedValue(
+      makeRoute({ platform: { ...makeRoute().platform, injectStreamOptions: false } }) as never
+    );
+
+    await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [], stream: true }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    const [_url, opts] = streamMock.mock.calls[0];
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("stream_options");
+  });
 });

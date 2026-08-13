@@ -56,6 +56,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
         ...platform,
         apiKeys,
         forwardHeaders,
+        injectStreamOptions: platform.injectStreamOptions ?? true,
       },
     });
   } catch (err) {
@@ -162,6 +163,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       updateData.rpmLimit = body.rpmLimit ?? null;
     if (body.tpmLimit !== undefined)
       updateData.tpmLimit = body.tpmLimit ?? null;
+    if (body.injectStreamOptions !== undefined)
+      updateData.injectStreamOptions = !!body.injectStreamOptions;
 
     // 健康状态字段（用于手动恢复平台状态）— 类型和范围校验
     const VALID_STATUSES = ["healthy", "degraded", "down"];

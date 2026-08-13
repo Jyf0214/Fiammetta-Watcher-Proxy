@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/router";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Tag, Select, Tabs, DatePicker, message, type TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime, formatDate } from "@/lib/timezone";
 import { formatDuration } from "@/lib/format";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 
 const { RangePicker } = DatePicker;
@@ -66,99 +66,54 @@ interface KeyOption {
 
 function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
   const { t } = useTranslation("log");
-  const router = useRouter();
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
   const [keyFilter, setKeyFilter] = useState<string | undefined>();
   const [dateRange, setDateRange] = useState<
     [Dayjs | null, Dayjs | null] | null
   >(null);
-  const [keyOptions, setKeyOptions] = useState<KeyOption[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
 
+  // Key 选项：与归档 Tab 共享同一 SWR key（/api/admin/keys），自动去重为一次请求
+  const { data: keyData } = useApi<{ id: string; name: string }[]>("/api/admin/keys");
+  const keyOptions = useMemo<KeyOption[]>(
+    () => (keyData ?? []).map((k) => ({ id: k.id, name: k.name })),
+    [keyData]
+  );
+
+  // 日志列表：key 包含全部筛选参数，参数变化时 SWR 自动重新请求
+  const logsKey = useMemo(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: "20",
+    });
+    if (statusFilter) params.set("status", statusFilter);
+    if (errorFilter) params.set("isError", errorFilter);
+    if (keyFilter) params.set("keyId", keyFilter);
+    if (dateRange && dateRange[0]) {
+      params.set("startDate", dateRange[0].format("YYYY-MM-DD"));
+    }
+    if (dateRange && dateRange[1]) {
+      params.set("endDate", dateRange[1].format("YYYY-MM-DD"));
+    }
+    return `/api/admin/logs?${params.toString()}`;
+  }, [page, statusFilter, errorFilter, keyFilter, dateRange]);
+
+  const { data, error, isValidating, mutate } = useApi<{
+    items: LogEntry[];
+    total: number;
+  }>(logsKey);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/admin/keys", { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data: any) => {
-        if (data.success && Array.isArray(data.data)) {
-          setKeyOptions(
-            data.data.map((k: { id: string; name: string }) => ({
-              id: k.id,
-              name: k.name,
-            }))
-          );
-        }
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchLogs = async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          page: String(page),
-          pageSize: "20",
-        });
-        if (statusFilter) params.set("status", statusFilter);
-        if (errorFilter) params.set("isError", errorFilter);
-        if (keyFilter) params.set("keyId", keyFilter);
-        if (dateRange && dateRange[0]) {
-          params.set("startDate", dateRange[0].format("YYYY-MM-DD"));
-        }
-        if (dateRange && dateRange[1]) {
-          params.set("endDate", dateRange[1].format("YYYY-MM-DD"));
-        }
-
-        const res = await fetch(`/api/admin/logs?${params}`, {
-          signal: controller.signal,
-        });
-        if (res.status === 401) {
-          message.warning(
-            t("auth:unauthorized")
-          );
-          router.push("/admin/login");
-          return;
-        }
-        const data: any = await res.json();
-        if (data.success) {
-          if (data.data?.items) setLogs(data.data.items);
-          if (data.data) setTotal(data.data.total);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common:error"));
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchLogs();
-    return () => controller.abort();
-  }, [
-    page,
-    statusFilter,
-    errorFilter,
-    keyFilter,
-    dateRange,
-    router,
-    t,
-    refreshKey,
-  ]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [error, t]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+    mutate();
+  }, [mutate]);
 
   useEffect(() => {
     onRefreshRef(handleRefresh);
@@ -361,12 +316,12 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
 
       <ResponsiveTable
         columns={columns}
-        dataSource={logs}
+        dataSource={data?.items ?? []}
         rowKey="id"
-        loading={loading}
+        loading={isValidating}
         pagination={{
           current: page,
-          total,
+          total: data?.total ?? 0,
           pageSize: 20,
           onChange: setPage,
           showTotal: (count) => t("common:pagination", { count }),
@@ -381,87 +336,51 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
 
 function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
   const { t } = useTranslation("log");
-  const router = useRouter();
-  const [stats, setStats] = useState<ArchiveEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const [dateRange, setDateRange] = useState<
     [Dayjs | null, Dayjs | null] | null
   >(null);
-  const [keyOptions, setKeyOptions] = useState<KeyOption[]>([]);
   const [keyFilter, setKeyFilter] = useState<string | undefined>();
   const [archiving, setArchiving] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
 
+  // Key 选项：与详细 Tab 共享同一 SWR key（/api/admin/keys），自动去重为一次请求
+  const { data: keyData } = useApi<{ id: string; name: string }[]>("/api/admin/keys");
+  const keyOptions = useMemo<KeyOption[]>(
+    () => (keyData ?? []).map((k) => ({ id: k.id, name: k.name })),
+    [keyData]
+  );
+
+  // 归档列表：key 包含全部筛选参数，参数变化时 SWR 自动重新请求
+  const statsKey = useMemo(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: "20",
+    });
+    if (keyFilter) params.set("keyId", keyFilter);
+    if (dateRange && dateRange[0]) {
+      params.set("startDate", dateRange[0].format("YYYY-MM-DD"));
+    }
+    if (dateRange && dateRange[1]) {
+      params.set("endDate", dateRange[1].format("YYYY-MM-DD"));
+    }
+    return `/api/admin/logs/archive?${params.toString()}`;
+  }, [page, keyFilter, dateRange]);
+
+  const { data, error, isValidating, mutate } = useApi<{
+    items: ArchiveEntry[];
+    total: number;
+  }>(statsKey);
+
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/admin/keys", { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data: any) => {
-        if (data.success && Array.isArray(data.data)) {
-          setKeyOptions(
-            data.data.map((k: { id: string; name: string }) => ({
-              id: k.id,
-              name: k.name,
-            }))
-          );
-        }
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchStats = async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          page: String(page),
-          pageSize: "20",
-        });
-        if (keyFilter) params.set("keyId", keyFilter);
-        if (dateRange && dateRange[0]) {
-          params.set("startDate", dateRange[0].format("YYYY-MM-DD"));
-        }
-        if (dateRange && dateRange[1]) {
-          params.set("endDate", dateRange[1].format("YYYY-MM-DD"));
-        }
-
-        const res = await fetch(`/api/admin/logs/archive?${params}`, {
-          signal: controller.signal,
-        });
-        if (res.status === 401) {
-          message.warning(
-            t("auth:unauthorized")
-          );
-          router.push("/admin/login");
-          return;
-        }
-        const data: any = await res.json();
-        if (data.success) {
-          if (data.data?.items) setStats(data.data.items);
-          if (data.data) setTotal(data.data.total);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("fetchFailed"));
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchStats();
-    return () => controller.abort();
-  }, [page, keyFilter, dateRange, router, t, refreshKey]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("fetchFailed"));
+    }
+  }, [error, t]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+    mutate();
+  }, [mutate]);
 
   useEffect(() => {
     onRefreshRef(handleRefresh);
@@ -474,7 +393,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       const data: any = await res.json();
       if (data.success) {
         message.success(data.message || t("archiveSuccess"));
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error || t("archiveFailed"));
       }
@@ -483,7 +402,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
     } finally {
       setArchiving(false);
     }
-  }, [handleRefresh, t]);
+  }, [mutate, t]);
 
   const columns: TableColumnsType<ArchiveEntry> = [
     {
@@ -652,12 +571,12 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
 
       <ResponsiveTable
         columns={columns}
-        dataSource={stats}
+        dataSource={data?.items ?? []}
         rowKey="id"
-        loading={loading}
+        loading={isValidating}
         pagination={{
           current: page,
-          total,
+          total: data?.total ?? 0,
           pageSize: 20,
           onChange: setPage,
           showTotal: (count) => t("common:pagination", { count }),

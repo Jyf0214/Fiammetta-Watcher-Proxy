@@ -5,7 +5,7 @@
  * 与 v1 代理 Key 完全隔离。
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
 import { Plus, Trash2, Copy, Shield, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +16,7 @@ import { ProCard } from "@/components/ui/ProCard";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -30,35 +31,22 @@ interface SystemKeyItem {
 
 export default function SystemKeysPage() {
   const { t } = useTranslation("system");
-  const [keys, setKeys] = useState<SystemKeyItem[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
+  const { data: keys, error, isLoading, mutate } = useApi<SystemKeyItem[]>("/api/admin/system-keys");
+
+  // 请求失败提示
+  useEffect(() => {
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [error, t]);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [newKeyVisible, setNewKeyVisible] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const fetchKeys = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/admin/system-keys", { signal: controller.signal });
-        const data: Record<string, any> = await res.json();
-        if (data.success && Array.isArray(data.data)) setKeys(data.data);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        message.error(t("common:error"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    };
-    fetchKeys();
-    return () => controller.abort();
-  }, [t, refreshKey]);
-
-  const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const handleCreate = async () => {
     try {
@@ -76,7 +64,7 @@ export default function SystemKeysPage() {
         form.resetFields();
         setNewKeyValue(data.data.key);
         setNewKeyVisible(true);
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error || t("sysKeyCreateFailed"));
       }
@@ -93,7 +81,7 @@ export default function SystemKeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("sysKeyDeleteSuccess"));
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error || t("sysKeyDeleteFailed"));
       }
@@ -112,7 +100,7 @@ export default function SystemKeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(enabled ? t("sysKeyToggleEnabled") : t("sysKeyToggleDisabled"));
-        handleRefresh();
+        mutate();
       } else {
         message.error(data.error || t("sysKeyOperationFailed"));
       }
@@ -189,7 +177,7 @@ export default function SystemKeysPage() {
     },
   ];
 
-  if (loading) {
+  if (isLoading) {
     return (
       <AdminLayout>
         <GlobalLoading size="large" />
@@ -221,7 +209,7 @@ export default function SystemKeysPage() {
         <ProCard>
           <ResponsiveTable
             columns={columns}
-            dataSource={keys}
+            dataSource={keys ?? []}
             rowKey="id"
             pagination={false}
           />

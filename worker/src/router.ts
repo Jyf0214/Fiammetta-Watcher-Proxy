@@ -148,6 +148,7 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
       rpmLimit: p.rpmLimit,
       tpmLimit: p.tpmLimit,
       forwardHeaders: p.forwardHeaders,
+      injectStreamOptions: p.injectStreamOptions ?? true,
       status: p.status as PlatformConfig["status"],
       failCount: p.failCount,
       lastFailAt: p.lastFailAt,

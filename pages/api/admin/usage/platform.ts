@@ -56,90 +56,46 @@ export default async function handler(
       orderBy: { createdAt: "desc" },
     });
 
-    // 通过 Prisma ORM 获取所有匹配的日志记录。
-    // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
-    // 必须分页循环拉取，否则统计只覆盖最早/最新 10000 条。
-    const PAGE_SIZE = 10000;
-    const logs: Array<{
-      platformId: string | null;
-      tokens: number;
-      promptTokens: number;
-      completionTokens: number;
-      ttft: number;
-      latency: number;
-      createdAt: number;
-      isError: boolean;
-    }> = [];
-    {
-      let skip = 0;
-      for (;;) {
-        const batch = await orm.requestLogs.findMany({
-          where,
-          select: {
-            platformId: true,
-            tokens: true,
-            promptTokens: true,
-            completionTokens: true,
-            ttft: true,
-            latency: true,
-            createdAt: true,
-            isError: true,
-          },
-          orderBy: { createdAt: "asc" },
-          take: PAGE_SIZE,
-          skip,
-        });
-        logs.push(...batch);
-        if (batch.length < PAGE_SIZE) break;
-        skip += PAGE_SIZE;
-      }
-    }
+    // 用 groupBy 在数据库层面完成聚合，避免分页拉取全表日志到内存。
+    // 注意：不能标注 any[]，否则会干扰 Prisma groupBy 泛型推断。
+    const grouped = await orm.requestLogs.groupBy({
+      by: ["platformId"],
+      where,
+      _count: { id: true },
+      _sum: {
+        tokens: true,
+        promptTokens: true,
+        completionTokens: true,
+        ttft: true,
+        latency: true,
+      },
+      _min: { createdAt: true },
+      _max: { createdAt: true },
+    });
+    // 错误请求数：groupBy 的 _count 不支持带 where 过滤，需单独按 isError 聚合一次
+    const errorGrouped = await orm.requestLogs.groupBy({
+      by: ["platformId"],
+      where: { ...where, isError: true },
+      _count: { id: true },
+    });
 
-    // 按 platformId 分组，手动计算聚合值
-    const grouped = new Map<string, typeof logs>();
-    for (const log of logs) {
-      const key = log.platformId || "unknown";
-      const arr = grouped.get(key);
-      if (arr) {
-        arr.push(log);
-      } else {
-        grouped.set(key, [log]);
-      }
-    }
+    const statsMap = new Map<string | null, typeof grouped[number]>(
+      grouped.map((g) => [g.platformId, g])
+    );
+    const errorMap = new Map<string | null, number>(
+      errorGrouped.map((g) => [g.platformId, g._count.id])
+    );
 
-    // 计算速率指标的辅助函数
-    function computeRates(logGroup: { tokens: number; promptTokens: number; completionTokens: number; ttft: number; latency: number; createdAt: number; isError: boolean }[]) {
-      const totalRequests = logGroup.length;
-      let totalTokens = 0;
-      let sumPromptTokens = 0;
-      let sumCompletionTokens = 0;
-      let sumTtft = 0;
-      let sumLatency = 0;
-      let errorCount = 0;
-      let minTtft = Infinity;
-      let maxTtft = 0;
-      let minLatency = Infinity;
-      let maxLatency = 0;
-      let firstRequestAt: number | null = null;
-      let lastRequestAt: number | null = null;
-
-      for (const log of logGroup) {
-        totalTokens += log.tokens;
-        sumPromptTokens += log.promptTokens;
-        sumCompletionTokens += log.completionTokens;
-        sumTtft += log.ttft;
-        sumLatency += log.latency;
-        if (log.isError) errorCount++;
-        if (log.ttft < minTtft) minTtft = log.ttft;
-        if (log.ttft > maxTtft) maxTtft = log.ttft;
-        if (log.latency < minLatency) minLatency = log.latency;
-        if (log.latency > maxLatency) maxLatency = log.latency;
-        if (firstRequestAt === null || log.createdAt < firstRequestAt) firstRequestAt = log.createdAt;
-        if (lastRequestAt === null || log.createdAt > lastRequestAt) lastRequestAt = log.createdAt;
-      }
-
-      const avgTtft = totalRequests > 0 ? Math.round(sumTtft / totalRequests) : 0;
-      const avgDuration = totalRequests > 0 ? Math.round(sumLatency / totalRequests) : 0;
+    // 由 DB 层 groupBy 结果计算速率指标（口径与原分页聚合一致）
+    function computeRates(g: typeof grouped[number], errorCount: number) {
+      const totalRequests = g._count.id;
+      const totalTokens = g._sum.tokens ?? 0;
+      const sumPromptTokens = g._sum.promptTokens ?? 0;
+      const sumCompletionTokens = g._sum.completionTokens ?? 0;
+      const avgTtft = totalRequests > 0 ? Math.round((g._sum.ttft ?? 0) / totalRequests) : 0;
+      const avgDuration = totalRequests > 0 ? Math.round((g._sum.latency ?? 0) / totalRequests) : 0;
+      const firstRequestAt = g._min.createdAt ?? null;
+      const lastRequestAt = g._max.createdAt ?? null;
 
       let timeSpanSeconds = 0;
       if (firstRequestAt != null && lastRequestAt != null) {
@@ -168,8 +124,8 @@ export default async function handler(
 
     // 合并平台信息和统计数据
     const result = allPlatforms.map((p) => {
-      const logGroup = grouped.get(p.id);
-      const rates = logGroup ? computeRates(logGroup) : {
+      const g = statsMap.get(p.id);
+      const rates = g ? computeRates(g, errorMap.get(p.id) ?? 0) : {
         totalRequests: 0,
         totalTokens: 0,
         promptTokens: 0,
@@ -195,9 +151,9 @@ export default async function handler(
     });
 
     // 添加 "未知平台" 条目（platformId 为 null 的请求）
-    const unknownGroup = grouped.get("unknown");
-    if (unknownGroup && unknownGroup.length > 0) {
-      const rates = computeRates(unknownGroup);
+    const unknownGroup = statsMap.get(null);
+    if (unknownGroup) {
+      const rates = computeRates(unknownGroup, errorMap.get(null) ?? 0);
       result.push({
         id: "unknown",
         name: "未知平台",

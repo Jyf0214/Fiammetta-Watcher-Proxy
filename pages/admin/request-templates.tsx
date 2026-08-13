@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Form, Input, Select, Modal, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -16,6 +16,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 
 interface RequestTemplate {
@@ -61,8 +62,6 @@ const EXAMPLE_BODIES = [
 
 export default function RequestTemplatesPage() {
   const { t } = useTranslation("system");
-  const [templates, setTemplates] = useState<RequestTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<RequestTemplate | null>(null);
   const [saving, setSaving] = useState(false);
@@ -71,28 +70,15 @@ export default function RequestTemplatesPage() {
   const [bodyJsonError, setBodyJsonError] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const fetchTemplates = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch("/api/admin/request-templates", { signal });
-      const data = await res.json() as Record<string, any>;
-      if (data.success) {
-        setTemplates(data.data);
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
+  const { data: templates, error, isLoading, mutate } = useApi<RequestTemplate[]>("/api/admin/request-templates");
 
+  // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
-    const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async 数据获取在 await 后 setState，compiler lint 误报（facebook/react#34905）
-    fetchTemplates(controller.signal);
-    return () => controller.abort();
-  }, [fetchTemplates]);
+    if (error && error.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("common:error"));
+    }
+  }, [error, t]);
 
   const openCreateModal = () => {
     setEditingTemplate(null);
@@ -154,7 +140,7 @@ export default function RequestTemplatesPage() {
         if (data.success) {
           message.success(t("rtUpdateSuccess"));
           setModalOpen(false);
-          fetchTemplates();
+          mutate();
         } else {
           message.error(data.error);
         }
@@ -174,7 +160,7 @@ export default function RequestTemplatesPage() {
         if (data.success) {
           message.success(t("rtCreateSuccess"));
           setModalOpen(false);
-          fetchTemplates();
+          mutate();
         } else {
           message.error(data.error);
         }
@@ -196,7 +182,7 @@ export default function RequestTemplatesPage() {
       });
       const data = await res.json() as Record<string, any>;
       if (data.success) {
-        fetchTemplates();
+        mutate();
       }
     } catch {
       // 静默失败
@@ -219,7 +205,7 @@ export default function RequestTemplatesPage() {
           const data = await res.json() as Record<string, any>;
           if (data.success) {
             message.success(t("rtDeleteSuccess"));
-            fetchTemplates();
+            mutate();
           } else {
             message.error(data.error);
           }
@@ -245,7 +231,7 @@ export default function RequestTemplatesPage() {
     setBodyJsonError(false);
   };
 
-  if (loading) {
+  if (isLoading && !templates) {
     return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
   }
 
@@ -263,7 +249,7 @@ export default function RequestTemplatesPage() {
           }
         />
 
-        {templates.length === 0 ? (
+        {(templates ?? []).length === 0 ? (
           <ProCard>
             <div className="text-center py-12 text-zinc-400">
               <FileText size={48} className="mx-auto mb-4 opacity-30" />
@@ -275,7 +261,7 @@ export default function RequestTemplatesPage() {
           </ProCard>
         ) : (
           <div className="space-y-3">
-            {templates.map((tpl) => (
+            {(templates ?? []).map((tpl) => (
               <ProCard key={tpl.id}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">

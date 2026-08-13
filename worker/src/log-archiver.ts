@@ -11,8 +11,14 @@
 import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "./config";
 
-/** 日志保留天数，超过此天数的日志将被聚合归档 */
-const RETENTION_DAYS = 30;
+/**
+ * 日志保留天数，超过此天数的日志将被聚合归档
+ *
+ * 导出供 pages/api/admin/stats.ts 复用：仪表盘统计按同一界限切分
+ * （date >= 今日零点 - RETENTION_DAYS 的明细仍留在 request_logs，更早的读 daily_stats），
+ * 保证"未归档明细 + 已归档历史"不重复、不遗漏。
+ */
+export const RETENTION_DAYS = 30;
 
 /** 每批处理的天数（防止一次性处理过多数据导致超时） */
 const BATCH_SIZE = 7;

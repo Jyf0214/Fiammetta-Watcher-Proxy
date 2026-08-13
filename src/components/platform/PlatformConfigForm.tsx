@@ -240,6 +240,15 @@ export function PlatformConfigForm({
             placeholder={t("forwardHeadersPlaceholder")}
           />
         </Form.Item>
+        <Form.Item
+          name="injectStreamOptions"
+          label={t("injectStreamOptions")}
+          valuePropName="checked"
+          extra={<span className={itemDesc}>{t("injectStreamOptionsDesc")}</span>}
+          className="!mt-4 !mb-0"
+        >
+          <Switch />
+        </Form.Item>
       </div>
 
       {/* 操作区 */}

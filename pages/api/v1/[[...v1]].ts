@@ -289,7 +289,10 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
 
     let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
     try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
-    if (isStream) upstreamBody.stream_options = { include_usage: true };
+    // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
+    // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
+    // 用户可在平台管理页关闭此选项以兼容这类上游
+    if (isStream && cur.injectStreamOptions !== false) upstreamBody.stream_options = { include_usage: true };
 
     const fwd: Record<string, string> = {};
     // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），

@@ -395,8 +395,10 @@ export async function proxyV1RequestLite(
   const upstreamBody: Record<string, unknown> = { ...body, model: route.targetModel };
 
   const isStream = config.supportsStreaming !== false && body.stream === true;
-  // 流式请求注入 stream_options（与全量版一致，保证 usage 回传）
-  if (isStream) {
+  // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
+  // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
+  // 用户可在平台管理页关闭此选项以兼容这类上游
+  if (isStream && route.platform.injectStreamOptions !== false) {
     upstreamBody.stream_options = { include_usage: true };
   }
 

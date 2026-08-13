@@ -22,6 +22,8 @@ export interface PlatformConfig {
   tpmLimit: number | null;
   /** 透传给上游的下游请求头白名单（JSON 字符串数组） */
   forwardHeaders: string;
+  /** 流式请求时是否向请求体注入 stream_options:{include_usage:true}；部分严格后端（Mistral 等）拒绝未知字段，平台需手动关闭 */
+  injectStreamOptions?: boolean;
   status: PlatformStatus;
   failCount: number;
   lastFailAt: number | null;

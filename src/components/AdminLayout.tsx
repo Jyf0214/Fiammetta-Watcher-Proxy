@@ -23,7 +23,6 @@ import {
   WifiOff,
 } from "lucide-react";
 import { message } from "antd";
-import GlobalLoading from "@/components/Loading";
 import "@/lib/i18n";
 
 // ---------- 类型定义 ----------
@@ -152,17 +151,28 @@ function SidebarUserMenu({
   return (
     <div className="mt-auto pt-4 border-t border-zinc-200 dark:border-zinc-800">
       <div className="px-3 py-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 mb-3">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm">
-            {username.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-              {username}
+        {username ? (
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm">
+              {username.charAt(0).toUpperCase()}
             </div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">{t("administrator")}</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                {username}
+              </div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">{t("administrator")}</div>
+            </div>
           </div>
-        </div>
+        ) : (
+          // 认证结果未返回时的轻量占位，避免用户名区空白闪烁
+          <div className="flex items-center gap-3" aria-busy="true">
+            <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
+            <div className="flex-1 space-y-2">
+              <div className="h-3.5 w-24 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
+              <div className="h-3 w-16 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
+            </div>
+          </div>
+        )}
       </div>
       <button
         onClick={onLogout}
@@ -238,7 +248,6 @@ export default function AdminLayout({
   const [username, setUsername] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [healthStatus, setHealthStatus] = useState<{ status: string; dbType: string } | null>(null);
 
@@ -247,7 +256,9 @@ export default function AdminLayout({
   const open = useCallback(() => setSidebarOpen(true), []);
   const close = useCallback(() => setSidebarOpen(false), []);
 
-  // 修复：添加 AbortController 防止组件卸载后的竞态请求
+  // 认证检查：与页面渲染并行执行，不再门控整页。
+  // 布局立即渲染（顶栏/侧边栏/children 即刻可见），页面自身的数据请求随之并行发起；
+  // 认证结果到达后若未通过，再跳转登录页。失败路径全部兜底跳转，避免未认证留白。
   useEffect(() => {
     if (isLoginPage) return;
 
@@ -269,10 +280,6 @@ export default function AdminLayout({
         // 忽略 AbortError，其他错误才跳转
         if (err instanceof DOMException && err.name === "AbortError") return;
         router.push("/admin/login");
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
       }
     };
 
@@ -342,15 +349,6 @@ export default function AdminLayout({
   // 登录页不使用管理后台布局
   if (isLoginPage) {
     return <>{children}</>;
-  }
-
-  // 加载中显示旋转图标
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-        <GlobalLoading />
-      </div>
-    );
   }
 
   const sidebarContent = (
