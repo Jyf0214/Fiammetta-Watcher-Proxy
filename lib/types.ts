@@ -14,6 +14,8 @@ export interface PlatformConfig {
   baseUrl: string;
   /** 平台 API 密钥数组（命名对象 [{name, key, whitelisted}] 的 key 值），round-robin 轮询 */
   apiKeys: string[];
+  /** 密钥对象数组（含 enabled/errorCount 等元数据），与 apiKeys 同源 */
+  apiKeyObjects?: PlatformApiKeyObject[];
   type: PlatformType;
   enabled: boolean;
   priority: number;
@@ -32,6 +34,15 @@ export interface PlatformConfig {
   createdAt?: number;
   /** 更新时间（Unix 秒时间戳） */
   updatedAt?: number;
+}
+
+/** 密钥对象（含元数据） */
+export interface PlatformApiKeyObject {
+  name: string;
+  key: string;
+  whitelisted?: boolean;
+  enabled?: boolean;
+  errorCount?: number;
 }
 
 // ==================== 模型映射类型 ====================

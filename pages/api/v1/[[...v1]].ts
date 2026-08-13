@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept, banKey } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
@@ -360,6 +360,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       // 平台错误统计，否则评分只见最终成功平台、错误率被严重低估
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upRes.status}（已封禁该 Key 并重试切换）`, db: dummyDb, env }).catch(() => {});
       await banKey(curKey, undefined, cur.id, env?.KV);
+      // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
+      void recordKeyError(curKey, isEmptyResponse ? 502 : upRes.status, cur.id, dummyDb, env).catch(() => {});
       console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);

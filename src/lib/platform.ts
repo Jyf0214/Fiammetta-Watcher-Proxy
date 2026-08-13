@@ -7,6 +7,8 @@ export interface NamedApiKey {
   name: string;
   key: string;
   whitelisted?: boolean;
+  enabled?: boolean;
+  errorCount?: number;
 }
 
 /** 解析平台密钥列表（兼容 JSON 字符串与已解析数组两种形态）；namePrefix 为默认密钥名前缀 */
@@ -25,12 +27,14 @@ export function parseNamedKeys(platform: Platform | null, namePrefix = "Key"): N
   }
   if (Array.isArray(arr) && arr.length > 0) {
     if (typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
-      arr.forEach((item: { name?: string; key: string; whitelisted?: boolean }) => {
+      arr.forEach((item: { name?: string; key: string; whitelisted?: boolean; enabled?: boolean; errorCount?: number }) => {
         if (item && typeof item.key === "string" && item.key.trim()) {
           parsed.push({
             name: item.name || `${namePrefix}${parsed.length + 1}`,
             key: item.key,
             whitelisted: !!item.whitelisted,
+            enabled: item.enabled !== false,
+            errorCount: typeof item.errorCount === "number" ? item.errorCount : 0,
           });
         }
       });

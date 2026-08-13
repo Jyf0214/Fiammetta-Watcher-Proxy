@@ -11,6 +11,7 @@ import {
   ShieldOff,
   Trash2,
   ClipboardPaste,
+  AlertCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
@@ -31,12 +32,14 @@ export function PlatformConfigForm({
   onUpdateKeyValue,
   onCopyKey,
   onToggleWhitelist,
+  onToggleKey,
   onSubmit,
   submitting,
   onDelete,
   deleting,
   onToggle,
   toggling,
+  togglingKeyIndex,
 }: {
   form: ReturnType<typeof Form.useForm>[0];
   editing: Platform | null;
@@ -48,12 +51,14 @@ export function PlatformConfigForm({
   onUpdateKeyValue: (i: number, v: string) => void;
   onCopyKey: (k: string) => void;
   onToggleWhitelist: (i: number) => void;
+  onToggleKey: (i: number, enabled: boolean) => void;
   onSubmit: () => void;
   submitting: boolean;
   onDelete: () => void;
   deleting: boolean;
   onToggle: (enabled: boolean) => void;
   toggling: boolean;
+  togglingKeyIndex: number | null;
 }) {
   const { t } = useTranslation("platform");
 
@@ -183,6 +188,30 @@ export function PlatformConfigForm({
                   {namedKey.whitelisted ? t("whitelistRemove") : t("whitelistAdd")}
                 </span>
               </button>
+              {/* 编辑模式下：错误计数 + 启停开关 */}
+              {editing && namedKey.key && (
+                <>
+                  {namedKey.errorCount && namedKey.errorCount > 0 ? (
+                    <span
+                      className={`shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+                        namedKey.enabled === false
+                          ? "text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/30"
+                          : "text-orange-500 bg-orange-50 dark:text-orange-400 dark:bg-orange-900/20"
+                      }`}
+                      title={t("errorCountTip")}
+                    >
+                      <AlertCircle size={11} className="inline" />
+                      {namedKey.errorCount}/5
+                    </span>
+                  ) : null}
+                  <Switch
+                    checked={namedKey.enabled !== false}
+                    loading={togglingKeyIndex === index}
+                    onChange={(checked) => onToggleKey(index, checked)}
+                    className="!h-[20px] !w-[36px]"
+                  />
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => onCopyKey(namedKey.key)}

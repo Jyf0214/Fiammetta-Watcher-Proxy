@@ -223,7 +223,8 @@
     "typeImage": "图片",
     "typeAudio": "音频",
     "typeVideo": "视频",
-    "typeModeration": "审核"
+    "typeModeration": "审核",
+    "errorCountTip": "连续错误计数（429 算 1 次，401 算 2 次，其余算 1 次），达 5 次自动禁用。手动启用后清零"
   },
   "apikey": {
     "key": "API Key",

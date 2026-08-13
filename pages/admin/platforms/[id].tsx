@@ -35,6 +35,7 @@ export default function PlatformDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [togglingKeyIndex, setTogglingKeyIndex] = useState<number | null>(null);
   const [unbanning, setUnbanning] = useState(false);
 
   // 模型操作状态
@@ -191,6 +192,37 @@ export default function PlatformDetailPage() {
     message.info(newState ? t("whitelistAdded") : t("whitelistRemoved"));
   };
 
+  const handleToggleKey = async (index: number, enabled: boolean) => {
+    if (!id || isNew) return;
+    const targetKey = namedKeys[index]?.key;
+    if (!targetKey) return;
+    setTogglingKeyIndex(index);
+    try {
+      const res = await fetch(`/api/admin/platforms/${id}/keys`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: targetKey, enabled }),
+      });
+      const data = (await res.json()) as Record<string, any>;
+      if (data.success) {
+        // 更新本地状态
+        const next = [...namedKeys];
+        next[index] = { ...next[index], enabled };
+        if (enabled) next[index].errorCount = 0;
+        setNamedKeys(next);
+        message.success(data.message);
+        mutateDetail();
+        mutateList();
+      } else {
+        message.error(data.error || t("common:error"));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setTogglingKeyIndex(null);
+    }
+  };
+
   // ---------- 保存 / 删除 / 启停 ----------
   const handleSubmit = async () => {
     try {
@@ -203,11 +235,13 @@ export default function PlatformDetailPage() {
       setSubmitting(true);
       if (validKeys.length > 0) {
         values.apiKeys = JSON.stringify(
-          validKeys.map((k) => ({
-            name: k.name,
-            key: k.key,
-            ...(k.whitelisted ? { whitelisted: true } : {}),
-          }))
+          validKeys.map((k) => {
+            const obj: Record<string, unknown> = { name: k.name, key: k.key };
+            if (k.whitelisted) obj.whitelisted = true;
+            if (k.enabled === false) obj.enabled = false;
+            if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+            return obj;
+          })
         );
       }
       if (typeof values.forwardHeaders === "string") {
@@ -456,12 +490,14 @@ export default function PlatformDetailPage() {
       onUpdateKeyValue={updateKeyValue}
       onCopyKey={copyKeyValue}
       onToggleWhitelist={handleToggleWhitelist}
+      onToggleKey={handleToggleKey}
       onSubmit={handleSubmit}
       submitting={submitting}
       onDelete={handleDelete}
       deleting={deleting}
       onToggle={handleToggle}
       toggling={toggling}
+      togglingKeyIndex={togglingKeyIndex}
     />
   );
 

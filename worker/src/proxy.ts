@@ -10,7 +10,7 @@
  */
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
-import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted } from "./platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
 import { recordSuccess, recordFailure } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
@@ -677,6 +677,8 @@ export async function proxyV1Request(
       }
       // 封禁该 Key 5 分钟（内存 + KV 持久化，管理后台可见）
       await banKey(currentKey, undefined, currentPlatform.id, env.KV);
+      // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
+      ctx.waitUntil(recordKeyError(currentKey, isEmptyResponse ? 502 : upstreamResponse.status, currentPlatform.id, env.DB, workerEnv).catch(() => {}));
       console.log(
         `${logTag} 上游 ${upstreamResponse.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${currentPlatform.name}, key: fingerprint:${keyFingerprint(currentKey)}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
       );

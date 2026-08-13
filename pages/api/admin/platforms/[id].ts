@@ -244,14 +244,25 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
               "key" in parsed[0]
             ) {
               // 命名密钥格式
-              const validKeys = parsed.filter(
-                (k: unknown): k is { name: string; key: string } =>
-                  typeof k === "object" &&
-                  k !== null &&
-                  typeof (k as Record<string, unknown>).key === "string" &&
-                  ((k as Record<string, unknown>).key as string).trim().length > 0 &&
-                  ((k as Record<string, unknown>).key as string).length <= 500
-              );
+              const validKeys = parsed
+                .filter(
+                  (k: unknown): k is Record<string, unknown> =>
+                    typeof k === "object" &&
+                    k !== null &&
+                    typeof (k as Record<string, unknown>).key === "string" &&
+                    ((k as Record<string, unknown>).key as string).trim().length > 0 &&
+                    ((k as Record<string, unknown>).key as string).length <= 500
+                )
+                .map((k) => {
+                  const obj: Record<string, unknown> = {
+                    name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : "Key",
+                    key: (k.key as string).trim(),
+                  };
+                  if (k.whitelisted === true) obj.whitelisted = true;
+                  if (k.enabled === false) obj.enabled = false;
+                  if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+                  return obj;
+                });
               updateData.apiKeys = JSON.stringify(validKeys);
             } else {
               // 旧格式：字符串数组

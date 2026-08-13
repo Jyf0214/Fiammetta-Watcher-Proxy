@@ -5,7 +5,7 @@
  * 请求时按 round-robin 轮询，确保各密钥均匀分摊调用量。
  */
 
-import type { PlatformConfig } from "@/lib/types";
+import type { PlatformConfig, PlatformApiKeyObject } from "@/lib/types";
 import type { WorkerEnv } from "./config";
 import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus } from "@/lib/key-status";
 
@@ -85,6 +85,16 @@ export function isKeyWhitelisted(key: string): boolean {
 const keyCooldowns = new Map<string, number>();
 
 const DEFAULT_KEY_BAN_MS = 5 * 60 * 1000;
+
+/**
+ * 持久化禁用的密钥集合（内存态）
+ *
+ * 错误计数达阈值后自动禁用，加入此集合。
+ * 用户手动启用后从此集合移除。
+ * 与 keyCooldowns 不同：keyCooldowns 有过期时间（5分钟自动恢复），
+ * disabledKeys 无过期，只能手动启用恢复。
+ */
+const disabledKeys = new Set<string>();
 
 /** 平台维度封禁键：`platformId:keyFingerprint`（platformId 为空时兼容无平台调用） */
 function banKeyId(platformId: string | undefined, key: string): string {
@@ -173,7 +183,17 @@ export async function loadKeyStatusFromKV(
     let loaded = 0;
     for (const p of platforms) {
       const statuses = await readPlatformKeyStatus(kv, p.id);
-      if (Object.keys(statuses).length === 0) continue;
+      if (Object.keys(statuses).length === 0) {
+        // 即使无 KV 状态也要加载持久化禁用的密钥
+        const keyObjects = parseApiKeyObjects(p.apiKeys);
+        for (const ko of keyObjects) {
+          if (ko.enabled === false) {
+            disabledKeys.add(banKeyId(p.id, ko.key));
+            loaded++;
+          }
+        }
+        continue;
+      }
 
       const keys = getAllKeys({
         id: p.id,
@@ -189,6 +209,14 @@ export async function loadKeyStatusFromKV(
           whitelistedKeyCooldowns.set(banKeyId(p.id, k), st.expireAt);
         }
         loaded++;
+      }
+
+      // 同时加载持久化禁用的密钥
+      const keyObjects = parseApiKeyObjects(p.apiKeys);
+      for (const ko of keyObjects) {
+        if (ko.enabled === false) {
+          disabledKeys.add(banKeyId(p.id, ko.key));
+        }
       }
     }
 
@@ -227,35 +255,36 @@ export function getNextKey(platform: PlatformConfig): string | null {
 
   const counter = counters.get(platform.id) ?? 0;
 
-  // 优先级1：非白名单、未封禁、未降级的 Key
+  // 优先级1：非白名单、未封禁、未降级、未持久化禁用的 Key
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
     if (
       !isKeyWhitelisted(key) &&
       !isKeyBanned(key, platform.id) &&
-      !isKeyDeprioritized(key, platform.id)
+      !isKeyDeprioritized(key, platform.id) &&
+      !isKeyDisabled(key, platform.id)
     ) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
   }
 
-  // 优先级2：白名单中未降级的 Key
+  // 优先级2：白名单中未降级、未持久化禁用的 Key
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id)) {
+    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
   }
 
-  // 优先级3：白名单中已降级的 Key（最后手段）
+  // 优先级3：白名单中已降级但未持久化禁用的 Key（最后手段）
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id)) {
+    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -278,31 +307,34 @@ export function getRandomKeyExcept(
 ): string | null {
   const allKeys = getAllKeys(platform);
 
-  // 优先级1：非白名单、未封禁、未降级
+  // 优先级1：非白名单、未封禁、未降级、未持久化禁用
   const tier1 = allKeys.filter(
     (k) =>
       !excludeKeys.has(k) &&
       !isKeyWhitelisted(k) &&
       !isKeyBanned(k, platform.id) &&
-      !isKeyDeprioritized(k, platform.id)
+      !isKeyDeprioritized(k, platform.id) &&
+      !isKeyDisabled(k, platform.id)
   );
   if (tier1.length > 0) return tier1[Math.floor(Math.random() * tier1.length)];
 
-  // 优先级2：白名单中未降级
+  // 优先级2：白名单中未降级、未持久化禁用
   const tier2 = allKeys.filter(
     (k) =>
       !excludeKeys.has(k) &&
       isKeyWhitelisted(k) &&
-      !isKeyDeprioritized(k, platform.id)
+      !isKeyDeprioritized(k, platform.id) &&
+      !isKeyDisabled(k, platform.id)
   );
   if (tier2.length > 0) return tier2[Math.floor(Math.random() * tier2.length)];
 
-  // 优先级3：白名单中已降级
+  // 优先级3：白名单中已降级但未持久化禁用
   const tier3 = allKeys.filter(
     (k) =>
       !excludeKeys.has(k) &&
       isKeyWhitelisted(k) &&
-      isKeyDeprioritized(k, platform.id)
+      isKeyDeprioritized(k, platform.id) &&
+      !isKeyDisabled(k, platform.id)
   );
   if (tier3.length > 0) return tier3[Math.floor(Math.random() * tier3.length)];
 
@@ -338,4 +370,194 @@ export function parseApiKeys(raw: string | null | undefined): string[] {
     // JSON 解析失败，忽略
   }
   return [];
+}
+
+/**
+ * 解析 apiKeys JSON 字符串为密钥对象数组（含 enabled/errorCount 等元数据）
+ */
+export function parseApiKeyObjects(raw: string | null | undefined): PlatformApiKeyObject[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (k): k is Record<string, unknown> =>
+          typeof k === "object" && k !== null && typeof k.key === "string" && (k.key as string).trim().length > 0
+      )
+      .map((k) => ({
+        name: typeof k.name === "string" ? k.name : "Key",
+        key: (k.key as string).trim(),
+        whitelisted: k.whitelisted === true,
+        enabled: k.enabled !== false,
+        errorCount: typeof k.errorCount === "number" ? k.errorCount : 0,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+// ==================== 密钥错误计数与自动禁用 ====================
+
+/** 错误计数阈值：达到此值后自动禁用密钥 */
+const KEY_ERROR_THRESHOLD = 5;
+
+/**
+ * 根据上游错误状态码计算错误计数增量
+ *
+ * 429 算 1 次，401 算 2 次，其余可重试错误（403/空响应等）算 1 次
+ */
+function errorIncrement(status: number): number {
+  if (status === 401) return 2;
+  if (status === 429) return 1;
+  return 1;
+}
+
+/**
+ * 记录密钥错误并更新数据库中的 errorCount
+ *
+ * - 累加错误计数（429→+1, 401→+2, 其余→+1）
+ * - 达到 5 次后自动将密钥 enabled 设为 false，不再变更 errorCount
+ * - 已禁用的密钥再次调用不会变更 errorCount
+ *
+ * 同时写入内存禁用集合，保证即时生效（下一次密钥选择立即跳过）
+ */
+export async function recordKeyError(
+  key: string,
+  upstreamStatus: number,
+  platformId: string,
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<void> {
+  try {
+    const { createDb } = await import("@/lib/prisma");
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const platform = await prisma.platforms.findFirst({
+      where: { id: platformId },
+      select: { apiKeys: true },
+    });
+    if (!platform?.apiKeys) return;
+
+    const keys = parseApiKeyObjects(platform.apiKeys);
+    const target = keys.find((k) => k.key === key);
+    if (!target) return;
+
+    // 已禁用的密钥不再变更错误计数
+    if (target.enabled === false) return;
+
+    const increment = errorIncrement(upstreamStatus);
+    const newCount = (target.errorCount ?? 0) + increment;
+
+    if (newCount >= KEY_ERROR_THRESHOLD) {
+      target.enabled = false;
+      target.errorCount = newCount;
+    } else {
+      target.errorCount = newCount;
+    }
+
+    // 更新整个 apiKeys JSON 字段
+    const updatedJson = JSON.stringify(keys.map((k) => {
+      const obj: Record<string, unknown> = { name: k.name, key: k.key };
+      if (k.whitelisted) obj.whitelisted = true;
+      if (k.enabled === false) obj.enabled = false;
+      if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
+      return obj;
+    }));
+
+    await prisma.platforms.update({
+      where: { id: platformId },
+      data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
+    });
+
+    // 内存层即时禁用
+    if (target.enabled === false) {
+      disabledKeys.add(banKeyId(platformId, key));
+      console.log(
+        `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数达 ${newCount}，已自动禁用（平台 ${platformId}）`
+      );
+    } else {
+      console.log(
+        `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数 ${newCount}/${KEY_ERROR_THRESHOLD}（平台 ${platformId}）`
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[platform-keys] 记录密钥错误失败:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+/**
+ * 手动启用密钥：清零错误计数并设为 enabled
+ *
+ * 同时清除内存禁用标记，即时生效
+ */
+export async function enableKey(
+  key: string,
+  platformId: string,
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<void> {
+  try {
+    const { createDb } = await import("@/lib/prisma");
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const platform = await prisma.platforms.findFirst({
+      where: { id: platformId },
+      select: { apiKeys: true },
+    });
+    if (!platform?.apiKeys) return;
+
+    const keys = parseApiKeyObjects(platform.apiKeys);
+    const target = keys.find((k) => k.key === key);
+    if (!target) return;
+
+    target.enabled = true;
+    target.errorCount = 0;
+
+    const updatedJson = JSON.stringify(keys.map((k) => {
+      const obj: Record<string, unknown> = { name: k.name, key: k.key };
+      if (k.whitelisted) obj.whitelisted = true;
+      if (k.enabled === false) obj.enabled = false;
+      if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
+      return obj;
+    }));
+
+    await prisma.platforms.update({
+      where: { id: platformId },
+      data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
+    });
+
+    // 清除内存禁用标记
+    disabledKeys.delete(banKeyId(platformId, key));
+    console.log(`[platform-keys] 密钥 ${keyFingerprint(key)} 已手动启用，错误计数清零（平台 ${platformId}）`);
+  } catch (err) {
+    console.error(
+      `[platform-keys] 启用密钥失败:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+/** 检查密钥是否已被持久化禁用（错误计数达阈值） */
+export function isKeyDisabled(key: string, platformId?: string): boolean {
+  return disabledKeys.has(banKeyId(platformId, key));
+}
+
+/**
+ * 清除密钥的持久化禁用标记（仅内存层，不操作数据库）
+ *
+ * 管理后台路由直接操作数据库 JSON 字段后调用此函数同步内存状态。
+ */
+export function clearKeyDisabled(key: string, platformId: string): void {
+  disabledKeys.delete(banKeyId(platformId, key));
+}
+
+/**
+ * 标记密钥为持久化禁用（仅内存层，不操作数据库）
+ *
+ * 管理后台路由直接操作数据库 JSON 字段后调用此函数同步内存状态。
+ */
+export function markKeyDisabled(key: string, platformId: string): void {
+  disabledKeys.add(banKeyId(platformId, key));
 }

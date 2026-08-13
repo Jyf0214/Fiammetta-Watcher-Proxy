@@ -9,7 +9,7 @@
  */
 
 import { routeRequestLite } from "./router-lite";
-import { getNextKey } from "./platform-keys";
+import { getNextKey, recordKeyError } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders } from "./forward-headers";
@@ -514,11 +514,12 @@ export async function proxyV1RequestLite(
       workerEnv,
       upstreamController,
       upstreamTimeoutId,
-      anthropicInputEstimate
+      anthropicInputEstimate,
+      currentKey
     );
   }
 
-  // ── 非 2xx：真实透传（不重试、不封禁、不熔断） + 错误日志 ──
+  // ── 非 2xx：真实透传（不重试、不熔断） + 错误日志 + 错误计数 ──
   let errorText = "";
   try {
     errorText = await upstreamResponse.text();
@@ -526,6 +527,11 @@ export async function proxyV1RequestLite(
     // 读取错误体失败（如 signal 超时），保留空错误体
   }
   clearTimeout(upstreamTimeoutId);
+
+  // 累加密钥错误计数并持久化（仅对 429/401/403 密钥相关错误计数，达 5 次自动禁用）
+  if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 403)) {
+    ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
+  }
 
   try {
     await recordRequestLog({
@@ -583,7 +589,8 @@ async function handleUpstreamResponseLite(
   workerEnv: WorkerEnv,
   upstreamController: AbortController,
   upstreamTimeoutId: ReturnType<typeof setTimeout>,
-  anthropicInputEstimate: number
+  anthropicInputEstimate: number,
+  currentKey: string
 ): Promise<Response> {
   // 流式响应（SSE）
   if (isStream) {
@@ -631,6 +638,10 @@ async function handleUpstreamResponseLite(
         });
       } catch (logError) {
         console.error("[proxy-lite] 日志写入失败:", logError);
+      }
+      // 空响应也计入错误计数
+      if (currentKey) {
+        ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
       return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
     }
@@ -774,6 +785,10 @@ async function handleUpstreamResponseLite(
       } catch (logError) {
         console.error("[proxy-lite] 日志写入失败:", logError);
       }
+      // 空响应也计入错误计数
+      if (currentKey) {
+        ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
+      }
       return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
     }
 
@@ -866,6 +881,10 @@ async function handleUpstreamResponseLite(
       });
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
+    }
+    // 空响应也计入错误计数
+    if (currentKey) {
+      ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
     }
     return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
   }

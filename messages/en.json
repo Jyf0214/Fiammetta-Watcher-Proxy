@@ -223,7 +223,8 @@
     "typeImage": "Image",
     "typeAudio": "Audio",
     "typeVideo": "Video",
-    "typeModeration": "Moderation"
+    "typeModeration": "Moderation",
+    "errorCountTip": "Consecutive error count (429 = 1, 401 = 2, others = 1). Auto-disabled at 5. Manual enable resets to 0"
   },
   "apikey": {
     "key": "API Key",

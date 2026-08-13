@@ -34,6 +34,7 @@ vi.mock("../platform-keys", () => ({
       return [];
     }
   }),
+  parseApiKeyObjects: vi.fn(() => []),
   getNextKey: vi.fn((platform: { apiKeys: string[] }) => platform.apiKeys[0] ?? null),
 }));
 

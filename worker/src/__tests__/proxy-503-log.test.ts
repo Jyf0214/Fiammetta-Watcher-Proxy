@@ -42,6 +42,8 @@ vi.mock("../platform-keys", () => ({
   isKeyBanned: vi.fn(() => false),
   isKeyDeprioritized: vi.fn(() => false),
   isKeyWhitelisted: vi.fn(() => false),
+  isKeyDisabled: vi.fn(() => false),
+  recordKeyError: vi.fn(async () => {}),
   parseApiKeys: vi.fn(() => ["sk-key1", "sk-key2"]),
 }));
 

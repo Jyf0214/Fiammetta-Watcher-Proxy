@@ -14,7 +14,7 @@
 import { createDb, getDbKind } from "@/lib/prisma";
 import { detectModelType } from "@/lib/detect-model-type";
 import type { WorkerEnv } from "./config";
-import { parseApiKeys, getNextKey } from "./platform-keys";
+import { parseApiKeys, parseApiKeyObjects, getNextKey } from "./platform-keys";
 import { isSafeUrl } from "@/lib/admin-security";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -119,6 +119,7 @@ async function fetchPlatformModels(platform: {
     name: platform.name,
     baseUrl: platform.baseUrl,
     apiKeys: parsedKeys,
+    apiKeyObjects: parseApiKeyObjects(platform.apiKeys),
     type: "openai",
     enabled: true,
     priority: 0,

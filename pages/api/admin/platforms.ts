@@ -140,11 +140,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
               } else if (typeof k === "object" && k !== null && typeof k.key === "string") {
                 if (k.key.trim().length > 0 && k.key.length <= 500) {
-                  parsedApiKeys.push({
+                  const obj: { name: string; key: string; whitelisted?: boolean; enabled?: boolean; errorCount?: number } = {
                     name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : `密钥${parsedApiKeys.length + 1}`,
                     key: k.key.trim(),
-                    ...(k.whitelisted === true ? { whitelisted: true } : {}),
-                  });
+                  };
+                  if (k.whitelisted === true) obj.whitelisted = true;
+                  if (k.enabled === false) obj.enabled = false;
+                  if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+                  parsedApiKeys.push(obj);
                 } else {
                   invalidCount++;
                 }

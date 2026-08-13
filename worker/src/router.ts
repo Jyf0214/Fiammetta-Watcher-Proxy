@@ -9,7 +9,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
-import { parseApiKeys } from "./platform-keys";
+import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import { selectPlatform, cleanupStaleBreakers, syncCircuitBreakersFromDatabase } from "./load-balancer";
 import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
 import { getConfig } from "./config";
@@ -141,6 +141,7 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
       name: p.name,
       baseUrl: p.baseUrl,
       apiKeys: parseApiKeys(p.apiKeys),
+      apiKeyObjects: parseApiKeyObjects(p.apiKeys),
       type: p.type as PlatformConfig["type"],
       enabled: p.enabled,
       priority: p.priority,

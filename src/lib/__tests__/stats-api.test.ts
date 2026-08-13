@@ -64,7 +64,7 @@ function makeReq(overrides: any = {}): NextApiRequest {
   } as unknown as NextApiRequest;
 }
 
-function makeRes(): NextApiResponse {
+function makeRes(): NextApiResponse & { body: unknown; statusCode: number } {
   let statusCode = 200;
   let body: unknown;
   const res: any = {
