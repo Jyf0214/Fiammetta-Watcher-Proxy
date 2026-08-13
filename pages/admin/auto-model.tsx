@@ -1,11 +1,19 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Input, Checkbox, message, type TableColumnsType } from "antd";
+import { Input, message } from "antd";
 import { Button } from "@/components/ui/Button";
-import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import Switch from "@/components/ui/Switch";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import { Zap, Copy, Check, RefreshCw, Database, Search } from "lucide-react";
+import {
+  Zap,
+  Copy,
+  Check,
+  RefreshCw,
+  Database,
+  Search,
+  Router,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
@@ -30,17 +38,17 @@ export default function AutoModelPage() {
   const [autoModelLoading, setAutoModelLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // 模型选择状态：行 id 为唯一勾选来源（同一 modelId 可存在于多个平台行），保存时派生 modelId 集合
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [selectedModelsLoading, setSelectedModelsLoading] = useState(false);
-  const [modelSearch, setModelSearch] = useState("");
+  // 已启用的 modelId 集合（唯一键，同一 modelId 多平台行联动）
+  const [enabledModelIds, setEnabledModelIds] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  // 防抖：快速多次切换时合并保存
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ===== 数据层（SWR）：config 与 platforms 并行拉取，平台模型并行批量请求 =====
 
-  // config：自动模型 ID 与已保存的选择（原串行链第一步）
   const { data: config, mutate: mutateConfig } = useApi<Record<string, string>>("/api/admin/config");
   const autoModelId = config?.["system:auto_model_id"] ?? null;
-  // config 中已保存的选择（部分平台加载失败时用于兜底保留，避免保存静默丢配置）
   const savedModelIds = useMemo(() => {
     const saved = config?.["system:auto_model_selected"];
     if (!saved) return [] as string[];
@@ -51,7 +59,6 @@ export default function AutoModelPage() {
     }
   }, [config]);
 
-  // 平台列表（原串行链第二步）
   const { data: platforms, error: platformsError } = useApi<Platform[]>("/api/admin/platforms");
   useEffect(() => {
     if (platformsError && platformsError.message !== UNAUTHORIZED_MESSAGE) {
@@ -59,9 +66,6 @@ export default function AutoModelPage() {
     }
   }, [platformsError, t]);
 
-  // 各平台模型（原串行 N+1 第三步 → 并行）：platforms 就绪后一次性并行请求所有平台的模型，
-  // 单个平台失败不影响其他平台（与原行为一致）。key 为 URL 列表的 JSON 序列化，
-  // platforms 变化（增删平台）时自动重新请求。
   const modelsKey =
     platforms && platforms.length > 0
       ? JSON.stringify(platforms.map((p) => `/api/admin/platforms/${p.id}/models`))
@@ -74,12 +78,11 @@ export default function AutoModelPage() {
         urls.map(async (url) => {
           try {
             const list = (await apiFetcher<PlatformModel[]>(url)) ?? [];
-            // 从 URL 提取平台 id 并合并平台名（原 for 循环内 push 时附加）
             const platformId = url.split("/")[4];
             const name = platforms?.find((p) => p.id === platformId)?.name ?? platformId;
             return list.map((m) => ({ ...m, platform: { name } }));
           } catch {
-            return []; // 单个平台失败不影响其他
+            return [];
           }
         })
       );
@@ -87,17 +90,12 @@ export default function AutoModelPage() {
     }
   );
 
-  // 已保存的模型选择扩散为对应行勾选（同一模型在多平台的全部行，代表该模型在路由池）。
-  // 仅在 config 与 models 首次就绪时执行一次，之后不覆盖用户手动勾选。
+  // 初始化：config 与 models 就绪后将已保存的选择填入 enabledModelIds
   const initializedRef = useRef(false);
   useEffect(() => {
     if (!initializedRef.current && config !== undefined && (models ?? []).length > 0) {
       initializedRef.current = true;
-      setSelectedKeys(
-        (models ?? [])
-          .filter((m) => savedModelIds.includes(m.modelId))
-          .map((m) => m.id)
-      );
+      setEnabledModelIds(new Set(savedModelIds));
     }
   }, [config, models, savedModelIds]);
 
@@ -117,7 +115,7 @@ export default function AutoModelPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        mutateConfig(); // 重新拉取 config，autoModelId 由 SWR 数据驱动更新
+        mutateConfig();
         message.success(t("autoModelRegenerated"));
       } else {
         message.error(data.error || t("common:error"));
@@ -129,7 +127,6 @@ export default function AutoModelPage() {
     }
   };
 
-  /** 复制自动模型 ID */
   const copyAutoModelId = () => {
     if (autoModelId) {
       navigator.clipboard.writeText(autoModelId).then(
@@ -142,13 +139,13 @@ export default function AutoModelPage() {
     }
   };
 
-  /** 保存模型选择（行勾选 → 唯一 modelId 集合；并集保留已保存但当前不可见的选择，避免平台加载失败时静默丢配置） */
-  const saveSelectedModels = async () => {
-    setSelectedModelsLoading(true);
+  /** 保存当前启用集合到 config */
+  const persistEnabledModels = async (ids: Set<string>) => {
+    setSaving(true);
     try {
       const visibleIds = new Set(
         (models ?? [])
-          .filter((m) => selectedKeys.includes(m.id))
+          .filter((m) => ids.has(m.modelId))
           .map((m) => m.modelId)
       );
       const modelIds = Array.from(
@@ -167,30 +164,34 @@ export default function AutoModelPage() {
       });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        mutateConfig(); // 重新拉取 config，更新 savedModelIds 兜底值
-        message.success(t("autoModelSelectedSaved"));
+        mutateConfig();
       } else {
         message.error(data.error || t("common:error"));
       }
     } catch {
       message.error(t("common:error"));
     } finally {
-      setSelectedModelsLoading(false);
+      setSaving(false);
     }
   };
 
-  /** 勾选切换：行 id 为勾选来源（同 modelId 多平台行独立勾选，保存时去重）；桌面表格与移动端卡片共用此列 */
-  const toggleSelect = (id: string, checked: boolean) => {
-    setSelectedKeys((prev) =>
-      checked
-        ? prev.includes(id)
-          ? prev
-          : [...prev, id]
-        : prev.filter((k) => k !== id)
-    );
+  /** 切换模型启用状态（带防抖，避免频繁保存） */
+  const toggleModel = (modelId: string, checked: boolean) => {
+    setEnabledModelIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(modelId);
+      else next.delete(modelId);
+      return next;
+    });
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      persistEnabledModels(enabledModelIds);
+    }, 500);
   };
 
-  /** 表格内搜索：按模型 ID / 平台名过滤 */
+  // 搜索过滤
+  const [modelSearch, setModelSearch] = useState("");
   const filteredModels = useMemo(() => {
     const q = modelSearch.trim().toLowerCase();
     if (!q) return models ?? [];
@@ -201,61 +202,26 @@ export default function AutoModelPage() {
     );
   }, [models, modelSearch]);
 
-  const columns: TableColumnsType<PlatformModel> = [
-    {
-      title: "",
-      key: "select",
-      width: 44,
-      render: (_: unknown, record: PlatformModel) => (
-        <Checkbox
-          checked={selectedKeys.includes(record.id)}
-          onChange={(e) => toggleSelect(record.id, e.target.checked)}
-          aria-label={record.modelId}
-        />
-      ),
-    },
-    {
-      title: t("admin:platforms"),
-      key: "platform",
-      width: 120,
-      render: (_: unknown, record: PlatformModel) => (
-        <span className="flex items-center gap-1.5">
-          <Database size={14} className="text-zinc-400" />
-          {record.platform.name}
-        </span>
-      ),
-    },
-    {
-      title: t("platform:modelId"),
-      dataIndex: "modelId",
-      key: "modelId",
-      ellipsis: true,
-    },
-    {
-      title: t("platform:modelSource"),
-      dataIndex: "source",
-      key: "source",
-      width: 80,
-      render: (v: string) => (
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-            v === "manual"
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-              : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-          }`}
-        >
-          {v === "manual" ? t("platform:manual") : t("platform:auto")}
-        </span>
-      ),
-    },
-    {
-      title: t("common:updatedAt"),
-      dataIndex: "fetchedAt",
-      key: "fetchedAt",
-      width: 180,
-      render: (v: string) => formatDateTime(v),
-    },
-  ];
+  // 去重后的唯一模型列表（保留第一个平台行，避免重复渲染同一模型）
+  const uniqueModels = useMemo(() => {
+    const seen = new Set<string>();
+    return filteredModels.filter((m) => {
+      if (seen.has(m.modelId)) return false;
+      seen.add(m.modelId);
+      return true;
+    });
+  }, [filteredModels]);
+
+  // 统计每个唯一 modelId 出现在哪些平台
+  const modelPlatforms = useMemo(() => {
+    const map = new Map<string, { name: string }[]>();
+    for (const m of filteredModels) {
+      const arr = map.get(m.modelId) ?? [];
+      arr.push(m.platform);
+      map.set(m.modelId, arr);
+    }
+    return map;
+  }, [filteredModels]);
 
   return (
     <AdminLayout>
@@ -314,27 +280,19 @@ export default function AutoModelPage() {
           )}
         </ProCard>
 
-        {/* 已发现的模型列表 — 行勾选即选择参与自动分流的模型（选择器与表格合并，避免双份同源展示） */}
+        {/* 已发现的模型 — 开关式选择参与自动分流的模型 */}
         <ProCard
           title={
             <span className="flex items-center gap-2">
               <Database size={16} />
               {t("admin:autoModelDiscovered")}
+              <span className="text-xs font-normal text-zinc-400 dark:text-zinc-500 ml-1">
+                {enabledModelIds.size > 0 && `· ${enabledModelIds.size} ${t("autoModelCountEnabled")}`}
+              </span>
             </span>
           }
-          extra={
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={saveSelectedModels}
-              loading={selectedModelsLoading}
-              disabled={selectedKeys.length === 0}
-            >
-              {t("common:save")}
-            </Button>
-          }
         >
-          <div className="mb-3">
+          <div className="mb-4">
             <Input
               prefix={<Search size={14} className="text-zinc-400" />}
               placeholder={t("autoModelSearchPlaceholder")}
@@ -345,14 +303,74 @@ export default function AutoModelPage() {
               className="max-w-sm"
             />
           </div>
-          <ResponsiveTable
-            columns={columns}
-            dataSource={filteredModels}
-            rowKey="id"
-            loading={modelsLoading}
-            pagination={{ pageSize: 20, showTotal: (total) => t("common:pagination", { count: total }) }}
-            scroll={{ x: 600 }}
-          />
+
+          {modelsLoading ? (
+            <div className="flex items-center justify-center py-16 text-zinc-300 dark:text-zinc-600">
+              <RefreshCw size={28} className="animate-spin" />
+            </div>
+          ) : uniqueModels.length === 0 ? (
+            <div className="text-center py-16 text-zinc-400">
+              <Database size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">{t("autoModelNoModels")}</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {uniqueModels.map((m) => {
+                const isOn = enabledModelIds.has(m.modelId);
+                const platforms = modelPlatforms.get(m.modelId) ?? [];
+                return (
+                  <div
+                    key={m.modelId}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
+                      isOn
+                        ? "bg-blue-50/60 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/40"
+                        : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+                    }`}
+                  >
+                    {/* 开关 */}
+                    <Switch
+                      checked={isOn}
+                      onChange={(checked) => toggleModel(m.modelId, checked)}
+                      loading={saving}
+                      className="shrink-0"
+                    />
+
+                    {/* 平台信息 */}
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <Database size={14} className="text-zinc-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                            {m.modelId}
+                          </span>
+                          <span
+                            className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                              m.source === "manual"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                            }`}
+                          >
+                            {m.source === "manual" ? t("platform:manual") : t("platform:auto")}
+                          </span>
+                        </div>
+                        {platforms.length > 0 && (
+                          <div className="flex items-center gap-1 mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+                            <Router size={10} />
+                            {platforms.map((p) => p.name).join(" · ")}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 更新时间 */}
+                    <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500 hidden sm:block">
+                      {formatDateTime(m.fetchedAt)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </ProCard>
       </PageContainer>
     </AdminLayout>
