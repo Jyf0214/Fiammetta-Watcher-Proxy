@@ -23,6 +23,7 @@ export interface Platform {
   forwardHeaders: string;
   status: string;
   failCount?: number;
+  cooldownEnd?: number | null;
   keyStatuses?: Record<string, { status: string; expireAt: number | null }>;
 }
 

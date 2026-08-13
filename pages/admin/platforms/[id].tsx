@@ -10,7 +10,7 @@ import {
 } from "@/components/platform/PlatformList";
 import { PlatformConfigForm } from "@/components/platform/PlatformConfigForm";
 import { ModelsPanel } from "@/components/platform/ModelsPanel";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
@@ -35,6 +35,7 @@ export default function PlatformDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [unbanning, setUnbanning] = useState(false);
 
   // 模型操作状态
   const [refreshing, setRefreshing] = useState(false);
@@ -258,6 +259,31 @@ export default function PlatformDetailPage() {
     }
   };
 
+  // ---------- 解禁（熔断恢复） ----------
+  const handleUnban = async () => {
+    if (!id || isNew) return;
+    setUnbanning(true);
+    try {
+      const res = await fetch(`/api/admin/platforms/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "healthy", cooldownEnd: null }),
+      });
+      const data = (await res.json()) as Record<string, any>;
+      if (data.success) {
+        message.success(t("platformUnbanned"));
+        mutateDetail();
+        mutateList();
+      } else {
+        message.error(data.error || t("common:error"));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setUnbanning(false);
+    }
+  };
+
   // ---------- 模型操作 ----------
   const handleRefreshModels = async () => {
     if (!id || isNew) return;
@@ -425,6 +451,18 @@ export default function PlatformDetailPage() {
             {platform && !isNew && (
               <div className="flex items-center gap-2 shrink-0">
                 <StatusDot status={platform.status} enabled={platform.enabled} />
+                {platform.status === "down" && (
+                  <button
+                    type="button"
+                    onClick={handleUnban}
+                    disabled={unbanning}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={t("platformUnbanTip")}
+                  >
+                    <Zap size={12} />
+                    <span className="hidden sm:inline">{unbanning ? t("common:loading") : t("platformUnban")}</span>
+                  </button>
+                )}
                 <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
               </div>
             )}
@@ -445,6 +483,28 @@ export default function PlatformDetailPage() {
               </>
             ) : platform ? (
               <div className="flex flex-col gap-8">
+                {/* 熔断恢复提示条 — 平台处于 down 状态时显示 */}
+                {platform.status === "down" && (
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/40">
+                    <div className="flex items-center gap-2 text-sm text-red-700 dark:text-red-400">
+                      <Zap size={16} className="shrink-0" />
+                      <span>{t("platformDownTip")}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleUnban}
+                      disabled={unbanning}
+                      className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {unbanning ? (
+                        <RefreshCw size={12} className="animate-spin" />
+                      ) : (
+                        <Zap size={12} />
+                      )}
+                      {unbanning ? t("common:loading") : t("platformUnban")}
+                    </button>
+                  </div>
+                )}
                 {/* 配置表单（上）— 卡片头部含品牌/名称/状态/启停开关 */}
                 {configForm}
 
