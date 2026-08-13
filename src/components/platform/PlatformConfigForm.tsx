@@ -1,6 +1,7 @@
 "use client";
 
-import { Form, Input, InputNumber, Select, Popconfirm } from "antd";
+import { useState } from "react";
+import { Form, Input, InputNumber, Select, Popconfirm, Modal } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
 import {
@@ -9,6 +10,7 @@ import {
   ShieldCheck,
   ShieldOff,
   Trash2,
+  ClipboardPaste,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
@@ -23,6 +25,7 @@ export function PlatformConfigForm({
   editing,
   namedKeys,
   onAddKey,
+  onBatchAddKeys,
   onRemoveKey,
   onUpdateKeyName,
   onUpdateKeyValue,
@@ -39,6 +42,7 @@ export function PlatformConfigForm({
   editing: Platform | null;
   namedKeys: NamedApiKey[];
   onAddKey: () => void;
+  onBatchAddKeys: (keys: string[]) => void;
   onRemoveKey: (i: number) => void;
   onUpdateKeyName: (i: number, v: string) => void;
   onUpdateKeyValue: (i: number, v: string) => void;
@@ -52,6 +56,21 @@ export function PlatformConfigForm({
   toggling: boolean;
 }) {
   const { t } = useTranslation("platform");
+
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [batchText, setBatchText] = useState("");
+
+  const handleBatchSubmit = () => {
+    const lines = batchText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length > 0) {
+      onBatchAddKeys(lines);
+    }
+    setBatchText("");
+    setBatchModalOpen(false);
+  };
 
   const formGroup =
     "rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 sm:p-6";
@@ -185,12 +204,43 @@ export function PlatformConfigForm({
             </div>
           ))}
         </div>
-        <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3">
+        <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3 flex gap-2">
           <Button variant="default" onClick={onAddKey} icon={<Plus size={14} />} block size="sm">
             {t("addKey")}
           </Button>
+          <Button
+            variant="ghost"
+            onClick={() => setBatchModalOpen(true)}
+            icon={<ClipboardPaste size={14} />}
+            block
+            size="sm"
+          >
+            {t("batchAddKey")}
+          </Button>
         </div>
       </div>
+
+      {/* 批量添加密钥模态框 */}
+      <Modal
+        title={t("batchAddKey")}
+        open={batchModalOpen}
+        onCancel={() => {
+          setBatchText("");
+          setBatchModalOpen(false);
+        }}
+        onOk={handleBatchSubmit}
+        okText={t("common:add")}
+        cancelText={t("common:cancel")}
+      >
+        <Input.TextArea
+          value={batchText}
+          onChange={(e) => setBatchText(e.target.value)}
+          rows={10}
+          placeholder={t("batchAddKeyPlaceholder")}
+          className="font-mono text-xs"
+        />
+        <p className="text-xs text-zinc-400 mt-2">{t("batchAddKeyHint")}</p>
+      </Modal>
 
       {/* 组 3：参数设置 */}
       <div className={formGroup}>

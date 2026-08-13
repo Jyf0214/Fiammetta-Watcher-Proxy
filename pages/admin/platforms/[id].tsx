@@ -131,6 +131,31 @@ export default function PlatformDetailPage() {
     setNamedKeys([...namedKeys, { name: defaultKeyName(i), key: "" }]);
   };
 
+  const batchAddNamedKeys = (keys: string[]) => {
+    const existingKeySet = new Set(namedKeys.map((k) => k.key));
+    const seen = new Set<string>();
+    const names = namedKeys.map((k) => k.name);
+    const newEntries: NamedApiKey[] = [];
+    let i = 1;
+    for (const key of keys) {
+      // 排除与已有密钥重复、排除本次批量内重复
+      if (existingKeySet.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      while (names.includes(defaultKeyName(i))) i++;
+      names.push(defaultKeyName(i));
+      newEntries.push({ name: defaultKeyName(i), key });
+      i++;
+    }
+    if (newEntries.length === 0) {
+      message.warning(t("batchAddKeyAllDup"));
+    } else {
+      setNamedKeys([...namedKeys, ...newEntries]);
+      if (newEntries.length < keys.length) {
+        message.info(t("batchAddKeyPartialDup", { added: newEntries.length, total: keys.length }));
+      }
+    }
+  };
+
   const removeNamedKey = (index: number) => {
     if (namedKeys.length <= 1) {
       message.warning(t("atLeastOneKey"));
@@ -425,6 +450,7 @@ export default function PlatformDetailPage() {
       editing={platform ?? null}
       namedKeys={namedKeys}
       onAddKey={addNamedKey}
+      onBatchAddKeys={batchAddNamedKeys}
       onRemoveKey={removeNamedKey}
       onUpdateKeyName={updateKeyName}
       onUpdateKeyValue={updateKeyValue}
