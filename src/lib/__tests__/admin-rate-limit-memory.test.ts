@@ -1,13 +1,13 @@
 /**
  * 管理 API 全局速率限制（src/lib/admin-rate-limit.ts）— 内存路径测试
  *
- * 覆盖非 CF 平台（EdgeOne / Vercel / 纯 Node）的进程内滑动窗口兜底分支：
+ * 覆盖非 Cloudflare 平台（EdgeOne / Vercel / 纯 Node）的进程内滑动窗口兜底分支：
  * - 首次请求放行
  * - 100 次内放行，第 101 次 429 + Retry-After + resetAt
  * - 60 秒窗口滑动后计数重置
  * - 不同管理员独立计数
  *
- * @opennextjs/cloudflare 被 mock 为 getCloudflareContext 抛错（模拟非 CF 平台
+ * @opennextjs/cloudflare 被 mock 为 getCloudflareContext 抛错（模拟非 Cloudflare 平台
  * 无 Cloudflare 上下文的形态），checkAdminRateLimit 内部动态 import 后 kv 为
  * undefined，自动落入 checkMemoryWindow 进程内窗口。
  */
@@ -17,7 +17,7 @@ import type { NextApiResponse } from "next";
 
 vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: () => {
-    throw new Error("no Cloudflare context (non-CF platform)");
+    throw new Error("no Cloudflare context (non-Cloudflare platform)");
   },
 }));
 
@@ -71,7 +71,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("checkAdminRateLimit — 内存路径（非 CF 平台兜底）", () => {
+describe("checkAdminRateLimit — 内存路径（非 Cloudflare 平台兜底）", () => {
   it("首次请求放行，不发送 429", async () => {
     const res = makeRes();
     await expect(checkAdminRateLimit("mem-admin-1", res)).resolves.toBe(true);

@@ -2,7 +2,7 @@
  * 重现：Pages 版 v1 代理（pages/api/v1/[[...v1]].ts）
  * 上游返回 503，下游也收到 503，但日志记录 status 显示 200
  *
- * EO 生产部署没有 Worker，/v1/* 走 Pages API 版代理，
+ * EdgeOne 生产部署没有 Worker，/v1/* 走 Pages API 版代理，
  * 此测试验证 Pages 版 5xx 透传分支的 recordRequestLog 收到的 status
  */
 

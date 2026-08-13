@@ -33,14 +33,6 @@ const ACTION_LABELS: Record<string, string> = {
   delete_platform: "actionDeletePlatform",
   create_api_key: "actionCreateApiKey",
   delete_api_key: "actionDeleteApiKey",
-  create_model_map: "actionCreateModelMap",
-  update_model_map: "actionUpdateModelMap",
-  delete_model_map: "actionDeleteModelMap",
-  enable_model_map: "actionEnableModelMap",
-  disable_model_map: "actionDisableModelMap",
-  batch_enable_model_maps: "actionBatchEnableModelMaps",
-  batch_disable_model_maps: "actionBatchDisableModelMaps",
-  batch_delete_model_maps: "actionBatchDeleteModelMaps",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -53,14 +45,6 @@ const ACTION_COLOR: Record<string, string> = {
   delete_platform: "red",
   create_api_key: "green",
   delete_api_key: "red",
-  create_model_map: "green",
-  update_model_map: "orange",
-  delete_model_map: "red",
-  enable_model_map: "green",
-  disable_model_map: "gold",
-  batch_enable_model_maps: "green",
-  batch_disable_model_maps: "gold",
-  batch_delete_model_maps: "red",
 };
 
 // ==================== 页面组件 ====================

@@ -154,7 +154,7 @@ jobs:
         run: echo "✓ Cloudflare 部署完成"
 
   # ==================== EdgeOne Makers 部署 ====================
-  # push canary：若 EO_PROJECT_NAME 与 EO_API_TOKEN 均已配置，自动与 CF 同时部署（secrets 无法在 if 中判断，用 step 输出标记）
+  # push canary：若 EO_PROJECT_NAME 与 EO_API_TOKEN 均已配置，自动与 Cloudflare 同时部署（secrets 无法在 if 中判断，用 step 输出标记）
   # workflow_dispatch：按 deploy_platform 选择（edgeone/both）部署
   deploy-edgeone:
     name: Deploy EdgeOne Makers

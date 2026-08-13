@@ -34,7 +34,7 @@ export default function PlatformsPage() {
         <PlatformList
           platforms={platforms ?? []}
           loading={isValidating}
-          className="rounded-xl shadow-sm overflow-hidden"
+          className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 overflow-hidden"
         />
       </div>
     </AdminLayout>

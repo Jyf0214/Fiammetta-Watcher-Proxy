@@ -56,7 +56,7 @@ function calcNiceTicks(max: number, min: number): number {
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-[13px] shadow-lg">
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-[13px]" style={{ boxShadow: "var(--shadow-lg)" }}>
       <p className="text-zinc-500 dark:text-zinc-400 mb-1.5">{label}</p>
       <div className="space-y-1">
         {payload.map((item: any) => (

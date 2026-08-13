@@ -57,17 +57,17 @@ export async function checkAdminRateLimit(
   adminId: string,
   res: NextApiResponse
 ): Promise<boolean> {
-  // 动态加载 CF 运行时 API：仅 Cloudflare 平台（Pages/本地 CF 模拟）启用 KV 限流，
+  // 动态加载 Cloudflare 运行时 API：仅 Cloudflare 平台（Pages/本地 Cloudflare 模拟）启用 KV 限流，
   // 其他平台（EdgeOne/Vercel/纯 Node）没有 @opennextjs/cloudflare 运行时依赖，降级为不限流
   let kv: KVNamespace | undefined;
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const { env } = getCloudflareContext();
     kv = env.KV;
-  } catch { /* 本地开发或非 CF 环境 */ }
+  } catch { /* 本地开发或非 Cloudflare 环境 */ }
 
   if (!kv) {
-    // 非 CF 平台：进程内滑动窗口兜底（原来直接放行 → 无限流）
+    // 非 Cloudflare 平台：进程内滑动窗口兜底（原来直接放行 → 无限流）
     return checkMemoryWindow(adminId, res);
   }
 

@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
-// 测试环境加载 .env.local（本地开发 PG 配置），供 createDb() 动态解析数据库类型与连接串。
+// 测试环境加载 .env.local（本地开发 PostgreSQL 配置），供 createDb() 动态解析数据库类型与连接串。
 // 注意：加载后 DATABASE_URL 会进入所有测试 worker 的 process.env——测试文件必须显式
 // 传 env（如 createTestDb 的 PG_URL）或先建立缓存，禁止无参 createDb() 直接读写开发库。
 function loadEnvLocal() {

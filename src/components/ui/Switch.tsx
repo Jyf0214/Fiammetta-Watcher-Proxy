@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { m } from "motion/react";
 
 export interface SwitchProps {
   checked?: boolean;
@@ -63,11 +64,12 @@ export default function Switch({
         ${className}
       `}
     >
-      <span
+      <m.span
+        animate={{ x: checked ? 20 : 2 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
         className={`
           pointer-events-none inline-flex h-[18px] w-[18px] items-center justify-center
-          rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out
-          ${checked ? "translate-x-[20px]" : "translate-x-[2px]"}
+          rounded-full bg-white
           ${loading ? "animate-pulse" : ""}
         `}
       >
@@ -81,7 +83,7 @@ export default function Switch({
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         )}
-      </span>
+      </m.span>
     </button>
   );
 }

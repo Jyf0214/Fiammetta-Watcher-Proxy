@@ -98,7 +98,7 @@ function ApiKeyCard({
 
 export default function KeysPage() {
   const { t } = useTranslation("apikey");
-  /** 构建期内联的部署平台（cf / edgeone / vercel / 空=自托管或本地） */
+  /** 构建期内联的部署平台（Cloudflare / EdgeOne / Vercel / 空=自托管或本地） */
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
   const { data: keys, isLoading, isValidating, mutate } = useApi<ApiKeyItem[]>("/api/admin/keys");

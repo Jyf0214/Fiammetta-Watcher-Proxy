@@ -7,7 +7,7 @@
 // 支持四种数据库方言（通过 DB_TYPE 环境变量选择）：
 //   - d1：Cloudflare D1（SQLite 方言）
 //   - tidb：TiDB Cloud（MySQL 方言）
-//   - mariadb：MariaDB / 纯 MySQL（mariadb 驱动，仅非 CF 平台）
+//   - mariadb：MariaDB / 纯 MySQL（mariadb 驱动，仅非 Cloudflare 平台）
 //   - pg / hyperdrive：PostgreSQL（直连或 Hyperdrive 加速）
 //
 // 运行环境自动检测：
@@ -110,7 +110,7 @@ async function createPrismaInstance(
       return new PrismaClient({ adapter });
     }
 
-    // ── MariaDB / 纯 MySQL（mariadb 驱动，TCP；仅非 CF 平台）──
+    // ── MariaDB / 纯 MySQL（mariadb 驱动，TCP；仅非 Cloudflare 平台）──
     case "mariadb": {
       const { PrismaClient } = await import("../src/generated/mariadb/client");
       const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");

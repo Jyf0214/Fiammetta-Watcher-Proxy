@@ -41,7 +41,8 @@
     "unitMs": "毫秒",
     "unitK": "K",
     "unitM": "M",
-    "unitB": "B"
+    "unitB": "B",
+    "add": "添加"
   },
   "validation": {
     "required": "不能为空"
@@ -123,6 +124,7 @@
     "dmStepAuditLogs": "审计日志",
     "dmStepRequestLogs": "请求日志",
     "dmStepRequestLogsDetail": "大量数据，可能需要较长时间",
+    "dmStepDailyStats": "每日统计",
     "dmPreviewTitle": "导入预览",
     "dmPreviewRecords": "条记录",
     "dmPreviewIssueHint": "检测到疑似异常记录（缺少必填字段/重复/脱敏），导入时将自动跳过",
@@ -178,7 +180,6 @@
     "batchAddKeyHint": "自动排除空行、与已有密钥重复及批量内重复",
     "batchAddKeyAllDup": "所有密钥均已存在，未添加新密钥",
     "batchAddKeyPartialDup": "已添加 {added}/{total} 个密钥，其余为重复",
-    "batchAddKeyDesc": "批量添加密钥",
     "keyName": "密钥名",
     "whitelistAdd": "加白",
     "whitelistRemove": "白名单",
@@ -334,15 +335,7 @@
     "actionUpdatePlatform": "更新平台",
     "actionDeletePlatform": "删除平台",
     "actionCreateApiKey": "创建 API Key",
-    "actionDeleteApiKey": "删除 API Key",
-    "actionCreateModelMap": "创建模型映射",
-    "actionUpdateModelMap": "更新模型映射",
-    "actionDeleteModelMap": "删除模型映射",
-    "actionEnableModelMap": "启用模型映射",
-    "actionDisableModelMap": "禁用模型映射",
-    "actionBatchEnableModelMaps": "批量启用模型映射",
-    "actionBatchDisableModelMaps": "批量禁用模型映射",
-    "actionBatchDeleteModelMaps": "批量删除模型映射"
+    "actionDeleteApiKey": "删除 API Key"
   },
   "system": {
     "autoModelTitle": "自动模型",

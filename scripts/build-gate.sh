@@ -9,7 +9,7 @@
 # 保留 v1 和 cron 路由（由 Pages API / Next.js Server 处理）。
 #
 # 使用方式：
-#   DEPLOY_PLATFORM=cf bash scripts/build-gate.sh   # 删除路由（CF 部署）
+#   DEPLOY_PLATFORM=cf bash scripts/build-gate.sh   # 删除路由（Cloudflare 部署）
 #   DEPLOY_PLATFORM=cf bash scripts/build-gate-restore.sh  # 还原路由
 # ================================================================
 
@@ -37,7 +37,7 @@ if [ -d "$GATE_TMP" ]; then
 fi
 
 if [ "${DEPLOY_PLATFORM:-}" = "cf" ]; then
-  echo " CF 模式：临时移除 Pages API v1 和 cron 路由"
+  echo " Cloudflare 模式：临时移除 Pages API v1 和 cron 路由"
 
   mkdir -p "$GATE_TMP"
 
@@ -51,5 +51,5 @@ if [ "${DEPLOY_PLATFORM:-}" = "cf" ]; then
     echo "  ✓ pages/api/cron/ → $GATE_TMP/cron"
   fi
 else
-  echo "非 CF 模式：保留 Pages API v1 和 cron 路由"
+  echo "非 Cloudflare 模式：保留 Pages API v1 和 cron 路由"
 fi

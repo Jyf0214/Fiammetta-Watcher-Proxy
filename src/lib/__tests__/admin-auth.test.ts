@@ -7,7 +7,7 @@
  * - JWT_SECRET 未配置时不抛错（返回 null，走 Bearer 分支）
  * - getAuditAdminId 虚拟 ID 归一化（env-admin / system-key → null）
  *
- * Bearer 分支走真实 PGlite 内存 PG（system_api_keys 表），不 mock 数据库。
+ * Bearer 分支走真实 PGlite 内存 PostgreSQL（system_api_keys 表），不 mock 数据库。
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,7 @@ import { generateToken } from "../auth";
 import { createTestDb, type TestDb } from "../../../lib/__tests__/helpers/test-pg-db";
 
 // createDb() 无参调用时的环境检测（detectEnvironment）依赖 @opennextjs/cloudflare；
-// 测试环境无 CF 上下文，mock 成抛错保证走 process.env 解析（DB_TYPE=pg → 命中
+// 测试环境无 Cloudflare 上下文，mock 成抛错保证走 process.env 解析（DB_TYPE=pg → 命中
 // PGlite 缓存），避免真实依赖在纯 Node 下的不确定行为（与 login-handler 一致）
 vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: () => {

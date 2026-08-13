@@ -41,13 +41,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
       });
 
-      // 读取 KV 中持久化的密钥状态（封禁/降级），非 CF 环境容错为空
+      // 读取 KV 中持久化的密钥状态（封禁/降级），非 Cloudflare 环境容错为空
       let kv: KVNamespace | undefined;
       try {
         const { getCloudflareContext } = await import("@opennextjs/cloudflare");
         kv = getCloudflareContext().env.KV as KVNamespace | undefined;
       } catch {
-        // 本地开发或非 CF 环境没有 KV binding
+        // 本地开发或非 Cloudflare 环境没有 KV binding
       }
 
       const keyStatusesByPlatform: Record<string, PlatformKeyStatus> = {};

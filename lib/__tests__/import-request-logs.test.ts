@@ -160,7 +160,7 @@ describe("requestLogs 导入：字段映射", () => {
 
 // ==================== requestLogs 导入：批量场景 ====================
 
-// 6961 条 × 虚拟 PG 的批量写在全量并发下较慢，放宽超时
+// 6961 条 × 虚拟 PostgreSQL 的批量写在全量并发下较慢，放宽超时
 const BULK_TIMEOUT = 30_000;
 
 describe("requestLogs 导入：批量场景", () => {

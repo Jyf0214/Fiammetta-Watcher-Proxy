@@ -16,7 +16,7 @@
  *   - api_key 列不存在（全新库或已迁移）→ 跳过并正常退出
  *   - platforms 表不存在（全新库，db push 尚未建表）→ 跳过并正常退出
  *   - DATABASE_URL 协议与 DB_TYPE 不匹配 → 跳过
- *   - hyperdrive 走 pg 直连迁移（origin 即 DATABASE_URL）
+ *   - hyperdrive 走 PostgreSQL 直连迁移（origin 即 DATABASE_URL）
  *
  * 安全：只输出变更数量与行数，绝不输出密钥内容。
  */
@@ -186,7 +186,7 @@ main().catch((err) => {
     process.exit(0);
   }
   // platforms 表不存在（全新库，db push 尚未建表）：正常跳过
-  // 必须同时命中表/关系语义，避免把 pg 的 database "xxx" does not exist 误判为表缺失
+  // 必须同时命中表/关系语义，避免把 PostgreSQL 的 database "xxx" does not exist 误判为表缺失
   if (
     /no such table|doesn't exist|does not exist/i.test(msg) &&
     /table|relation|platforms/i.test(msg)

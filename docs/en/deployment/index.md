@@ -4,7 +4,7 @@ FWP supports 4 deployment methods, grouped by target:
 
 | Method | Architecture | Database | Scheduled Tasks |
 |--------|--------------|----------|------------------|
-| **Cloudflare Pages + Worker** | Worker handles proxy + scheduled tasks, Pages serves the frontend and admin panel | D1 (free, zero config) or TiDB/PG | Built into Cloudflare (free) |
+| **Cloudflare Pages + Worker** | Worker handles proxy + scheduled tasks, Pages serves the frontend and admin panel | D1 (free, zero config) or TiDB/PostgreSQL | Built into Cloudflare (free) |
 | **Vercel / EdgeOne** | Serverless functions handle everything | TiDB / MariaDB / PostgreSQL (remote) | HTTP endpoints + external scheduler (Vercel Cron requires Pro) |
 | **Node.js standalone** | Full server on your own machine | TiDB / MariaDB / PostgreSQL | HTTP endpoints + system cron |
 | **Docker** | Containerized deployment | PostgreSQL / MySQL (incl. MariaDB) | HTTP endpoints + system cron |
@@ -15,7 +15,7 @@ FWP supports 4 deployment methods, grouped by target:
 |------|-----------|--------|---------|------------------|
 | Free tier | Worker CPU 10ms/request (streaming AI proxy often exceeds this) | 100GB bandwidth/month | See official pricing | None (own resources) |
 | Scheduled tasks | Built-in (free) | **Pro plan only** | External scheduler | System cron |
-| Database | D1 (default, zero config) | TiDB/MariaDB/PG (remote) | TiDB/MariaDB/PG (remote) | TiDB/MariaDB/PG |
+| Database | D1 (default, zero config) | TiDB/MariaDB/PostgreSQL (remote) | TiDB/MariaDB/PostgreSQL (remote) | TiDB/MariaDB/PostgreSQL |
 | Deploy trigger | Manual via web UI, or push `canary` | Connect Git repo in console | Manual via web UI | Manual |
 | Best for | Zero-cost serverless | Existing Vercel / TiDB account | Tencent Cloud ecosystem | Full control |
 
@@ -37,7 +37,7 @@ FWP supports 4 deployment methods, grouped by target:
 |----------|-------------|-----------|
 | Cloudflare D1 | Nothing (`DB_TYPE=d1`) | Cloudflare only |
 | TiDB Cloud | `DB_TYPE=tidb` + `DATABASE_URL` (MySQL protocol) | All |
-| MariaDB / pure MySQL | `DB_TYPE=mariadb` + `DATABASE_URL` (mariadb protocol) | Non-CF (Vercel / EdgeOne / Node.js / Docker) |
+| MariaDB / pure MySQL | `DB_TYPE=mariadb` + `DATABASE_URL` (mariadb protocol) | Non-Cloudflare (Vercel / EdgeOne / Node.js / Docker) |
 | PostgreSQL | `DB_TYPE=pg` + `DATABASE_URL` | All |
 
 ## Related Docs

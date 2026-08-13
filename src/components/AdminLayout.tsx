@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
+import { AnimatePresence, m } from "motion/react";
 import {
   LayoutDashboard,
   Server,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
+import { collapseVariants, collapseTransition, slideLeftVariants, slideTransition } from "@/lib/motion";
 
 // ---------- 类型定义 ----------
 interface MenuItem {
@@ -108,25 +110,34 @@ function SidebarGroup({
         className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
       >
         {t(groupI18nKeys[group] ?? group)}
-        {isCollapsed ? (
-          <ChevronRight className="w-3 h-3" />
-        ) : (
+        <m.span animate={{ rotate: isCollapsed ? 0 : 180 }} transition={{ duration: 0.2 }}>
           <ChevronDown className="w-3 h-3" />
-        )}
+        </m.span>
       </button>
-      {!isCollapsed && (
-        <div className="mt-2 space-y-1">
-          {groupItems.map((item) => (
-            <SidebarItem
-              key={item.key}
-              item={item}
-              isActive={isActive(item.href)}
-              onClick={onItemClick}
-              t={t}
-            />
-          ))}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <m.div
+            variants={collapseVariants}
+            initial="collapsed"
+            animate="open"
+            exit="collapsed"
+            transition={collapseTransition}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 space-y-1">
+              {groupItems.map((item) => (
+                <SidebarItem
+                  key={item.key}
+                  item={item}
+                  isActive={isActive(item.href)}
+                  onClick={onItemClick}
+                  t={t}
+                />
+              ))}
+            </div>
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -348,7 +359,7 @@ export default function AdminLayout({
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800">
       {/* 品牌头 */}
       <div className="h-16 flex items-center gap-2.5 px-4 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs shadow-sm">
+        <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs">
           FW
         </div>
         <div className="flex flex-col">
@@ -418,27 +429,41 @@ export default function AdminLayout({
       </aside>
 
       {/* 移动端遮罩层 — 低于顶栏（z-40），顶栏保持可操作；高于内容 */}
-      {sidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-[35]"
-          onClick={close}
-        />
-      )}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <m.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="lg:hidden fixed inset-0 bg-black/50 z-[35]"
+            onClick={close}
+          />
+        )}
+      </AnimatePresence>
 
       {/* 移动端侧边栏 */}
-      <aside
-        className={`lg:hidden fixed top-0 left-0 bottom-0 w-64 z-50 transform transition-transform duration-300 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        {sidebarContent}
-        <button
-          onClick={close}
-          className="absolute top-4 right-4 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </aside>
+      <AnimatePresence>
+        {sidebarOpen && (
+          <m.aside
+            variants={slideLeftVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={slideTransition}
+            className="lg:hidden fixed top-0 left-0 bottom-0 w-64 z-50"
+            style={{ boxShadow: "var(--shadow-lg)" }}
+          >
+            {sidebarContent}
+            <button
+              onClick={close}
+              className="absolute top-4 right-4 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </m.aside>
+        )}
+      </AnimatePresence>
 
       {/* 内容区 - 补偿 Header 高度 64px */}
       <main className="min-h-screen pt-16 lg:pl-64">

@@ -15,7 +15,7 @@
  * - GET 当前管理员：无 token / 有效 / 过期 / 篡改 / 弱配置
  * - DELETE 登出：清 Cookie + 审计 logout
  *
- * 数据库使用 PGlite 内存 PG（lib/__tests__/helpers/test-pg-db.ts）：
+ * 数据库使用 PGlite 内存 PostgreSQL（lib/__tests__/helpers/test-pg-db.ts）：
  * 审计日志与限流计数走真实 SQL，避免 mock 漂移掩盖回归。
  * 环境变量在 beforeEach/afterEach 中显式设置/清理，与 .env.local 隔离。
  */
@@ -27,7 +27,7 @@ import handler from "../../../pages/api/admin/auth";
 import { createTestDb, type TestDb } from "../../../lib/__tests__/helpers/test-pg-db";
 
 // createDb() 无参调用时的环境检测（detectEnvironment）依赖 @opennextjs/cloudflare；
-// 测试环境无 CF 上下文，mock 成抛错保证走 process.env 解析（DB_TYPE=pg → 命中
+// 测试环境无 Cloudflare 上下文，mock 成抛错保证走 process.env 解析（DB_TYPE=pg → 命中
 // PGlite 缓存），避免真实依赖在纯 Node 下的不确定行为
 vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: () => {

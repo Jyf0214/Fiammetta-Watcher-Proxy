@@ -5,7 +5,7 @@
  *   1. 根据 DB_TYPE 只生成需要的 Prisma Client（避免打包多余 WASM）
  *   2. 为未使用的方言生成空 stub 文件（webpack 静态分析需要 import 路径存在）
  *   3. 自动读取 .env.local（优先，本地开发库）与 .env（不覆盖已有环境变量；EdgeOne CLI 构建期会把项目环境变量拉取到 .env）
- *   4. MySQL/MariaDB/PG 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/CF 构建）且 DATABASE_URL 协议匹配时
+ *   4. MySQL/MariaDB/PostgreSQL 方言在 CI 环境（CI=true，含 EdgeOne/Vercel/Cloudflare 构建）且 DATABASE_URL 协议匹配时
  *      自动执行 prisma db push 同步表结构；本地默认不 push，需要时设置 DB_PUSH=1
  *      （npm run db:dev 会在 .env.local 写入 DB_PUSH=1，本地开发自动同步表结构）
  *   5. D1 由 Python 部署脚本单独处理建表，不在此处 push

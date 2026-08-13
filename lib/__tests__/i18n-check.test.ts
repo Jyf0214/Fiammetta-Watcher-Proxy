@@ -272,10 +272,43 @@ function analyze(): Issues {
       fileNs.push(ns);
     }
     const nsSet = new Set(fileNs);
+
+    // t() 变量引用的字典常量名收集（提前到 uiLiterals 之前，用于排除字典块）
+    const tVarRefs = new Set<string>();
+    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[[.]/g)) {
+      tVarRefs.add(m[1]);
+    }
+    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\?\?|\))/g)) {
+      const v = m[1];
+      const assign = src.match(new RegExp(`(?:const|let)\\s+${v}\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\[`));
+      if (assign) tVarRefs.add(assign[1]);
+    }
+
     const fileLiterals = [...src.matchAll(STRING_LIT)]
       .map((m2) => m2[1] ?? m2[2] ?? m2[3])
       .filter((lit): lit is string => typeof lit === "string" && lit.length > 0 && lit.length < 80);
-    for (const lit of fileLiterals) uiLiterals.add(lit);
+
+    // tVarRefs 字典常量块内的字符串已通过 usedKeys 正确标记引用，
+    // 不再注入 uiLiterals，避免恰好同名的无关字符串值误保死键。
+    // 收集这些块的字符区间用于排除。
+    const dictLiteralRanges: Array<[number, number]> = [];
+    for (const name of tVarRefs) {
+      const defRe = new RegExp(`const\\s+${name}\\s*(?::[^=]*)?=\\s*\\{`);
+      const dm = src.match(defRe);
+      if (!dm || dm.index === undefined) continue;
+      const blockStart = dm.index + dm[0].length - 1;
+      const blockEndIdx = blockEnd(src, blockStart, "{", "}");
+      if (blockEndIdx === -1) continue;
+      dictLiteralRanges.push([dm.index, blockEndIdx + 1]);
+    }
+    const inDictBlock = (offset: number) =>
+      dictLiteralRanges.some(([s, e]) => offset >= s && offset < e);
+    for (const m2 of src.matchAll(STRING_LIT)) {
+      const lit = m2[1] ?? m2[2] ?? m2[3];
+      if (lit && lit.length > 0 && lit.length < 80 && !inDictBlock(m2.index ?? 0)) {
+        uiLiterals.add(lit);
+      }
+    }
 
     // 解析单个键引用 → "ns:key"；返回 null 表示引用不合法
     // tryResolve 不产生报错（用于动态键候选筛选），resolve 会记录缺失
@@ -360,15 +393,6 @@ function analyze(): Issues {
     //   1) t(XXX[...]) / t(XXX.yyy) 直接引用
     //   2) 中间变量：const key = XXX[...]; t(key) / t(key ?? fallback)
     //   3) 结构化属性：labelKey/detailKey/nameKey 值（含 import 自其他文件的字典，如 MODEL_TYPE_CONFIG）
-    const tVarRefs = new Set<string>();
-    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[[.]/g)) {
-      tVarRefs.add(m[1]);
-    }
-    for (const m of src.matchAll(/\bt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\?\?|\))/g)) {
-      const v = m[1];
-      const assign = src.match(new RegExp(`(?:const|let)\\s+${v}\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\[`));
-      if (assign) tVarRefs.add(assign[1]);
-    }
     for (const name of tVarRefs) {
       const defRe = new RegExp(`const\\s+${name}\\s*(?::[^=]*)?=\\s*\\{`);
       const dm = src.match(defRe);

@@ -4,7 +4,7 @@
  * 覆盖可信代理链：EdgeOne 部署（DEPLOY_PLATFORM=edgeone）采信 EO-Client-IP /
  * EO-Connecting-IP / XFF 首项、Vercel 部署（DEPLOY_PLATFORM=vercel）采信
  * x-vercel-forwarded-for / XFF / x-real-ip（Vercel 边缘强制覆盖）、其他部署平台
- * （docker/cf/未设置）忽略伪造 EO 头与 Vercel 头、边缘运行时（无 socket）采信
+ * （docker/Cloudflare/未设置）忽略伪造 EdgeOne 头与 Vercel 头、边缘运行时（无 socket）采信
  * CF-Connecting-IP、有 socket 时忽略伪造的 CF-Connecting-IP、直连忽略伪造 XFF、
  * 可信代理链从右向左取首个非可信条目、全可信链回退 X-Real-IP、无 socket 地址
  * 且无边缘注入头时返回 null（不归入共享桶）。
@@ -169,7 +169,7 @@ describe("getClientIp — 非 EO 部署忽略伪造 EO 头", () => {
     expect(getClientIp(asReq(req))).toBe("1.2.3.4");
   });
 
-  it("CF 部署（DEPLOY_PLATFORM=cf）：忽略 EO 头，使用 TCP 对端", () => {
+  it("Cloudflare 部署（DEPLOY_PLATFORM=cf）：忽略 EO 头，使用 TCP 对端", () => {
     setDeployPlatform("cf");
     const req = makeReq({ headers: { "eo-client-ip": "5.6.7.8" } });
     expect(getClientIp(asReq(req))).toBe("1.2.3.4");
@@ -219,7 +219,7 @@ describe("getClientIp — 边缘运行时（无 TCP 对端）", () => {
     expect(getClientIp(asReq(req))).toBe("1.2.3.4");
   });
 
-  it("配置了 TRUSTED_PROXY_IPS 且对端可信时仍忽略 CF-Connecting-IP（非 CF 链路不会覆盖该头，返回 null 而非伪造值）", () => {
+  it("配置了 TRUSTED_PROXY_IPS 且对端可信时仍忽略 CF-Connecting-IP（非 Cloudflare 链路不会覆盖该头，返回 null 而非伪造值）", () => {
     setTrustedProxies("10.0.0.1");
     const req = makeReq({
       headers: { "cf-connecting-ip": "5.6.7.8" },

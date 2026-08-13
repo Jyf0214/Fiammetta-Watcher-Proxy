@@ -2,8 +2,8 @@
  * 测试专用虚拟 PostgreSQL 数据库（PGlite，WASM 内存实现）
  *
  * 每个测试文件（vitest worker 进程）在内存中启动一个真实 PostgreSQL 内核
- * （@electric-sql/pglite，PG 编译为 WASM，仅存在于测试进程，测试结束即销毁）：
- *   1. PGlite.create() 启动内存 PG
+ * （@electric-sql/pglite，PostgreSQL 编译为 WASM，仅存在于测试进程，测试结束即销毁）：
+ *   1. PGlite.create() 启动内存 PostgreSQL
  *   2. PGLiteSocketServer 暴露 Postgres wire 协议（本机随机端口）
  *   3. 表结构由 `prisma migrate diff --from-empty` 从 prisma/schema.pg.prisma
  *      派生（非手写 DDL，与生产 schema 完全一致）
@@ -20,7 +20,7 @@ import type { Database } from "@/lib/prisma";
 export interface TestDb {
   /** 通过 lib/prisma createDb 工厂获得的真实 Prisma Client（pg 方言） */
   db: Database;
-  /** 内存 PG 的完整连接串（可写回 process.env.PG_URL 供无参 createDb() 复用） */
+  /** 内存 PostgreSQL 的完整连接串（可写回 process.env.PG_URL 供无参 createDb() 复用） */
   url: string;
   /** 停止 wire server、断开 Prisma 连接、释放 WASM 内存 */
   cleanup: () => Promise<void>;
@@ -65,8 +65,8 @@ export async function createTestDb(): Promise<TestDb> {
     db,
     url,
     cleanup: async () => {
-      // 先断开 Prisma（pg 客户端主动发送 Terminate 消息），再停 wire server：
-      // 若服务端先断开空闲连接，pg 连接池会记录一条"意外终止"错误日志
+      // 先断开 Prisma（PostgreSQL 客户端主动发送 Terminate 消息），再停 wire server：
+      // 若服务端先断开空闲连接，PostgreSQL 连接池会记录一条"意外终止"错误日志
       await db.$disconnect();
       await server.stop();
       await pglite.close();

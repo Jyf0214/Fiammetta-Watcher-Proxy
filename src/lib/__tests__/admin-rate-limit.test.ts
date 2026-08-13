@@ -8,7 +8,7 @@
  * - KV 异常降级：get/put 抛错时降级进程内内存窗口（不 fail-open 成无限流）
  *
  * @opennextjs/cloudflare 被 mock 为提供可控内存 KV（get/put/delete + 可注入异常），
- * 不依赖真实 CF 运行时。内存路径（非 CF 平台）见 admin-rate-limit-memory.test.ts。
+ * 不依赖真实 Cloudflare 运行时。内存路径（非 Cloudflare 平台）见 admin-rate-limit-memory.test.ts。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

@@ -65,6 +65,7 @@ const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
   apiKeys: { labelKey: "dmStepApiKeys" },
   auditLogs: { labelKey: "dmStepAuditLogs" },
   requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
+  dailyStats: { labelKey: "dmStepDailyStats" },
 };
 
 // ==================== 导入前预览分析 ====================
@@ -91,6 +92,7 @@ const PREVIEW_RULES: Record<
   apiKeys: { required: ["key"], unique: "key", masked: "key" },
   auditLogs: { required: ["action"] },
   requestLogs: { required: ["model"] },
+  dailyStats: { required: ["date", "model"] },
 };
 
 /** 解析导入文件，统计各类型条数与可疑记录（缺必填字段/重复/脱敏） */

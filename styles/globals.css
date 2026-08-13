@@ -3,6 +3,38 @@
 /* 使用 class 控制深色模式（而非 media query） */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ===== Tailwind v4 语义 token 映射 ===== */
+/* 将 CSS 变量映射为 Tailwind 工具类，消除 bg-white dark:bg-zinc-900 双写 */
+@theme inline {
+  --color-layout: var(--color-bg-layout);
+  --color-container: var(--color-bg-container);
+  --color-elevated: var(--color-bg-elevated);
+  --color-subtle: var(--color-bg-subtle);
+
+  --color-border-default: var(--color-border);
+  --color-border-secondary: var(--color-border-secondary);
+
+  --color-fill: var(--color-fill);
+  --color-fill-secondary: var(--color-fill-secondary);
+  --color-fill-tertiary: var(--color-fill-tertiary);
+
+  --color-text-primary: var(--color-text);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+  --color-text-quaternary: var(--color-text-quaternary);
+
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-error: var(--color-error);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
 /* ===== 语义化 CSS 变量 ===== */
 /* Light 模式（默认） */
 :root {
@@ -34,10 +66,13 @@
   --color-warning: #d97706;
   --color-error: #dc2626;
 
-  /* 阴影 */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.12);
+  /* 阴影 — 三级体系，微浮起 / 浮层 / 强浮层 */
+  /* tertiary: 几乎不可见的微浮起（卡片/面板） */
+  --shadow-sm: 0 3px 1px -1px rgba(26, 26, 26, 0.06);
+  /* secondary: 清晰浮层（下拉/弹出菜单） */
+  --shadow-md: 0 8px 16px -4px rgba(0, 0, 0, 0.20);
+  /* primary: 强浮层（模态框/对话框） */
+  --shadow-lg: 0 20px 20px -8px rgba(0, 0, 0, 0.24);
 
   /* 圆角 */
   --radius-sm: 6px;
@@ -71,9 +106,10 @@
   --color-warning: #f59e0b;
   --color-error: #f87171;
 
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.20);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.30);
-  --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.40);
+  /* 阴影 — 与 light 模式保持一致（阴影不随主题变化） */
+  --shadow-sm: 0 3px 1px -1px rgba(26, 26, 26, 0.06);
+  --shadow-md: 0 8px 16px -4px rgba(0, 0, 0, 0.20);
+  --shadow-lg: 0 20px 20px -8px rgba(0, 0, 0, 0.24);
 }
 
 /* ===== 全局基础 ===== */

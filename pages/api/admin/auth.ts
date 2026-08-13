@@ -62,10 +62,10 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  *
  * 优先级：
  * 0. EdgeOne 部署（DEPLOY_PLATFORM=edgeone，Makers 控制台环境变量，构建与运行时
- *    共享）：请求必经 EO 边缘，EO-Client-IP / EO-Connecting-IP 由边缘强制注入且
- *    客户端无法伪造，优先采信；X-Forwarded-For 由 EO 维护（首项为客户端真实 IP）
+ *    共享）：请求必经 EdgeOne 边缘，EO-Client-IP / EO-Connecting-IP 由边缘强制注入且
+ *    客户端无法伪造，优先采信；X-Forwarded-For 由 EdgeOne 维护（首项为客户端真实 IP）
  *    作为回退。仅此部署平台采信——其他平台（Docker 显式 DEPLOY_PLATFORM=docker、
- *    CF、直连、未设置）EO 头完全不可信（攻击者可任意伪造绕过限流），一律忽略；
+ *    Cloudflare、直连、未设置）EdgeOne 头完全不可信（攻击者可任意伪造绕过限流），一律忽略；
  * 1. Vercel 部署（DEPLOY_PLATFORM=vercel）：Vercel 边缘强制覆盖 X-Forwarded-For
  *    为真实客户端公网 IP 且不转发外部 IP（防 IP 伪造），并注入同值的
  *    x-vercel-forwarded-for / x-real-ip；x-vercel-forwarded-for 为 Vercel 专属头
@@ -89,7 +89,7 @@ export function getClientIp(req: NextApiRequest): string | null {
   const socketIp = normalizeIp(req.socket?.remoteAddress ?? "");
 
   // EdgeOne 部署：采信边缘强制注入的专属头（仅当 DEPLOY_PLATFORM=edgeone，
-  // 防止其他部署方案因伪造 EO 头绕过限流）
+  // 防止其他部署方案因伪造 EdgeOne 头绕过限流）
   if (process.env.DEPLOY_PLATFORM === "edgeone") {
     const eoIp =
       firstHeaderValue(req.headers["eo-client-ip"]) ??
@@ -100,8 +100,8 @@ export function getClientIp(req: NextApiRequest): string | null {
       const first = normalizeIp(eoXff.split(",")[0] ?? eoXff);
       if (first) return first;
     }
-    // EO 专属头缺失（异常形态）时回退 TCP 对端（边缘节点 IP），
-    // 不落入下方 CF-Connecting-IP 信任分支——EO 不注入该头，直连伪造不可信
+    // EdgeOne 专属头缺失（异常形态）时回退 TCP 对端（边缘节点 IP），
+    // 不落入下方 CF-Connecting-IP 信任分支——EdgeOne 不注入该头，直连伪造不可信
     return socketIp || null;
   }
 

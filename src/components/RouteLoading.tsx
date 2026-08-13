@@ -1,16 +1,21 @@
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useTranslation } from "react-i18next";
+import { m } from "motion/react";
 
 /**
  * 路由切换骨架屏 — 管理后台页面切换时替代白屏/居中 Spinner
  *
  * 布局与 AdminLayout 对齐：顶栏 + 标题区 + 统计卡片网格 + 列表块，
- * 淡入淡出过渡，避免页面切换闪烁。
+ * 淡入过渡，避免页面切换闪烁。
  */
 export default function RouteLoading() {
   const { t } = useTranslation("common");
   return (
-    <div
+    <m.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
       className="fixed inset-0 z-[200] bg-zinc-50 dark:bg-zinc-950 overflow-hidden"
       role="status"
       aria-label={t("loading")}
@@ -43,6 +48,6 @@ export default function RouteLoading() {
           <Skeleton className="h-72 rounded-xl bg-white dark:bg-zinc-900" />
         </div>
       </div>
-    </div>
+    </m.div>
   );
 }

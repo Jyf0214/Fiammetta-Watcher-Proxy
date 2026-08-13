@@ -1,6 +1,6 @@
 #!/bin/bash
 # ================================================================
-# Worker lite 构建门控脚本（仅 CF 部署，CI 内使用）
+# Worker lite 构建门控脚本（仅 Cloudflare 部署，CI 内使用）
 #
 # 环境变量 VERSION（GitHub 仓库变量，可选值 latest / lite）：
 #   - latest（默认）：部署全量 Worker（评分/重试/熔断/全部 Cron）

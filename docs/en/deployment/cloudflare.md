@@ -2,7 +2,7 @@
 
 FWP on Cloudflare consists of two parts: the **Worker** handles the `/v1/*` proxy and 3 scheduled tasks, while **Pages** serves the frontend and admin panel. Both share the same database.
 
-- Database defaults to `DB_TYPE=d1` (Cloudflare D1 — free, zero configuration); TiDB/PG are also supported
+- Database defaults to `DB_TYPE=d1` (Cloudflare D1 — free, zero configuration); TiDB/PostgreSQL are also supported
 - GitHub Actions auto-deploy is recommended: push the code and everything is published
 
 ## Prerequisites

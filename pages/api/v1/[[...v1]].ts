@@ -1,8 +1,8 @@
 /**
  * /v1/* 代理路由 — Pages API 版本
  *
- * 非 CF 部署时由 Pages API 处理 /v1/* 代理请求。
- * CF 部署时此文件被构建门控脚本临时移除，由 Worker 处理。
+ * 非 Cloudflare 部署时由 Pages API 处理 /v1/* 代理请求。
+ * Cloudflare 部署时此文件被构建门控脚本临时移除，由 Worker 处理。
  *
  * 核心逻辑复用 worker/src/ 下的业务模块，仅适配 Pages 运行时环境。
  */
@@ -106,7 +106,7 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
       KV: env.KV,
     };
   } catch {
-    // 本地开发或非 CF 环境：回退 process.env
+    // 本地开发或非 Cloudflare 环境：回退 process.env
     return {
       DB_TYPE: process.env.DB_TYPE,
       DATABASE_URL: process.env.DATABASE_URL,

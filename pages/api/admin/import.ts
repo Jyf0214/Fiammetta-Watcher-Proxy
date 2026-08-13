@@ -10,7 +10,6 @@
  * - 按 ID 或名称匹配，已存在则跳过
  * - 脱敏值（含 ***）自动跳过
  * - 导入不会删除现有数据，只添加新数据
- * - 敏感配置（admin_reset_password）跳过
  * - 有依赖关系的数据按顺序导入
  */
 
@@ -39,6 +38,7 @@ interface FullImportResult {
     configs?: ImportResult;
     auditLogs?: ImportResult;
     requestLogs?: ImportResult;
+    dailyStats?: ImportResult;
   };
 }
 
@@ -64,6 +64,7 @@ const MAX_PER_TYPE: Record<string, number> = {
   configs: 200,
   auditLogs: 10000,
   requestLogs: 10000,
+  dailyStats: 10000,
 };
 
 /** 单次导入总记录数上限 */
@@ -178,6 +179,7 @@ export default async function handler(
       { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
       { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
       { key: "requestLogs", data: body.requestLogs, fn: importRequestLogs },
+      { key: "dailyStats", data: body.dailyStats, fn: importDailyStats },
     ];
 
     // 总记录数（与上限检查一致：仅统计数组类型的记录）
@@ -692,10 +694,10 @@ async function importApiKeys(
  * 导入系统配置
  *
  * 按 key 做 upsert（已存在则更新 value，不存在则创建）
- * 跳过敏感配置（admin_reset_password）与运行期关键配置（system:auto_model_id），
+ * 跳过运行期关键配置（system:auto_model_id），
  * 仅允许 system:* 前缀的键（与 /api/admin/config 的写入约束一致，其他键视为异常数据）
  */
-const SKIP_IMPORT_CONFIG_KEYS = new Set(["admin_reset_password", "system:auto_model_id"]);
+const SKIP_IMPORT_CONFIG_KEYS = new Set(["system:auto_model_id"]);
 const IMPORT_CONFIG_PREFIX = "system:";
 
 async function importConfigs(
@@ -954,6 +956,109 @@ export async function importRequestLogs(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 请求日志批量写入失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
+    }
+  }
+
+  return { imported, skipped, skipReasons };
+}
+
+// ==================== 导入每日统计 ====================
+
+/**
+ * 导入每日统计数据
+ *
+ * 按 date + keyId + model 去重（与 daily_stats 唯一约束一致）。
+ * platformId 不存在时置 null，避免悬空引用。
+ */
+async function importDailyStats(
+  db: DbClient,
+  dailyStats: Array<Record<string, unknown>>
+): Promise<ImportResult> {
+  let imported = 0;
+  let skipped = 0;
+  const skipReasons: Record<string, number> = {};
+
+  // 预加载已有记录的去重键
+  const existingRows = await db.dailyStats.findMany({
+    select: { date: true, keyId: true, model: true },
+  });
+  const existingKeys = new Set(
+    existingRows.map((r) => `${r.date}\0${r.keyId ?? ""}\0${r.model}`)
+  );
+  const batchSeen = new Set<string>();
+
+  // 外键校验：platformId 不存在时置 null
+  const referencedPlatformIds = new Set<string>();
+  for (const s of dailyStats) {
+    const pid = sanitizeNullableString(s.platformId);
+    if (pid) referencedPlatformIds.add(pid);
+  }
+  const existingPlatformRows = referencedPlatformIds.size > 0
+    ? await db.platforms.findMany({ where: { id: { in: Array.from(referencedPlatformIds) } }, select: { id: true } })
+    : [];
+  const validPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
+
+  const validStats: Array<Record<string, unknown>> = [];
+  for (const s of dailyStats) {
+    const date = sanitizeNonNegativeInt(s.date);
+    const model = sanitizeString(s.model);
+    if (date === null || !model) {
+      skipReasons["缺少必要字段 (date/model)"] = (skipReasons["缺少必要字段 (date/model)"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    const keyId = sanitizeNullableString(s.keyId);
+    const dedupeKey = `${date}\0${keyId ?? ""}\0${model}`;
+    if (existingKeys.has(dedupeKey) || batchSeen.has(dedupeKey)) {
+      skipReasons["记录已存在"] = (skipReasons["记录已存在"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    batchSeen.add(dedupeKey);
+    validStats.push(s);
+  }
+
+  if (validStats.length === 0) {
+    return { imported, skipped, skipReasons };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < validStats.length; i += BATCH_SIZE) {
+    const batch = validStats.slice(i, i + BATCH_SIZE);
+    const batchData = batch.map((s) => {
+      const rawPlatformId = sanitizeNullableString(s.platformId);
+      return {
+        id: generateId(),
+        date: sanitizeNonNegativeInt(s.date) ?? now,
+        keyId: sanitizeNullableString(s.keyId),
+        keyName: sanitizeNullableString(s.keyName),
+        platformId: rawPlatformId && validPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
+        platformName: sanitizeNullableString(s.platformName),
+        model: sanitizeString(s.model),
+        totalRequests: sanitizeNonNegativeInt(s.totalRequests) ?? 0,
+        errorRequests: sanitizeNonNegativeInt(s.errorRequests) ?? 0,
+        totalTokens: sanitizeNonNegativeInt(s.totalTokens) ?? 0,
+        totalPromptTokens: sanitizeNonNegativeInt(s.totalPromptTokens) ?? 0,
+        totalCompletionTokens: sanitizeNonNegativeInt(s.totalCompletionTokens) ?? 0,
+        avgTtft: sanitizeNonNegativeFloat(s.avgTtft) ?? 0,
+        avgDuration: sanitizeNonNegativeFloat(s.avgDuration) ?? 0,
+        avgTps: sanitizeNonNegativeFloat(s.avgTps) ?? 0,
+        maxTtft: sanitizeNonNegativeInt(s.maxTtft) ?? 0,
+        maxDuration: sanitizeNonNegativeInt(s.maxDuration) ?? 0,
+        maxTps: sanitizeNonNegativeFloat(s.maxTps) ?? 0,
+        createdAt: sanitizeNonNegativeInt(s.createdAt) ?? now,
+      };
+    });
+
+    try {
+      const result = await db.dailyStats.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 每日统计批量写入失败:", errMsg);
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
       skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;

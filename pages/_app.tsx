@@ -3,6 +3,8 @@ import Head from "next/head"
 import { useRouter } from "next/router"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { ThemeProvider } from "next-themes"
+import { AnimatePresence, LazyMotion, domMax } from "motion/react"
 import "../styles/globals.css"
 import "@/lib/i18n"
 import { message } from "antd"
@@ -16,7 +18,6 @@ export default function App({ Component, pageProps }: AppProps) {
   const { t } = useTranslation("common")
   const [routeLoading, setRouteLoading] = useState(false)
 
-  // 管理后台路由切换时显示骨架屏，替代整页白屏 + 居中 Spinner
   useEffect(() => {
     const handleStart = (url: string) => {
       if (url.startsWith("/admin")) setRouteLoading(true)
@@ -34,14 +35,18 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [router])
 
   return (
-    <>
-      <Head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="description" content={t("metaDescription")} />
-        <title>{t("brandFull")}</title>
-      </Head>
-      {routeLoading && <RouteLoading />}
-      <Component {...pageProps} />
-    </>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <LazyMotion features={domMax} strict>
+        <Head>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="description" content={t("metaDescription")} />
+          <title>{t("brandFull")}</title>
+        </Head>
+        <AnimatePresence>
+          {routeLoading && <RouteLoading />}
+        </AnimatePresence>
+        <Component {...pageProps} />
+      </LazyMotion>
+    </ThemeProvider>
   )
 }

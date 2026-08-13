@@ -113,7 +113,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     }
 
     // 模型筛选（模糊匹配）
-    // Prisma 的 contains 在 PG/MySQL/TiDB 下直接拼接 LIKE '%...%'，不转义 %/_ 通配符；
+    // Prisma 的 contains 在 PostgreSQL/MySQL/TiDB 下直接拼接 LIKE '%...%'，不转义 %/_ 通配符；
     // 不转义时 model=% 会匹配全部记录（查询范围被放大），这里先行转义
     if (model) {
       const escaped = model.replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -153,7 +153,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   try {
-    // 注意：此模式仅在非 D1 数据库类型（TiDB/PG/MySQL，生产 EO 为 TiDB）下有效——
+    // 注意：此模式仅在非 D1 数据库类型（TiDB/PostgreSQL/MySQL，生产 EdgeOne 为 TiDB）下有效——
     // createDb 忽略传入的 dummy DB，走 DB_TYPE + TIDB_URL/PG_URL 环境变量；
     // D1 部署下应改传真实 binding（无参调用自动检测）。与 pages/api/cron/[[...cron]].ts 用法一致。
     const result = await runArchiveTask({} as D1Database, { DB_TYPE: process.env.DB_TYPE });

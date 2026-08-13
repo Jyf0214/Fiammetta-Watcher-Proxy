@@ -3,7 +3,7 @@
  * 开发环境嵌入式 PostgreSQL 快速启动脚本
  *
  * 开发时无需手动安装/启动 PostgreSQL：本脚本用 embedded-postgres 包管理
- * 一个落在项目目录 .pgdata/ 的嵌入式 PG 实例（数据文件化，无系统服务依赖）。
+ * 一个落在项目目录 .pgdata/ 的嵌入式 PostgreSQL 实例（数据文件化，无系统服务依赖）。
  *
  * 用法：
  *   npm run db:dev              # 前台启动：初始化（如需）+ 启动 + 建库 + 写 .env.local
@@ -35,7 +35,7 @@ const PASSWORD = "postgres";
 const APP_DB = "fiammetta_dev";
 const PG_URL = `postgresql://${USER}:${PASSWORD}@127.0.0.1:${PORT}/${APP_DB}`;
 
-/** TCP 探活：端口是否已被 PG 监听 */
+/** TCP 探活：端口是否已被 PostgreSQL 监听 */
 function probePort(timeoutMs = 800) {
   return new Promise((done) => {
     const sock = net.connect(PORT, "127.0.0.1");
@@ -111,7 +111,7 @@ async function runServer() {
   }
   writeEnvLocal();
   console.log(`[dev-db] 嵌入式 PostgreSQL 已就绪: ${PG_URL}`);
-  // 保持进程存活（embedded-postgres 退出钩子会随进程清理 PG 子进程）
+  // 保持进程存活（embedded-postgres 退出钩子会随进程清理 PostgreSQL 子进程）
   await new Promise(() => {});
 }
 

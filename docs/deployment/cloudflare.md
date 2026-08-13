@@ -2,7 +2,7 @@
 
 FWP 部署到 Cloudflare 后由两部分组成：**Worker** 处理 `/v1/*` 代理与 3 个定时任务，**Pages** 托管前台与管理后台，两者共享同一个数据库。
 
-- 数据库默认 `DB_TYPE=d1`（Cloudflare D1，免费，无需任何配置）；也可用 TiDB/PG
+- 数据库默认 `DB_TYPE=d1`（Cloudflare D1，免费，无需任何配置）；也可用 TiDB/PostgreSQL
 - 推荐使用 GitHub Actions 自动部署：推送代码即完成全部发布
 
 ## 前置条件

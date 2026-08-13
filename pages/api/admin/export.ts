@@ -83,12 +83,10 @@ export default async function handler(
         platformId: m.platformId,
       }));
 
-      // 系统配置（跳过敏感配置，如 admin_reset_password——与 import 的跳过逻辑对齐，
-      // 避免导出文件泄露凭据或经导入误恢复）
+      // 系统配置
       const configs = await db.configs.findMany();
 
       exportData.configs = configs
-        .filter((c) => c.key !== "admin_reset_password")
         .map((c) => ({
           key: c.key,
           value: c.value,

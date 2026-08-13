@@ -18,13 +18,13 @@ function getPrismaAlias() {
 
 // Cloudflare Pages 构建（opennextjs-cloudflare）按 workerd 条件解析 external 包：
 // @prisma/client 的 WASM 引擎、pg-cloudflare 的真实 Socket 实现都能正确打包。
-// 非 CF 平台（EdgeOne/Vercel/纯 Node）没有该打包器，Turbopack external 化后运行时
+// 非 Cloudflare 平台（EdgeOne/Vercel/纯 Node）没有该打包器，Turbopack external 化后运行时
 // import("<包名>-<hash>") 依赖 .next/node_modules symlink，上传部署时 symlink 丢失
 // → ERR_MODULE_NOT_FOUND（@prisma/client 是所有方言必经模块）。
-// 因此数据库栈在 CF 构建保持 external（恢复已验证行为），非 CF 构建强制转译内联。
+// 因此数据库栈在 Cloudflare 构建保持 external（恢复已验证行为），非 Cloudflare 构建强制转译内联。
 const isCFDeploy = process.env.DEPLOY_PLATFORM === "cf";
 
-// CF 平台可用的数据库栈（d1/tidb/pg/hyperdrive）——CF 构建保持 external，
+// Cloudflare 平台可用的数据库栈（d1/tidb/pg/hyperdrive）——Cloudflare 构建保持 external，
 // 由 opennextjs-cloudflare 按 workerd 条件打包。
 const prismaStack = [
   "@prisma/client",
@@ -35,9 +35,9 @@ const prismaStack = [
   "pg",
 ];
 
-// MariaDB/纯 MySQL（mariadb 驱动，TCP）仅支持非 CF 平台：
-// - 非 CF 构建强制转译内联（EdgeOne/纯 Node 可运行）
-// - CF 构建通过 turbopack.resolveAlias 指向空 stub，不打包 TCP 驱动（体积 + workerd 兼容）
+// MariaDB/纯 MySQL（mariadb 驱动，TCP）仅支持非 Cloudflare 平台：
+// - 非 Cloudflare 构建强制转译内联（EdgeOne/纯 Node 可运行）
+// - Cloudflare 构建通过 turbopack.resolveAlias 指向空 stub，不打包 TCP 驱动（体积 + workerd 兼容）
 const mariadbStack = ["@prisma/adapter-mariadb", "mariadb"];
 
 const nextConfig: NextConfig = {
@@ -60,7 +60,7 @@ const nextConfig: NextConfig = {
   // Anthropic Messages 兼容端点：Anthropic SDK / Claude Code 的 baseURL 为域名根时，
   // 请求路径固定为 /v1/messages（SDK buildURL = baseURL + "/v1/messages"），而本项目
   // 函数路由以 /api 开头。全量把 /v1/* 转发到 /api/v1/*，OpenAI 客户端亦可配 base=域名根。
-  // CF 部署（Worker 直连 /v1/*）不需要此转发。
+  // Cloudflare 部署（Worker 直连 /v1/*）不需要此转发。
   async rewrites() {
     return [
       {
@@ -97,7 +97,7 @@ const nextConfig: NextConfig = {
     ];
   },
   // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析；
-  // CF 构建时 mariadb（TCP 驱动）alias 到空 stub（CF 不支持 mariadb）。
+  // Cloudflare 构建时 mariadb（TCP 驱动）alias 到空 stub（Cloudflare 不支持 mariadb）。
   // 注意 resolveAlias 值为字符串，本地文件用相对项目根的路径（绝对路径会被当成 relative import）。
   turbopack: {
     ...(isCFDeploy
@@ -111,7 +111,7 @@ const nextConfig: NextConfig = {
   },
   // Turbopack（Next.js 16 默认）会把部分包 external 化并在运行时 import("<包名>-<hash>")，
   // 该 ID 依赖 .next/node_modules symlink 解析，EdgeOne 上传部署时 symlink 丢失 → 500。
-  // 通用库无条件内联（CF 侧内联无副作用）；数据库栈仅非 CF 内联（见 prismaStack 注释）。
+  // 通用库无条件内联（Cloudflare 侧内联无副作用）；数据库栈仅非 Cloudflare 内联（见 prismaStack 注释）。
   transpilePackages: [
     "i18next",
     "react-i18next",
@@ -133,7 +133,7 @@ const nextConfig: NextConfig = {
   },
   // mysql2 为 prisma CLI 依赖（构建期 db push 用），运行时无 import；
   // pg-cloudflare 由 pg 内部按 workerd 条件引用，非 workerd 环境解析为空模块。
-  // CF 构建额外将数据库栈保持 external，由 opennextjs-cloudflare 按 workerd 条件打包。
+  // Cloudflare 构建额外将数据库栈保持 external，由 opennextjs-cloudflare 按 workerd 条件打包。
   serverExternalPackages: [
     "mysql2",
     "pg-cloudflare",

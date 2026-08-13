@@ -41,7 +41,8 @@
     "unitMs": "ms",
     "unitK": "K",
     "unitM": "M",
-    "unitB": "B"
+    "unitB": "B",
+    "add": "Add"
   },
   "validation": {
     "required": " is required"
@@ -123,6 +124,7 @@
     "dmStepAuditLogs": "Audit logs",
     "dmStepRequestLogs": "Request logs",
     "dmStepRequestLogsDetail": "Large dataset, may take a while",
+    "dmStepDailyStats": "Daily stats",
     "dmPreviewTitle": "Import Preview",
     "dmPreviewRecords": "records",
     "dmPreviewIssueHint": "Suspicious records detected (missing fields / duplicates / masked values); they will be skipped during import",
@@ -178,7 +180,6 @@
     "batchAddKeyHint": "Auto-skips empty lines, duplicates of existing keys, and duplicates within batch",
     "batchAddKeyAllDup": "All keys already exist, no new keys added",
     "batchAddKeyPartialDup": "Added {added}/{total} keys, rest were duplicates",
-    "batchAddKeyDesc": "Batch add keys",
     "keyName": "Key name",
     "whitelistAdd": "Whitelist",
     "whitelistRemove": "Whitelisted",
@@ -334,15 +335,7 @@
     "actionUpdatePlatform": "Update Platform",
     "actionDeletePlatform": "Delete Platform",
     "actionCreateApiKey": "Create API Key",
-    "actionDeleteApiKey": "Delete API Key",
-    "actionCreateModelMap": "Create Model Map",
-    "actionUpdateModelMap": "Update Model Map",
-    "actionDeleteModelMap": "Delete Model Map",
-    "actionEnableModelMap": "Enable Model Map",
-    "actionDisableModelMap": "Disable Model Map",
-    "actionBatchEnableModelMaps": "Batch Enable Model Maps",
-    "actionBatchDisableModelMaps": "Batch Disable Model Maps",
-    "actionBatchDeleteModelMaps": "Batch Delete Model Maps"
+    "actionDeleteApiKey": "Delete API Key"
   },
   "system": {
     "autoModelTitle": "Auto Model",

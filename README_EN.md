@@ -23,10 +23,10 @@ LLM API proxy with multi-platform load balancing, circuit breaker recovery, and 
 ## Architecture
 
 ```
-User request → Proxy entry (CF deployment: Worker proxies v1/* + Cron tasks; other platforms: Next.js routes)
+User request → Proxy entry (Cloudflare deployment: Worker proxies v1/* + Cron tasks; other platforms: Next.js routes)
              → Admin dashboard (Next.js 16 + API routes)
              → D1 / TiDB / MariaDB / PostgreSQL (lib/prisma.ts unified factory, switched by DB_TYPE)
-             → Rate limiting & key ban state (KV on CF, in-process storage elsewhere)
+             → Rate limiting & key ban state (KV on Cloudflare, in-process storage elsewhere)
 ```
 
 ## Database Support
@@ -35,12 +35,12 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 
 | DB_TYPE | Database | Adapter | Protocol | Platforms |
 |---------|----------|---------|----------|-----------|
-| `d1` (default) | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | CF |
+| `d1` (default) | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | Cloudflare |
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | All |
-| `mariadb` | MariaDB / pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-CF only (EdgeOne/Vercel/Docker/Node) |
+| `mariadb` | MariaDB / pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
 | `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
 
-> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-CF platforms** (CF builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
+> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-Cloudflare platforms** (Cloudflare builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 
 ## Deployment
 
@@ -65,7 +65,7 @@ Configure these in GitHub repo Settings → Secrets:
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
 | `DB_TYPE` | Database type (`d1` / `tidb` / `pg`, default `d1`) |
-| `DATABASE_URL` | External database URL (required for TiDB/PG, not needed for D1) |
+| `DATABASE_URL` | External database URL (required for TiDB/PostgreSQL, not needed for D1) |
 | `EO_PROJECT_NAME` | EdgeOne Makers project name (required for EdgeOne deployments) |
 | `EO_API_TOKEN` | EdgeOne API Token (required for EdgeOne deployments) |
 
@@ -128,8 +128,8 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
 | `JWT_SECRET` | JWT signing secret (min 32 chars; auto-generated on Cloudflare CI deployments, must be set manually elsewhere) |
-| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` (CF deployments); `mariadb` for non-CF platforms only |
-| `DATABASE_URL` | External database URL (required for TiDB/MariaDB/PG, D1 connects via binding) |
+| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` (Cloudflare deployments); `mariadb` for non-Cloudflare platforms only |
+| `DATABASE_URL` | External database URL (required for TiDB/MariaDB/PostgreSQL, D1 connects via binding) |
 
 ## Development
 
@@ -146,7 +146,7 @@ npm run test         # Run tests
 - **Runtime**: Cloudflare Workers + Pages (OpenNext) / EdgeOne / Vercel / Docker (Next.js standalone)
 - **Framework**: Next.js 16 + React 19
 - **Database**: Cloudflare D1 / TiDB Cloud / MariaDB / PostgreSQL (Prisma 7 ORM + Driver Adapters)
-- **Cache**: Cloudflare KV (CF deployment)
+- **Cache**: Cloudflare KV (Cloudflare deployment)
 - **UI**: Ant Design 6 + Tailwind CSS
 - **Charts**: Recharts
 - **Auth**: JWT (jose)

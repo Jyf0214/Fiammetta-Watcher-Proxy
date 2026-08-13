@@ -23,10 +23,10 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 ## 架构
 
 ```
-用户请求 → 代理入口（CF 部署：Worker 代理 v1/* + Cron 任务；其他平台：Next.js 路由）
+用户请求 → 代理入口（Cloudflare 部署：Worker 代理 v1/* + Cron 任务；其他平台：Next.js 路由）
          → 管理后台（Next.js 16 + API 路由）
          → D1 / TiDB / MariaDB / PostgreSQL（lib/prisma.ts 统一工厂，按 DB_TYPE 切换）
-         → 限流与 Key 封禁状态（CF 部署存于 KV，其他平台为进程内存储）
+         → 限流与 Key 封禁状态（Cloudflare 部署存于 KV，其他平台为进程内存储）
 ```
 
 ## 数据库支持
@@ -35,12 +35,12 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 
 | DB_TYPE | 数据库 | 适配器 | 协议 | 平台 |
 |---------|--------|--------|------|------|
-| `d1`（默认） | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | CF |
+| `d1`（默认） | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | Cloudflare |
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | 所有平台 |
-| `mariadb` | MariaDB / 纯 MySQL | `@prisma/adapter-mariadb` | TCP | 仅非 CF（EdgeOne/Vercel/Docker/纯 Node） |
+| `mariadb` | MariaDB / 纯 MySQL | `@prisma/adapter-mariadb` | TCP | 仅非 Cloudflare（EdgeOne/Vercel/Docker/纯 Node） |
 | `pg` | PostgreSQL 直连 | `@prisma/adapter-pg` | TCP | 所有平台 |
 
-> **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。`mariadb` 驱动走 TCP，仅适用于 MariaDB/纯 MySQL 直连，且**仅支持非 CF 平台**（CF 构建会将 mariadb 驱动排除在产物外）。免费版 Workers 存在 CPU/请求限制，批量导入日志（多条记录写入）时 API 可能超时不可用。
+> **TiDB 注意事项：** TiDB Cloud 在 Cloudflare Workers 中必须使用 HTTP 协议（`@tidbcloud/prisma-adapter`），不能使用传统 TCP 连接的 `@prisma/adapter-mariadb`，因为 Workers 运行在 V8 Isolate 上不支持 Node.js TCP Socket。`mariadb` 驱动走 TCP，仅适用于 MariaDB/纯 MySQL 直连，且**仅支持非 Cloudflare 平台**（Cloudflare 构建会将 mariadb 驱动排除在产物外）。免费版 Workers 存在 CPU/请求限制，批量导入日志（多条记录写入）时 API 可能超时不可用。
 
 ## 部署
 
@@ -65,7 +65,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 | `ADMIN_USERNAME` | 管理员用户名 |
 | `ADMIN_PASSWORD` | 管理员密码 |
 | `DB_TYPE` | 数据库类型（`d1` / `tidb` / `pg`，默认 `d1`） |
-| `DATABASE_URL` | 外部数据库 URL（TiDB/PG 时必需，D1 无需设置） |
+| `DATABASE_URL` | 外部数据库 URL（TiDB/PostgreSQL 时必需，D1 无需设置） |
 | `EO_PROJECT_NAME` | EdgeOne Makers 项目名（EdgeOne 部署时需要） |
 | `EO_API_TOKEN` | EdgeOne API Token（EdgeOne 部署时需要） |
 
@@ -128,8 +128,8 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `ADMIN_USERNAME` | 管理员用户名 |
 | `ADMIN_PASSWORD` | 管理员密码 |
 | `JWT_SECRET` | JWT 签名密钥（至少 32 字符；Cloudflare CI 部署时自动生成，其他平台必须手动设置） |
-| `DB_TYPE` | 数据库类型：`d1`（默认）/ `tidb` / `pg`（CF 部署）；`mariadb` 仅非 CF 平台可用 |
-| `DATABASE_URL` | 外部数据库 URL（TiDB/MariaDB/PG 时必需，D1 通过 binding 连接无需设置） |
+| `DB_TYPE` | 数据库类型：`d1`（默认）/ `tidb` / `pg`（Cloudflare 部署）；`mariadb` 仅非 Cloudflare 平台可用 |
+| `DATABASE_URL` | 外部数据库 URL（TiDB/MariaDB/PostgreSQL 时必需，D1 通过 binding 连接无需设置） |
 
 ## 开发
 
@@ -146,7 +146,7 @@ npm run test         # 运行测试
 - **运行时**: Cloudflare Workers + Pages（OpenNext）/ EdgeOne / Vercel / Docker（Next.js standalone）
 - **框架**: Next.js 16 + React 19
 - **数据库**: Cloudflare D1 / TiDB Cloud / MariaDB / PostgreSQL（Prisma 7 ORM + Driver Adapters）
-- **缓存**: Cloudflare KV（CF 部署）
+- **缓存**: Cloudflare KV（Cloudflare 部署）
 - **UI**: Ant Design 6 + Tailwind CSS
 - **图表**: Recharts
 - **认证**: JWT（jose）

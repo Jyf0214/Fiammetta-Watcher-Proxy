@@ -2,7 +2,7 @@
 # ================================================================
 # 构建还原脚本
 #
-# DEPLOY_PLATFORM=cf 的 CF 构建完成后，将 build-gate.sh 移走的
+# DEPLOY_PLATFORM=cf 的 Cloudflare 构建完成后，将 build-gate.sh 移走的
 # 路由还原回来。
 #
 # 使用方式：
