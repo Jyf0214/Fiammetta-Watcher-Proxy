@@ -131,7 +131,15 @@ async function createPrismaInstance(
       const url = (env?.PG_URL as string) || process.env.PG_URL || process.env.DATABASE_URL;
       if (!url) throw new Error("PG_URL 或 DATABASE_URL 未配置");
 
-      const pool = new Pool({ connectionString: url });
+      const pool = new Pool({
+        connectionString: url,
+        // 256MB 容器下限制连接数，每连接约 2-4MB buffer
+        max: 3,
+        // 空闲连接 30 秒后自动关闭回收内存
+        idleTimeoutMillis: 30_000,
+        // 连接建立超时
+        connectionTimeoutMillis: 10_000,
+      });
       // pg 官方要求：空闲连接错误（数据库重启/网络闪断）必须显式消费，
       // 否则 Node 视为未捕获 error 事件直接崩溃进程
       pool.on("error", (err) => {

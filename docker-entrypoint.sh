@@ -37,4 +37,7 @@ echo "[启动] 同步数据库表结构（DB_TYPE=$DB_TYPE）..."
 DB_PUSH=1 node scripts/prepare-db.mjs
 
 echo "[启动] 启动应用..."
+# 限制 V8 堆上限为 192MB，在 256MB 容器中预留 ~64MB 给 V8 外部内存（pg 连接 buffer、libuv 线程池等），
+# 迫使 GC 在接近上限时积极回收，防止 RSS 无限增长触发 OOM killer
+export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=192"
 exec node server.js
