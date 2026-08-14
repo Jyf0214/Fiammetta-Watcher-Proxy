@@ -105,7 +105,7 @@ export function PlatformConfigForm({
       {/* 单卡片：header(品牌+状态+开关) + 可折叠内容 */}
       <div className={cardClass}>
         {editing && (
-          <div className="hidden lg:flex items-center gap-3 px-5 pt-5 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="hidden lg:flex items-center gap-3 px-5 sm:px-6 pt-5 sm:pt-6 pb-5 mb-5 border-b border-zinc-100 dark:border-zinc-800">
             <BrandAvatar name={editing.name} type={editing.type} size="lg" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
@@ -135,7 +135,7 @@ export function PlatformConfigForm({
         <Collapse
           defaultActiveKey={editing ? ["keys", "params"] : ["basic", "keys", "params"]}
           ghost
-          className="platform-config-collapse"
+          className="platform-config-collapse p-5 sm:p-6"
           items={[
             ...(!editing
               ? [
