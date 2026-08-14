@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
+import { SurfaceSkeleton } from "@/components/ui/SurfaceSkeleton";
 import {
   parseNamedKeys,
   parseForwardHeaders,
@@ -503,21 +504,20 @@ export default function PlatformDetailPage() {
 
   return (
     <AdminLayout>
-      <div className="flex flex-col lg:flex-row h-full">
-        {/* 左侧：桌面端平台列表栏 */}
-        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6">
+      <div className="flex h-full">
+        {/* 左侧：桌面端平台列表栏（280px 固定宽度，与内容区共占满屏宽） */}
+        <div className="hidden lg:flex flex-col w-[280px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
           <PlatformList
             platforms={platforms ?? []}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
-            className="h-[calc(100vh-100px)] overflow-y-auto"
+            className="flex-1 overflow-y-auto"
           />
         </div>
 
-        {/* 右侧：主内容区 */}
-        <div className="flex-1 min-w-0 relative">
-
-          {/* 移动端返回条（sticky 吸附在 Header 下方 64px） */}
+        {/* 右侧：详情主体（独立滚动容器，maxWidth 1024，padding 24） */}
+        <div className="flex-1 min-w-0 overflow-y-auto">
+          {/* 移动端返回条（sticky 吸附在 Header 下方） */}
           <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
@@ -557,12 +557,10 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 详情主体 — 桌面端无额外顶部间距；移动端返回条 sticky 在文档流内占位，仅保留少量呼吸间距 */}
-          <div className="w-full max-w-2xl mx-auto pt-4 lg:pt-0 pb-10">
+          {/* 详情内容区：maxWidth 1024 + padding 24 */}
+          <div className="max-w-[1024px] mx-auto p-4 lg:p-6 pb-10">
             {detailLoading ? (
-              <div className="py-24 text-center text-zinc-300 dark:text-zinc-600">
-                <RefreshCw size={28} className="inline animate-spin" />
-              </div>
+              <SurfaceSkeleton variant="form" />
             ) : isNew ? (
               <>
                 <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-5">
@@ -571,7 +569,7 @@ export default function PlatformDetailPage() {
                 {configForm}
               </>
             ) : platform ? (
-              <div className="flex flex-col gap-8">
+              <div className="flex flex-col gap-6">
                 {/* 熔断恢复提示条 — 平台处于 down 状态时显示 */}
                 {platform.status === "down" && (
                   <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/40">
@@ -594,29 +592,27 @@ export default function PlatformDetailPage() {
                     </button>
                   </div>
                 )}
-                {/* 配置表单（上）— 卡片头部含品牌/名称/状态/启停开关 */}
+                {/* 配置表单（上） */}
                 {configForm}
 
-                {/* 模型列表 */}
-                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
-                  <ModelsPanel
-                    models={models ?? []}
-                    loading={modelsLoading}
-                    refreshing={refreshing}
-                    newModelId={newModelId}
-                    onNewModelIdChange={setNewModelId}
-                    onAddModel={handleAddModel}
-                    onRefreshModels={handleRefreshModels}
-                    onDeleteModel={handleDeleteModel}
-                    onToggleModel={handleToggleModel}
-                    onToggleAll={handleToggleAll}
-                    togglingAll={togglingAll}
-                    togglingModelId={togglingModelId}
-                    onTestModel={handleTestModel}
-                    testLoading={testLoading}
-                    testResults={testResults}
-                  />
-                </div>
+                {/* 模型列表（下） */}
+                <ModelsPanel
+                  models={models ?? []}
+                  loading={modelsLoading}
+                  refreshing={refreshing}
+                  newModelId={newModelId}
+                  onNewModelIdChange={setNewModelId}
+                  onAddModel={handleAddModel}
+                  onRefreshModels={handleRefreshModels}
+                  onDeleteModel={handleDeleteModel}
+                  onToggleModel={handleToggleModel}
+                  onToggleAll={handleToggleAll}
+                  togglingAll={togglingAll}
+                  togglingModelId={togglingModelId}
+                  onTestModel={handleTestModel}
+                  testLoading={testLoading}
+                  testResults={testResults}
+                />
               </div>
             ) : null}
           </div>

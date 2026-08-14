@@ -37,7 +37,7 @@ export interface TestResult {
 }
 
 /**
- * 模型管理面板 — 标题工具条 + 带图标类型 Tabs + 已启用/已禁用分组
+ * 模型管理面板 — sticky 标题工具条 + 类型 Tabs + 已启用/已禁用分组
  */
 export function ModelsPanel({
   models,
@@ -94,7 +94,6 @@ export function ModelsPanel({
     });
   }, [models, typeFilter, searchText]);
 
-  // 已启用 / 已禁用分组（对照 EnabledModelList / DisabledModels 两组）
   const { enabledModels, disabledModels } = useMemo(() => {
     const enabled: ModelItem[] = [];
     const disabled: ModelItem[] = [];
@@ -102,7 +101,6 @@ export function ModelsPanel({
     return { enabledModels: enabled, disabledModels: disabled };
   }, [filteredModels]);
 
-  // 类型 Tabs：带图标 + 计数，仅显示有模型的数量（除 all 外）
   const typeTabs = [
     { key: "all", label: t("groupAll"), icon: Grid3x3 },
     { key: "chat", label: t(MODEL_TYPE_CONFIG.chat.labelKey), icon: MessageSquare },
@@ -119,7 +117,6 @@ export function ModelsPanel({
       .catch(() => message.error(t("common:copyFailed")));
   };
 
-  /** 单个模型行 — 品牌色图标 + 名称（点击复制）+ hover 编辑/删除 + 类型标签 + 启停开关（对照 ModelItem） */
   const renderModelRow = (model: ModelItem) => {
     const typeCfg = MODEL_TYPE_CONFIG[model.type] || MODEL_TYPE_CONFIG.chat;
     const TypeIcon = typeCfg.icon;
@@ -127,7 +124,7 @@ export function ModelsPanel({
     return (
       <div
         key={model.id}
-        className="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
+        className="group flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
       >
         <ModelIcon modelId={model.modelId} />
         <div className="flex-1 min-w-0">
@@ -140,8 +137,6 @@ export function ModelsPanel({
             >
               {model.modelId}
             </button>
-            {/* hover 操作内联在名称后（对照 ModelItem Actions）；触屏无 hover，移动端常显；
-                桌面隐藏时同时禁用指针，避免透明按钮仍可点击误删 */}
             <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:pointer-events-none lg:group-hover:pointer-events-auto transition-opacity">
               <Popconfirm
                 title={t("deleteModelConfirm")}
@@ -158,7 +153,7 @@ export function ModelsPanel({
               </Popconfirm>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 mt-1 text-[11px] text-zinc-400">
+          <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-zinc-400">
             <span>{model.source === "manual" ? t("manual") : t("auto")}</span>
           </div>
         </div>
@@ -183,13 +178,12 @@ export function ModelsPanel({
     );
   };
 
-  /** 分组标题 — 12px 次要文字 + 右侧图标操作（对照 EnabledModelList / DisabledModels 分组标题） */
   const renderGroupHeader = (
     label: string,
     count: number,
     action?: { title: string; onClick: () => void; loading: boolean }
   ) => (
-    <div className="flex items-center justify-between mt-6 mb-1.5 first:mt-2">
+    <div className="flex items-center justify-between mt-4 mb-1 first:mt-2">
       <span className="text-xs text-zinc-500 dark:text-zinc-400">
         {label}
         <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
@@ -215,91 +209,92 @@ export function ModelsPanel({
   );
 
   return (
-    <div>
-      {/* 标题区：模型列表 + 搜索/刷新（对照 ModelTitle） */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-          {t("models")}
-        </h3>
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-3">
+      {/* sticky 标题区 */}
+      <div className="sticky top-0 lg:top-0 z-10 bg-white dark:bg-zinc-900 -mx-4 lg:-mx-6 px-4 lg:px-6 pt-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+            {t("models")}
+          </h3>
+          <div className="flex items-center gap-2">
+            <Input
+              prefix={<Search size={14} className="text-zinc-400" />}
+              placeholder={t("searchPlaceholder")}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              className="w-32 lg:w-40"
+              size="small"
+            />
+            <Button
+              variant="default"
+              size="sm"
+              icon={<RefreshCw size={13} />}
+              onClick={onRefreshModels}
+              loading={refreshing}
+            >
+              {t("refreshModels")}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              icon={<Zap size={13} />}
+              onClick={() => {
+                setTestModelId(chatModels[0]?.modelId);
+                setTestModalOpen(true);
+              }}
+              disabled={chatModels.length === 0}
+            >
+              {t("testModel")}
+            </Button>
+          </div>
+        </div>
+
+        {/* 添加模型 + 类型 Tab 过滤 */}
+        <div className="flex items-center gap-2 mb-2">
           <Input
-            prefix={<Search size={14} className="text-zinc-400" />}
-            placeholder={t("searchPlaceholder")}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            allowClear
-            className="w-40"
+            placeholder={t("modelPlaceholder")}
+            value={newModelId}
+            onChange={(e) => onNewModelIdChange(e.target.value)}
+            onPressEnter={onAddModel}
+            className="flex-1"
             size="small"
           />
           <Button
-            variant="default"
+            variant="primary"
             size="sm"
-            icon={<RefreshCw size={13} />}
-            onClick={onRefreshModels}
-            loading={refreshing}
+            onClick={onAddModel}
+            disabled={!newModelId.trim()}
+            icon={<Plus size={13} />}
           >
-            {t("refreshModels")}
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            icon={<Zap size={13} />}
-            onClick={() => {
-              setTestModelId(chatModels[0]?.modelId);
-              setTestModalOpen(true);
-            }}
-            disabled={chatModels.length === 0}
-          >
-            {t("testModel")}
+            {t("addModel")}
           </Button>
         </div>
-      </div>
 
-      {/* 添加模型 */}
-      <div className="flex gap-2 mb-3">
-        <Input
-          placeholder={t("modelPlaceholder")}
-          value={newModelId}
-          onChange={(e) => onNewModelIdChange(e.target.value)}
-          onPressEnter={onAddModel}
-          className="flex-1"
-          size="small"
-        />
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onAddModel}
-          disabled={!newModelId.trim()}
-          icon={<Plus size={13} />}
-        >
-          {t("addModel")}
-        </Button>
-      </div>
-
-      {/* 类型 Tab 过滤（带图标，对照参考 Tabs square 变体） */}
-      <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl">
-        {typeTabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = typeFilter === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setTypeFilter(tab.key)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-200",
-                active
-                  ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              )}
-            >
-              <Icon size={13} />
-              <span className="hidden sm:inline">{tab.label}</span>
-              <span className="text-[10px] tabular-nums text-zinc-400">
-                {loading ? "…" : (typeCounts[tab.key] || 0)}
-              </span>
-            </button>
-          );
-        })}
+        <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-x-auto">
+          {typeTabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = typeFilter === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setTypeFilter(tab.key)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all duration-200 whitespace-nowrap",
+                  active
+                    ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                )}
+              >
+                <Icon size={13} />
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="text-[10px] tabular-nums text-zinc-400">
+                  {loading ? "…" : (typeCounts[tab.key] || 0)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* 模型列表 */}
@@ -314,7 +309,6 @@ export function ModelsPanel({
         />
       ) : (
         <>
-          {/* 已启用分组 */}
           {renderGroupHeader(t("groupEnabled"), enabledModels.length, {
             title: t("disableAll"),
             onClick: () => onToggleAll(false),
@@ -328,7 +322,6 @@ export function ModelsPanel({
             </div>
           )}
 
-          {/* 已禁用分组 */}
           {renderGroupHeader(t("groupDisabled"), disabledModels.length, {
             title: t("enableAll"),
             onClick: () => onToggleAll(true),

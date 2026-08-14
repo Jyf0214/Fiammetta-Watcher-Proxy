@@ -95,10 +95,10 @@ function PlatformRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
+        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
         active
-          ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-900 dark:border-zinc-100"
-          : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+          ? "bg-zinc-100 dark:bg-zinc-800"
+          : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       )}
     >
       <BrandAvatar name={platform.name} type={platform.type} size="sm" />
@@ -263,10 +263,10 @@ export function PlatformList({
                 type="button"
                 onClick={() => router.push("/admin/platforms")}
                 className={cn(
-                  "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors border-l-2",
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
                   !activeId
-                    ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-900 dark:border-zinc-100"
-                    : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                    ? "bg-zinc-100 dark:bg-zinc-800"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 )}
               >
                 <span className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
