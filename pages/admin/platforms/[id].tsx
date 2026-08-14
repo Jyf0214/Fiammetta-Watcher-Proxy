@@ -517,8 +517,8 @@ export default function PlatformDetailPage() {
 
         {/* 右侧：详情主体（独立滚动容器，maxWidth 1024，padding 24） */}
         <div className="flex-1 min-w-0 overflow-y-auto">
-          {/* 移动端返回条（sticky 吸附在 Header 下方） */}
-          <div className="lg:hidden sticky top-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
+          {/* 移动端返回条（sticky 吸顶，负边距抵消父级 padding 延伸至屏幕边缘） */}
+          <div className="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur -mx-4 -mt-4 px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
