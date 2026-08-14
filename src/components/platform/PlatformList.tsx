@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Input } from "antd";
 import { Plus, Search, ChevronDown, Cloud, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/ui";
 
 /** 平台数据接口（与 API /api/admin/platforms 返回结构一致） */
@@ -242,19 +243,19 @@ export function PlatformList({
           <Cloud size={36} className="animate-pulse" />
         </div>
       ) : items.length === 0 ? (
-        <div className="text-center py-16 text-zinc-400">
-          <Cloud size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{t("noPlatforms")}</p>
-          <Button variant="primary" size="sm" className="mt-4" onClick={goCreate} icon={<Plus size={14} />}>
-            {t("createPlatform")}
-          </Button>
-        </div>
+        <EmptyState
+          icon={<Cloud className="w-10 h-10" />}
+          title={t("noPlatforms")}
+          action={
+            <Button variant="primary" size="sm" onClick={goCreate} icon={<Plus size={14} />}>
+              {t("createPlatform")}
+            </Button>
+          }
+        />
       ) : (
         <div className="flex-1 overflow-y-auto p-2.5">
           {enabled.length === 0 && disabled.length === 0 ? (
-            <div className="text-center py-12 text-zinc-400 text-sm">
-              {t("searchNoResult")}
-            </div>
+            <EmptyState title={t("searchNoResult")} />
           ) : (
             <>
               {/* "全部"行：点击回到列表页全量视图 */}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { Table, Pagination } from "antd";
 import type { TableProps } from "antd";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -91,11 +92,7 @@ function MobileCards<T>({
   );
 
   if (!data.length) {
-    return (
-      <div className="text-center py-12 text-sm text-zinc-400 dark:text-zinc-500">
-        {t("noData")}
-      </div>
-    );
+    return <EmptyState title={t("noData")} />;
   }
 
   return (

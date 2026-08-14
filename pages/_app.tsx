@@ -9,6 +9,7 @@ import "../styles/globals.css"
 import "@/lib/i18n"
 import { message } from "antd"
 import RouteLoading from "@/components/RouteLoading"
+import { AntdProvider } from "@/components/providers/AntdProvider"
 
 // Toast 固定在导航栏下方，避免遮挡
 message.config({ top: 60 })
@@ -36,6 +37,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <AntdProvider>
       <LazyMotion features={domMax} strict>
         <Head>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -47,6 +49,7 @@ export default function App({ Component, pageProps }: AppProps) {
         </AnimatePresence>
         <Component {...pageProps} />
       </LazyMotion>
+      </AntdProvider>
     </ThemeProvider>
   )
 }

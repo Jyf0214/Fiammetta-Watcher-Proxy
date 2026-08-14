@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { Input, Popconfirm, message, Modal, Select, Alert } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   RefreshCw,
   Trash2,
@@ -307,10 +308,10 @@ export function ModelsPanel({
           <RefreshCw size={20} className="animate-spin mr-2" />{t("common:loading")}…
         </div>
       ) : filteredModels.length === 0 ? (
-        <div className="text-center py-12 text-zinc-400">
-          <Cpu size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{searchText ? t("searchNoResult") : t("noModels")}</p>
-        </div>
+        <EmptyState
+          icon={<Cpu className="w-10 h-10" />}
+          title={searchText ? t("searchNoResult") : t("noModels")}
+        />
       ) : (
         <>
           {/* 已启用分组 */}

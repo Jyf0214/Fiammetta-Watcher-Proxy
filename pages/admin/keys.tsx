@@ -7,11 +7,13 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ImperativeModal, createModal } from "@/components/ui/ImperativeModal";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime, formatDate } from "@/lib/timezone";
 import { useApi } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
 interface ApiKeyItem {
@@ -106,9 +108,10 @@ export default function KeysPage() {
   const [editItem, setEditItem] = useState<ApiKeyItem | null>(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
-  const [newKeyVisible, setNewKeyVisible] = useState(false);
-  const [newKeyValue, setNewKeyValue] = useState("");
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [keyModal] = useState(() =>
+    createModal({ title: t("createdTitle"), width: 520, content: null })
+  );
 
   const handleToggle = async (item: ApiKeyItem) => {
     const newStatus = item.status === "active" ? "disabled" : "active";
@@ -183,8 +186,29 @@ export default function KeysPage() {
           message.success(data.message);
           setModalOpen(false);
           form.resetFields();
-          setNewKeyValue(data.data.key);
-          setNewKeyVisible(true);
+          const keyValue = data.data.key as string;
+          keyModal.update({
+            title: t("createdTitle"),
+            onCancel: () => keyModal.close(),
+            content: (
+              <>
+                <p className="text-zinc-400 dark:text-zinc-300 mb-3">{t("saveWarning")}</p>
+                <div className="bg-zinc-800 dark:bg-zinc-700 p-3 rounded-lg font-mono text-sm break-all text-zinc-200 dark:text-zinc-100 border border-zinc-700 dark:border-zinc-600">
+                  {keyValue}
+                </div>
+                <Button
+                  variant="default"
+                  className="mt-3 w-full sm:w-auto"
+                  icon={<Copy size={14} />}
+                  aria-label={t("copyKey")}
+                  onClick={() => copyToClipboard(keyValue)}
+                >
+                  {t("copyKey")}
+                </Button>
+              </>
+            ),
+          });
+          keyModal.open();
           mutate();
         } else {
           message.error(data.error?.message);
@@ -311,7 +335,15 @@ export default function KeysPage() {
   ];
 
   if (isLoading && !keys) {
-    return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
+    return (
+      <AdminLayout>
+        <PageContainer>
+          <AsyncBoundary isLoading error={null}>
+            <></>
+          </AsyncBoundary>
+        </PageContainer>
+      </AdminLayout>
+    );
   }
 
   return (
@@ -342,7 +374,7 @@ export default function KeysPage() {
         {/* 移动端：卡片列表 */}
         <div className="sm:hidden space-y-3 mb-6">
           {(keys ?? []).length === 0 && !isValidating ? (
-            <div className="text-center py-12 text-sm text-zinc-400">{t("noApiKey")}</div>
+            <EmptyState title={t("noApiKey")} />
           ) : (
             (keys ?? []).map((apiKey) => (
               <ApiKeyCard
@@ -417,34 +449,8 @@ export default function KeysPage() {
           </Form>
         </Modal>
 
-        {/* 新 Key 展示弹窗 */}
-        <Modal
-          title={t("createdTitle")}
-          open={newKeyVisible}
-          onCancel={() => setNewKeyVisible(false)}
-          centered
-          width={520}
-          style={{ maxWidth: "90vw" }}
-          footer={[
-            <Button key="close" variant="default" onClick={() => setNewKeyVisible(false)} className="w-full sm:w-auto">
-              {t("common:close")}
-            </Button>,
-          ]}
-        >
-          <p className="text-zinc-400 dark:text-zinc-300 mb-3">{t("saveWarning")}</p>
-          <div className="bg-zinc-800 dark:bg-zinc-700 p-3 rounded-lg font-mono text-sm break-all text-zinc-200 dark:text-zinc-100 border border-zinc-700 dark:border-zinc-600">
-            {newKeyValue}
-          </div>
-          <Button
-            variant="default"
-            className="mt-3 w-full sm:w-auto"
-            icon={<Copy size={14} />}
-            aria-label={t("copyKey")}
-            onClick={() => copyToClipboard(newKeyValue)}
-          >
-            {t("copyKey")}
-          </Button>
-        </Modal>
+        {/* 命令式密钥展示弹窗 */}
+        <ImperativeModal instance={keyModal} />
       </PageContainer>
     </AdminLayout>
   );

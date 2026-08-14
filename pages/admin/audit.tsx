@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { RefreshCw, History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
 // ==================== 类型 ====================
@@ -120,7 +120,23 @@ function AuditContent() {
   ];
 
   if (isLoading && !data) {
-    return <GlobalLoading size="large" />;
+    return (
+      <PageContainer>
+        <AsyncBoundary isLoading error={null}>
+          <></>
+        </AsyncBoundary>
+      </PageContainer>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <PageContainer>
+        <AsyncBoundary isLoading={false} error={error} onRetry={mutate}>
+          <></>
+        </AsyncBoundary>
+      </PageContainer>
+    );
   }
 
   return (

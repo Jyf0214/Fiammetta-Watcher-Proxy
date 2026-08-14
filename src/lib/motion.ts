@@ -5,16 +5,10 @@ export const EASE_MATERIAL = [0.4, 0, 0.2, 1] as const;
 export const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 
 // ===== Page / route transitions =====
-export const pageTransition: {
-  initial: Record<string, number>;
-  animate: Record<string, number>;
-  exit: Record<string, number>;
-  transition: Transition;
-} = {
+export const pageTransition: Variants = {
   initial: { opacity: 0, y: 8 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -8 },
-  transition: { duration: 0.24, ease: EASE_MATERIAL },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.24, ease: EASE_MATERIAL } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.24, ease: EASE_MATERIAL } },
 };
 
 // ===== List item enter / exit =====

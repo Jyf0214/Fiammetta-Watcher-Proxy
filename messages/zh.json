@@ -21,7 +21,6 @@
     "refresh": "刷新",
     "retry": "重试",
     "reset": "重置",
-    "close": "关闭",
     "copy": "复制",
     "copied": "已复制到剪贴板",
     "copyFailed": "复制失败",
@@ -42,7 +41,15 @@
     "unitK": "K",
     "unitM": "M",
     "unitB": "B",
-    "add": "添加"
+    "add": "添加",
+    "themeLight": "浅色",
+    "themeDark": "深色",
+    "themeSystem": "跟随系统",
+    "language": "语言",
+    "langZh": "中文",
+    "langEn": "English",
+    "loadFailed": "加载失败",
+    "emptyTitle": "暂无数据"
   },
   "validation": {
     "required": "不能为空"
@@ -312,7 +319,13 @@
     "tps": "TPS",
     "tabKey": "Key 用量",
     "tabPlatform": "平台用量",
-    "trendEmptyHint": "发送 API 请求后数据将在此显示"
+    "trendEmptyHint": "发送 API 请求后数据将在此显示",
+    "topPlatforms": "平台请求数排行",
+    "topTokens": "平台 Token 排行",
+    "peakTokens": "峰值 Token",
+    "peakDuration": "峰值耗时",
+    "currentStreak": "连续活跃",
+    "longestStreak": "最长连续"
   },
   "dashboard": {
     "avgTtft": "TTFT",

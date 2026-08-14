@@ -18,7 +18,7 @@ const CYCLE: Record<ThemeMode, ThemeMode> = {
  * next-themes 通过 SSR 注入 class 到 <html>，消除首屏闪烁。
  */
 export function useThemeMode() {
-  const { theme, setTheme, resolvedTheme, systemTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {

@@ -5,7 +5,8 @@ import Switch from "@/components/ui/Switch";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
-import GlobalLoading from "@/components/Loading";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import {
@@ -232,7 +233,15 @@ export default function RequestTemplatesPage() {
   };
 
   if (isLoading && !templates) {
-    return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
+    return (
+      <AdminLayout>
+        <PageContainer>
+          <AsyncBoundary isLoading error={null}>
+            <></>
+          </AsyncBoundary>
+        </PageContainer>
+      </AdminLayout>
+    );
   }
 
   return (
@@ -251,13 +260,15 @@ export default function RequestTemplatesPage() {
 
         {(templates ?? []).length === 0 ? (
           <ProCard>
-            <div className="text-center py-12 text-zinc-400">
-              <FileText size={48} className="mx-auto mb-4 opacity-30" />
-              <p className="text-sm">{t("rtNoTemplates")}</p>
-              <Button variant="primary" size="sm" className="mt-4" onClick={openCreateModal} icon={<Plus size={14} />}>
-                {t("rtAdd")}
-              </Button>
-            </div>
+            <EmptyState
+              icon={<FileText className="w-12 h-12" />}
+              title={t("rtNoTemplates")}
+              action={
+                <Button variant="primary" size="sm" onClick={openCreateModal} icon={<Plus size={14} />}>
+                  {t("rtAdd")}
+                </Button>
+              }
+            />
           </ProCard>
         ) : (
           <div className="space-y-3">

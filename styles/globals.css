@@ -123,6 +123,11 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* 覆盖 antd genLinkStyle 注入的全局 a 标签蓝色 */
+a {
+  color: inherit;
+}
+
 /* ===== 滚动条 ===== */
 * {
   scrollbar-width: thin;

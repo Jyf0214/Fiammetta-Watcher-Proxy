@@ -13,11 +13,12 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
+import { ImperativeModal, createModal } from "@/components/ui/ImperativeModal";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
 
 interface SystemKeyItem {
@@ -45,8 +46,14 @@ export default function SystemKeysPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
-  const [newKeyVisible, setNewKeyVisible] = useState(false);
-  const [newKeyValue, setNewKeyValue] = useState("");
+  const [keyModal] = useState(() =>
+    createModal({
+      title: t("sysKeyCreatedTitle"),
+      width: 520,
+      okText: t("sysKeySaved"),
+      content: null,
+    })
+  );
 
   const handleCreate = async () => {
     try {
@@ -62,8 +69,29 @@ export default function SystemKeysPage() {
         message.success(data.message || t("sysKeyCreateSuccess"));
         setModalOpen(false);
         form.resetFields();
-        setNewKeyValue(data.data.key);
-        setNewKeyVisible(true);
+        const keyValue = data.data.key as string;
+        keyModal.update({
+          title: t("sysKeyCreatedTitle"),
+          okText: t("sysKeySaved"),
+          onCancel: () => keyModal.close(),
+          onOk: () => keyModal.close(),
+          content: (
+            <>
+              <Alert type="warning" message={t("sysKeyShowOnce")} className="mb-3" />
+              <div className="bg-neutral-50 dark:bg-neutral-800 rounded p-3 font-mono text-sm break-all">
+                {keyValue}
+              </div>
+              <Button
+                className="mt-3"
+                onClick={() => copyToClipboard(keyValue)}
+                icon={<Copy size={14} />}
+              >
+                {t("sysKeyCopy")}
+              </Button>
+            </>
+          ),
+        });
+        keyModal.open();
         mutate();
       } else {
         message.error(data.error || t("sysKeyCreateFailed"));
@@ -180,7 +208,11 @@ export default function SystemKeysPage() {
   if (isLoading) {
     return (
       <AdminLayout>
-        <GlobalLoading size="large" />
+        <PageContainer>
+          <AsyncBoundary isLoading error={null}>
+            <></>
+          </AsyncBoundary>
+        </PageContainer>
       </AdminLayout>
     );
   }
@@ -240,31 +272,8 @@ export default function SystemKeysPage() {
           </div>
         </Modal>
 
-        {/* 新 Key 展示弹窗 */}
-        <Modal
-          title={t("sysKeyCreatedTitle")}
-          open={newKeyVisible}
-          onOk={() => { setNewKeyVisible(false); setNewKeyValue(""); }}
-          onCancel={() => { setNewKeyVisible(false); setNewKeyValue(""); }}
-          okText={t("sysKeySaved")}
-          cancelButtonProps={{ style: { display: "none" } }}
-        >
-          <Alert
-            type="warning"
-            message={t("sysKeyShowOnce")}
-            className="mb-3"
-          />
-          <div className="bg-neutral-50 dark:bg-neutral-800 rounded p-3 font-mono text-sm break-all">
-            {newKeyValue}
-          </div>
-          <Button
-            className="mt-3"
-            onClick={() => copyToClipboard(newKeyValue)}
-            icon={<Copy size={14} />}
-          >
-            {t("sysKeyCopy")}
-          </Button>
-        </Modal>
+        {/* 命令式密钥展示弹窗 */}
+        <ImperativeModal instance={keyModal} />
       </PageContainer>
     </AdminLayout>
   );

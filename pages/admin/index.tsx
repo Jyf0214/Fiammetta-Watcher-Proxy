@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import {
   Cloud,
   Key,
@@ -22,9 +23,10 @@ import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
 import { useApi } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import AdminLayout from "@/components/AdminLayout";
+import { m } from "motion/react";
+import { staggerContainer, listItemVariants, listItemTransition } from "@/lib/motion";
 
 // 懒加载迷你趋势图组件（与用量页共享同一图表模块，复用同一份 recharts chunk）
 const MiniTrendChart = dynamic(
@@ -78,7 +80,7 @@ function DashboardContent() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   // 统计卡片数据：30s 自动轮询由 SWR refreshInterval 驱动（关闭自动刷新时停轮询）
-  const { data: stats, isLoading, mutate: mutateStats } = useApi<Stats>("/api/admin/stats", {
+  const { data: stats, isLoading, error, mutate: mutateStats } = useApi<Stats>("/api/admin/stats", {
     refreshInterval: autoRefresh ? AUTO_REFRESH_INTERVAL : 0,
   });
 
@@ -225,7 +227,23 @@ function DashboardContent() {
   // ==================== 渲染 ====================
 
   if (isLoading && !stats) {
-    return <GlobalLoading size="large" />;
+    return (
+      <PageContainer>
+        <AsyncBoundary isLoading error={null}>
+          <></>
+        </AsyncBoundary>
+      </PageContainer>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <PageContainer>
+        <AsyncBoundary isLoading={false} error={error} onRetry={mutateStats}>
+          <></>
+        </AsyncBoundary>
+      </PageContainer>
+    );
   }
 
   return (
@@ -277,12 +295,18 @@ function DashboardContent() {
       {/* 统计卡片 */}
       {viewMode === "grid" ? (
         // 网格视图：一行多个
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <m.div
+          className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6"
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
+        >
           {statCards.map((card) => {
             const display = "display" in card && card.display ? card.display : null;
             const displayVal = display ? display.value : formatCompactNumber(card.value, t);
             return (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
+              <m.div key={card.key} variants={listItemVariants} transition={listItemTransition}>
+              <ProCard className="bg-white border-zinc-200" padding="p-3">
                 <div className="flex items-center gap-2.5">
                   <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
                     <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
@@ -298,9 +322,10 @@ function DashboardContent() {
                   </div>
                 </div>
               </ProCard>
+              </m.div>
             );
           })}
-        </div>
+        </m.div>
       ) : (
         // 详细视图：一行一个，带趋势图
         <div className="space-y-3 mb-6">

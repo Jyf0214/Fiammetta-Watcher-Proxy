@@ -21,7 +21,6 @@
     "refresh": "Refresh",
     "retry": "Retry",
     "reset": "Reset",
-    "close": "Close",
     "copy": "Copy",
     "copied": "Copied to clipboard",
     "copyFailed": "Copy failed",
@@ -42,7 +41,15 @@
     "unitK": "K",
     "unitM": "M",
     "unitB": "B",
-    "add": "Add"
+    "add": "Add",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "language": "Language",
+    "langZh": "中文",
+    "langEn": "English",
+    "loadFailed": "Failed to load",
+    "emptyTitle": "No data"
   },
   "validation": {
     "required": " is required"
@@ -312,7 +319,13 @@
     "tps": "TPS",
     "tabKey": "Key Usage",
     "tabPlatform": "Platform Usage",
-    "trendEmptyHint": "Data will appear here after sending API requests"
+    "trendEmptyHint": "Data will appear here after sending API requests",
+    "topPlatforms": "Top Platforms by Requests",
+    "topTokens": "Top Platforms by Tokens",
+    "peakTokens": "Peak Tokens",
+    "peakDuration": "Peak Duration",
+    "currentStreak": "Current Streak",
+    "longestStreak": "Longest Streak"
   },
   "dashboard": {
     "avgTtft": "TTFT",

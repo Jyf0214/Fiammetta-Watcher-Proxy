@@ -3,8 +3,8 @@ import { message } from "antd";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import AdminLayout from "@/components/AdminLayout";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { PlatformList, type Platform } from "@/components/platform/PlatformList";
 
 /**
@@ -25,7 +25,27 @@ export default function PlatformsPage() {
   }, [error, t]);
 
   if (isLoading && !platforms) {
-    return <AdminLayout><GlobalLoading size="large" /></AdminLayout>;
+    return (
+      <AdminLayout>
+        <div className="max-w-2xl mx-auto p-4 lg:p-6">
+          <AsyncBoundary isLoading error={null}>
+            <></>
+          </AsyncBoundary>
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  if (error && !platforms) {
+    return (
+      <AdminLayout>
+        <div className="max-w-2xl mx-auto p-4 lg:p-6">
+          <AsyncBoundary isLoading={false} error={error}>
+            <></>
+          </AsyncBoundary>
+        </div>
+      </AdminLayout>
+    );
   }
 
   return (

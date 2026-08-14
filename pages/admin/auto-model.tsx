@@ -5,6 +5,7 @@ import Switch from "@/components/ui/Switch";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProCard } from "@/components/ui/ProCard";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import {
   Zap,
   Copy,
@@ -305,14 +306,19 @@ export default function AutoModelPage() {
           </div>
 
           {modelsLoading ? (
-            <div className="flex items-center justify-center py-16 text-zinc-300 dark:text-zinc-600">
-              <RefreshCw size={28} className="animate-spin" />
-            </div>
+            <AsyncBoundary isLoading error={null}>
+              <></>
+            </AsyncBoundary>
           ) : uniqueModels.length === 0 ? (
-            <div className="text-center py-16 text-zinc-400">
-              <Database size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">{t("autoModelNoModels")}</p>
-            </div>
+            <AsyncBoundary
+              isLoading={false}
+              error={null}
+              isEmpty
+              emptyIcon={<Database className="w-10 h-10" />}
+              emptyTitle={t("autoModelNoModels")}
+            >
+              <></>
+            </AsyncBoundary>
           ) : (
             <div className="space-y-2">
               {uniqueModels.map((m) => {

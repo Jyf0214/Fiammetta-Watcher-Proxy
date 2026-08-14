@@ -3,15 +3,13 @@ import { Select, Tabs, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
-import {
-  RefreshCw,
-  BarChart3,
-  AlertTriangle,
-} from "lucide-react";
+import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
+import { BarListChart } from "@/components/usage/BarListChart";
+import { HeatmapCard } from "@/components/usage/HeatmapCard";
+import { RefreshCw, BarChart3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
-import GlobalLoading from "@/components/Loading";
 import dynamic from "next/dynamic";
 import KeyUsageTab from "@/components/usage/KeyUsageTab";
 import PlatformUsageTab from "@/components/usage/PlatformUsageTab";
@@ -53,6 +51,13 @@ export default function UsagePage() {
     isValidating: trendLoading,
     mutate: mutateTrend,
   } = useApi<TrendPoint[]>(`/api/admin/usage/trend?period=${period}`);
+
+  // 平台用量数据（用于排行榜）
+  const {
+    data: platformData,
+  } = useApi<Array<{ name: string; stats: { totalRequests: number; totalTokens: number } }>>(
+    `/api/admin/usage/platform?period=${period}`
+  );
 
   // 刷新按钮（refreshKey 计数）触发趋势与子 Tab（各自内部监听）重新验证
   useRefreshKey(refreshKey, mutateTrend);
@@ -137,37 +142,28 @@ export default function UsagePage() {
             {t("trendTitle")}
           </h3>
           {trendLoading ? (
-            <div className="h-[220px] sm:h-[320px] flex items-center justify-center">
-              <GlobalLoading size="small" />
+            <div className="h-[220px] sm:h-[320px]">
+              <AsyncBoundary isLoading error={null}>
+                <></>
+              </AsyncBoundary>
             </div>
           ) : trendError ? (
-            <div className="h-[220px] sm:h-[320px] flex flex-col items-center justify-center gap-2">
-              <AlertTriangle className="text-2xl text-red-400" />
-              <p className="text-sm text-red-500 font-medium">
-                {t("dashboard:fetchFailed")}
-              </p>
-              <p className="text-xs text-zinc-400 max-w-md text-center">
-                {trendError?.message}
-              </p>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<RefreshCw size={14} />}
-                onClick={handleRefresh}
-                className="mt-1"
-              >
-                {t("common:retry")}
-              </Button>
+            <div className="h-[220px] sm:h-[320px]">
+              <AsyncBoundary isLoading={false} error={trendError} onRetry={handleRefresh}>
+                <></>
+              </AsyncBoundary>
             </div>
           ) : (trendData ?? []).length === 0 ? (
-            <div className="h-[220px] sm:h-[320px] flex flex-col items-center justify-center gap-2">
-              <BarChart3 className="text-3xl text-zinc-300" />
-              <p className="text-sm text-zinc-400">
-                {t("common:noData")}
-              </p>
-              <p className="text-xs text-zinc-300">
-                {t("trendEmptyHint")}
-              </p>
+            <div className="h-[220px] sm:h-[320px]">
+              <AsyncBoundary
+                isLoading={false}
+                error={null}
+                isEmpty
+                emptyIcon={<BarChart3 className="w-8 h-8" />}
+                emptyHint={t("trendEmptyHint")}
+              >
+                <></>
+              </AsyncBoundary>
             </div>
           ) : (
             <UsageChart
@@ -204,6 +200,37 @@ export default function UsagePage() {
             </div>
           )}
         </div>
+
+        {/* 活动热力统计 */}
+        <HeatmapCard
+          stats={{
+            peakTokens: trendSummary?.totalTokens,
+            currentStreak: (trendData?.length ?? 0) > 0 ? 1 : 0,
+            longestStreak: (trendData?.length ?? 0) > 0 ? 1 : 0,
+          }}
+          isLoading={trendLoading}
+          className="mb-4"
+        />
+
+        {/* 排行榜 */}
+        {(platformData ?? []).length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <BarListChart
+              title={t("topPlatforms")}
+              items={(platformData ?? [])
+                .filter((item) => item.stats.totalRequests > 0)
+                .map((item) => ({ label: item.name, value: item.stats.totalRequests }))
+                .slice(0, 5)}
+            />
+            <BarListChart
+              title={t("topTokens")}
+              items={(platformData ?? [])
+                .filter((item) => item.stats.totalTokens > 0)
+                .map((item) => ({ label: item.name, value: item.stats.totalTokens }))
+                .slice(0, 5)}
+            />
+          </div>
+        )}
 
         {/* Tab 切换：Key 用量 / 平台用量 */}
         <Tabs

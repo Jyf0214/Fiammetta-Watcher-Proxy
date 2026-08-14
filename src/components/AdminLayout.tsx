@@ -25,29 +25,30 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
-import { collapseVariants, collapseTransition, slideLeftVariants, slideTransition } from "@/lib/motion";
+import { collapseVariants, collapseTransition, slideLeftVariants, slideTransition, pageTransition } from "@/lib/motion";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { registerDefaultItems, useSidebarItems, type SidebarItem } from "@/lib/sidebar-registry";
 
 // ---------- 类型定义 ----------
-interface MenuItem {
-  key: string;
-  icon: React.ElementType;
-  href: string;
-  group: string;
-}
+// MenuItem 已迁移到 sidebar-registry.ts 的 SidebarItem
 
 // ---------- 菜单配置 ----------
-const menuItems: MenuItem[] = [
-  { key: "dashboard", icon: LayoutDashboard, href: "/admin", group: "overview" },
-  { key: "platforms", icon: Server, href: "/admin/platforms", group: "manage" },
-  { key: "keys", icon: Key, href: "/admin/keys", group: "manage" },
-  { key: "autoModel", icon: Zap, href: "/admin/auto-model", group: "manage" },
-  { key: "requestTemplates", icon: FileText, href: "/admin/request-templates", group: "manage" },
-  { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor" },
-  { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor" },
-  { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor" },
-  { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system" },
-  { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system" },
+const defaultMenuItems: SidebarItem[] = [
+  { key: "dashboard", icon: LayoutDashboard, href: "/admin", group: "overview", order: 1 },
+  { key: "platforms", icon: Server, href: "/admin/platforms", group: "manage", order: 2 },
+  { key: "keys", icon: Key, href: "/admin/keys", group: "manage", order: 3 },
+  { key: "autoModel", icon: Zap, href: "/admin/auto-model", group: "manage", order: 4 },
+  { key: "requestTemplates", icon: FileText, href: "/admin/request-templates", group: "manage", order: 5 },
+  { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor", order: 6 },
+  { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor", order: 7 },
+  { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor", order: 8 },
+  { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system", order: 9 },
+  { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 10 },
 ];
+
+// 注册默认菜单项（模块加载时执行一次）
+registerDefaultItems(defaultMenuItems);
 
 const groupI18nKeys: Record<string, string> = {
   overview: "groupOverview",
@@ -63,7 +64,7 @@ function SidebarItem({
   onClick,
   t,
 }: {
-  item: MenuItem;
+  item: SidebarItem;
   isActive: boolean;
   onClick: () => void;
   t: (key: string) => string;
@@ -96,7 +97,7 @@ function SidebarGroup({
   t,
 }: {
   group: string;
-  items: MenuItem[];
+  items: SidebarItem[];
   isCollapsed: boolean;
   onToggle: () => void;
   isActive: (href: string) => boolean;
@@ -235,6 +236,10 @@ function TopHeader({
             <span className="font-medium text-zinc-900 dark:text-zinc-100">{breadcrumb}</span>
           </nav>
         </div>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <LanguageToggle />
+        </div>
       </div>
     </header>
   );
@@ -343,7 +348,9 @@ export default function AdminLayout({
     setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
   };
 
-  const grouped = menuItems.reduce<Record<string, MenuItem[]>>((acc, item) => {
+  const sidebarItems = useSidebarItems();
+
+  const grouped = sidebarItems.reduce<Record<string, SidebarItem[]>>((acc, item) => {
     const g = item.group;
     acc[g] ??= [];
     acc[g].push(item);
@@ -468,7 +475,17 @@ export default function AdminLayout({
       {/* 内容区 - 补偿 Header 高度 64px */}
       <main className="min-h-screen pt-16 lg:pl-64">
         <div className="p-4 lg:p-6">
-          {children}
+          <AnimatePresence mode="wait">
+            <m.div
+              key={router.asPath}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={pageTransition}
+            >
+              {children}
+            </m.div>
+          </AnimatePresence>
         </div>
       </main>
     </div>
