@@ -1,92 +1,73 @@
 "use client";
 
-import { cn } from "@/lib/ui";
+import { memo } from "react";
 
-/**
- * 模型图标 — 按模型 ID 前缀匹配品牌色渐变 + 白色粗体字
- * 已知品牌用专属配色，未知模型按 ID 哈希从渐变池中取色回退
- */
-interface BrandDef {
-  label: string;
-  gradient: string;
-}
+import OpenAIMono from "@lobehub/icons/es/OpenAI/components/Mono";
+import ClaudeMono from "@lobehub/icons/es/Claude/components/Mono";
+import GeminiMono from "@lobehub/icons/es/Gemini/components/Mono";
+import DeepSeekMono from "@lobehub/icons/es/DeepSeek/components/Mono";
+import QwenMono from "@lobehub/icons/es/Qwen/components/Mono";
+import GrokMono from "@lobehub/icons/es/Grok/components/Mono";
+import MistralMono from "@lobehub/icons/es/Mistral/components/Mono";
+import DalleMono from "@lobehub/icons/es/Dalle/components/Mono";
+import OllamaMono from "@lobehub/icons/es/Ollama/components/Mono";
+import CohereMono from "@lobehub/icons/es/Cohere/components/Mono";
 
-const BRAND_PATTERNS: { pattern: RegExp; brand: BrandDef }[] = [
-  // OpenAI
-  { pattern: /^(gpt|chatgpt|o1|o3|text-|dall-e|whisper|gpt-image)/i, brand: { label: "G", gradient: "bg-gradient-to-br from-emerald-400 to-teal-600" } },
-  // Anthropic
-  { pattern: /^claude/i, brand: { label: "C", gradient: "bg-gradient-to-br from-orange-400 to-amber-600" } },
-  // Google Gemini
-  { pattern: /^gemini/i, brand: { label: "G", gradient: "bg-gradient-to-br from-sky-400 to-teal-600" } },
-  // DeepSeek
-  { pattern: /^deepseek/i, brand: { label: "D", gradient: "bg-gradient-to-br from-zinc-600 to-zinc-900" } },
-  // 通义千问
-  { pattern: /^(qwen|dashscope|ali)/i, brand: { label: "Q", gradient: "bg-gradient-to-br from-rose-400 to-pink-600" } },
-  // Meta Llama
-  { pattern: /^llama/i, brand: { label: "L", gradient: "bg-gradient-to-br from-slate-500 to-slate-700" } },
-  // Mistral
-  { pattern: /^mistral/i, brand: { label: "M", gradient: "bg-gradient-to-br from-orange-500 to-red-600" } },
-  // Moonshot Kimi
-  { pattern: /^(moonshot|kimi)/i, brand: { label: "K", gradient: "bg-gradient-to-br from-zinc-600 to-zinc-900" } },
-  // 智谱 GLM
-  { pattern: /^glm/i, brand: { label: "Z", gradient: "bg-gradient-to-br from-teal-400 to-cyan-600" } },
-  // xAI Grok
-  { pattern: /^grok/i, brand: { label: "X", gradient: "bg-gradient-to-br from-zinc-700 to-black" } },
-  // Perplexity
-  { pattern: /^perplexity/i, brand: { label: "P", gradient: "bg-gradient-to-br from-teal-400 to-emerald-600" } },
-  // 豆包
-  { pattern: /^(doubao|volc)/i, brand: { label: "DB", gradient: "bg-gradient-to-br from-red-400 to-rose-600" } },
-  // MiniMax
-  { pattern: /^minimax/i, brand: { label: "M", gradient: "bg-gradient-to-br from-rose-500 to-orange-600" } },
-  // Cohere
-  { pattern: /^cohere/i, brand: { label: "C", gradient: "bg-gradient-to-br from-amber-400 to-yellow-600" } },
-  // Groq
-  { pattern: /^groq/i, brand: { label: "G", gradient: "bg-gradient-to-br from-orange-400 to-amber-500" } },
-  // 百川
-  { pattern: /^baichuan/i, brand: { label: "B", gradient: "bg-gradient-to-br from-cyan-400 to-sky-600" } },
-  // 文心
-  { pattern: /^(ernie|wenxin)/i, brand: { label: "E", gradient: "bg-gradient-to-br from-slate-500 to-zinc-700" } },
-  // 零一万物
-  { pattern: /^yi-/i, brand: { label: "Y", gradient: "bg-gradient-to-br from-slate-500 to-slate-700" } },
-  // 阶跃星辰
-  { pattern: /^step/i, brand: { label: "S", gradient: "bg-gradient-to-br from-amber-500 to-orange-700" } },
+type IconComp = React.FC<{ size?: number }>;
+
+const MODEL_PREFIX_MAP: { prefix: string; Icon: IconComp }[] = [
+  { prefix: "gpt-", Icon: OpenAIMono as IconComp },
+  { prefix: "o1", Icon: OpenAIMono as IconComp },
+  { prefix: "o3", Icon: OpenAIMono as IconComp },
+  { prefix: "o4", Icon: OpenAIMono as IconComp },
+  { prefix: "chatgpt", Icon: OpenAIMono as IconComp },
+  { prefix: "text-embedding", Icon: OpenAIMono as IconComp },
+  { prefix: "text-davinci", Icon: OpenAIMono as IconComp },
+  { prefix: "dall-e", Icon: DalleMono as IconComp },
+  { prefix: "whisper", Icon: OpenAIMono as IconComp },
+  { prefix: "tts", Icon: OpenAIMono as IconComp },
+  { prefix: "claude", Icon: ClaudeMono as IconComp },
+  { prefix: "gemini", Icon: GeminiMono as IconComp },
+  { prefix: "deepseek", Icon: DeepSeekMono as IconComp },
+  { prefix: "qwen", Icon: QwenMono as IconComp },
+  { prefix: "grok-", Icon: GrokMono as IconComp },
+  { prefix: "mistral", Icon: MistralMono as IconComp },
+  { prefix: "mixtral", Icon: MistralMono as IconComp },
+  { prefix: "codestral", Icon: MistralMono as IconComp },
+  { prefix: "llama", Icon: OllamaMono as IconComp },
+  { prefix: "command", Icon: CohereMono as IconComp },
 ];
 
-const FALLBACK_GRADIENTS = [
-  "bg-gradient-to-br from-zinc-500 to-zinc-700",
-  "bg-gradient-to-br from-emerald-500 to-teal-600",
-  "bg-gradient-to-br from-slate-500 to-slate-700",
-  "bg-gradient-to-br from-orange-500 to-amber-600",
-  "bg-gradient-to-br from-rose-500 to-pink-600",
-  "bg-gradient-to-br from-cyan-500 to-teal-600",
-];
+/** 模型图标 — 根据模型 ID 前缀匹配品牌 SVG，未匹配时回退到色块 */
+export const ModelIcon = memo(function ModelIcon({
+  modelId,
+  size = "md",
+}: {
+  modelId: string;
+  size?: "sm" | "md";
+}) {
+  const px = size === "sm" ? 20 : 32;
+  const lower = modelId.toLowerCase();
+  const match = MODEL_PREFIX_MAP.find((m) => lower.startsWith(m.prefix));
 
-function resolveBrand(modelId: string): BrandDef {
-  const id = modelId.trim();
-  for (const { pattern, brand } of BRAND_PATTERNS) {
-    if (pattern.test(id)) return brand;
+  if (match) {
+    const Icon = match.Icon;
+    return (
+      <div
+        className="shrink-0 flex items-center justify-center text-zinc-700 dark:text-zinc-300"
+        style={{ width: px, height: px }}
+      >
+        <Icon size={Math.round(px * 0.7)} />
+      </div>
+    );
   }
-  // 未知模型：按 ID 哈希取固定渐变，避免同页内同前缀模型颜色跳动
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  const gradient = FALLBACK_GRADIENTS[Math.abs(hash) % FALLBACK_GRADIENTS.length];
-  const parts = id.split("/");
-  const brand = (parts.length > 1 ? parts[0] : id.split("-")[0]).slice(0, 2).toUpperCase();
-  return { label: brand || "?", gradient };
-}
 
-export function ModelIcon({ modelId, size = "md" }: { modelId: string; size?: "sm" | "md" }) {
-  const brand = resolveBrand(modelId);
-  const box = size === "sm" ? "w-6 h-6 rounded-md text-[9px]" : "w-8 h-8 rounded-lg text-[11px]";
   return (
     <div
-      className={cn(
-        "shrink-0 flex items-center justify-center font-bold text-white select-none",
-        box,
-        brand.gradient
-      )}
+      className="shrink-0 flex items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 text-xs font-bold"
+      style={{ width: px, height: px }}
     >
-      {brand.label}
+      {modelId.slice(0, 2).toUpperCase()}
     </div>
   );
-}
+});

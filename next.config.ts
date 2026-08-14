@@ -120,6 +120,7 @@ const nextConfig: NextConfig = {
     "clsx",
     "motion",
     "tailwind-merge",
+    "@lobehub/icons",
     ...(isCFDeploy ? [] : [...prismaStack, ...mariadbStack]),
   ],
   // Webpack（--webpack 模式）：alias 未使用的方言到空 stub

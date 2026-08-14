@@ -7,6 +7,7 @@ import { Input } from "antd";
 import { Plus, Search, ChevronDown, Cloud, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { BrandIcon } from "@/components/platform/BrandIcon";
 import { cn } from "@/lib/ui";
 
 /** 平台数据接口（与 API /api/admin/platforms 返回结构一致） */
@@ -28,28 +29,13 @@ export interface Platform {
   keyStatuses?: Record<string, { status: string; expireAt: number | null }>;
 }
 
-/** 品牌 → 色块映射（不引入外链 Logo，色块 + 首字母） */
-const BRAND_STYLE: Record<string, { box: string; text: string }> = {
-  openai: {
-    box: "bg-zinc-900 dark:bg-zinc-100",
-    text: "text-white dark:text-zinc-900",
-  },
-  azure: {
-    box: "bg-zinc-700 dark:bg-zinc-300",
-    text: "text-white dark:text-zinc-900",
-  },
-  custom: {
-    box: "bg-zinc-200 dark:bg-zinc-700",
-    text: "text-zinc-500 dark:text-zinc-300",
-  },
-};
-
-const DEFAULT_BRAND: { box: string; text: string } = {
+/** 品牌图标 — 优先使用品牌 SVG 图标库，未匹配时回退到色块 + 首字母 */
+const FALLBACK_BRAND: { box: string; text: string } = {
   box: "bg-zinc-100 dark:bg-zinc-800",
   text: "text-zinc-400 dark:text-zinc-500",
 };
 
-/** 品牌图标 — 圆角方块 + 名称首字母 */
+/** 品牌图标 — 优先使用品牌 SVG 图标库，未匹配时回退到色块 + 首字母 */
 export function BrandAvatar({
   name,
   type,
@@ -59,12 +45,16 @@ export function BrandAvatar({
   type: string;
   size?: "sm" | "md" | "lg";
 }) {
-  const style = BRAND_STYLE[type] ?? DEFAULT_BRAND;
+  const px = size === "lg" ? 48 : size === "sm" ? 22 : 32;
   const initial = name.trim().slice(0, 2).toUpperCase() || "?";
   const box =
     size === "lg" ? "w-12 h-12 rounded-2xl text-base" : size === "sm" ? "w-8 h-8 rounded-lg text-xs" : "w-10 h-10 rounded-lg text-sm";
+
+  const icon = <BrandIcon type={type} size={px} />;
+  if (icon) return icon;
+
   return (
-    <div className={cn("shrink-0 flex items-center justify-center font-bold", box, style.box, style.text)}>
+    <div className={cn("shrink-0 flex items-center justify-center font-bold", box, FALLBACK_BRAND.box, FALLBACK_BRAND.text)}>
       {initial}
     </div>
   );
