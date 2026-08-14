@@ -135,7 +135,7 @@ export function PlatformConfigForm({
         <Collapse
           defaultActiveKey={editing ? ["keys", "params"] : ["basic", "keys", "params"]}
           ghost
-          className="platform-config-collapse"
+          className="platform-config-collapse px-3 sm:px-5 py-3 sm:py-4"
           items={[
             ...(!editing
               ? [
@@ -190,22 +190,27 @@ export function PlatformConfigForm({
                     {namedKeys.map((namedKey, index) => (
                       <div
                         key={index}
-                        className="flex items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700"
+                        className="p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700"
                       >
-                        <Input
-                          value={namedKey.name}
-                          onChange={(e) => onUpdateKeyName(index, e.target.value)}
-                          placeholder={t("keyName")}
-                          className="!w-20 sm:!w-24 !min-w-0 shrink-0"
-                          size="small"
-                        />
-                        <Input.Password
-                          value={namedKey.key}
-                          onChange={(e) => onUpdateKeyValue(index, e.target.value)}
-                          placeholder={editing ? t("keyPlaceholderEdit") : t("keyPlaceholderAdd")}
-                          className="!flex-1 !min-w-0 font-mono text-xs"
-                          size="small"
-                        />
+                        {/* 第一行：名称 + 密钥输入 */}
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            value={namedKey.name}
+                            onChange={(e) => onUpdateKeyName(index, e.target.value)}
+                            placeholder={t("keyName")}
+                            className="!w-20 sm:!w-24 !min-w-0 shrink-0"
+                            size="small"
+                          />
+                          <Input.Password
+                            value={namedKey.key}
+                            onChange={(e) => onUpdateKeyValue(index, e.target.value)}
+                            placeholder={editing ? t("keyPlaceholderEdit") : t("keyPlaceholderAdd")}
+                            className="!flex-1 !min-w-0 font-mono text-xs"
+                            size="small"
+                          />
+                        </div>
+                        {/* 第二行：操作按钮 */}
+                        <div className="flex items-center gap-1 mt-1.5">
                         <button
                           type="button"
                           onClick={() => onToggleWhitelist(index)}
@@ -263,6 +268,7 @@ export function PlatformConfigForm({
                         >
                           <Trash2 size={13} />
                         </button>
+                        </div>
                       </div>
                     ))}
                   </div>
