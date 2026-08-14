@@ -507,21 +507,21 @@ export default function PlatformDetailPage() {
 
   return (
     <AdminLayout>
-      <div className="flex h-full">
-        {/* 左侧：桌面端平台列表栏（280px 固定宽度，与内容区共占满屏宽） */}
-        <div className="hidden lg:flex flex-col w-[280px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+      <div className="flex flex-col lg:flex-row h-full">
+        {/* 左侧：桌面端平台列表栏 */}
+        <div className="hidden lg:block w-[340px] shrink-0 border-r border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden mr-6">
           <PlatformList
             platforms={platforms ?? []}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
-            className="flex-1 overflow-y-auto"
+            className="h-[calc(100vh-100px)] overflow-y-auto"
           />
         </div>
 
-        {/* 右侧：详情主体（独立滚动容器，maxWidth 1024，padding 24） */}
+        {/* 右侧：详情主体 */}
         <div className="flex-1 min-w-0 overflow-y-auto">
-          {/* 移动端返回条（sticky 吸顶，负边距抵消父级 padding 延伸至屏幕边缘） */}
-          <div className="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur -mx-3 -mt-4 px-3 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
+          {/* 移动端返回条（sticky 吸顶） */}
+          <div className="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
@@ -568,8 +568,8 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 详情内容区：maxWidth 1024 + padding（移动端 12px 对齐 LobeChat，桌面端 24px） */}
-          <div className="max-w-[1024px] mx-auto px-3 py-4 lg:p-6 pb-10">
+          {/* 详情主体 — 无左右 padding，max-w-2xl 居中 */}
+          <div className="w-full max-w-2xl mx-auto pt-4 lg:pt-0 pb-10">
             {detailLoading ? (
               <SurfaceSkeleton variant="form" />
             ) : isNew ? (

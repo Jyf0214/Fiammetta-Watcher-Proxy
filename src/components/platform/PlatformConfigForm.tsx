@@ -135,7 +135,7 @@ export function PlatformConfigForm({
         <Collapse
           defaultActiveKey={editing ? ["keys", "params"] : ["basic", "keys", "params"]}
           ghost
-          className="platform-config-collapse px-3 sm:px-5 py-3 sm:py-4"
+          className="platform-config-collapse"
           items={[
             ...(!editing
               ? [
