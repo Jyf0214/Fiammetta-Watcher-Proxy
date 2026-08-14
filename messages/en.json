@@ -344,12 +344,19 @@
     "admin": "Admin",
     "ip": "IP",
     "actionLogin": "Admin Login",
+    "actionLoginFailed": "Login Failed",
     "actionLogout": "Admin Logout",
     "actionCreatePlatform": "Create Platform",
     "actionUpdatePlatform": "Update Platform",
     "actionDeletePlatform": "Delete Platform",
     "actionCreateApiKey": "Create API Key",
-    "actionDeleteApiKey": "Delete API Key"
+    "actionUpdateApiKey": "Update API Key",
+    "actionDeleteApiKey": "Delete API Key",
+    "actionTogglePlatformKey": "Toggle Platform Key",
+    "actionCreateSystemKey": "Create System Key",
+    "actionDeleteSystemKey": "Delete System Key",
+    "actionImportData": "Import Data",
+    "actionExportData": "Export Data"
   },
   "system": {
     "autoModelTitle": "Auto Model",

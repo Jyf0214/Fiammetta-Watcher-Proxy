@@ -344,12 +344,19 @@
     "admin": "管理员",
     "ip": "IP",
     "actionLogin": "管理员登录",
+    "actionLoginFailed": "登录失败",
     "actionLogout": "管理员登出",
     "actionCreatePlatform": "创建平台",
     "actionUpdatePlatform": "更新平台",
     "actionDeletePlatform": "删除平台",
     "actionCreateApiKey": "创建 API Key",
-    "actionDeleteApiKey": "删除 API Key"
+    "actionUpdateApiKey": "更新 API Key",
+    "actionDeleteApiKey": "删除 API Key",
+    "actionTogglePlatformKey": "切换平台密钥",
+    "actionCreateSystemKey": "创建系统密钥",
+    "actionDeleteSystemKey": "删除系统密钥",
+    "actionImportData": "导入数据",
+    "actionExportData": "导出数据"
   },
   "system": {
     "autoModelTitle": "自动模型",

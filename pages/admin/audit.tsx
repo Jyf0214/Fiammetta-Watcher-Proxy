@@ -27,24 +27,40 @@ interface AuditEntry {
 
 const ACTION_LABELS: Record<string, string> = {
   login: "actionLogin",
+  login_success: "actionLogin",
+  login_failed: "actionLoginFailed",
   logout: "actionLogout",
   create_platform: "actionCreatePlatform",
   update_platform: "actionUpdatePlatform",
   delete_platform: "actionDeletePlatform",
   create_api_key: "actionCreateApiKey",
+  update_api_key: "actionUpdateApiKey",
   delete_api_key: "actionDeleteApiKey",
+  toggle_platform_key: "actionTogglePlatformKey",
+  create_system_key: "actionCreateSystemKey",
+  delete_system_key: "actionDeleteSystemKey",
+  import_data: "actionImportData",
+  export_data: "actionExportData",
 };
 
 // ==================== 语义颜色映射 ====================
 
 const ACTION_COLOR: Record<string, string> = {
   login: "blue",
+  login_success: "blue",
+  login_failed: "red",
   logout: "default",
   create_platform: "green",
   update_platform: "orange",
   delete_platform: "red",
   create_api_key: "green",
+  update_api_key: "orange",
   delete_api_key: "red",
+  toggle_platform_key: "orange",
+  create_system_key: "green",
+  delete_system_key: "red",
+  import_data: "purple",
+  export_data: "purple",
 };
 
 // ==================== 页面组件 ====================

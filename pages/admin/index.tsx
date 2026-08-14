@@ -179,7 +179,7 @@ function DashboardContent() {
       title: t("totalTokens"),
       value: stats?.totalTokens ?? 0,
       icon: <Database />,
-      color: "bg-amber-50",
+      color: "bg-amber-50 dark:bg-amber-900/20",
       iconColor: "text-amber-500",
     },
     {
@@ -187,7 +187,7 @@ function DashboardContent() {
       title: t("avgTtft"),
       value: stats?.avgTtft ?? 0,
       icon: <Clock />,
-      color: "bg-orange-50",
+      color: "bg-orange-50 dark:bg-orange-900/20",
       iconColor: "text-orange-500",
       get display() { return formatDuration(this.value, t); },
     },
@@ -196,7 +196,7 @@ function DashboardContent() {
       title: t("avgDuration"),
       value: stats?.avgDuration ?? 0,
       icon: <Clock />,
-      color: "bg-cyan-50",
+      color: "bg-cyan-50 dark:bg-cyan-900/20",
       iconColor: "text-cyan-500",
       get display() { return formatDuration(this.value, t); },
     },
@@ -205,7 +205,7 @@ function DashboardContent() {
       title: t("avgTps"),
       value: stats?.avgTps ?? 0,
       icon: <Gauge />,
-      color: "bg-teal-50",
+      color: "bg-teal-50 dark:bg-teal-900/20",
       iconColor: "text-teal-500",
     },
   ];
@@ -306,17 +306,17 @@ function DashboardContent() {
             const displayVal = display ? display.value : formatCompactNumber(card.value, t);
             return (
               <m.div key={card.key} variants={listItemVariants} transition={listItemTransition}>
-              <ProCard className="bg-white border-zinc-200" padding="p-3">
+              <ProCard className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800" padding="p-3">
                 <div className="flex items-center gap-2.5">
                   <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
                     <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
-                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
+                    <p className="text-zinc-500 dark:text-zinc-400 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
+                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 dark:text-zinc-100 leading-tight tabular-nums whitespace-nowrap`}>
                       {displayVal}
                       {display?.suffix && (
-                        <span className="text-sm font-normal text-zinc-400 ml-1">{display.suffix}</span>
+                        <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500 ml-1">{display.suffix}</span>
                       )}
                     </p>
                   </div>
@@ -334,17 +334,17 @@ function DashboardContent() {
             const displayVal = display ? display.value : formatCompactNumber(card.value, t);
             const hasTrend = trendData[card.key] && trendData[card.key].length > 0;
             return (
-              <ProCard key={card.key} className="bg-white border-zinc-200" padding="px-4 py-3">
+              <ProCard key={card.key} className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800" padding="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className={`h-8 w-8 ${card.color} rounded-lg flex items-center justify-center shrink-0`}>
                     <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-zinc-500 text-[11px] leading-tight mb-0.5">{card.title}</p>
-                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 tabular-nums leading-tight whitespace-nowrap`}>
+                    <p className="text-zinc-500 dark:text-zinc-400 text-[11px] leading-tight mb-0.5">{card.title}</p>
+                    <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 dark:text-zinc-100 tabular-nums leading-tight whitespace-nowrap`}>
                       {displayVal}
                       {display?.suffix && (
-                        <span className="text-sm font-normal text-zinc-400 ml-1">{display.suffix}</span>
+                        <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500 ml-1">{display.suffix}</span>
                       )}
                     </p>
                   </div>
