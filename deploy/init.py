@@ -179,7 +179,7 @@ def set_secret(key: str, value: str, extra_args: list):
     if res.returncode == 0:
         print(f"  Secret 已设置: {key}")
     else:
-        fail(f"Secret {key} 设置失败: {res.stderr.decode().strip()}")
+        fail(f"Secret {key} 设置失败 (returncode={res.returncode})")
 
 
 # ==================== 阶段实现 ====================

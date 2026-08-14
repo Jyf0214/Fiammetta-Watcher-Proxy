@@ -491,7 +491,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         res.write(buf + "\n");
       }
     } catch (e) {
-      if (!idleTimedOut) console.error(`${tag} 流式错误:`, e);
+      if (!idleTimedOut) console.error(`${tag} 流式错误:`, e instanceof Error ? e.message : String(e));
     } finally {
       clearInterval(watchdog);
     }
@@ -612,7 +612,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(decodeURIComponent(full.slice("/v1/models/".length)), res); }
     await proxyV1RequestPages(req, res, cfg, auth.apiKey);
   } catch (err) {
-    console.error("[v1-proxy] 未捕获异常:", err);
+    console.error("[v1-proxy] 未捕获异常:", err instanceof Error ? err.message : String(err));
     if (cfg?.protocol === "anthropic") { res.status(500).json(formatAnthropicError(500, "服务器内部错误")); return; }
     res.status(500).json({ error: { message: "服务器内部错误", type: "server_error" } });
   }

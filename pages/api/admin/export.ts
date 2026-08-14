@@ -189,7 +189,7 @@ export default async function handler(
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.status(200).send(jsonContent);
   } catch (err) {
-    console.error("[GET /api/admin/export] 导出数据失败:", err);
+    console.error("[GET /api/admin/export] 导出数据失败:", err instanceof Error ? err.message : String(err));
     res.status(500).json({ success: false, error: "导出数据失败" });
   }
 }

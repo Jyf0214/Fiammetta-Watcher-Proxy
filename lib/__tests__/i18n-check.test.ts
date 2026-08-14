@@ -31,7 +31,7 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const CJK = /[\u4e00-\u9fff]/;
-const T_CALL = /\bt\s*\(\s*(`(?:[^`]|\$\{[^}]*\})*`|"[^"]*"|'[^']*')/g;
+const T_CALL = /\bt\s*\(\s*(`[^`]*`|"[^"]*"|'[^']*')/g;
 const NS_CALL = /useTranslation\s*\(\s*"([^"]+)"\s*\)/g;
 const STRING_LIT = /"([^"\n]*)"|'([^'\n]*)'|`([^`\n]*)`/g;
 

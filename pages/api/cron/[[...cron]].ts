@@ -33,9 +33,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const param = req.query.cron;
   const task = Array.isArray(param) ? param[0] : param;
-  // hasOwnProperty 而非 in：in 会命中原型链键（constructor/toString/__proto__ 等），
-  // 导致这些键被当作合法任务执行（实测 __proto__ 触发 500 泄露内部错误）
-  if (!task || !Object.prototype.hasOwnProperty.call(CRON_ROUTES, task)) {
+  const VALID_TASKS = ["model-fetch", "key-reset", "log-archive"];
+  if (!task || !VALID_TASKS.includes(task)) {
     return res.status(404).json({ error: "Not Found" });
   }
 

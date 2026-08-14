@@ -406,7 +406,7 @@ async function handleLogout(req: NextApiRequest, res: NextApiResponse) {
 
     return res.status(200).json({ success: true, message: "已退出登录" });
   } catch (err) {
-    console.error("[DELETE /api/admin/auth] 登出异常:", err);
+    console.error("[DELETE /api/admin/auth] 登出异常:", err instanceof Error ? err.message : String(err));
     clearAuthCookie(res);
     return res.status(500).json({ success: false, error: "登出过程中发生错误，但登录状态已清除" });
   }
@@ -426,7 +426,7 @@ async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
     if (!admin) return res.status(401).json({ success: false, error: "未授权" });
     return res.status(200).json({ success: true, data: { adminId: admin.adminId, username: admin.username } });
   } catch (err) {
-    console.error("[GET /api/admin/auth] 获取管理员信息失败:", err);
+    console.error("[GET /api/admin/auth] 获取管理员信息失败:", err instanceof Error ? err.message : String(err));
     return res.status(401).json({ success: false, error: "未授权" });
   }
 }

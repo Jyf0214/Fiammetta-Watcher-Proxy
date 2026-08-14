@@ -59,7 +59,7 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
     }
     console.log(`[platform-keys] 已加载 ${whitelistedKeys.size} 个白名单 Key`);
   } catch (err) {
-    console.error("[platform-keys] 加载白名单失败:", err);
+    console.error("[platform-keys] 加载白名单失败:", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -483,7 +483,7 @@ export async function recordKeyError(
   } catch (err) {
     console.error(
       `[platform-keys] 记录密钥错误失败:`,
-      err instanceof Error ? err.message : String(err)
+      (err instanceof Error ? err.message : String(err)).substring(0, 200)
     );
   }
 }
@@ -534,7 +534,7 @@ export async function enableKey(
   } catch (err) {
     console.error(
       `[platform-keys] 启用密钥失败:`,
-      err instanceof Error ? err.message : String(err)
+      (err instanceof Error ? err.message : String(err)).substring(0, 200)
     );
   }
 }
