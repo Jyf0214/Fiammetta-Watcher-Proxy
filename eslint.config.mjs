@@ -14,6 +14,7 @@ export default tseslint.config(
       ".open-next/**",
       "dist/**",
       "worker/dist/**",
+      "src/generated/**",
       "*.config.*",
       "scripts/**",
     ],
