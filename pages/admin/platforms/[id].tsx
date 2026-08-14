@@ -10,7 +10,7 @@ import {
 } from "@/components/platform/PlatformList";
 import { PlatformConfigForm } from "@/components/platform/PlatformConfigForm";
 import { ModelsPanel, type TestResult } from "@/components/platform/ModelsPanel";
-import { ArrowLeft, RefreshCw, Zap } from "lucide-react";
+import { ArrowLeft, RefreshCw, Zap, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
@@ -38,6 +38,7 @@ export default function PlatformDetailPage() {
   const [toggling, setToggling] = useState(false);
   const [togglingKeyIndex, setTogglingKeyIndex] = useState<number | null>(null);
   const [unbanning, setUnbanning] = useState(false);
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
 
   // 模型操作状态
   const [refreshing, setRefreshing] = useState(false);
@@ -499,6 +500,8 @@ export default function PlatformDetailPage() {
       onToggle={handleToggle}
       toggling={toggling}
       togglingKeyIndex={togglingKeyIndex}
+      infoModalOpen={infoModalOpen}
+      onInfoModalOpenChange={setInfoModalOpen}
     />
   );
 
@@ -552,6 +555,14 @@ export default function PlatformDetailPage() {
                     <span className="hidden sm:inline">{unbanning ? t("common:loading") : t("platformUnban")}</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setInfoModalOpen(true)}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  title={t("groupBasic")}
+                >
+                  <Settings size={16} />
+                </button>
                 <Switch checked={platform.enabled} loading={toggling} onChange={handleToggle} />
               </div>
             )}

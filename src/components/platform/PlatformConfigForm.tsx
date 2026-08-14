@@ -12,6 +12,7 @@ import {
   Trash2,
   ClipboardPaste,
   AlertCircle,
+  Settings,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
@@ -39,6 +40,8 @@ export function PlatformConfigForm({
   onToggle,
   toggling,
   togglingKeyIndex,
+  infoModalOpen,
+  onInfoModalOpenChange,
 }: {
   form: ReturnType<typeof Form.useForm>[0];
   editing: Platform | null;
@@ -58,11 +61,18 @@ export function PlatformConfigForm({
   onToggle: (enabled: boolean) => void;
   toggling: boolean;
   togglingKeyIndex: number | null;
+  infoModalOpen: boolean;
+  onInfoModalOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation("platform");
 
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
+
+  // 响应式读取表单字段值，供 Modal 中展示
+  const formName = Form.useWatch("name", form);
+  const formBaseUrl = Form.useWatch("baseUrl", form);
+  const formType = Form.useWatch("type", form);
 
   const handleBatchSubmit = () => {
     const lines = batchText
@@ -108,6 +118,14 @@ export function PlatformConfigForm({
                 </span>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => onInfoModalOpenChange(true)}
+              className="shrink-0 p-2 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              title={t("groupBasic")}
+            >
+              <Settings size={16} />
+            </button>
             <div className="shrink-0">
               <Switch checked={editing.enabled} loading={toggling} onChange={onToggle} />
             </div>
@@ -115,50 +133,54 @@ export function PlatformConfigForm({
         )}
 
         <Collapse
-          defaultActiveKey={["basic", "keys", "params"]}
+          defaultActiveKey={editing ? ["keys", "params"] : ["basic", "keys", "params"]}
           ghost
           className="platform-config-collapse"
           items={[
-            {
-              key: "basic",
-              label: <span className={groupTitle}>{t("groupBasic")}</span>,
-              children: (
-                <>
-                  <Form.Item
-                    name="name"
-                    label={t("name")}
-                    rules={[{ required: true }]}
-                    extra={<span className={itemDesc}>{t("nameDesc")}</span>}
-                    className="!mb-5"
-                  >
-                    <Input />
-                  </Form.Item>
-                  <Form.Item
-                    name="baseUrl"
-                    label={t("baseUrl")}
-                    rules={[{ required: true }]}
-                    extra={<span className={itemDesc}>{t("baseUrlDesc")}</span>}
-                    className="!mb-5"
-                  >
-                    <Input placeholder="https://api.openai.com/v1" />
-                  </Form.Item>
-                  <Form.Item
-                    name="type"
-                    label={t("type")}
-                    extra={<span className={itemDesc}>{t("typeDesc")}</span>}
-                    className="!mb-0"
-                  >
-                    <Select
-                      options={[
-                        { value: "openai", label: t("typeOpenai") },
-                        { value: "azure", label: t("typeAzure") },
-                        { value: "custom", label: t("typeCustom") },
-                      ]}
-                    />
-                  </Form.Item>
-                </>
-              ),
-            },
+            ...(!editing
+              ? [
+                  {
+                    key: "basic",
+                    label: <span className={groupTitle}>{t("groupBasic")}</span>,
+                    children: (
+                      <>
+                        <Form.Item
+                          name="name"
+                          label={t("name")}
+                          rules={[{ required: true }]}
+                          extra={<span className={itemDesc}>{t("nameDesc")}</span>}
+                          className="!mb-5"
+                        >
+                          <Input />
+                        </Form.Item>
+                        <Form.Item
+                          name="baseUrl"
+                          label={t("baseUrl")}
+                          rules={[{ required: true }]}
+                          extra={<span className={itemDesc}>{t("baseUrlDesc")}</span>}
+                          className="!mb-5"
+                        >
+                          <Input placeholder="https://api.openai.com/v1" />
+                        </Form.Item>
+                        <Form.Item
+                          name="type"
+                          label={t("type")}
+                          extra={<span className={itemDesc}>{t("typeDesc")}</span>}
+                          className="!mb-0"
+                        >
+                          <Select
+                            options={[
+                              { value: "openai", label: t("typeOpenai") },
+                              { value: "azure", label: t("typeAzure") },
+                              { value: "custom", label: t("typeCustom") },
+                            ]}
+                          />
+                        </Form.Item>
+                      </>
+                    ),
+                  },
+                ]
+              : []),
             {
               key: "keys",
               label: <span className={groupTitle}>{t("apiKey")}</span>,
@@ -347,6 +369,57 @@ export function PlatformConfigForm({
           className="font-mono text-xs"
         />
         <p className="text-xs text-zinc-400 mt-2">{t("batchAddKeyHint")}</p>
+      </Modal>
+
+      {/* 基本信息 Modal（齿轮按钮打开，仅编辑已有平台时显示） */}
+      <Modal
+        title={t("groupBasic")}
+        open={infoModalOpen}
+        onCancel={() => onInfoModalOpenChange(false)}
+        onOk={() => onInfoModalOpenChange(false)}
+        okText={t("common:save")}
+        cancelText={t("common:cancel")}
+        width="min(90vw, 640px)"
+      >
+        <div className="pt-2 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+              {t("name")} <span className="text-red-500">*</span>
+            </label>
+            <Input
+              value={formName ?? ""}
+              onChange={(e) => form.setFieldsValue({ name: e.target.value })}
+            />
+            <p className="text-xs text-zinc-400 mt-1">{t("nameDesc")}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+              {t("baseUrl")} <span className="text-red-500">*</span>
+            </label>
+            <Input
+              value={formBaseUrl ?? ""}
+              onChange={(e) => form.setFieldsValue({ baseUrl: e.target.value })}
+              placeholder="https://api.openai.com/v1"
+            />
+            <p className="text-xs text-zinc-400 mt-1">{t("baseUrlDesc")}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+              {t("type")}
+            </label>
+            <Select
+              value={formType}
+              onChange={(v) => form.setFieldsValue({ type: v })}
+              options={[
+                { value: "openai", label: t("typeOpenai") },
+                { value: "azure", label: t("typeAzure") },
+                { value: "custom", label: t("typeCustom") },
+              ]}
+              className="w-full"
+            />
+            <p className="text-xs text-zinc-400 mt-1">{t("typeDesc")}</p>
+          </div>
+        </div>
       </Modal>
 
       {/* 操作区 */}
