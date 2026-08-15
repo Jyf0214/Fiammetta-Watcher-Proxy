@@ -545,6 +545,22 @@ describe("convertOpenAIRequest", () => {
     expect(out.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hi" }] }]);
   });
 
+  it("顶层 system 字段优先于消息内 system，多段拼接", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      system: "模板 system",
+      messages: [
+        { role: "system", content: "消息 system" },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    expect(out.system).toBe("模板 system\n消息 system");
+  });
+
+  it("top_k 透传（Anthropic 原生参数，模板配置生效）", () => {
+    expect(convertOpenAIRequest({ model: "m", messages: [], top_k: 20 }).top_k).toBe(20);
+  });
+
   it("max_tokens 缺失时默认 4096；max_completion_tokens 兜底", () => {
     expect(convertOpenAIRequest({ model: "m", messages: [] }).max_tokens).toBe(4096);
     expect(

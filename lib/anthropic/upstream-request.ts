@@ -6,12 +6,12 @@
  * 转发前再转回 Anthropic 请求体。
  *
  * 转换规则：
- * - system 消息 → 顶层 system 字段（多段拼接）
+ * - system 消息 → 顶层 system 字段（多段拼接；兼容网关的顶层 system 字段优先）
  * - user/assistant 消息混合 text 与 image_url part → text/image 块
  * - assistant tool_calls → tool_use 块（arguments JSON 解析）
  * - tool 消息 → user 消息中的 tool_result 块（连续 tool 消息合并同一条 user 消息）
  * - tools（function 格式）→ input_schema；tool_choice 四种形态映射
- * - stop → stop_sequences
+ * - stop → stop_sequences；temperature/top_p/top_k 透传
  * - max_tokens 为 Anthropic 必填，OpenAI 缺失时默认 4096
  * - 白名单输出：Anthropic 严格模式拒绝未知字段（stream_options/n 等全部剥离）
  */
@@ -143,8 +143,12 @@ export function convertOpenAIRequest(
     throw new OpenAIRequestError("缺少必填字段: messages");
   }
 
-  // system 消息 → 顶层 system；其余消息按角色转换（合并连续同角色消息）
+  // system 消息 → 顶层 system（兼容网关的顶层 system 字段优先，消息内 system 追加）；
+  // 其余消息按角色转换（合并连续同角色消息）
   const systemParts: string[] = [];
+  if (typeof req.system === "string" && req.system) {
+    systemParts.push(req.system);
+  }
   const out: AnthropicMessage[] = [];
 
   for (const raw of req.messages) {
@@ -260,6 +264,7 @@ export function convertOpenAIRequest(
   if (req.stream === true) converted.stream = true;
   if (typeof req.temperature === "number") converted.temperature = req.temperature;
   if (typeof req.top_p === "number") converted.top_p = req.top_p;
+  if (typeof req.top_k === "number" && Number.isInteger(req.top_k)) converted.top_k = req.top_k;
   if (typeof req.stop === "string") {
     converted.stop_sequences = [req.stop];
   } else if (Array.isArray(req.stop)) {

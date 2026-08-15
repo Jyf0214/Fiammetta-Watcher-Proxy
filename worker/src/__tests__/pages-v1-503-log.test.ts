@@ -11,6 +11,7 @@ import handler from "../../../pages/api/v1/[[...v1]]";
 import { validateApiKey } from "../../../worker/src/auth";
 import { routeRequest } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept } from "../../../worker/src/platform-keys";
+import { getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { recordFailure } from "../../../worker/src/load-balancer";
 import { recordRequestLog } from "../../../worker/src/token";
 import type { PlatformConfig } from "@/lib/types";
@@ -292,5 +293,80 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
     expect(logParams.errorMessage).toContain("空闲超时");
+  });
+});
+
+// ==================== 上游 Anthropic 协议 ====================
+
+describe("Pages 版 v1 代理 上游 Anthropic 协议（模板先应用再转换）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform({ type: "anthropic", baseUrl: "https://api.anthropic.com" }),
+      targetModel: "claude-target",
+    });
+    vi.mocked(validateApiKey).mockResolvedValue({
+      apiKey: { id: "key-id", key: "sk-client-key", name: "client" } as any,
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+    // 模板命中：注入 OpenAI 专属字段 + Anthropic 原生字段
+    vi.mocked(getApplicableTemplates).mockReturnValue([
+      { id: "t1", name: "t1", description: "", models: ["*"], mergeBody: {}, enabled: true },
+    ]);
+    vi.mocked(applyTemplates).mockImplementation((b) => ({
+      ...(b as Record<string, unknown>),
+      stream_options: { include_usage: true },
+      n: 2,
+      response_format: { type: "json_object" },
+      top_k: 20,
+      system: "模板 system",
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("模板先作用于原始请求再转换：OpenAI 专属字段剥离，Anthropic 原生字段透传", async () => {
+    let sentUrl = "";
+    let sentBody: Record<string, unknown> = {};
+    const sentHeaders: Record<string, string> = {};
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      sentUrl = _url;
+      sentBody = JSON.parse(String(init.body));
+      const h = new Headers(init.headers as HeadersInit);
+      h.forEach((v, k) => {
+        sentHeaders[k] = v;
+      });
+      return new Response(
+        JSON.stringify({
+          id: "msg_1",
+          content: [{ type: "text", text: "hi" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const req = makeReq({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    // URL 指向 /v1/messages
+    expect(sentUrl).toBe("https://api.anthropic.com/v1/messages");
+    // 模板在转换前应用：OpenAI 专属字段被转换白名单剥离
+    expect(sentBody.stream_options).toBeUndefined();
+    expect(sentBody.n).toBeUndefined();
+    expect(sentBody.response_format).toBeUndefined();
+    // Anthropic 原生字段透传
+    expect(sentBody.top_k).toBe(20);
+    expect(sentBody.system).toBe("模板 system");
+    expect(sentBody.model).toBe("claude-target");
+    // 认证头
+    expect(sentHeaders["x-api-key"]).toBe("sk-key1");
+    expect(sentHeaders["anthropic-version"]).toBe("2023-06-01");
   });
 });

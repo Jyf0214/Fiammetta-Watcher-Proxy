@@ -29,7 +29,10 @@ const CACHE_TTL = 30_000;
 
 // ==================== 深度合并 ====================
 
-/** mergeBody 允许合并的字段白名单，防止注入 model/messages/tools 等危险字段 */
+/** mergeBody 允许合并的字段白名单，防止注入 model/messages/tools 等危险字段。
+ *  字段按 OpenAI 请求语义编写；对 anthropic 上游平台，模板在转换前应用，
+ *  OpenAI 专属字段（stream_options/n/response_format 等）会被转换白名单剥离，
+ *  仅 system/temperature/top_p/top_k/max_tokens/stop/tools/tool_choice 生效。 */
 const MERGEBODY_ALLOWED_KEYS = new Set([
   "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
   "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",

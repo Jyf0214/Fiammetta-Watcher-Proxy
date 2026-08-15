@@ -13,6 +13,7 @@ import { proxyV1Request, withIdleTimeout } from "../proxy";
 import { getNextKey, getRandomKeyExcept, banKey } from "../platform-keys";
 import { recordFailure, recordSuccess } from "../load-balancer";
 import { routeRequest } from "../router";
+import { getApplicableTemplates, applyTemplates } from "../request-templates";
 import { recordRequestLog } from "../token";
 import type { PlatformConfig } from "@/lib/types";
 import type { WorkerEnv } from "../config";
@@ -564,5 +565,121 @@ describe("proxyV1Request 流式挂起空闲超时", () => {
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
     expect(logParams.errorMessage).toContain("空闲超时");
+  });
+});
+
+// ==================== 上游 Anthropic 协议 ====================
+
+describe("proxyV1Request 上游 Anthropic 协议（模板先应用再转换）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform({ type: "anthropic", baseUrl: "https://api.anthropic.com" }),
+      targetModel: "claude-target",
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+    // 模板命中：注入 OpenAI 专属字段 + Anthropic 原生字段
+    vi.mocked(getApplicableTemplates).mockReturnValue([
+      { id: "t1", name: "t1", description: "", models: ["*"], mergeBody: {}, enabled: true },
+    ]);
+    vi.mocked(applyTemplates).mockImplementation((b) => ({
+      ...(b as Record<string, unknown>),
+      stream_options: { include_usage: true },
+      n: 2,
+      response_format: { type: "json_object" },
+      top_k: 20,
+      system: "模板 system",
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("模板先作用于原始请求再转换：OpenAI 专属字段剥离，Anthropic 原生字段透传", async () => {
+    let sentUrl = "";
+    let sentBody: Record<string, unknown> = {};
+    const sentHeaders: Record<string, string> = {};
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      sentUrl = _url;
+      sentBody = JSON.parse(String(init.body));
+      const h = new Headers(init.headers as HeadersInit);
+      h.forEach((v, k) => {
+        sentHeaders[k] = v;
+      });
+      return new Response(
+        JSON.stringify({
+          id: "msg_1",
+          content: [{ type: "text", text: "hi" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    // URL 指向 /v1/messages
+    expect(sentUrl).toBe("https://api.anthropic.com/v1/messages");
+    // 模板在转换前应用：OpenAI 专属字段被转换白名单剥离
+    expect(sentBody.stream_options).toBeUndefined();
+    expect(sentBody.n).toBeUndefined();
+    expect(sentBody.response_format).toBeUndefined();
+    // Anthropic 原生字段透传
+    expect(sentBody.top_k).toBe(20);
+    expect(sentBody.system).toBe("模板 system");
+    expect(sentBody.model).toBe("claude-target");
+    // 认证头
+    expect(sentHeaders["x-api-key"]).toBe("sk-key1");
+    expect(sentHeaders["anthropic-version"]).toBe("2023-06-01");
+  });
+
+  it("流式 + anthropic：stream_options 注入被上游协议守卫排除", async () => {
+    let sentBody: Record<string, unknown> = {};
+    const encoder = new TextEncoder();
+    const sseStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n\n'));
+        controller.enqueue(encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n'));
+        controller.enqueue(encoder.encode('event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n'));
+        controller.enqueue(encoder.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      sentBody = JSON.parse(String(init.body));
+      return new Response(sseStream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    // 流式注入守卫 !upstreamIsAnthropic：不注入 stream_options
+    expect(sentBody.stream_options).toBeUndefined();
+    // 模板注入的 OpenAI 专属字段仍被转换剥离
+    expect(sentBody.n).toBeUndefined();
+    expect(sentBody.top_k).toBe(20);
+    // 下游 stream: true 透传
+    expect(sentBody.stream).toBe(true);
   });
 });

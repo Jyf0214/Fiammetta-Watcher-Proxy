@@ -287,13 +287,16 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       sendV1Error(res, config, 500, `平台 "${cur.name}" 无可用 API Key`, "server_error"); return;
     }
 
-    let upstreamBody: Record<string, unknown>;
+    // 模板先作用于原始 OpenAI 请求体；Anthropic 分支随后转换——转换白名单会剥离
+    // 模板中的 OpenAI 专属字段（stream_options/n/response_format 等），避免严格后端 422
+    let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
+    try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
     // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
     // 认证用 x-api-key + anthropic-version
     const upstreamIsAnthropic = cur.type === "anthropic";
     if (upstreamIsAnthropic) {
       try {
-        upstreamBody = convertOpenAIRequest({ ...body, model: tgt });
+        upstreamBody = convertOpenAIRequest(upstreamBody);
       } catch (convertError) {
         if (convertError instanceof OpenAIRequestError) {
           sendV1Error(res, config, 400, convertError.message, "invalid_request_error");
@@ -301,10 +304,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         }
         throw convertError;
       }
-    } else {
-      upstreamBody = { ...body, model: tgt };
     }
-    try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
     // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游

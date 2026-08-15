@@ -475,25 +475,10 @@ export async function proxyV1Request(
     // 请求体转回 /v1/messages 格式，URL 指向 /v1/messages，认证用 x-api-key + anthropic-version
     const upstreamIsAnthropic = currentPlatform.type === "anthropic";
 
-    // 构建上游请求体（Anthropic 分支的请求体已在步骤 2.5 转换为 OpenAI 格式）
-    let upstreamBody: Record<string, unknown>;
-    if (upstreamIsAnthropic) {
-      try {
-        upstreamBody = convertOpenAIRequest({
-          ...body,
-          model: currentTargetModel,
-        });
-      } catch (convertError) {
-        if (convertError instanceof OpenAIRequestError) {
-          return v1ErrorResponse(config, 400, convertError.message, "invalid_request_error");
-        }
-        throw convertError;
-      }
-    } else {
-      upstreamBody = { ...body, model: currentTargetModel };
-    }
-
-    // 应用请求模板
+    // 构建上游请求体：模板先作用于原始 OpenAI 请求体。
+    // Anthropic 分支随后转换——convertOpenAIRequest 白名单会剥离模板中的 OpenAI 专属字段
+    // （stream_options/n/response_format 等），避免 Anthropic 严格后端 422 extra_forbidden
+    let upstreamBody: Record<string, unknown> = { ...body, model: currentTargetModel };
     try {
       const templates = await loadTemplates(env.DB, workerEnv);
       const applicable = getApplicableTemplates(templates, requestedModel);
@@ -502,6 +487,17 @@ export async function proxyV1Request(
       }
     } catch (tplErr) {
       console.error(`${logTag} 加载请求模板失败:`, tplErr);
+    }
+
+    if (upstreamIsAnthropic) {
+      try {
+        upstreamBody = convertOpenAIRequest(upstreamBody);
+      } catch (convertError) {
+        if (convertError instanceof OpenAIRequestError) {
+          return v1ErrorResponse(config, 400, convertError.message, "invalid_request_error");
+        }
+        throw convertError;
+      }
     }
 
     // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
