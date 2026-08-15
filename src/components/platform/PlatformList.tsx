@@ -4,10 +4,12 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { Input } from "antd";
-import { Plus, Search, ChevronDown, Cloud, WalletCards } from "lucide-react";
+import { Plus, Search, ChevronDown, Cloud, WalletCards, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { BrandIcon } from "@/components/platform/BrandIcon";
+import { BrandIcon, BRAND_MAP } from "@/components/platform/BrandIcon";
+import { PresetIcon, PRESET_ICON_MAP } from "@/components/platform/PresetIcon";
+import { PresetPickerModal } from "@/components/platform/PresetPickerModal";
 import { cn } from "@/lib/ui";
 
 /** 平台数据接口（与 API /api/admin/platforms 返回结构一致） */
@@ -17,6 +19,7 @@ export interface Platform {
   baseUrl: string;
   apiKeys: string;
   type: string;
+  presetId?: string | null;
   enabled: boolean;
   priority: number;
   weight: number;
@@ -39,14 +42,16 @@ const FALLBACK_BRAND: { box: string; text: string } = {
   text: "text-zinc-400 dark:text-zinc-500",
 };
 
-/** 品牌图标 — 优先使用品牌 SVG 图标库，未匹配时回退到色块 + 首字母 */
+/** 品牌图标 — 预设来源优先显示预设图标，其次品牌 type 图标，未匹配时回退到色块 + 首字母 */
 export function BrandAvatar({
   name,
   type,
+  presetId,
   size = "md",
 }: {
   name: string;
   type: string;
+  presetId?: string | null;
   size?: "sm" | "md" | "lg";
 }) {
   const px = size === "lg" ? 48 : size === "sm" ? 22 : 32;
@@ -54,8 +59,12 @@ export function BrandAvatar({
   const box =
     size === "lg" ? "w-12 h-12 rounded-2xl text-base" : size === "sm" ? "w-8 h-8 rounded-lg text-xs" : "w-10 h-10 rounded-lg text-sm";
 
-  const icon = <BrandIcon type={type} size={px} />;
-  if (icon) return icon;
+  if (presetId && PRESET_ICON_MAP[presetId]) {
+    return <PresetIcon presetId={presetId} size={px} />;
+  }
+  if (BRAND_MAP[type]) {
+    return <BrandIcon type={type} size={px} />;
+  }
 
   return (
     <div className={cn("shrink-0 flex items-center justify-center font-bold", box, FALLBACK_BRAND.box, FALLBACK_BRAND.text)}>
@@ -95,7 +104,7 @@ function PlatformRow({
           : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       )}
     >
-      <BrandAvatar name={platform.name} type={platform.type} size="sm" />
+      <BrandAvatar name={platform.name} type={platform.type} presetId={platform.presetId} size="sm" />
       <span className={cn(
         "flex-1 min-w-0 text-sm truncate",
         active ? "text-zinc-900 dark:text-zinc-100 font-medium" : "text-zinc-700 dark:text-zinc-300"
@@ -127,6 +136,7 @@ export function PlatformList({
 }: PlatformListProps) {
   const { t } = useTranslation("platform");
   const router = useRouter();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [items, setItems] = useState<Platform[]>(platforms);
   const [prevPlatforms, setPrevPlatforms] = useState(platforms);
   const [searchText, setSearchText] = useState("");
@@ -164,7 +174,7 @@ export function PlatformList({
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const goPlatform = (id: string) => router.push(`/admin/platforms/${id}`);
-  const goCreate = () => router.push("/admin/platforms/new");
+  const goPresets = () => router.push("/admin/platforms/presets");
 
   /** 分组折叠列表 */
   const renderGroup = (key: "enabled" | "disabled", label: string, items: Platform[]) => {
@@ -209,7 +219,7 @@ export function PlatformList({
 
   return (
     <div className={cn("flex flex-col bg-white dark:bg-zinc-900", className)}>
-      {/* 工具条：搜索 + 新建 */}
+      {/* 工具条：搜索 + 预设入口 + 新建 */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-100 dark:border-zinc-800">
         <Input
           prefix={<Search size={14} className="text-zinc-400" />}
@@ -222,7 +232,16 @@ export function PlatformList({
         />
         <button
           type="button"
-          onClick={goCreate}
+          onClick={goPresets}
+          className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 transition-colors"
+          title={t("presets")}
+          aria-label={t("presets")}
+        >
+          <LayoutGrid size={18} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
           className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 transition-colors"
           title={t("createPlatform")}
           aria-label={t("createPlatform")}
@@ -230,6 +249,12 @@ export function PlatformList({
           <Plus size={18} strokeWidth={1.5} />
         </button>
       </div>
+
+      {/* 新建选择器：从预设选择或手动创建 */}
+      <PresetPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* 列表区 */}
       {loading && items.length === 0 ? (
@@ -241,7 +266,7 @@ export function PlatformList({
           icon={<Cloud className="w-10 h-10" />}
           title={t("noPlatforms")}
           action={
-            <Button variant="primary" size="sm" onClick={goCreate} icon={<Plus size={14} />}>
+            <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)} icon={<Plus size={14} />}>
               {t("createPlatform")}
             </Button>
           }

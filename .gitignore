@@ -54,7 +54,7 @@ tsconfig.tsbuildinfo
 *.sqlite3
 
 # data directory (contains sensitive config)
-data/
+/data/
 
 # 嵌入式 PostgreSQL 开发库（scripts/dev-postgres.mjs）
 .pgdata/

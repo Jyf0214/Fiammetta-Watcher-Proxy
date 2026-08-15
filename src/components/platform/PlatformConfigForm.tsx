@@ -106,7 +106,7 @@ export function PlatformConfigForm({
       <div className={cardClass}>
         {editing && (
           <div className="hidden lg:flex items-center gap-3 px-5 sm:px-6 pt-5 sm:pt-6 pb-5 mb-5 border-b border-zinc-100 dark:border-zinc-800">
-            <BrandAvatar name={editing.name} type={editing.type} size="lg" />
+            <BrandAvatar name={editing.name} type={editing.type} presetId={editing.presetId} size="lg" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 truncate">

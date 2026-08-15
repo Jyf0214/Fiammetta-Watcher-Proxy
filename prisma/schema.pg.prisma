@@ -36,6 +36,8 @@ model platforms {
   baseUrl        String  @map("base_url")
   apiKeys        String @db.Text @map("api_keys")
   type           String  @default("openai")
+  // 预设来源（从预设模板创建时记录，用于图标与来源识别）
+  presetId       String? @map("preset_id")
   enabled        Boolean @default(true)
   priority       Int     @default(0)
   weight         Int     @default(1)

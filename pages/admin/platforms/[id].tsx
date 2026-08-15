@@ -537,7 +537,7 @@ export default function PlatformDetailPage() {
               </button>
               {platform && !isNew && (
                 <div className="shrink-0">
-                  <BrandAvatar name={platform.name} type={platform.type} size="sm" />
+                  <BrandAvatar name={platform.name} type={platform.type} presetId={platform.presetId} size="sm" />
                 </div>
               )}
               <span className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 truncate">
