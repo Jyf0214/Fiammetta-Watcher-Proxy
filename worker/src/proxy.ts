@@ -11,7 +11,7 @@
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
-import { recordSuccess, recordFailure } from "./load-balancer";
+import { recordSuccess, recordFailure, selectPlatform } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
   checkPlatformRpm,
@@ -700,16 +700,18 @@ export async function proxyV1Request(
         continue;
       }
 
-      // 策略 2：换平台（支持同一模型）
+      // 策略 2：换平台（支持同一模型）——复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择
       const otherPlatforms = getPlatformsForModel(
         currentTargetModel,
         triedPlatforms
       );
       if (otherPlatforms.length > 0) {
-        const idx = Math.floor(Math.random() * otherPlatforms.length);
-        currentPlatform = otherPlatforms[idx];
-        currentKey = getNextKey(currentPlatform);
-        continue;
+        const nextPlatform = selectPlatform(otherPlatforms);
+        if (nextPlatform) {
+          currentPlatform = nextPlatform;
+          currentKey = getNextKey(currentPlatform);
+          continue;
+        }
       }
 
       // 无更多可切换的目标

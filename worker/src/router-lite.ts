@@ -198,7 +198,7 @@ export function selectPlatformLite(platforms: PlatformConfig[]): PlatformConfig 
   const now = Date.now();
 
   const available = platforms.filter(
-    (p) => p.enabled && (p.cooldownEnd === null || p.cooldownEnd <= now)
+    (p) => p.enabled && (p.cooldownEnd === null || p.cooldownEnd * 1000 <= now)
   );
   if (available.length === 0) return null;
 

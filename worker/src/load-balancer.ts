@@ -285,8 +285,8 @@ export function selectPlatform(
       incrementHalfOpenPending(p.id);
     }
 
-    // 检查冷却期
-    if (p.cooldownEnd !== null && p.cooldownEnd > now) return false;
+    // 检查冷却期（数据库 cooldownEnd 为 Unix 秒，需与 Date.now() 的毫秒对齐）
+    if (p.cooldownEnd !== null && p.cooldownEnd * 1000 > now) return false;
 
     return true;
   });

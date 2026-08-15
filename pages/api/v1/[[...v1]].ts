@@ -11,7 +11,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
-import { recordSuccess, recordFailure } from "../../../worker/src/load-balancer";
+import { recordSuccess, recordFailure, selectPlatform } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
@@ -373,7 +373,11 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       const nk = getRandomKeyExcept(cur, tried);
       if (nk) { curKey = nk; continue; }
       const ops = getPlatformsForModel(tgt, triedP);
-      if (ops.length > 0) { cur = ops[Math.floor(Math.random() * ops.length)]; curKey = getNextKey(cur); continue; }
+      if (ops.length > 0) {
+        // 复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择（与 Worker 版一致）
+        const nextPlatform = selectPlatform(ops);
+        if (nextPlatform) { cur = nextPlatform; curKey = getNextKey(cur); continue; }
+      }
     }
 
     // 最后一次尝试或无处可切换：返回真实状态

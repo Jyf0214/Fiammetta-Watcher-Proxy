@@ -92,7 +92,7 @@ describe("selectPlatformLite 纯负载均衡", () => {
   it("被动过滤冷却期平台（cooldownEnd 只读，不写状态）", () => {
     const cooling = makePlatform({
       id: "p-cool",
-      cooldownEnd: Date.now() + 60_000,
+      cooldownEnd: Math.floor((Date.now() + 60_000) / 1000),
     });
     const normal = makePlatform({ id: "p-normal" });
     const result = selectPlatformLite([cooling, normal]);
@@ -100,7 +100,7 @@ describe("selectPlatformLite 纯负载均衡", () => {
   });
 
   it("全部冷却/禁用时返回 null", () => {
-    const cooling = makePlatform({ cooldownEnd: Date.now() + 60_000 });
+    const cooling = makePlatform({ cooldownEnd: Math.floor((Date.now() + 60_000) / 1000) });
     expect(selectPlatformLite([cooling])).toBeNull();
   });
 });

@@ -226,12 +226,19 @@ describe("selectPlatform", () => {
     expect(result!.id).toBe("p2");
   });
 
-  it("cooldown 未过期的平台被跳过", () => {
+  it("cooldown 未过期的平台被跳过（cooldownEnd 为 Unix 秒）", () => {
     const now = Date.now();
-    const p1 = makePlatform({ id: "p1", cooldownEnd: now + 60000 });
+    const p1 = makePlatform({ id: "p1", cooldownEnd: Math.floor((now + 60000) / 1000) });
     const p2 = makePlatform({ id: "p2" });
     const result = selectPlatform([p1, p2]);
     expect(result!.id).toBe("p2");
+  });
+
+  it("cooldown 已过期的平台可被选中（cooldownEnd 为 Unix 秒）", () => {
+    const now = Date.now();
+    const p1 = makePlatform({ id: "p1", cooldownEnd: Math.floor((now - 1000) / 1000) });
+    const result = selectPlatform([p1]);
+    expect(result!.id).toBe("p1");
   });
 
   it("所有平台熔断时返回 null", async () => {
