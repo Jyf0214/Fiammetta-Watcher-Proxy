@@ -22,7 +22,7 @@ import {
 import { createUsageTransformer, recordRequestLog } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
-import { extractForwardableHeaders } from "./forward-headers";
+import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import {
@@ -544,8 +544,10 @@ export async function proxyV1Request(
         "Content-Type": "application/json",
         Authorization: `Bearer ${currentKey}`,
         ...forwardHeaders,
+        // 高级设置：自定义请求头（强制覆盖），优先级高于下游透传头
+        ...parseExtraHeaders(currentPlatform.extraHeaders),
       };
-      // 高级设置：UA 复用
+      // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
       if (currentPlatform.reuseUserAgent && currentPlatform.customUserAgent) {
         headers["User-Agent"] = currentPlatform.customUserAgent;
       }

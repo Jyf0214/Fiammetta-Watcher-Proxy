@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "whitelisted" BOOLEAN NOT NULL DEFAULT false,
     "reuse_user_agent" BOOLEAN NOT NULL DEFAULT false,
     "custom_user_agent" TEXT,
+    "extra_headers" TEXT NOT NULL DEFAULT '{}',
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

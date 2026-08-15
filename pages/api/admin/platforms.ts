@@ -97,6 +97,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         forwardHeaders,
         injectStreamOptions,
         whitelisted,
+        extraHeaders,
       } = body;
 
       // 输入校验
@@ -243,6 +244,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ success: false, error: errors.join("; ") });
       }
 
+      // extraHeaders 校验：JSON 对象（键值对），最多 20 条，键与值均为字符串
+      let normalizedExtraHeaders = "{}";
+      if (extraHeaders !== undefined && extraHeaders !== null && extraHeaders !== "") {
+        if (typeof extraHeaders !== "string") {
+          errors.push("自定义请求头必须为 JSON 对象字符串");
+        } else {
+          try {
+            const parsed = JSON.parse(extraHeaders);
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+              errors.push("自定义请求头必须为 JSON 对象");
+            } else {
+              const normalized: Record<string, string> = {};
+              let count = 0;
+              for (const [k, v] of Object.entries(parsed)) {
+                if (count >= 20) {
+                  errors.push("自定义请求头最多 20 条");
+                  break;
+                }
+                if (typeof k !== "string" || typeof v !== "string") {
+                  errors.push("自定义请求头的键和值必须为字符串");
+                  break;
+                }
+                normalized[k] = v;
+                count++;
+              }
+              normalizedExtraHeaders = JSON.stringify(normalized);
+            }
+          } catch {
+            errors.push("自定义请求头 JSON 格式错误");
+          }
+        }
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({ success: false, error: errors.join("; ") });
+      }
+
       const platformType = VALID_PLATFORM_TYPES.includes(type) ? type : "openai";
       const now = Math.floor(Date.now() / 1000);
 
@@ -269,6 +307,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           forwardHeaders: normalizedForwardHeaders,
           injectStreamOptions: injectStreamOptions !== false,
           whitelisted: whitelisted === true,
+          extraHeaders: normalizedExtraHeaders,
           createdAt: now,
           updatedAt: now,
         },
@@ -303,6 +342,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           failCount: 0,
           forwardHeaders: normalizedForwardHeaders,
           injectStreamOptions: injectStreamOptions !== false,
+          extraHeaders: normalizedExtraHeaders,
           createdAt: now,
           updatedAt: now,
         },

@@ -87,3 +87,41 @@ export function extractForwardableHeaders(
 
   return result;
 }
+
+/**
+ * 解析平台"自定义请求头（强制覆盖）"配置
+ *
+ * 入参为 JSON 键值对字符串（如 `{"X-Custom":"value"}`）。仅保留：
+ *   - 合法的 header 名（RFC 7230 token）
+ *   - 字符串类型的值
+ * 对值做 CR/LF/NUL 净化，防止 HTTP 头注入。非法项直接跳过。
+ *
+ * @param raw - 平台配置的 extraHeaders（JSON 字符串），为 null/空/非法 JSON 时返回空对象
+ * @param maxEntries - 最多保留的条目数（超过截断），默认 20
+ * @returns 解析后的请求头键值对
+ */
+export function parseExtraHeaders(
+  raw: string | null | undefined,
+  maxEntries = 20
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!raw || raw === "{}") return result;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return result;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return result;
+
+  let count = 0;
+  for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (count >= maxEntries) break;
+    if (!isValidHeaderName(name) || typeof value !== "string") continue;
+    result[name] = sanitizeHeaderValue(value);
+    count++;
+  }
+
+  return result;
+}

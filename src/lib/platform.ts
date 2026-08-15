@@ -83,3 +83,43 @@ export function parseForwardHeaders(raw: string | string[] | null | undefined): 
     return raw;
   }
 }
+
+// ---------- 自定义请求头（强制覆盖） ----------
+
+/**
+ * 将存储的 extraHeaders JSON 字符串转换为文本框展示文本（每行 `Key: Value`）。
+ * 解析失败或非对象时返回空字符串。
+ */
+export function parseExtraHeadersText(raw: string | null | undefined): string {
+  if (!raw || raw === "{}") return "";
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+    return Object.entries(obj)
+      .filter(([, v]) => typeof v === "string")
+      .map(([k, v]) => `${k}: ${v as string}`)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 将文本框（`Key: Value` 每行一个，空行忽略）转换为 extraHeaders JSON 字符串。
+ * 无有效行时返回 "{}"。
+ */
+export function serializeExtraHeaders(text: string | undefined): string {
+  if (!text || !text.trim()) return "{}";
+  const obj: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const idx = trimmed.indexOf(":");
+    if (idx <= 0) continue;
+    const key = trimmed.slice(0, idx).trim();
+    const value = trimmed.slice(idx + 1).trim();
+    if (!key || !value) continue;
+    obj[key] = value;
+  }
+  return Object.keys(obj).length > 0 ? JSON.stringify(obj) : "{}";
+}

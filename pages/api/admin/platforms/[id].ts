@@ -57,6 +57,9 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
         apiKeys,
         forwardHeaders,
         injectStreamOptions: platform.injectStreamOptions ?? true,
+        reuseUserAgent: platform.reuseUserAgent ?? false,
+        customUserAgent: platform.customUserAgent ?? "",
+        extraHeaders: platform.extraHeaders ?? "{}",
       },
     });
   } catch (err) {
@@ -236,6 +239,30 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
           updateData.customUserAgent = null;
         } else if (body.customUserAgent.length <= 500) {
           updateData.customUserAgent = body.customUserAgent.trim();
+        }
+      }
+    }
+
+    // 高级设置：自定义请求头（强制覆盖），JSON 键值对
+    if (body.extraHeaders !== undefined) {
+      if (body.extraHeaders === "" || body.extraHeaders === null) {
+        updateData.extraHeaders = "{}";
+      } else if (typeof body.extraHeaders === "string") {
+        try {
+          const parsed = JSON.parse(body.extraHeaders);
+          if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const normalized: Record<string, string> = {};
+            let count = 0;
+            for (const [k, v] of Object.entries(parsed)) {
+              if (count >= 20) break;
+              if (typeof k !== "string" || typeof v !== "string") continue;
+              normalized[k] = v;
+              count++;
+            }
+            updateData.extraHeaders = JSON.stringify(normalized);
+          }
+        } catch {
+          // JSON 解析失败，保留原值
         }
       }
     }

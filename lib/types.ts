@@ -30,6 +30,8 @@ export interface PlatformConfig {
   reuseUserAgent?: boolean;
   /** 自定义 User-Agent 字符串（reuseUserAgent 开启时生效），最长 500 字符 */
   customUserAgent?: string | null;
+  /** 高级设置：自定义请求头（强制覆盖，JSON 键值对字符串），优先级高于下游透传头 */
+  extraHeaders?: string | null;
   status: PlatformStatus;
   failCount: number;
   lastFailAt: number | null;

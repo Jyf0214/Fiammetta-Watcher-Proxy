@@ -12,7 +12,7 @@ import { routeRequestLite } from "./router-lite";
 import { getNextKey, recordKeyError } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus } from "./token";
 import { withIdleTimeout } from "./stream-guard";
-import { extractForwardableHeaders } from "./forward-headers";
+import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import {
   convertOpenAIResponse,
@@ -452,13 +452,20 @@ export async function proxyV1RequestLite(
   );
   let upstreamResponse: Response;
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${currentKey}`,
+      ...forwardHeaders,
+      // 高级设置：自定义请求头（强制覆盖），优先级高于下游透传头
+      ...parseExtraHeaders(route.platform.extraHeaders),
+    };
+    // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
+    if (route.platform.reuseUserAgent && route.platform.customUserAgent) {
+      headers["User-Agent"] = route.platform.customUserAgent;
+    }
     upstreamResponse = await fetch(upstreamUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${currentKey}`,
-        ...forwardHeaders,
-      },
+      headers,
       body: JSON.stringify(upstreamBody),
       signal: upstreamController.signal,
       // 禁止跟随重定向：isSafeUpstreamUrl 只校验初始 URL，

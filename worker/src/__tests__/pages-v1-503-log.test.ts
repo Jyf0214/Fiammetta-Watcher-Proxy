@@ -74,6 +74,7 @@ vi.mock("../../../worker/src/token", () => ({
 
 vi.mock("../../../worker/src/forward-headers", () => ({
   extractForwardableHeaders: vi.fn(() => ({})),
+  parseExtraHeaders: vi.fn(() => ({})),
 }));
 
 vi.mock("@opennextjs/cloudflare", () => ({

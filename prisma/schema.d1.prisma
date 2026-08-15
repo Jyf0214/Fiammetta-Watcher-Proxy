@@ -49,6 +49,8 @@ model platforms {
   // 高级设置：UA 复用
   reuseUserAgent Boolean @default(false) @map("reuse_user_agent")
   customUserAgent String? @map("custom_user_agent")
+  // 高级设置：自定义请求头（强制覆盖，JSON 键值对字符串）
+  extraHeaders  String  @default("{}") @map("extra_headers")
   createdAt      Int     @default(0) @map("created_at")
   updatedAt      Int     @default(0) @map("updated_at")
 

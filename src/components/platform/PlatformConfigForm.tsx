@@ -379,11 +379,22 @@ export function PlatformConfigForm({
                       name="customUserAgent"
                       label={t("customUserAgent")}
                       extra={<span className={itemDesc}>{t("customUserAgentDesc")}</span>}
-                      className="!mb-0"
+                      className="!mb-4"
                     >
                       <Input placeholder={t("customUserAgentPlaceholder")} />
                     </Form.Item>
                   )}
+                  <Form.Item
+                    name="extraHeaders"
+                    label={t("extraHeaders")}
+                    extra={<span className={itemDesc}>{t("extraHeadersDesc")}</span>}
+                    className="!mb-0"
+                  >
+                    <Input.TextArea
+                      rows={3}
+                      placeholder={t("extraHeadersPlaceholder")}
+                    />
+                  </Form.Item>
                 </>
               ),
             },

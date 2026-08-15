@@ -71,6 +71,10 @@ export default async function handler(
         rpmLimit: p.rpmLimit,
         tpmLimit: p.tpmLimit,
         forwardHeaders: p.forwardHeaders,
+        injectStreamOptions: p.injectStreamOptions,
+        reuseUserAgent: p.reuseUserAgent,
+        customUserAgent: p.customUserAgent,
+        extraHeaders: p.extraHeaders,
         status: p.status,
       }));
 

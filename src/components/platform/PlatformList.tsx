@@ -23,6 +23,10 @@ export interface Platform {
   rpmLimit: number | null;
   tpmLimit: number | null;
   forwardHeaders: string;
+  injectStreamOptions?: boolean;
+  reuseUserAgent?: boolean;
+  customUserAgent?: string | null;
+  extraHeaders?: string | null;
   status: string;
   failCount?: number;
   cooldownEnd?: number | null;

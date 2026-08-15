@@ -24,6 +24,7 @@ CREATE TABLE "platforms" (
     "last_fail_at" INTEGER,
     "cooldown_end" INTEGER,
     "forward_headers" TEXT NOT NULL DEFAULT '[]',
+    "extra_headers" TEXT NOT NULL DEFAULT '{}',
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

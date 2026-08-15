@@ -13,7 +13,7 @@ import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, fr
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
-import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
+import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
@@ -314,8 +314,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let upRes: Response;
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
-    const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd });
-    // 高级设置：UA 复用
+    const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd, ...parseExtraHeaders(cur.extraHeaders) });
+    // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
     if (cur.reuseUserAgent && cur.customUserAgent) {
       headers.set("User-Agent", cur.customUserAgent);
     }

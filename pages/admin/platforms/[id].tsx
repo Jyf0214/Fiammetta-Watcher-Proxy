@@ -19,6 +19,8 @@ import { SurfaceSkeleton } from "@/components/ui/SurfaceSkeleton";
 import {
   parseNamedKeys,
   parseForwardHeaders,
+  parseExtraHeadersText,
+  serializeExtraHeaders,
   type ModelItem,
   type NamedApiKey,
 } from "@/lib/platform";
@@ -121,7 +123,7 @@ export default function PlatformDetailPage() {
     if (syncedForId === id) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSyncedForId(id);
-    form.setFieldsValue({ ...platform, forwardHeaders: parseForwardHeaders(platform.forwardHeaders) });
+    form.setFieldsValue({ ...platform, forwardHeaders: parseForwardHeaders(platform.forwardHeaders), extraHeaders: parseExtraHeadersText(platform.extraHeaders) });
     const parsed = parseNamedKeys(platform, t("keyNamePrefix"));
     setNamedKeys(parsed.length > 0 ? parsed : [{ name: defaultKeyName(1), key: "" }]);
   }, [platform, id, isNew, syncedForId, form, t, defaultKeyName]);
@@ -249,6 +251,9 @@ export default function PlatformDetailPage() {
       if (typeof values.forwardHeaders === "string") {
         const lines = values.forwardHeaders.split("\n").map((l: string) => l.trim()).filter(Boolean);
         values.forwardHeaders = lines.length > 0 ? JSON.stringify(lines) : "";
+      }
+      if (typeof values.extraHeaders === "string") {
+        values.extraHeaders = serializeExtraHeaders(values.extraHeaders);
       }
       const url = isNew ? "/api/admin/platforms" : `/api/admin/platforms/${id}`;
       const method = isNew ? "POST" : "PUT";

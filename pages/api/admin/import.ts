@@ -374,6 +374,21 @@ function sanitizeForwardHeaders(value: unknown): string {
   }
 }
 
+/** extraHeaders：仅接受合法 JSON 对象（键值对字符串），否则回退 "{}"（防脏数据影响头覆盖） */
+function sanitizeExtraHeaders(value: unknown): string {
+  if (typeof value !== "string" || value === "") return "{}";
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
+    for (const v of Object.values(parsed)) {
+      if (typeof v !== "string") return "{}";
+    }
+    return value;
+  } catch {
+    return "{}";
+  }
+}
+
 /**
  * 规范化平台密钥为命名对象数组 JSON（兼容对象/字符串数组格式）
  *
@@ -505,6 +520,10 @@ async function importPlatforms(
       rpmLimit: sanitizeNonNegativeInt(p.rpmLimit),
       tpmLimit: sanitizeNonNegativeInt(p.tpmLimit),
       forwardHeaders: sanitizeForwardHeaders(p.forwardHeaders),
+      injectStreamOptions: sanitizeBoolean(p.injectStreamOptions, true),
+      reuseUserAgent: sanitizeBoolean(p.reuseUserAgent, false),
+      customUserAgent: sanitizeNullableString(p.customUserAgent),
+      extraHeaders: sanitizeExtraHeaders(p.extraHeaders),
       status: "healthy",
       failCount: 0,
       createdAt: now,
