@@ -111,7 +111,7 @@ crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 
 - 遍历所有已配置的平台，调用其 `/v1/models` 接口获取支持的模型列表
 - 将发现的模型写入 `platform_models` 表
-- 支持平台类型：OpenAI、Azure、自定义 OpenAI 兼容接口
+- 支持平台类型：OpenAI、Azure、自定义 OpenAI 兼容接口（Anthropic 类型平台暂不支持自动发现，可手动添加模型）
 - 失败的平台不会影响其他平台的模型发现
 
 ### Key 重置（key-reset）

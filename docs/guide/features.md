@@ -2,7 +2,7 @@
 
 ## 多平台统一接入
 
-支持主流 AI 平台，统一为 OpenAI 兼容格式：
+统一 API 入口访问主流 AI 平台（OpenAI 兼容接口直接接入，Anthropic 原生协议自动转换）：
 
 - **OpenAI** — GPT-4o、GPT-4、GPT-3.5
 - **Anthropic** — Claude 3.5、Claude 3

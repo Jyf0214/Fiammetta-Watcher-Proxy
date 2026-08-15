@@ -2,7 +2,7 @@
 
 ## Multi-platform Access
 
-Support major AI platforms with a unified OpenAI-compatible format:
+A unified API entry for major AI platforms (OpenAI-compatible APIs connect directly; native Anthropic protocol is converted automatically):
 
 - **OpenAI** — GPT-4o, GPT-4, GPT-3.5
 - **Anthropic** — Claude 3.5, Claude 3

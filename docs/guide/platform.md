@@ -11,11 +11,20 @@
 | 平台名称 | 自定义名称，用于标识 |
 | Base URL | 平台 API 地址 |
 | API Key | 平台的认证密钥 |
-| 平台类型 | OpenAI / Anthropic / Google 等 |
+| 平台类型 | OpenAI 兼容 / Azure / 自定义 / Anthropic |
 | 优先级 | 数值越大优先级越高 |
 | 权重 | 路由分配比例 |
 | RPM 限制 | 每分钟请求数限制 |
 | TPM 限制 | 每分钟 Token 数限制 |
+
+## 平台类型
+
+平台类型决定上游协议：
+
+- **OpenAI 兼容**：大多数厂商的 OpenAI 兼容端点（OpenAI、Google、DeepSeek 等）
+- **Azure**：Azure OpenAI 服务
+- **自定义**：自定义 OpenAI 兼容网关
+- **Anthropic**：Anthropic 原生协议，用于官方 Claude API、GitHub Copilot 等网关
 
 ## 命名密钥
 

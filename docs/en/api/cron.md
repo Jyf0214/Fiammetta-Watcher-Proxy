@@ -102,7 +102,7 @@ Using [Cron-job.org](https://cron-job.org), [UptimeRobot](https://uptimerobot.co
 
 - Iterates all configured platforms, calls their `/v1/models` endpoint
 - Writes discovered models to `platform_models` table
-- Supports: OpenAI, Azure, custom OpenAI-compatible APIs
+- Supports: OpenAI, Azure, custom OpenAI-compatible APIs (automatic model discovery is not available for Anthropic-type platforms; add models manually)
 - Platform failures don't affect other platforms
 
 ### Key Reset (key-reset)

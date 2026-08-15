@@ -35,6 +35,8 @@ Click "Add Platform" and fill in:
 | TPM Limit | Max tokens per minute | No |
 | Forward Headers | Downstream request headers to forward to upstream (JSON array) | No |
 
+The platform type determines the upstream protocol: choose `openai` for most providers' OpenAI-compatible endpoints, `anthropic` for the native Anthropic protocol (official Claude, GitHub Copilot, etc.). See "Platform Configuration".
+
 ### Health Check & Circuit Breaker
 
 - **healthy**: Normal operation
