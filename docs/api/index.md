@@ -148,3 +148,10 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/admin/export` | GET | 导出数据（支持 type 参数） |
 | `/api/admin/import` | POST | 导入数据 |
 | `/api/health` | GET | 健康检查（数据库类型与连接状态，需管理员认证） |
+
+## 相关文档
+
+- [快速开始](/guide/quickstart) — 本地安装与初始化
+- [平台配置](/guide/platform) — 配置上游 AI 服务提供商
+- [API Key 管理](/guide/api-key) — 创建客户端访问凭证
+- [部署指南](/deployment/) — 生产部署方式与数据库选择

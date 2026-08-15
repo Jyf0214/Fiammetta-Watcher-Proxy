@@ -148,3 +148,10 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 | `/api/admin/export` | GET | Export data (supports type parameter) |
 | `/api/admin/import` | POST | Import data |
 | `/api/health` | GET | Health check (db type + connection status, admin auth required) |
+
+## Related Docs
+
+- [Quick Start](/en/guide/quickstart) — local install and setup
+- [Platform Configuration](/en/guide/platform) — configure upstream AI service providers
+- [API Key Management](/en/guide/api-key) — create client credentials
+- [Deployment Guide](/en/deployment/) — production deployment options and database choices

@@ -10,33 +10,27 @@ cd Fiammetta-Watcher-Proxy
 npm install --legacy-peer-deps
 ```
 
-### 2. 配置环境变量
+### 2. 配置管理员账号
+
+本地开发**无需配置数据库**：`npm run dev` 会自动拉起嵌入式 PostgreSQL（数据存放在 `.pgdata/`）并写入 `.env.local`（`DB_TYPE=pg` + `DB_PUSH=1`，prepare-db 优先读取 `.env.local`）。只需配置管理员登录：
 
 ```bash
 cat > .env << 'EOF'
-DB_TYPE=tidb
-DATABASE_URL=mysql://用户名:密码@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=你的密码
 JWT_SECRET=至少32字符的随机密钥
 EOF
 ```
 
-### 3. 初始化数据库
-
-```bash
-DB_PUSH=1 node scripts/prepare-db.mjs
-```
-
-`npm install` / `npm run dev` 会自动生成 Prisma Client，但**本地默认不会同步表结构**（防止误操作真实数据库）。首次开发需手动执行上面的命令，将表结构推送到 `.env` 中 `DATABASE_URL` 指向的数据库（`DB_TYPE` 会按 `DATABASE_URL` 协议自动推断）。
-
-### 4. 启动开发服务器
+### 3. 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-### 5. 访问管理后台
+`npm install` / `npm run dev` 会自动生成 Prisma Client，并**自动同步表结构到本地嵌入式 PostgreSQL**（predev 钩子执行 `dev-postgres.mjs --ensure` + `prepare-db.mjs`），无需手动建表。
+
+### 4. 访问管理后台
 
 打开 `http://localhost:3000/admin`，使用配置的管理员账号登录。
 
@@ -55,4 +49,5 @@ npm run dev
 - [平台配置](/guide/platform) — 配置上游 AI 服务提供商
 - [API Key 管理](/guide/api-key) — 创建和管理 API Key
 - [模型映射](/guide/model-map) — 配置模型名称映射
+- [API 参考](/api/) — 各端点调用方式
 - [环境变量](/deployment/env) — 完整环境变量参考

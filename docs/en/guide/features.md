@@ -22,7 +22,6 @@ A unified API entry for major AI platforms (OpenAI-compatible APIs connect direc
 - **Real-time dashboard**: Requests, tokens, TTFT latency
 - **Trend charts**: Hourly/daily trends with single-day hourly view
 - **Platform comparison**: Request distribution and performance by platform
-- **Model statistics**: Call counts and token consumption per model
 - **Log archiving**: Detailed logs older than 30 days auto-aggregated
 
 ## API Key Management

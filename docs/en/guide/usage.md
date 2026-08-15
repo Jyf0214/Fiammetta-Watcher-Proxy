@@ -37,21 +37,34 @@ Click "Add Platform" and fill in:
 
 The platform type determines the upstream protocol: choose `openai` for most providers' OpenAI-compatible endpoints, `anthropic` for the native Anthropic protocol (official Claude, GitHub Copilot, etc.). See "Platform Configuration".
 
+### Advanced Settings
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| Forward Headers | Downstream request headers to forward to upstream (JSON array) | empty |
+| Inject stream_options | Whether to auto-inject `stream_options` (turn off when the upstream rejects it) | on |
+| Platform Whitelist | When enabled, the platform is never banned on 429 — it is only degraded for 2 minutes (per-key error-count auto-disable is unaffected) | off |
+| Override UA | When enabled, replaces the User-Agent sent to upstream with the custom UA (requires Custom UA to be filled in; takes priority over UA in Extra Headers) | off |
+| Custom UA | Override the User-Agent sent to upstream | empty |
+| Extra Headers | Additional request headers sent to upstream (JSON object, max 20) | empty |
+
 ### Health Check & Circuit Breaker
 
 - **healthy**: Normal operation
-- **degraded**: Reduced allocation frequency
+- **degraded**: Carries failure counts closer to the breaker threshold; still participates in allocation
 - **down**: Circuit breaker triggered, no requests allocated
 
 **Circuit breaker rules**:
-- Triggers after 5 consecutive failures
+- Triggers after 5 consecutive failures (retryable statuses 429/401/403/402 go through key ban and platform switching first and do not count directly; they only count when retries are exhausted and still failing)
 - 60-second cooldown period
 - After cooldown, enters half-open state with a probe request
 - Success restores to healthy; failure re-triggers the breaker
 
 ### Key Rotation
 
-A platform can have multiple keys (named-object JSON array). FWP uses Round-Robin rotation to distribute requests evenly across keys.
+A platform can have multiple keys (named-object JSON array). FWP uses Round-Robin rotation to distribute requests evenly across usable keys.
+
+Key error counts accumulate and auto-disable the key: 429 → +1, 401 → +2, 402 → +5; at 5 the key is automatically disabled (a 429 also bans it for 5 minutes).
 
 Key format:
 
@@ -93,12 +106,12 @@ Based on `resetPeriod`:
 
 - **Enabled**: Accepts requests normally
 - **Disabled**: Rejects all requests (returns 401)
-- **Expired**: Auto-disabled after expiry date
-- **Over Limit**: Rejects requests when token or call limits are reached
+- **Expired**: Requests are rejected after the expiry date (returns 401)
+- **Over Limit**: Rejects requests when token or call limits are reached (returns 429)
 
 ## Model Mapping
 
-Map client-requested model names to actual upstream model names.
+Map client-requested model names to actual upstream model names. There is **no dedicated management page** in the current version — maintain mappings via Export/Import JSON in the "Data Manager" page (see [Model Mapping](/en/guide/model-map)).
 
 ### Configuration
 
@@ -118,11 +131,15 @@ Map client-requested model names to actual upstream model names.
 
 Auto Model is an advanced routing feature:
 
-1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron)
+1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron, other deployments call `/api/cron/model-fetch` externally — see [Cron Tasks](/en/api/cron))
 2. View discovery results on the "Auto Model" page
 3. Select specific models to include in the auto-routing pool
 4. System generates an auto-model ID — when clients use this ID, FWP automatically selects the best platform and model
 5. Failed auto-model requests are temporarily frozen for 3 minutes to prevent repeated failures
+
+::: warning
+Model discovery calls the OpenAI-compatible `/models` endpoint — **Anthropic-type platforms do not support auto-discovery** (no `/models` endpoint in the native protocol); add platform models manually.
+:::
 
 ## Usage Monitoring
 
@@ -165,7 +182,6 @@ Records all admin operations:
 - Login/logout
 - Platform create/update/delete
 - API Key create/update/delete
-- System config changes
 - Data import/export
 
 Each entry includes operator, action type, details, and client IP.
@@ -192,4 +208,10 @@ Import results show imported and skipped counts per data type.
 
 ## System Settings
 
-- System status overview (database connection, platform count, key count)
+The "System" group contains the Data Manager and System Keys pages (see above). The database type and connection status are shown in the sidebar status bar (from `/api/health`, admin auth required).
+
+## Related Docs
+
+- [Deployment Guide](/en/deployment/) — deployment options and database choices
+- [Environment Variables](/en/deployment/env) — full env var reference
+- [API Reference](/en/api/) — endpoint usage

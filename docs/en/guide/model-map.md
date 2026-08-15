@@ -40,9 +40,20 @@ Mappings whose `alias` already exists are skipped on import (existing records ar
 2. **Cost Optimization**: Map expensive models to cost-effective ones
 3. **Multi-platform**: Same alias maps to different targets per platform
 
+## Wildcard Mapping
+
+An `alias` ending with `*` matches by prefix: e.g. `gpt-4*` matches every model name starting with `gpt-4`, and the matched suffix is appended to `targetModel`.
+
 ## Platform Model Discovery
 
-FWP automatically discovers models supported by each platform.
+FWP automatically discovers the model list of each platform (scheduled every 6 hours by default); results are visible on the "Auto Model" page. Discovery calls the OpenAI-compatible `/models` endpoint:
+
+- OpenAI-compatible platforms (`openai` / `azure` / `custom`) discover normally
+- **Anthropic-type platforms do not support auto-discovery** (no `/models` endpoint in the native protocol) — add models manually or use presets
 
 ## Next Steps
+
+- [Auto Routing](/en/guide/auto-model) — automatically pick the best platform and model
+- [API Reference](/en/api/) — endpoint usage
+- [Data Management](/en/guide/usage) — maintain mappings via import/export
 

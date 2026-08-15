@@ -25,3 +25,8 @@
 
 ## 下一步
 
+- [功能特性](/guide/features) — 完整能力清单
+- [快速开始](/guide/quickstart) — 本地安装与初始化
+- [API 参考](/api/) — 各端点调用方式
+- [部署指南](/deployment/) — 生产部署方式选择
+

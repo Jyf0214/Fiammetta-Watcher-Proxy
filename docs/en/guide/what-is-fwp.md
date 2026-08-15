@@ -25,3 +25,8 @@ Client → FWP → OpenAI / Anthropic / Google / ...
 
 ## Next Steps
 
+- [Features](/en/guide/features) — full capability list
+- [Quick Start](/en/guide/quickstart) — local install and setup
+- [API Reference](/en/api/) — endpoint usage
+- [Deployment Guide](/en/deployment/) — production deployment options
+

@@ -10,33 +10,27 @@ cd Fiammetta-Watcher-Proxy
 npm install --legacy-peer-deps
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure Admin Credentials
+
+**No database setup is needed for local development**: `npm run dev` starts an embedded PostgreSQL (data in `.pgdata/`) and writes `.env.local` (`DB_TYPE=pg` + `DB_PUSH=1`; prepare-db reads `.env.local` first). Just configure admin login:
 
 ```bash
 cat > .env << 'EOF'
-DB_TYPE=tidb
-DATABASE_URL=mysql://user:password@host:4000/dbname?sslaccept=accept_invalid_certs
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-password
 JWT_SECRET=random-secret-32+chars
 EOF
 ```
 
-### 3. Initialize the Database
-
-```bash
-DB_PUSH=1 node scripts/prepare-db.mjs
-```
-
-`npm install` / `npm run dev` auto-generate the Prisma Client, but **the table schema is NOT pushed by default locally** (to protect real databases from accidental changes). On first setup, run the command above to sync the schema to the database in `DATABASE_URL` (`DB_TYPE` is inferred from the `DATABASE_URL` protocol).
-
-### 4. Start the Dev Server
+### 3. Start the Dev Server
 
 ```bash
 npm run dev
 ```
 
-### 5. Access the Admin Panel
+`npm install` / `npm run dev` auto-generate the Prisma Client and **automatically sync the schema to the local embedded PostgreSQL** (the predev hook runs `dev-postgres.mjs --ensure` + `prepare-db.mjs`) — no manual table setup.
+
+### 4. Access the Admin Panel
 
 Open `http://localhost:3000/admin` and log in with your admin credentials.
 
@@ -55,4 +49,5 @@ FWP supports multiple deployment options: Cloudflare, Vercel, EdgeOne, Node.js, 
 - [Platform Config](/en/guide/platform) — Configure upstream AI service providers
 - [API Key Management](/en/guide/api-key) — Create and manage API keys
 - [Model Mapping](/en/guide/model-map) — Configure model name mappings
+- [API Reference](/en/api/) — endpoint usage
 - [Environment Variables](/en/deployment/env) — Complete env var reference

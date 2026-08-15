@@ -42,6 +42,8 @@ FWP 支持 4 种部署方式，按部署目标分组：
 
 ## 相关文档
 
+- [快速开始](/guide/quickstart) — 本地安装与初始化
+- [API 参考](/api/) — 各端点调用方式
 - [架构说明](/deployment/architecture) — 了解两种部署模式与平台差异
 - [环境变量](/deployment/env)
 - [Nginx 配置](/deployment/nginx) — 自托管反向代理

@@ -32,16 +32,24 @@ Platform A (weight=3) : Platform B (weight=2) : Platform C (weight=1)
 ### Health-based
 
 - Prefer healthy platforms
-- Reduce usage of degraded platforms
-- Skip down platforms completely
+- Skip down platforms completely (circuit breaker)
+- Degraded platforms still participate normally but carry failure counts, closer to the breaker threshold
 
 ## Platform Model Discovery
 
-FWP automatically discovers models supported by each platform:
+FWP periodically (every 6 hours by default) discovers models supported by each platform:
 
 1. Understand platform capabilities
 2. Configure model mappings
 3. Monitor model availability
 
+Discovery calls the OpenAI-compatible `/models` endpoint: OpenAI-compatible platforms (`openai` / `azure` / `custom`) discover normally; **Anthropic-type platforms do not support auto-discovery** (no `/models` endpoint in the native protocol).
+
+See [Model Mapping](/en/guide/model-map) for mappings and wildcards, and the [Deployment Guide](/en/deployment/) / [Cron Tasks](/en/api/cron) for scheduling.
+
 ## Next Steps
+
+- [Model Mapping](/en/guide/model-map) — configure model name mappings
+- [API Reference](/en/api/) — endpoint usage
+- [Cron Tasks](/en/api/cron) — scheduled task endpoints
 

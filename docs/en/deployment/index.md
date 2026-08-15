@@ -42,6 +42,8 @@ FWP supports 4 deployment methods, grouped by target:
 
 ## Related Docs
 
+- [Quick Start](/en/guide/quickstart) — local install and setup
+- [API Reference](/en/api/) — endpoint usage
 - [Architecture](/en/deployment/architecture) — the two deployment modes and platform differences
 - [Environment Variables](/en/deployment/env)
 - [Nginx](/en/deployment/nginx) — reverse proxy for self-hosted setups
