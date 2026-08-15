@@ -33,7 +33,7 @@ jobs:
         run: |
           semgrep scan \
             --metrics=off \
-            --config auto \
+            --config p/security-audit \
             --sarif \
             -o semgrep.sarif \
             .
