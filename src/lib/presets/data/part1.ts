@@ -177,7 +177,7 @@ export const part1: PlatformPreset[] = [
     description: 'Developer of the Claude model family, balancing intelligence, speed, and cost.',
     url: 'https://anthropic.com',
     baseUrl: 'https://api.anthropic.com',
-    type: 'openai',
+    type: 'anthropic',
     models: [
       'claude-fable-5',
       'claude-opus-5',

@@ -607,7 +607,7 @@ export const part3: PlatformPreset[] = [
     name: 'Vercel AI Gateway',
     description: 'Unified API for 100+ models with usage monitoring and failover.',
     url: 'https://vercel.com/ai-gateway',
-    type: 'openai',
+    type: 'anthropic',
     models: [
       'google/gemini-2.5-pro',
       'anthropic/claude-opus-4.1',

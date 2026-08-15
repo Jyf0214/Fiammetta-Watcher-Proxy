@@ -10,8 +10,11 @@
  */
 
 export { convertAnthropicRequest, AnthropicRequestError } from "./request";
+export { convertOpenAIRequest, OpenAIRequestError } from "./upstream-request";
 export { convertOpenAIResponse, mapFinishReason, generateAnthropicMessageId } from "./response";
+export { convertAnthropicResponse, mapStopReason } from "./upstream-response";
 export { OpenAIToAnthropicStream } from "./stream";
+export { AnthropicToOpenAIStream, mapAnthropicErrorType } from "./upstream-stream";
 export { estimateInputTokens, estimateTextTokens, estimateMessageTokens } from "./count-tokens";
 export { formatAnthropicError, toAnthropicErrorType } from "./errors";
 export type {

@@ -123,7 +123,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
-    const VALID_PLATFORM_TYPES = ["openai", "azure", "custom"] as const;
+    const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic"] as const;
     if (
       body.type !== undefined &&
       !VALID_PLATFORM_TYPES.includes(body.type)

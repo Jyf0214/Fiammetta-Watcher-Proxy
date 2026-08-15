@@ -20,6 +20,10 @@ import {
   formatAnthropicError,
   AnthropicRequestError,
   estimateInputTokens,
+  convertOpenAIRequest,
+  OpenAIRequestError,
+  convertAnthropicResponse,
+  AnthropicToOpenAIStream,
 } from "@/lib/anthropic";
 import type { ProxyConfig } from "./endpoints";
 import type { ApiKeyRecord } from "./auth";
@@ -290,6 +294,43 @@ function createAnthropicStreamTransformerLite(
   });
 }
 
+/**
+ * Anthropic SSE → OpenAI SSE 的 TransformStream（上游为 Anthropic 协议时专用）
+ *
+ * 接在 usage 提取之前：日志/截断检测作用于转换后的 OpenAI 流（语义不变），
+ * 正常收尾输出 data: [DONE]（Anthropic 只有 message_stop，无 [DONE]）。
+ */
+function createOpenAIStreamTransformerLite(): TransformStream<Uint8Array, Uint8Array> {
+  const streamer = new AnthropicToOpenAIStream();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  return new TransformStream({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6);
+        if (!data) continue;
+        try {
+          const parsed = JSON.parse(data);
+          const out = streamer.feedData(parsed);
+          if (out) controller.enqueue(encoder.encode(out));
+        } catch {
+          // 无法解析的行（非 JSON 数据）直接忽略，不影响流
+        }
+      }
+    },
+    flush(controller) {
+      const out = streamer.finish();
+      if (out) controller.enqueue(encoder.encode(out));
+    },
+  });
+}
+
 // ==================== 单次上游请求 ====================
 
 /**
@@ -392,13 +433,33 @@ export async function proxyV1RequestLite(
   }
 
   // ── 4. 构建上游请求 ──
-  const upstreamBody: Record<string, unknown> = { ...body, model: route.targetModel };
+  // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
+  // 认证用 x-api-key + anthropic-version
+  const upstreamIsAnthropic = route.platform.type === "anthropic";
+
+  let upstreamBody: Record<string, unknown>;
+  if (upstreamIsAnthropic) {
+    try {
+      upstreamBody = convertOpenAIRequest({
+        ...body,
+        model: route.targetModel,
+      });
+    } catch (convertError) {
+      if (convertError instanceof OpenAIRequestError) {
+        return liteErrorResponse(config, 400, convertError.message, "invalid_request_error");
+      }
+      throw convertError;
+    }
+  } else {
+    upstreamBody = { ...body, model: route.targetModel };
+  }
 
   const isStream = config.supportsStreaming !== false && body.stream === true;
   // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
   // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
   // 用户可在平台管理页关闭此选项以兼容这类上游
-  if (isStream && route.platform.injectStreamOptions !== false) {
+  // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
+  if (isStream && route.platform.injectStreamOptions !== false && !upstreamIsAnthropic) {
     upstreamBody.stream_options = { include_usage: true };
   }
 
@@ -414,7 +475,9 @@ export async function proxyV1RequestLite(
     }
   }
 
-  const upstreamUrl = `${route.platform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
+  const upstreamUrl = upstreamIsAnthropic
+      ? `${route.platform.baseUrl.replace(/\/+$/, "")}/v1/messages`
+      : `${route.platform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
 
   // SSRF 防护：校验上游 URL
   const urlCheck = isSafeUpstreamUrl(route.platform.baseUrl);
@@ -454,7 +517,11 @@ export async function proxyV1RequestLite(
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${currentKey}`,
+      // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
+      // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
+      ...(upstreamIsAnthropic
+        ? { "x-api-key": currentKey, "anthropic-version": "2023-06-01" }
+        : { Authorization: `Bearer ${currentKey}` }),
       ...forwardHeaders,
       // 高级设置：自定义请求头（强制覆盖），优先级高于下游透传头
       ...parseExtraHeaders(route.platform.extraHeaders),
@@ -585,7 +652,7 @@ export async function proxyV1RequestLite(
  */
 async function handleUpstreamResponseLite(
   upstreamResponse: Response,
-  platform: { id: string; name: string },
+  platform: { id: string; name: string; type?: string },
   apiKey: ApiKeyRecord,
   requestedModel: string,
   config: ProxyConfig,
@@ -599,6 +666,8 @@ async function handleUpstreamResponseLite(
   anthropicInputEstimate: number,
   currentKey: string
 ): Promise<Response> {
+  // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
+  const upstreamIsAnthropic = platform.type === "anthropic";
   // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;
@@ -728,7 +797,13 @@ async function handleUpstreamResponseLite(
         );
       }
     );
-    const pipedStream = guardedStream.pipeThrough(transformer);
+    // 上游 Anthropic 协议：先把 Anthropic 事件流转成 OpenAI chunk 流，
+    // usage 提取/截断检测才能按 OpenAI 语义工作（[DONE] 收尾、usage 字段）
+    let pipeline: ReadableStream<Uint8Array> = guardedStream;
+    if (upstreamIsAnthropic) {
+      pipeline = pipeline.pipeThrough(createOpenAIStreamTransformerLite());
+    }
+    const pipedStream = pipeline.pipeThrough(transformer);
     // Anthropic 协议：OpenAI SSE → Anthropic 事件流（在 usage 统计之后转换）
     const finalStream = config.protocol === "anthropic"
       ? pipedStream.pipeThrough(createAnthropicStreamTransformerLite(requestedModel, anthropicInputEstimate))
@@ -901,9 +976,15 @@ async function handleUpstreamResponseLite(
   let responsePromptTokens = 0;
   let responseCompletionTokens = 0;
 
+  // 上游为 Anthropic 协议：先转成 OpenAI 内部格式（usage 提取与下游转换共用同一对象）；
+  // 转换失败（非 JSON / 结构异常）时 openaiBody 为 null，交由下方 502 分支处理
+  let openaiBody: Record<string, unknown> | null = null;
   try {
-    const parsed = JSON.parse(responseBody);
-    const usage = parsed?.usage;
+    const parsed = JSON.parse(responseBody) as Record<string, unknown>;
+    openaiBody = upstreamIsAnthropic
+      ? convertAnthropicResponse(parsed, requestedModel)
+      : parsed;
+    const usage = openaiBody.usage as Record<string, unknown> | undefined;
     if (usage) {
       const extracted = extractUsage(usage);
       responseTokens = extracted.totalTokens;
@@ -917,8 +998,9 @@ async function handleUpstreamResponseLite(
   if (config.protocol === "anthropic") {
     // OpenAI chat.completion → Anthropic message（回显下游请求的模型名）
     try {
+      if (!openaiBody) throw new Error("unparseable");
       const converted = JSON.stringify(
-        convertOpenAIResponse(JSON.parse(responseBody) as Record<string, unknown>, requestedModel)
+        convertOpenAIResponse(openaiBody, requestedModel)
       );
       // 不阻塞响应：成功日志后置到 waitUntil（与流式分支一致）
       ctx.waitUntil(
@@ -975,7 +1057,11 @@ async function handleUpstreamResponseLite(
     })
   );
 
-  return new Response(responseBody, {
+  // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
+  // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
+  const finalBody =
+    upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
+  return new Response(finalBody, {
     status: upstreamResponse.status,
     headers: { "Content-Type": responseContentType },
   });

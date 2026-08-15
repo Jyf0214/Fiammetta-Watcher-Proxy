@@ -17,7 +17,7 @@ import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/sr
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
-import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError } from "@/lib/anthropic";
+import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -287,12 +287,29 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       sendV1Error(res, config, 500, `平台 "${cur.name}" 无可用 API Key`, "server_error"); return;
     }
 
-    let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
+    let upstreamBody: Record<string, unknown>;
+    // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
+    // 认证用 x-api-key + anthropic-version
+    const upstreamIsAnthropic = cur.type === "anthropic";
+    if (upstreamIsAnthropic) {
+      try {
+        upstreamBody = convertOpenAIRequest({ ...body, model: tgt });
+      } catch (convertError) {
+        if (convertError instanceof OpenAIRequestError) {
+          sendV1Error(res, config, 400, convertError.message, "invalid_request_error");
+          return;
+        }
+        throw convertError;
+      }
+    } else {
+      upstreamBody = { ...body, model: tgt };
+    }
     try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
     // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游
-    if (isStream && cur.injectStreamOptions !== false) upstreamBody.stream_options = { include_usage: true };
+    // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
+    if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic) upstreamBody.stream_options = { include_usage: true };
 
     const fwd: Record<string, string> = {};
     // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），
@@ -302,7 +319,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     for (const [k, v] of Object.entries(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders)))
       if (/^[a-zA-Z0-9-]+$/.test(k)) fwd[k] = v;
 
-    const url = `${cur.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
+    const url = upstreamIsAnthropic
+      ? `${cur.baseUrl.replace(/\/+$/, "")}/v1/messages`
+      : `${cur.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
     const check = isSafeUpstreamUrl(cur.baseUrl);
     if (!check.safe) {
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, db: dummyDb, env }).catch(() => {});
@@ -314,7 +333,14 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let upRes: Response;
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
-    const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd, ...parseExtraHeaders(cur.extraHeaders) });
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
+      // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
+      ...(upstreamIsAnthropic ? { "x-api-key": curKey, "anthropic-version": "2023-06-01" } : { Authorization: `Bearer ${curKey}` }),
+      ...fwd,
+      ...parseExtraHeaders(cur.extraHeaders),
+    });
     // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
     if (cur.reuseUserAgent && cur.customUserAgent) {
       headers.set("User-Agent", cur.customUserAgent);
@@ -409,7 +435,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+  // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
+  const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
     const s = upRes.body;
     if (!s) { clearTimeout(upstreamTimeoutId); try { await recordFailure(platform.id, dummyDb); } catch {} sendV1Error(res, config, 500, "上游未返回流式响应", "server_error"); return; }
@@ -448,6 +476,8 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // Anthropic 协议：OpenAI SSE chunk → Anthropic 事件流（message_start → ... → message_stop）。
     // message_start.usage.input_tokens 用转换前请求体的输入估算（max_tokens 是输出上限，语义不符）
     const streamer = config.protocol === "anthropic" ? new OpenAIToAnthropicStream({ model, inputTokens: anthropicInputEstimate }) : null;
+    // 上游为 Anthropic 协议：Anthropic 事件 → OpenAI chunk（usage/[DONE]/error 语义统一）
+    const upstreamStreamer = upstreamIsAnthropic ? new AnthropicToOpenAIStream() : null;
     // 看门狗：距上次收到数据超过 UPSTREAM_IDLE_TIMEOUT_MS 即取消上游流，避免函数被无数据流无限占用
     const watchdog = setInterval(() => {
       if (Date.now() - lastChunkAt > UPSTREAM_IDLE_TIMEOUT_MS) {
@@ -465,19 +495,30 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         for (const l of lines) {
           if (l === "data: [DONE]") { sawDone = true; if (!streamer) res.write(l + "\n"); continue; }
           if (!l.startsWith("data: ")) {
-            // 非 data 行（空行分隔符等）：OpenAI 分支原样透传，Anthropic 分支由转换器生成格式
-            if (!streamer) res.write(l + "\n");
+            // 非 data 行（空行分隔符等）：OpenAI 分支原样透传；
+            // 上游 Anthropic 的 event: 行由转换器消费，丢弃
+            if (!streamer && !upstreamStreamer) res.write(l + "\n");
             continue;
           }
           try {
             const data = JSON.parse(l.slice(6));
-            if (data.usage) { const ex = extractUsage(data.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
-            if (data.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = data.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(data.error.message || "").substring(0, 1000) }; } }
-            if (streamer) {
-              // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
-              if (data.choices || data.usage) res.write(streamer.feedChunk(data));
-            } else {
-              res.write(l + "\n");
+            // 上游 Anthropic：Anthropic 事件 → OpenAI chunk（可能产出多行 SSE）
+            const outLines = upstreamStreamer
+              ? upstreamStreamer.feedData(data).split("\n").filter((x) => x.length > 0)
+              : [l];
+            for (const ol of outLines) {
+              if (ol === "data: [DONE]") { sawDone = true; if (!streamer) res.write(ol + "\n"); continue; }
+              try {
+                const d = JSON.parse(ol.slice(6));
+                if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
+                if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } }
+                if (streamer) {
+                  // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
+                  if (d.choices || d.usage) res.write(streamer.feedChunk(d));
+                } else {
+                  res.write(ol + "\n");
+                }
+              } catch {}
             }
           } catch {}
         }
@@ -497,7 +538,8 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
           res.write(streamer.finish());
         }
       } else if (buf) {
-        res.write(buf + "\n");
+        // 上游 Anthropic 时 buf 残留的是 event: 行等转换器已消费的行，不写出
+        if (!upstreamStreamer) res.write(buf + "\n");
       }
     } catch (e) {
       if (!idleTimedOut) console.error(`${tag} 流式错误:`, e instanceof Error ? e.message : String(e));
@@ -543,12 +585,20 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   // 空响应：2xx 但响应体为空（上游返回空 body），判定无效交由调用方重试
   if (!body.trim()) return EMPTY_UPSTREAM_RESPONSE;
   let rt = 0, rpt = 0, rct = 0;
-  try { const p = JSON.parse(body); if (p?.usage) { const ex = extractUsage(p.usage, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {}); } } catch {}
+  // 上游为 Anthropic 协议：先转成 OpenAI 内部格式（usage 提取与下游转换共用同一对象）；
+  // 转换失败（非 JSON / 结构异常）时 openaiBody 为 null，交由下方 502 分支处理
+  let openaiBody: Record<string, unknown> | null = null;
+  try {
+    const p = JSON.parse(body) as Record<string, unknown>;
+    openaiBody = upstreamIsAnthropic ? convertAnthropicResponse(p, model) : p;
+    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {}); }
+  } catch {}
   res.setHeader("Content-Type", "application/json");
   if (config.protocol === "anthropic") {
     // OpenAI chat.completion → Anthropic message（回显下游请求的模型名）
     try {
-      const converted = JSON.stringify(convertOpenAIResponse(JSON.parse(body) as Record<string, unknown>, model));
+      if (!openaiBody) throw new Error("unparseable");
+      const converted = JSON.stringify(convertOpenAIResponse(openaiBody, model));
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
       void recordSuccess(platform.id, dummyDb).catch(() => {});
@@ -562,7 +612,9 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   }
   void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
   void recordSuccess(platform.id, dummyDb).catch(() => {});
-  res.status(upRes.status).send(body);
+  // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
+  // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
+  res.status(upRes.status).send(upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body);
 }
 
 /** 提取 API Key：兼容 Anthropic 客户端（x-api-key 头）与 OpenAI 客户端（Authorization: Bearer） */

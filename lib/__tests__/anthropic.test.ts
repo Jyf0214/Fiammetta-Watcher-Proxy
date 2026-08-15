@@ -14,6 +14,10 @@ import {
   estimateInputTokens,
   formatAnthropicError,
   toAnthropicErrorType,
+  convertOpenAIRequest,
+  convertAnthropicResponse,
+  AnthropicToOpenAIStream,
+  mapAnthropicErrorType,
 } from "../anthropic";
 
 // ==================== 请求转换 ====================
@@ -506,5 +510,321 @@ describe("formatAnthropicError", () => {
 
   it("toAnthropicErrorType 默认分支保留 openai type", () => {
     expect(toAnthropicErrorType(418, "custom_error")).toBe("custom_error");
+  });
+});
+
+// ==================== 上游转换：OpenAI 请求 → Anthropic 请求 ====================
+
+describe("convertOpenAIRequest", () => {
+  it("基础请求：model/messages/max_tokens/stream 同名透传", () => {
+    const out = convertOpenAIRequest({
+      model: "claude-sonnet-4",
+      messages: [{ role: "user", content: "Hello" }],
+      max_tokens: 1024,
+      stream: true,
+      temperature: 0.5,
+      top_p: 0.9,
+    });
+    expect(out.model).toBe("claude-sonnet-4");
+    expect(out.max_tokens).toBe(1024);
+    expect(out.stream).toBe(true);
+    expect(out.temperature).toBe(0.5);
+    expect(out.top_p).toBe(0.9);
+    expect(out.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hello" }] }]);
+  });
+
+  it("system 消息 → 顶层 system 字段", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      messages: [
+        { role: "system", content: "You are helpful" },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    expect(out.system).toBe("You are helpful");
+    expect(out.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hi" }] }]);
+  });
+
+  it("max_tokens 缺失时默认 4096；max_completion_tokens 兜底", () => {
+    expect(convertOpenAIRequest({ model: "m", messages: [] }).max_tokens).toBe(4096);
+    expect(
+      convertOpenAIRequest({ model: "m", messages: [], max_completion_tokens: 2048 }).max_tokens
+    ).toBe(2048);
+  });
+
+  it("stop 字符串形态 → 单元素 stop_sequences；数组形态过滤非字符串", () => {
+    expect(convertOpenAIRequest({ model: "m", messages: [], stop: "END" }).stop_sequences).toEqual([
+      "END",
+    ]);
+    expect(
+      convertOpenAIRequest({ model: "m", messages: [], stop: ["a", 1, "b"] }).stop_sequences
+    ).toEqual(["a", "b"]);
+    // 全非字符串数组不设置 stop_sequences
+    expect(
+      convertOpenAIRequest({ model: "m", messages: [], stop: [1, 2] }).stop_sequences
+    ).toBeUndefined();
+  });
+
+  it("白名单剥离：stream_options/n/response_format 等未知字段不输出", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      stream_options: { include_usage: true },
+      n: 2,
+      response_format: { type: "json_object" },
+      user: "u1",
+    });
+    expect(out.stream_options).toBeUndefined();
+    expect(out.n).toBeUndefined();
+    expect(out.response_format).toBeUndefined();
+    expect(out.user).toBeUndefined();
+  });
+
+  it("image_url data URI → base64 image 块，http url → url source", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "看图" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+            { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+          ],
+        },
+      ],
+    });
+    const msg = out.messages as Array<{ content: unknown[] }>;
+    expect(msg[0].content).toEqual([
+      { type: "text", text: "看图" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+      { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+    ]);
+  });
+
+  it("assistant tool_calls → tool_use，tool 消息 → tool_result 且合并同一条 user 消息", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      messages: [
+        { role: "user", content: "天气" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call_1", type: "function", function: { name: "get_weather", arguments: "{\"city\":\"sh\"}" } },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "25 度" },
+        { role: "tool", tool_call_id: "call_1", content: "补充数据" },
+        { role: "user", content: "谢谢" },
+      ],
+    });
+    const msgs = out.messages as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+    expect(msgs).toHaveLength(3);
+    expect(msgs[1].role).toBe("assistant");
+    expect(msgs[1].content[0]).toEqual({
+      type: "tool_use",
+      id: "call_1",
+      name: "get_weather",
+      input: { city: "sh" },
+    });
+    // 两条 tool 消息 + 后续 user 消息合并为一条 user（tool_result × 2 + text）
+    expect(msgs[2].role).toBe("user");
+    expect(msgs[2].content).toEqual([
+      { type: "tool_result", tool_use_id: "call_1", content: "25 度" },
+      { type: "tool_result", tool_use_id: "call_1", content: "补充数据" },
+      { type: "text", text: "谢谢" },
+    ]);
+  });
+
+  it("tool_choice 四种形态映射", () => {
+    const auto = convertOpenAIRequest({ model: "m", messages: [], tool_choice: "auto" });
+    expect(auto.tool_choice).toEqual({ type: "auto" });
+    const none = convertOpenAIRequest({ model: "m", messages: [], tool_choice: "none" });
+    expect(none.tool_choice).toEqual({ type: "none" });
+    const required = convertOpenAIRequest({ model: "m", messages: [], tool_choice: "required" });
+    expect(required.tool_choice).toEqual({ type: "any" });
+    const tool = convertOpenAIRequest({
+      model: "m",
+      messages: [],
+      tool_choice: { type: "function", function: { name: "get_weather" } },
+    });
+    expect(tool.tool_choice).toEqual({ type: "tool", name: "get_weather" });
+  });
+
+  it("tools function 格式 → input_schema", () => {
+    const out = convertOpenAIRequest({
+      model: "m",
+      messages: [],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "查询天气",
+            parameters: { type: "object", properties: { city: { type: "string" } } },
+          },
+        },
+      ],
+    });
+    expect(out.tools).toEqual([
+      {
+        name: "get_weather",
+        description: "查询天气",
+        input_schema: { type: "object", properties: { city: { type: "string" } } },
+      },
+    ]);
+  });
+
+  it("缺少 model 抛 OpenAIRequestError", () => {
+    expect(() => convertOpenAIRequest({ messages: [] })).toThrowError("缺少必填字段: model");
+  });
+});
+
+// ==================== 上游转换：Anthropic 响应 → OpenAI 响应 ====================
+
+describe("convertAnthropicResponse", () => {
+  it("文本 + tool_use → content + tool_calls", () => {
+    const out = convertAnthropicResponse(
+      {
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        content: [
+          { type: "text", text: "好的" },
+          { type: "tool_use", id: "toolu_1", name: "get_weather", input: { city: "sh" } },
+          { type: "thinking", thinking: "思考过程" },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+      "claude-sonnet-4"
+    );
+    expect(out.object).toBe("chat.completion");
+    expect(out.model).toBe("claude-sonnet-4");
+    expect(out.choices[0].message.content).toBe("好的");
+    expect(out.choices[0].message.tool_calls).toEqual([
+      {
+        id: "toolu_1",
+        type: "function",
+        function: { name: "get_weather", arguments: '{"city":"sh"}' },
+      },
+    ]);
+    expect(out.choices[0].finish_reason).toBe("tool_calls");
+    // thinking 块丢弃
+    expect(out.choices[0].message.content).not.toContain("思考过程");
+  });
+
+  it("usage 映射：input_tokens→prompt_tokens，output_tokens→completion_tokens", () => {
+    const out = convertAnthropicResponse(
+      {
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 20 },
+      },
+      "m"
+    );
+    expect(out.usage).toEqual({ prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 });
+    expect(out.choices[0].finish_reason).toBe("stop");
+  });
+
+  it("stop_reason 映射：max_tokens→length", () => {
+    const out = convertAnthropicResponse(
+      { content: [], stop_reason: "max_tokens", usage: {} },
+      "m"
+    );
+    expect(out.choices[0].finish_reason).toBe("length");
+  });
+});
+
+// ==================== 上游转换：Anthropic SSE → OpenAI SSE ====================
+
+describe("AnthropicToOpenAIStream", () => {
+  it("完整文本流：role → content 增量 → finish → usage → [DONE]", () => {
+    const s = new AnthropicToOpenAIStream();
+    const out = [
+      s.feedData({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+      s.feedData({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+      s.feedData({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你好" } }),
+      s.feedData({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "世界" } }),
+      s.feedData({ type: "content_block_stop", index: 0 }),
+      s.feedData({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 7 } }),
+      s.feedData({ type: "message_stop" }),
+    ].join("");
+
+    const chunks = out.split("\n\n").filter(Boolean).map((c) => c.replace(/^data: /, ""));
+    expect(JSON.parse(chunks[0])).toEqual({
+      choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+    });
+    expect(JSON.parse(chunks[1])).toEqual({
+      choices: [{ index: 0, delta: { content: "你好" }, finish_reason: null }],
+    });
+    expect(JSON.parse(chunks[2])).toEqual({
+      choices: [{ index: 0, delta: { content: "世界" }, finish_reason: null }],
+    });
+    expect(JSON.parse(chunks[3])).toEqual({
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    });
+    expect(JSON.parse(chunks[4]).usage).toEqual({
+      prompt_tokens: 5,
+      completion_tokens: 7,
+      total_tokens: 12,
+    });
+    expect(chunks[5]).toBe("[DONE]");
+  });
+
+  it("工具流：首个 input_json_delta 携带 id/name，后续仅 arguments", () => {
+    const s = new AnthropicToOpenAIStream();
+    const out = [
+      s.feedData({ type: "message_start" }),
+      s.feedData({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "get_weather" } }),
+      s.feedData({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"city\":" } }),
+      s.feedData({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "\"sh\"}" } }),
+      s.feedData({ type: "content_block_stop", index: 0 }),
+      s.feedData({ type: "message_delta", delta: { stop_reason: "tool_use" } }),
+      s.feedData({ type: "message_stop" }),
+    ].join("");
+
+    const chunks = out.split("\n\n").filter(Boolean).map((c) => c.replace(/^data: /, ""));
+    const first = JSON.parse(chunks[1]);
+    expect(first.choices[0].delta.tool_calls[0]).toEqual({
+      index: 0,
+      id: "toolu_1",
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":' },
+    });
+    const second = JSON.parse(chunks[2]);
+    expect(second.choices[0].delta.tool_calls[0]).toEqual({
+      index: 0,
+      function: { arguments: '"sh"}' },
+    });
+  });
+
+  it("error 事件 → OpenAI 错误 chunk 且不输出 [DONE]", () => {
+    const s = new AnthropicToOpenAIStream();
+    const out =
+      s.feedData({ type: "message_start" }) +
+      s.feedData({ type: "error", error: { type: "overloaded_error", message: "过载" } }) +
+      s.feedData({ type: "message_stop" }) +
+      s.finish();
+    const chunks = out.split("\n\n").filter(Boolean).map((c) => c.replace(/^data: /, ""));
+    expect(chunks).toHaveLength(2);
+    expect(JSON.parse(chunks[1]).error).toEqual({ code: 529, message: "过载" });
+    expect(chunks.join()).not.toContain("[DONE]");
+  });
+
+  it("流截断（EOF 无 message_stop）：finish() 不输出 [DONE]", () => {
+    const s = new AnthropicToOpenAIStream();
+    s.feedData({ type: "message_start" });
+    s.feedData({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "部分" } });
+    expect(s.finish()).toBe("");
+  });
+
+  it("mapAnthropicErrorType 错误类型 → HTTP 码", () => {
+    expect(mapAnthropicErrorType("overloaded_error")).toBe(529);
+    expect(mapAnthropicErrorType("rate_limit_error")).toBe(429);
+    expect(mapAnthropicErrorType("authentication_error")).toBe(401);
+    expect(mapAnthropicErrorType("invalid_request_error")).toBe(400);
+    expect(mapAnthropicErrorType("unknown_type")).toBe(500);
   });
 });

@@ -171,6 +171,7 @@ export function PlatformConfigForm({
                           <Select
                             options={[
                               { value: "openai", label: t("typeOpenai") },
+                              { value: "anthropic", label: t("typeAnthropic") },
                               { value: "azure", label: t("typeAzure") },
                               { value: "custom", label: t("typeCustom") },
                             ]}
@@ -465,6 +466,7 @@ export function PlatformConfigForm({
               onChange={(v) => form.setFieldsValue({ type: v })}
               options={[
                 { value: "openai", label: t("typeOpenai") },
+                { value: "anthropic", label: t("typeAnthropic") },
                 { value: "azure", label: t("typeAzure") },
                 { value: "custom", label: t("typeCustom") },
               ]}

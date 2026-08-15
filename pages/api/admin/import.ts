@@ -291,7 +291,7 @@ function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
 const MIN_VALID_TS = 1704067200;
 
 /** 枚举白名单：与运行期代码实际读取的值一致 */
-const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom"]);
+const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom", "anthropic"]);
 const VALID_KEY_STATUSES = new Set(["active", "disabled"]);
 const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
 

@@ -168,7 +168,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      const VALID_PLATFORM_TYPES = ["openai", "azure", "custom"] as const;
+      const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic"] as const;
       if (type !== undefined && !VALID_PLATFORM_TYPES.includes(type)) {
         errors.push(
           `平台类型无效，允许的值为: ${VALID_PLATFORM_TYPES.join(", ")}`

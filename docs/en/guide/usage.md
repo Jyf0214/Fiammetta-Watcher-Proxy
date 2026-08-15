@@ -28,7 +28,7 @@ Click "Add Platform" and fill in:
 | Name | Custom identifier | Yes |
 | Base URL | Platform API address (e.g. `https://api.openai.com`) | Yes |
 | API Keys | Auth keys, multiple allowed (one per line), rotated round-robin | Yes |
-| Platform Type | `openai` / `azure` / `custom` | Yes |
+| Platform Type | `openai` / `azure` / `custom` / `anthropic` | Yes |
 | Priority | Higher value = higher priority | No (default 0) |
 | Weight | Load balancing weight, higher = more traffic | No (default 1) |
 | RPM Limit | Max requests per minute | No |

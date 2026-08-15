@@ -4,7 +4,8 @@
 
 // ==================== 平台类型 ====================
 
-export type PlatformType = "openai" | "azure" | "custom";
+/** openai = OpenAI 兼容协议（默认）；anthropic = 上游 Anthropic 协议（/v1/messages） */
+export type PlatformType = "openai" | "azure" | "custom" | "anthropic";
 
 export type PlatformStatus = "healthy" | "degraded" | "down";
 

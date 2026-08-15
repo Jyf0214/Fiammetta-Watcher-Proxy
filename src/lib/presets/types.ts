@@ -5,8 +5,8 @@
  * 模型 ID 批量写入 platform_models，其他字段（密钥/限额等）由用户后续配置。
  */
 
-/** 平台类型（与 platforms 表一致） */
-export type PresetPlatformType = "openai" | "azure" | "custom";
+/** 平台类型（与 platforms 表一致）：anthropic = 上游 Anthropic 协议（/v1/messages） */
+export type PresetPlatformType = "openai" | "azure" | "custom" | "anthropic";
 
 /** 预设平台模板 */
 export interface PlatformPreset {

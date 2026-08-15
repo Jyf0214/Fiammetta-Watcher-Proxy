@@ -146,6 +146,7 @@
     "apiKey": "API Key",
     "type": "Platform Type",
     "typeOpenai": "OpenAI",
+    "typeAnthropic": "Anthropic",
     "typeAzure": "Azure",
     "typeCustom": "Custom",
     "priority": "Priority",

@@ -146,6 +146,7 @@
     "apiKey": "API Key",
     "type": "平台类型",
     "typeOpenai": "OpenAI",
+    "typeAnthropic": "Anthropic",
     "typeAzure": "Azure",
     "typeCustom": "自定义",
     "priority": "优先级",

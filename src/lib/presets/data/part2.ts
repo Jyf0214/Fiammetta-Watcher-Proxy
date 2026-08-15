@@ -106,7 +106,7 @@ export const part2: PlatformPreset[] = [
     name: 'GitHub Copilot',
     description: 'Access top models like Claude, GPT, and Gemini through a GitHub Copilot subscription.',
     url: 'https://github.com/features/copilot',
-    type: 'openai',
+    type: 'anthropic',
     models: [
       'gpt-5.4',
       'gpt-5.4-mini',
