@@ -96,6 +96,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         tpmLimit,
         forwardHeaders,
         injectStreamOptions,
+        whitelisted,
       } = body;
 
       // 输入校验
@@ -267,6 +268,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           failCount: 0,
           forwardHeaders: normalizedForwardHeaders,
           injectStreamOptions: injectStreamOptions !== false,
+          whitelisted: whitelisted === true,
           createdAt: now,
           updatedAt: now,
         },

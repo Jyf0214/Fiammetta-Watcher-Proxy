@@ -109,7 +109,7 @@ beforeEach(() => {
   mocks.isSafeUrl.mockResolvedValue({ safe: true, reason: "" });
   mocks.getAuditAdminId.mockReturnValue("env-admin");
   mocks.findMany.mockResolvedValue([]);
-  mocks.create.mockResolvedValue({});
+  mocks.create.mockResolvedValue({ id: "mock-id", name: "", baseUrl: "", apiKeys: "[]", type: "openai", enabled: true, priority: 0, weight: 1, rpmLimit: null, tpmLimit: null, status: "healthy", failCount: 0, lastFailAt: null, cooldownEnd: null, forwardHeaders: "[]", injectStreamOptions: true, whitelisted: false, createdAt: 0, updatedAt: 0 });
   mocks.auditCreate.mockResolvedValue({});
 });
 

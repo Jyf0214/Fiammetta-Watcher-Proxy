@@ -45,6 +45,7 @@ model platforms {
   cooldownEnd    Int?    @map("cooldown_end")
   forwardHeaders String  @map("forward_headers")
   injectStreamOptions Boolean @default(true) @map("inject_stream_options")
+  whitelisted    Boolean @default(false) @map("whitelisted")
   createdAt      Int     @default(0) @map("created_at")
   updatedAt      Int     @default(0) @map("updated_at")
 

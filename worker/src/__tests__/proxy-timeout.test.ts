@@ -259,6 +259,38 @@ describe("proxyV1Request 上游状态码处理", () => {
     expect(body.id).toBe("ok");
     expect(recordSuccess).toHaveBeenCalledWith("test-platform", env.DB);
   });
+
+  it("上游返回 402：立即禁用 Key（errorCount+5 ����值）并重试换 Key，成功后返回 200", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "payment required" } }), {
+          status: 402,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "ok", usage: { total_tokens: 5 } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    // 402 纳入可重试状态，��发封禁并换 Key 重试
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(banKey).toHaveBeenCalledTimes(1);
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", env.KV);
+    expect(res.status).toBe(200);
+  });
 });
 
 // ==================== 空响应判定与重试 ====================

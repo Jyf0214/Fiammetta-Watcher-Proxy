@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     platforms: {
       findMany: async () => [
-        { apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]) },
+        { id: "platform-1", apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]), whitelisted: false },
       ],
     },
   })),
@@ -202,6 +202,32 @@ describe("banKey KV 持久化", () => {
     expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
 
     const raw = kv.store.get(keyStatusKey("platform-1"));
+    const parsed = JSON.parse(raw!);
+    const value = Object.values(parsed)[0] as any;
+    expect(value.status).toBe("deprioritized");
+  });
+
+  it("白名单平台的 Key 收到 429 后写入降级状态而非封禁", async () => {
+    const kv = makeMockKv();
+    // Mock 白名单平台
+    vi.doMock("@/lib/prisma", () => ({
+      createDb: vi.fn(async () => ({
+        platforms: {
+          findMany: async () => [
+            { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
+          ],
+        },
+      })),
+    }));
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    await banKey("sk-normal", undefined, "whitelisted-platform", kv);
+
+    expect(isKeyBanned("sk-normal", "whitelisted-platform")).toBe(false);
+    expect(isKeyDeprioritized("sk-normal", "whitelisted-platform")).toBe(true);
+
+    const raw = kv.store.get(keyStatusKey("whitelisted-platform"));
+    expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     const value = Object.values(parsed)[0] as any;
     expect(value.status).toBe("deprioritized");

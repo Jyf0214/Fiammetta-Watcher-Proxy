@@ -193,6 +193,8 @@
     "whitelistAddTip": "Add to whitelist (not banned on 429)",
     "whitelistRemoveTip": "Whitelisted (not banned on 429, click to remove)",
     "copyKeyTip": "Copy key",
+    "platformWhitelisted": "Never Ban Platform",
+    "platformWhitelistedDesc": "Whitelisted platforms will never be banned (keys still get banned normally)",
     "removeKeyTip": "Remove this key",
     "deletePlatform": "Delete Provider",
     "deletePlatformDesc": "This action cannot be undone. Please proceed with caution.",

@@ -137,7 +137,7 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
  * 429（限流）、401（密钥失效）、403（密钥无权限/被拦截）均表示当前 Key 或平台
  * 不可用，封禁当前 Key 并换 Key/换平台重试。5xx 等其它错误不重试，直接真实透传。
  */
-const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403]);
+const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
 
 /**
  * 空响应哨兵：上游返回 2xx 但响应体为空（空 JSON / 空 SSE 流 / 空 multipart）。

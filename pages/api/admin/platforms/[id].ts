@@ -165,6 +165,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       updateData.tpmLimit = body.tpmLimit ?? null;
     if (body.injectStreamOptions !== undefined)
       updateData.injectStreamOptions = !!body.injectStreamOptions;
+    if (body.whitelisted !== undefined)
+      updateData.whitelisted = !!body.whitelisted;
 
     // 健康状态字段（用于手动恢复平台状态）— 类型和范围校验
     const VALID_STATUSES = ["healthy", "degraded", "down"];

@@ -346,6 +346,15 @@ export function PlatformConfigForm({
                     extra={<span className={itemDesc}>{t("injectStreamOptionsDesc")}</span>}
                     className="!mt-4 !mb-0"
                   >
+                  <Form.Item
+                    name="whitelisted"
+                    label={t("platformWhitelisted")}
+                    valuePropName="checked"
+                    extra={<span className={itemDesc}>{t("platformWhitelistedDesc")}</span>}
+                    className="!mt-4 !mb-0"
+                  >
+                    <Switch />
+                  </Form.Item>
                     <Switch />
                   </Form.Item>
                 </>

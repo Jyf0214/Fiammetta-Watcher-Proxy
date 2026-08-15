@@ -28,6 +28,9 @@ const whitelistedKeyCooldowns = new Map<string, number>();
 
 const WHITELISTED_KEY_COOLDOWN_MS = 2 * 60 * 1000; // 白名单 Key 降级 2 分钟
 
+/** 白名单平台（永不封禁，密钥仍正常封禁） */
+const whitelistedPlatforms = new Set<string>();
+
 /**
  * 加载白名单（从所有平台的 apiKeys JSON 中读取 whitelisted 标记）
  */
@@ -36,10 +39,15 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
     const platforms = await prisma.platforms.findMany({
-      select: { apiKeys: true },
+      select: { id: true, apiKeys: true, whitelisted: true },
     });
+    whitelistedPlatforms.clear();
     whitelistedKeys.clear();
     for (const p of platforms) {
+      // M-eM-^NM-^FM-eM-^OM-2M-fM-^UM-0M-fM-^MM-.M-fM--M-#M-gM-^YM-=M-eM-^PM-^MM-eM-^MM-^UM-dM-8M--
+      if (p.whitelisted === true) {
+        whitelistedPlatforms.add(p.id);
+      }
       if (!p.apiKeys) continue;
       try {
         const arr = JSON.parse(p.apiKeys);
@@ -57,7 +65,7 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
         }
       } catch { /* ignore */ }
     }
-    console.log(`[platform-keys] 已加载 ${whitelistedKeys.size} 个白名单 Key`);
+    console.log(`[platform-keys] 已加载 ${whitelistedPlatforms.size} 个白名单平台，${whitelistedKeys.size} 个白名单 Key`);
   } catch (err) {
     console.error("[platform-keys] 加载白名单失败:", err instanceof Error ? err.message : String(err));
   }
@@ -103,7 +111,7 @@ function banKeyId(platformId: string | undefined, key: string): string {
 
 /**
  * 封禁指定 Key（收到429时调用）
- * 白名单 Key 不会被封禁，只会被临时降级
+ * 白名单 Key 或白名单平台的 Key 不会被封禁，只会被临时降级
  *
  * 状态同时写入 KV（按平台维度持久化），供管理后台展示实时密钥状态；
  * 内存 Map 为快速判断层，冷启动后通过 loadKeyStatusFromKV 从 KV 恢复。
@@ -116,8 +124,8 @@ export async function banKey(
 ): Promise<void> {
   const fp = keyFingerprint(key);
 
-  if (isKeyWhitelisted(key)) {
-    // 白名单 Key：不封禁，只降级（降级同样按平台维度隔离）
+  // 白名单平台或白名单 Key：不封禁，只降级（降级同样按平台维度隔离）
+  if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) {
     const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
     whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
     if (platformId && kv) {
@@ -134,12 +142,12 @@ export async function banKey(
 }
 
 /**
- * 检查 Key 是否处于封禁状态（白名单 Key 永远不会被封禁）
+ * 检查 Key 是否处于封禁状态（白名单平台或白名单 Key 永远不会被封禁）
  *
  * @param platformId - 封禁所属平台（同一密钥字符串在不同平台不互相连坐）
  */
 export function isKeyBanned(key: string, platformId?: string): boolean {
-  if (isKeyWhitelisted(key)) return false;
+  if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) return false;
 
   const expireAt = keyCooldowns.get(banKeyId(platformId, key));
   if (!expireAt) return false;
@@ -161,6 +169,14 @@ export function isKeyDeprioritized(key: string, platformId?: string): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * 检查平台是否为白名单平台（永不封禁，密钥仍正常封禁）
+ */
+export function isPlatformWhitelisted(platformId?: string): boolean {
+  if (!platformId) return false;
+  return whitelistedPlatforms.has(platformId);
 }
 
 /**
@@ -408,6 +424,7 @@ const KEY_ERROR_THRESHOLD = 5;
  * 429 算 1 次，401 算 2 次，其余可重试错误（403/空响应等）算 1 次
  */
 function errorIncrement(status: number): number {
+  if (status === 402) return 5;
   if (status === 401) return 2;
   if (status === 429) return 1;
   return 1;

@@ -193,6 +193,8 @@
     "whitelistAddTip": "加入白名单（429 时不封禁）",
     "whitelistRemoveTip": "白名单（429 时不封禁，点击移除）",
     "copyKeyTip": "复制密钥",
+    "platformWhitelisted": "永不封禁平台",
+    "platformWhitelistedDesc": "白名单平台永不被封禁（密钥仍正常封禁）",
     "removeKeyTip": "删除此密钥",
     "deletePlatform": "删除服务商",
     "deletePlatformDesc": "删除后不可恢复，请谨慎操作",
