@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -19,11 +19,12 @@ const CYCLE: Record<ThemeMode, ThemeMode> = {
  */
 export function useThemeMode() {
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // hydration 完成标记：服务器快照 false、客户端快照 true，避免 effect 内 setState 级联渲染
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const mode = (theme as ThemeMode) || "system";
   const isDark = mounted ? resolvedTheme === "dark" : false;

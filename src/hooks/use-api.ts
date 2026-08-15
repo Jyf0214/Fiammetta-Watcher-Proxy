@@ -48,7 +48,7 @@ function extractErrorMessage(body: ApiResponse | null, status: number): string {
  */
 export async function apiFetcher<T = unknown>(url: string): Promise<T> {
   const res = await fetch(url);
-  let body: ApiResponse<T> | null = null;
+  let body: ApiResponse<T> | null;
   try {
     body = (await res.json()) as ApiResponse<T>;
   } catch {

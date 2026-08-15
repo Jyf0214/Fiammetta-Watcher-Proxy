@@ -93,7 +93,7 @@ function makeRes(): NextApiResponse & { body: StatsResponse; statusCode: number 
   const res: any = {
     status(c: number) { statusCode = c; return res; },
     json(b: StatsResponse) { body = b; return res; },
-    setHeader(k: string, v: string) { return res; },
+    setHeader(_k: string, _v: string) { return res; },
     get statusCode() { return statusCode; },
     get body() { return body; },
   };

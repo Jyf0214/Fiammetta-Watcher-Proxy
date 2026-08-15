@@ -32,7 +32,9 @@ export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason
   const hostname = new URL(urlStr).hostname;
 
   // IP 字面量：第一层已判定非内网，无需（也无法）再做 DNS 解析
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":")) {
+  const ipv4Parts = hostname.split(".");
+  const isIpv4Literal = ipv4Parts.length === 4 && ipv4Parts.every((p) => /^\d{1,3}$/.test(p));
+  if (isIpv4Literal || hostname.includes(":")) {
     return { safe: true };
   }
 
