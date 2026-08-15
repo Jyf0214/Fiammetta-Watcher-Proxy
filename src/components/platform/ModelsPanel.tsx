@@ -210,8 +210,8 @@ export function ModelsPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* sticky 标题区 */}
-      <div className="sticky top-0 lg:top-0 z-10 bg-white dark:bg-zinc-900 -mx-4 lg:-mx-6 px-4 lg:px-6 pt-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+      {/* sticky 标题区 — 移动端吸在返回条下方（64px 顶栏 + 52px 固定返回条），桌面端返回条隐藏直接对齐顶栏；-mx 抵消外层 padding 撑满 */}
+      <div className="sticky top-[116px] lg:top-16 z-10 bg-white dark:bg-zinc-900 -mx-4 lg:-mx-6 px-4 lg:px-6 pt-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
             {t("models")}

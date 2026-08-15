@@ -524,9 +524,9 @@ export default function PlatformDetailPage() {
         </div>
 
         {/* 右侧：详情主体 */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          {/* 移动端返回条（sticky 吸顶 — 负边距抵消 AdminLayout p-4 实现完全吸顶+左右撑满） */}
-          <div className="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur -mx-4 -mt-4 px-4 py-2.5 flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* 移动端返回条（sticky 吸顶 — 移出 overflow 容器使其相对 body 滚动生效；top-16 对齐 64px 顶栏下缘、z-30 低于面包屑；-mx-4 -mt-4 抵消 AdminLayout p-4 实现左右撑满+顶部贴齐；h-[52px] 固定高度供 ModelsPanel 吸顶偏移引用） */}
+          <div className="lg:hidden sticky top-16 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur -mx-4 -mt-4 px-4 py-2.5 h-[52px] flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800">
             <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
               <button
                 onClick={() => router.push("/admin/platforms")}
@@ -573,8 +573,8 @@ export default function PlatformDetailPage() {
             )}
           </div>
 
-          {/* 详情主体 — 无左右 padding，max-w-2xl 居中 */}
-          <div className="w-full max-w-2xl mx-auto pt-4 lg:pt-0 pb-10">
+          {/* 详情主体 — 无左右 padding，max-w-2xl 居中；不含 overflow 容器，ModelsPanel sticky 相对 body 生效 */}
+          <div className="flex-1 min-w-0 w-full max-w-2xl mx-auto pt-4 lg:pt-0 pb-10">
             {detailLoading ? (
               <SurfaceSkeleton variant="form" />
             ) : isNew ? (
