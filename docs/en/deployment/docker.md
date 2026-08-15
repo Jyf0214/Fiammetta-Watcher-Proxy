@@ -1,19 +1,26 @@
 # Docker Deployment
 
 ::: warning Current Status
-An official pre-built image is published: `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` — pull and run directly. For production, prefer [Cloudflare](/en/deployment/cloudflare) or [Vercel](/en/deployment/vercel).
+An official pre-built image is published: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` — pull and run directly. For production, prefer [Cloudflare](/en/deployment/cloudflare) or [Vercel](/en/deployment/vercel).
 :::
 
 ::: tip Version Note
-The image is built from the **`stable` branch** (v1.0.x) of the repository and includes its own features such as auto table creation, admin initialization and the `/setup` onboarding page. The other deployment guides in these docs are based on the `canary` branch (v2.0.x) — feature sets differ. For the latest features use [Node.js Standalone](/en/deployment/standalone).
+The image is built from the **`canary` branch** of the repository and matches this series of docs. The canary branch has no `/setup` onboarding page (a `stable` branch v1.0.x feature): Docker deployments must set `DATABASE_URL`, tables are synced automatically on startup, and the admin account is configured via environment variables.
 :::
 
-## Use the Pre-built Image
+## Image Versions
 
-The official image is published to GHCR — no local build needed:
+| Image | Contents |
+|-------|----------|
+| `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` | Full: admin panel + V1 proxy + scheduled tasks |
+| `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite` | Lite: V1 proxy and scheduled task APIs only, no admin panel |
+
+Images are built by GitHub Actions: trigger the **Docker Build** workflow manually from the Actions tab (choose `DB_TYPE`), or push a `canary` tag.
+
+## Use the Pre-built Image (Full)
 
 ```bash
-docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
+docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:canary
 ```
 
 ```bash
@@ -23,11 +30,12 @@ docker run -d \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=your-password \
   -e JWT_SECRET=random-secret-32+chars \
-  ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
+  ghcr.io/jyf0214/fiammetta-watcher-proxy:canary
 ```
 
-- The database type is detected from the connection string (`postgresql://`, `mysql://` or `mariadb://`)
-- On first start it automatically creates the tables and initializes the admin — nothing else to do
+- The database type is detected from the connection string (`postgresql://`, `mariadb://` or `mysql://`), or set explicitly via `DB_TYPE`; `tidb` / `mariadb` / `pg` are supported (D1 exists only in the Cloudflare runtime)
+- Tables are synced automatically on startup (idempotent) — no manual setup
+- The admin account is configured via `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables
 - `JWT_SECRET` is required, at least 32 chars (see [Environment Variables](/en/deployment/env)) — login fails without it
 
 ### docker compose with the pre-built image
@@ -35,7 +43,7 @@ docker run -d \
 ```yaml
 services:
   app:
-    image: ghcr.io/jyf0214/fiammetta-watcher-proxy:latest
+    image: ghcr.io/jyf0214/fiammetta-watcher-proxy:canary
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -64,6 +72,27 @@ services:
 
 volumes:
   pgdata:
+```
+
+## Lite Image (:canary-lite)
+
+The lite image provides only the V1 proxy and scheduled task APIs — no admin panel. It suits gateways that already have an admin frontend elsewhere. Environment-variable requirements are the same as the full image.
+
+```bash
+docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
+```
+
+## Built-in Compose Files
+
+The repository ships two compose files — clone it and use them directly:
+
+- `docker-compose.yml` — app + PostgreSQL in one deployment (bundled database, with security hardening and health checks), ready to use out of the box
+- `docker-compose.standalone.yml` — app + external database (bring your own PostgreSQL / TiDB / MariaDB)
+
+Create a `.env` file in the repo root and fill in the required values (see the comments in the compose file — `POSTGRES_PASSWORD` / `DATABASE_URL` / `ADMIN_PASSWORD` / `JWT_SECRET`, etc.; compose refuses to start if they are missing), then:
+
+```bash
+docker compose up -d
 ```
 
 > For database connection failures, port conflicts, etc., see [Troubleshooting](/en/deployment/troubleshooting).
