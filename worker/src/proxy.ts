@@ -540,13 +540,18 @@ export async function proxyV1Request(
       UPSTREAM_TIMEOUT_MS
     );
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${currentKey}`,
+        ...forwardHeaders,
+      };
+      // 高级设置：UA 复用
+      if (currentPlatform.reuseUserAgent && currentPlatform.customUserAgent) {
+        headers["User-Agent"] = currentPlatform.customUserAgent;
+      }
       upstreamResponse = await fetch(upstreamUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${currentKey}`,
-          ...forwardHeaders,
-        },
+        headers,
         body: JSON.stringify(upstreamBody),
         signal: upstreamController.signal,
         // 禁止跟随重定向：isSafeUpstreamUrl 只校验初始 URL，

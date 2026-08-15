@@ -226,6 +226,20 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
+    // 高级设置：UA 复用
+    if (body.reuseUserAgent !== undefined) {
+      updateData.reuseUserAgent = !!body.reuseUserAgent;
+    }
+    if (body.customUserAgent !== undefined) {
+      if (typeof body.customUserAgent === "string") {
+        if (body.customUserAgent.trim().length === 0) {
+          updateData.customUserAgent = null;
+        } else if (body.customUserAgent.length <= 500) {
+          updateData.customUserAgent = body.customUserAgent.trim();
+        }
+      }
+    }
+
     // apiKeys 在编辑时可选（不提供则保留原值）
     // 支持两种格式：字符串数组 ["key1", "key2"] 或对象数组 [{name, key, whitelisted}]
     if (body.apiKeys !== undefined && body.apiKeys !== null) {

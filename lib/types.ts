@@ -26,6 +26,10 @@ export interface PlatformConfig {
   forwardHeaders: string;
   /** 流式请求时是否向请求体注入 stream_options:{include_usage:true}；部分严格后端（Mistral 等）拒绝未知字段，平台需手动关闭 */
   injectStreamOptions?: boolean;
+  /** 高级设置：是否使用自定义 User-Agent 覆盖默认请求头 */
+  reuseUserAgent?: boolean;
+  /** 自定义 User-Agent 字符串（reuseUserAgent 开启时生效），最长 500 字符 */
+  customUserAgent?: string | null;
   status: PlatformStatus;
   failCount: number;
   lastFailAt: number | null;

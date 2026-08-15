@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "forward_headers" TEXT NOT NULL,
     "inject_stream_options" BOOLEAN NOT NULL DEFAULT true,
     "whitelisted" BOOLEAN NOT NULL DEFAULT false,
+    "reuse_user_agent" BOOLEAN NOT NULL DEFAULT false,
+    "custom_user_agent" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

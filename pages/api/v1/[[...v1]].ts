@@ -314,7 +314,12 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let upRes: Response;
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
-    try { upRes = await fetch(url, { method: "POST", headers: new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd }), body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual" }); }
+    const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${curKey}`, ...fwd });
+    // 高级设置：UA 复用
+    if (cur.reuseUserAgent && cur.customUserAgent) {
+      headers.set("User-Agent", cur.customUserAgent);
+    }
+    try { upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual" }); }
     catch (e) {
       clearTimeout(upstreamTimeoutId);
       if (e instanceof DOMException && e.name === "AbortError") {

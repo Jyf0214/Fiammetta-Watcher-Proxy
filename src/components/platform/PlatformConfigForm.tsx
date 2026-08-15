@@ -346,6 +346,8 @@ export function PlatformConfigForm({
                     extra={<span className={itemDesc}>{t("injectStreamOptionsDesc")}</span>}
                     className="!mt-4 !mb-0"
                   >
+                    <Switch />
+                  </Form.Item>
                   <Form.Item
                     name="whitelisted"
                     label={t("platformWhitelisted")}
@@ -355,8 +357,33 @@ export function PlatformConfigForm({
                   >
                     <Switch />
                   </Form.Item>
+                </>
+              ),
+            },
+            {
+              key: "advanced",
+              label: <span className={groupTitle}>{t("groupAdvanced")}</span>,
+              children: (
+                <>
+                  <Form.Item
+                    name="reuseUserAgent"
+                    label={t("reuseUserAgent")}
+                    valuePropName="checked"
+                    extra={<span className={itemDesc}>{t("reuseUserAgentDesc")}</span>}
+                    className="!mb-4"
+                  >
                     <Switch />
                   </Form.Item>
+                  {form.getFieldValue("reuseUserAgent") && (
+                    <Form.Item
+                      name="customUserAgent"
+                      label={t("customUserAgent")}
+                      extra={<span className={itemDesc}>{t("customUserAgentDesc")}</span>}
+                      className="!mb-0"
+                    >
+                      <Input placeholder={t("customUserAgentPlaceholder")} />
+                    </Form.Item>
+                  )}
                 </>
               ),
             },
