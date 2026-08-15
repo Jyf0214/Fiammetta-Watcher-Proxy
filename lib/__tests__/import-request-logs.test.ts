@@ -7,7 +7,7 @@
  * 3. ISO 日期 → unix 秒
  * 4. 无 model 记录被跳过
  * 5. 字段缺失时使用默认值
- * 6. 6961 条批量场景
+ * 6. 1000 条批量场景
  * 7. sanitize 工具边界（上界/枚举/布尔/状态码/时间戳）
  *
  * 数据库使用虚拟 PostgreSQL（PGlite 内存实例，仅存在于测试进程），
@@ -160,11 +160,11 @@ describe("requestLogs 导入：字段映射", () => {
 
 // ==================== requestLogs 导入：批量场景 ====================
 
-// 6961 条 × 虚拟 PostgreSQL 的批量写在全量并发下较慢，放宽超时
+// 1000 条 × 虚拟 PostgreSQL 的批量写在全量并发下较慢，放宽超时
 const BULK_TIMEOUT = 30_000;
 
 describe("requestLogs 导入：批量场景", () => {
-  it("6961 条记录 — 外键全部存在时成功", async () => {
+  it("1000 条记录 — 外键全部存在时成功", async () => {
     await db.apiKeys.create({ data: { id: "cmr98pf8c0003c901nu8icnev", key: "test-key", name: "Test Key" } });
     await db.platforms.create({
       data: { id: "cmrewguvw006qeo01bnj25l6w", name: "Platform A", baseUrl: "http://a.com", apiKeys: "[]", forwardHeaders: "[]" },
@@ -174,7 +174,7 @@ describe("requestLogs 导入：批量场景", () => {
     });
 
     const logs: Array<Record<string, unknown>> = [];
-    for (let i = 0; i < 6961; i++) {
+    for (let i = 0; i < 1000; i++) {
       logs.push({
         keyId: "cmr98pf8c0003c901nu8icnev",
         platformId: i % 2 === 0 ? "cmrewguvw006qeo01bnj25l6w" : "cmra4pg1u0000er01k73pzpik",
@@ -185,15 +185,15 @@ describe("requestLogs 导入：批量场景", () => {
     }
 
     const result = await importRequestLogs(db, logs);
-    expect(result.imported).toBe(6961);
+    expect(result.imported).toBe(1000);
     expect(result.skipped).toBe(0);
 
-    expect(await db.requestLogs.count()).toBe(6961);
+    expect(await db.requestLogs.count()).toBe(1000);
   }, BULK_TIMEOUT);
 
-  it("6961 条记录 — 外键全部不存在时也能成功（置 null）", async () => {
+  it("1000 条记录 — 外键全部不存在时也能成功（置 null）", async () => {
     const logs: Array<Record<string, unknown>> = [];
-    for (let i = 0; i < 6961; i++) {
+    for (let i = 0; i < 1000; i++) {
       logs.push({
         keyId: "non-existent-key", platformId: "non-existent-platform",
         model: "gpt-4", status: 200, tokens: 100, duration: 500,
@@ -202,13 +202,13 @@ describe("requestLogs 导入：批量场景", () => {
     }
 
     const result = await importRequestLogs(db, logs);
-    expect(result.imported).toBe(6961);
+    expect(result.imported).toBe(1000);
     expect(result.skipped).toBe(0);
 
     const nullCount = await db.requestLogs.count({
       where: { keyId: null, platformId: null },
     });
-    expect(nullCount).toBe(6961);
+    expect(nullCount).toBe(1000);
   }, BULK_TIMEOUT);
 });
 

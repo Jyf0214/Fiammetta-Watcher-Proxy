@@ -12,6 +12,10 @@
  * 不连接任何外部数据库服务器，不污染开发/生产数据。
  */
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDb, disconnectDb } from "@/lib/prisma";
@@ -24,6 +28,30 @@ export interface TestDb {
   url: string;
   /** 停止 wire server、断开 Prisma 连接、释放 WASM 内存 */
   cleanup: () => Promise<void>;
+}
+
+/**
+ * 派生建表 DDL（prisma migrate diff 子进程约 3s，按 schema 内容哈希缓存到系统临时目录，
+ * 避免每个测试文件重复派生；schema 变更时哈希变化自动重新派生）
+ */
+function deriveDdl(): string {
+  const schemaPath = path.resolve(process.cwd(), "prisma/schema.pg.prisma");
+  const hash = createHash("sha1").update(readFileSync(schemaPath)).digest("hex").slice(0, 12);
+  const cacheDir = path.join(tmpdir(), "fiammetta-test-ddl");
+  const cacheFile = path.join(cacheDir, `${hash}.sql`);
+  if (existsSync(cacheFile)) {
+    return readFileSync(cacheFile, "utf8");
+  }
+  const ddl = execSync(
+    "npx prisma migrate diff --from-empty --to-schema prisma/schema.pg.prisma --script",
+    { cwd: process.cwd(), encoding: "utf8", timeout: 120_000 }
+  );
+  mkdirSync(cacheDir, { recursive: true });
+  // 先写临时文件再原子重命名，避免多个 vitest worker 并行写同一缓存互相读到半截内容
+  const tmpFile = `${cacheFile}.${process.pid}.tmp`;
+  writeFileSync(tmpFile, ddl);
+  renameSync(tmpFile, cacheFile);
+  return ddl;
 }
 
 /**
@@ -47,10 +75,7 @@ export async function createTestDb(): Promise<TestDb> {
   const url = `postgresql://postgres:postgres@${host}:${port}/postgres`;
 
   // 建表：schema.pg.prisma 派生 DDL（--from-empty），与生产表结构一致，非手写
-  const ddl = execSync(
-    "npx prisma migrate diff --from-empty --to-schema prisma/schema.pg.prisma --script",
-    { cwd: process.cwd(), encoding: "utf8", timeout: 120_000 }
-  );
+  const ddl = deriveDdl();
   const { Pool } = await import("pg");
   const setup = new Pool({ connectionString: url });
   try {
