@@ -5,7 +5,8 @@ WORKDIR /app
 
 # 创建非 root 用户（构建阶段也以此用户运行，避免最终 chown）
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
 
 # 构建方言：Docker 部署仅支持 tidb / mariadb / pg（d1 只存在于 Cloudflare 运行时）。
 # 必须与运行时 DB_TYPE 一致——决定构建期生成的 Prisma Client 方言与转译内联的数据库栈。
@@ -43,7 +44,8 @@ RUN apk add --no-cache wget
 
 # 创建非 root 用户（与 builder 阶段相同 UID/GID）
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
 
 # 安装生产依赖（含 prisma CLI，用于启动时同步表结构）
 # --legacy-peer-deps：同 builder 阶段，容器内无 .npmrc，strict 模式会 EUSAGE
