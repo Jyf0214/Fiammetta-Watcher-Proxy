@@ -4,7 +4,7 @@
 
 > [!TIP]
 > **注意：项目处于开发阶段，功能不稳定，暂不建议用于生产环境。**
-> 本仓库（canary 分支）提供自动构建的预构建镜像：`ghcr.io/jyf0214/fiammetta-watcher-proxy:canary`（完整版）与 `:canary-lite`（精简版，仅 V1 代理与定时任务），可直接拉取运行；推送到 `canary` 分支或手动触发 Docker Build 工作流即自动构建。
+> 本仓库（canary 分支）提供自动构建的预构建镜像：`ghcr.io/jyf0214/fiammetta-watcher-proxy:canary`（完整版）与 `:canary-lite`（精简版，仅 V1 代理与定时任务），可直接拉取运行；推送 `canary` 标签或手动触发 Docker Build 工作流即自动构建。
 
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。可部署在 Cloudflare、EdgeOne、Vercel 或自有服务器（Docker）。
 
@@ -118,7 +118,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 - 需在 `.env` 中配置数据库密码、`ADMIN_USERNAME` / `ADMIN_PASSWORD`、`JWT_SECRET` 等必填项
 - 容器启动时自动同步数据库表结构，管理员账号通过环境变量认证（无 `/setup` 引导页）
-- 预构建镜像由推送到 `canary` 分支或手动触发 **Docker Build** 工作流自动构建，详细步骤见部署教程
+- 预构建镜像由推送 `canary` 标签或手动触发 **Docker Build** 工作流自动构建，详细步骤见部署教程
 
 ### 环境变量
 
