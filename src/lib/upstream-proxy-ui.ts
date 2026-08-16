@@ -1,0 +1,255 @@
+/** 出站代理前端共享模块（无服务端依赖，列表页/详情页/列表组件共用）。
+ *  常量与解析语义与 src/lib/upstream-proxy.ts 保持一致——前端不直接 import 服务端模块 */
+
+export const CONFIG_KEY = "system:upstream_proxy";
+export const POOL_KEY = "system:upstream_proxy_pool";
+export const HEALTH_KEY = "system:upstream_proxy_health";
+export const DEFAULT_CHECK_URL = "https://cp.cloudflare.com/generate_204";
+/** 旧版配置（无 groups 字段）解析时补的组名，与后端「单组」语义等价 */
+export const LEGACY_GROUP_NAME = "default";
+
+export interface ProxyHealthEntry {
+  status: "ok" | "fail";
+  latencyMs: number;
+  /** unix 秒 */
+  checkedAt: number;
+  failCount: number;
+}
+export type ProxyHealthMap = Record<string, ProxyHealthEntry>;
+
+export interface ParsedGroup {
+  name: string;
+  sourceUrl: string;
+  urls: string[];
+}
+export interface ParsedConfig {
+  groups: ParsedGroup[];
+  platformIds: string[];
+  platformGroup: Record<string, string>;
+  healthCheckUrl?: string;
+}
+
+export interface GroupFormState {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  urlsText: string;
+  boundPlatformIds: string[];
+}
+
+/** 解析代理配置（兼容旧版纯 URL 字符串 / {urls,...} / 新版 groups，与后端 parseProxyConfig 对齐） */
+export function parseProxyConfig(raw: string | undefined): ParsedConfig {
+  if (!raw) return { groups: [], platformIds: [], platformGroup: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = raw;
+  }
+  if (typeof parsed === "string") {
+    return {
+      groups: [{ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: [parsed] }],
+      platformIds: [],
+      platformGroup: {},
+    };
+  }
+  if (Array.isArray(parsed)) {
+    return {
+      groups: [
+        {
+          name: LEGACY_GROUP_NAME,
+          sourceUrl: "",
+          urls: parsed.filter((u): u is string => typeof u === "string"),
+        },
+      ],
+      platformIds: [],
+      platformGroup: {},
+    };
+  }
+  if (!parsed || typeof parsed !== "object") return { groups: [], platformIds: [], platformGroup: {} };
+
+  const obj = parsed as Record<string, unknown>;
+  const groups: ParsedGroup[] = (Array.isArray(obj.groups) ? obj.groups : [])
+    .filter((g): g is Record<string, unknown> => !!g && typeof g === "object" && !Array.isArray(g))
+    .map((g) => ({
+      name: typeof g.name === "string" ? g.name.trim() : "",
+      sourceUrl: typeof g.sourceUrl === "string" ? g.sourceUrl.trim() : "",
+      urls: Array.isArray(g.urls) ? g.urls.filter((u): u is string => typeof u === "string") : [],
+    }))
+    .filter((g) => g.name.length > 0);
+
+  // 旧版字段（顶层 urls）兼容：无 groups 时视为单组
+  const legacyUrls = Array.isArray(obj.urls) ? obj.urls.filter((u): u is string => typeof u === "string") : [];
+  if (groups.length === 0 && legacyUrls.length > 0) {
+    groups.push({ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: legacyUrls });
+  }
+
+  const platformIds = Array.isArray(obj.platformIds)
+    ? obj.platformIds.filter((p): p is string => typeof p === "string")
+    : [];
+  const platformGroup: Record<string, string> = {};
+  if (obj.platformGroup && typeof obj.platformGroup === "object" && !Array.isArray(obj.platformGroup)) {
+    for (const [pid, groupName] of Object.entries(obj.platformGroup as Record<string, unknown>)) {
+      if (typeof groupName === "string") platformGroup[pid] = groupName;
+    }
+  }
+  const healthCheckUrl = typeof obj.healthCheckUrl === "string" ? obj.healthCheckUrl : undefined;
+  return { groups, platformIds, platformGroup, healthCheckUrl };
+}
+
+/** 解析健康度记录（容忍脏数据） */
+export function parseHealthMap(raw: string | undefined): ProxyHealthMap {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: ProxyHealthMap = {};
+    for (const [url, entry] of Object.entries(parsed)) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      if (e.status !== "ok" && e.status !== "fail") continue;
+      map[url] = {
+        status: e.status,
+        latencyMs: typeof e.latencyMs === "number" ? e.latencyMs : 0,
+        checkedAt: typeof e.checkedAt === "number" ? e.checkedAt : 0,
+        failCount: typeof e.failCount === "number" ? e.failCount : 0,
+      };
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+/** 解析拉取结果（{ groupName: [url] }，容忍脏数据） */
+export function parsePoolMap(raw: string | undefined): Record<string, string[]> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, string[]> = {};
+    for (const [groupName, urls] of Object.entries(parsed)) {
+      if (Array.isArray(urls)) {
+        map[groupName] = urls.filter((u): u is string => typeof u === "string");
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+/** 手动代理文本 → 地址数组（按行拆分、去空去重） */
+export function parseUrlsText(text: string): string[] {
+  return [...new Set(text.split("\n").map((s) => s.trim()).filter(Boolean))];
+}
+
+/** 展示用规范化：裸 host:port 补 http://，与后端 normalizeProxyLine 写入健康表的键对齐 */
+export function normalizeProxyUrl(u: string): string {
+  return /^https?:\/\//i.test(u) ? u : `http://${u}`;
+}
+
+/** 单行代理地址是否合法（与后端 normalizeProxyLine 语义一致）：带协议头的必须 http(s)，
+ *  无协议头视为裸 host:port 自动补 http://；解析失败（无 host、端口非法等）拒绝 */
+export function isProxyLineValid(line: string): boolean {
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(line);
+  if (hasScheme && !/^https?:\/\//i.test(line)) return false;
+  try {
+    const parsed = new URL(hasScheme ? line : `http://${line}`);
+    return /^https?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 展示用代理地址脱敏：剥离 URL 中的 user:pass 凭据（健康列表仅展示，匹配仍用完整 URL）。
+ *  用正则而非 URL 序列化，避免剥离后补尾斜杠导致展示与真实地址不一致 */
+export function maskProxyUrl(url: string): string {
+  return url.replace(/\/\/[^@\s]+@/, "//***@");
+}
+
+/** 健康检查时间展示：unix 秒 → 「MM-DD HH:mm」（本地时区） */
+export function formatChecked(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 组内全部候选地址（拉取结果 ∪ 手动代理，规范化 + 去重，供展示与健康查询共用） */
+export function collectGroupUrls(poolUrls: string[], manualUrls: string[]): string[] {
+  return [...new Set([...poolUrls, ...manualUrls].map(normalizeProxyUrl))];
+}
+
+/** 兼容后端两种错误形状：{ error: "msg" } 或 { error: { message } } */
+export function errMsg(data: Record<string, any>, fallback: string): string {
+  return typeof data.error === "string" ? data.error : data.error?.message ?? fallback;
+}
+
+/** 配置校验错误 → i18n 键 */
+export type ConfigValidationError =
+  | "upstreamProxyGroupNameRequired"
+  | "upstreamProxyGroupNameDup"
+  | "upstreamProxyGroupNameReserved"
+  | "upstreamProxyInvalidSourceUrl"
+  | "upstreamProxyInvalidUrls";
+
+/**
+ * 表单 → 配置 JSON 字符串（全空返回 "{}"；供保存与「已保存一致性」校验共用）。
+ * 纯函数：校验失败返回错误键，由调用方提示
+ */
+export function buildConfigJson(
+  groups: GroupFormState[],
+  platformIds: string[],
+  checkUrl: string
+): { ok: true; value: string } | { ok: false; error: ConfigValidationError } {
+  const trimmed = groups
+    .map((g) => ({
+      name: g.name.trim(),
+      sourceUrl: g.sourceUrl.trim(),
+      urls: parseUrlsText(g.urlsText),
+      boundPlatformIds: [...new Set(g.boundPlatformIds)],
+    }))
+    .filter(
+      (g) =>
+        g.name.length > 0 || g.sourceUrl.length > 0 || g.urls.length > 0 || g.boundPlatformIds.length > 0
+    );
+  if (trimmed.length === 0) return { ok: true, value: "{}" };
+
+  // 校验组名：必填且唯一；"new" 保留给新建页路由，禁止作为组名
+  const names = trimmed.map((g) => g.name);
+  if (names.some((n) => !n)) return { ok: false, error: "upstreamProxyGroupNameRequired" };
+  if (new Set(names).size !== names.length) return { ok: false, error: "upstreamProxyGroupNameDup" };
+  if (names.some((n) => n === "new")) return { ok: false, error: "upstreamProxyGroupNameReserved" };
+  // 校验拉取地址与手动代理
+  for (const g of trimmed) {
+    if (g.sourceUrl && !/^https?:\/\//i.test(g.sourceUrl)) {
+      return { ok: false, error: "upstreamProxyInvalidSourceUrl" };
+    }
+    if (g.urls.some((u) => !isProxyLineValid(u))) {
+      return { ok: false, error: "upstreamProxyInvalidUrls" };
+    }
+  }
+
+  const platformGroup: Record<string, string> = {};
+  for (const g of trimmed) {
+    for (const pid of [...new Set(g.boundPlatformIds)]) platformGroup[pid] = g.name;
+  }
+  const checkUrlTrimmed = checkUrl.trim();
+  if (checkUrlTrimmed && !/^https?:\/\//i.test(checkUrlTrimmed)) {
+    return { ok: false, error: "upstreamProxyInvalidUrls" };
+  }
+  return {
+    ok: true,
+    value: JSON.stringify({
+      groups: trimmed.map((g) => ({
+        name: g.name,
+        ...(g.sourceUrl ? { sourceUrl: g.sourceUrl } : {}),
+        ...(g.urls.length > 0 ? { urls: g.urls } : {}),
+      })),
+      platformIds,
+      platformGroup,
+      // 留空时不写字段，由后端 normalizeConfig 填充默认探测地址（与后端默认值保持单一来源）
+      ...(checkUrlTrimmed ? { healthCheckUrl: checkUrlTrimmed } : {}),
+    }),
+  };
+}
