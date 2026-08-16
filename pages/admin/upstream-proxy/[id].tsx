@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, RefreshCw, Save } from "lucide-react";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 import {
@@ -47,6 +47,7 @@ export default function UpstreamProxyGroupPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const { data: config, error, isLoading, isValidating, mutate } = useApi<Record<string, string>>(
     "/api/admin/config"
   );
@@ -62,6 +63,9 @@ export default function UpstreamProxyGroupPage() {
   const poolMap = parsePoolMap(config?.[POOL_KEY]);
   const parsed = parseProxyConfig(config?.[CONFIG_KEY]);
   const currentGroup = isNew ? undefined : parsed.groups.find((g) => g.name === id);
+
+  const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
+  const isDocker = deployPlatform === "docker";
 
   // 路由 id / 服务器配置值变化时回填表单（渲染期 prev 值比较；值未变时不覆盖未保存的编辑）
   const [prevKey, setPrevKey] = useState<string>("");
@@ -134,6 +138,39 @@ export default function UpstreamProxyGroupPage() {
     const ok = await saveConfig(merged, "upstreamProxyGroupSaved");
     if (ok && name) {
       router.replace(`/admin/upstream-proxy/${encodeURIComponent(name)}`);
+      // 保存后立即拉取订阅源（仅 Docker 且存在配置了订阅地址的组时触发），
+      // 不等 cron 周期；失败不阻断保存成功的提示
+      if (isDocker && merged.some((g) => g.sourceUrl.trim().length > 0)) {
+        void pullProxyGroupsNow();
+      }
+    }
+  };
+
+  /** 立即拉取订阅源（手动按钮与「保存后自动拉取」共用）；
+   *  拉取针对全部配置了订阅地址的组，成功后刷新配置与健康数据 */
+  const pullProxyGroupsNow = async () => {
+    setPulling(true);
+    try {
+      const res = await fetch("/api/admin/upstream-proxy/pull", { method: "POST" });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        mutate();
+        const results = (data.data?.results ?? {}) as Record<string, { error?: string }>;
+        const failed = Object.values(results).filter((r) => r?.error);
+        if (Object.keys(results).length > 0 && failed.length === Object.keys(results).length) {
+          message.error(t("upstreamProxyPullFailed"));
+        } else if (failed.length > 0) {
+          message.warning(t("upstreamProxyPullPartial"));
+        } else {
+          message.success(t("upstreamProxyPulled"));
+        }
+      } else {
+        message.error(errMsg(data, t("common:error")));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setPulling(false);
     }
   };
 
@@ -206,7 +243,23 @@ export default function UpstreamProxyGroupPage() {
   /** 组内代理列表（只读健康视图） */
   const proxyListView = (
     <div className={formGroupClass}>
-      <h3 className={groupTitleClass}>{t("upstreamProxyGroupProxies")}</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+          {t("upstreamProxyGroupProxies")}
+        </h3>
+        {isDocker && (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => void pullProxyGroupsNow()}
+            loading={pulling}
+            icon={<RefreshCw size={14} />}
+            disabled={!currentGroup?.sourceUrl}
+          >
+            {t("upstreamProxyPullNow")}
+          </Button>
+        )}
+      </div>
       {groupUrls.length === 0 ? (
         <p className="text-xs text-zinc-400">{t("upstreamProxyGroupEmpty")}</p>
       ) : (
@@ -388,27 +441,29 @@ export default function UpstreamProxyGroupPage() {
                     <h1 className="text-base font-bold truncate">
                       {isNew ? t("upstreamProxyNewGroup") : summary.name || "…"}
                     </h1>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                          summary.proxyCount === 0
-                            ? "bg-zinc-300 dark:bg-zinc-600"
-                            : summary.failCount > 0
-                              ? "bg-rose-500"
-                              : summary.okCount > 0
-                                ? "bg-emerald-500"
-                                : "bg-zinc-300 dark:bg-zinc-600"
-                        }`}
-                      />
-                      <span className="text-[11px] text-zinc-400">
-                        {t("upstreamProxyHealthStats", {
-                          total: summary.proxyCount,
-                          ok: summary.okCount,
-                          fail: summary.failCount,
-                          none: summary.proxyCount - summary.okCount - summary.failCount,
-                        })}
-                      </span>
-                    </div>
+                    {!isNew && (
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full shrink-0 ${
+                            summary.proxyCount === 0
+                              ? "bg-zinc-300 dark:bg-zinc-600"
+                              : summary.failCount > 0
+                                ? "bg-rose-500"
+                                : summary.okCount > 0
+                                  ? "bg-emerald-500"
+                                  : "bg-zinc-300 dark:bg-zinc-600"
+                          }`}
+                        />
+                        <span className="text-[11px] text-zinc-400">
+                          {t("upstreamProxyHealthStats", {
+                            total: summary.proxyCount,
+                            ok: summary.okCount,
+                            fail: summary.failCount,
+                            none: summary.proxyCount - summary.okCount - summary.failCount,
+                          })}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

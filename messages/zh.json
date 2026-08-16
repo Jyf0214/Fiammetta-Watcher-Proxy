@@ -458,7 +458,7 @@
     "upstreamProxySourceUrlLabel": "订阅地址",
     "upstreamProxyGroupBasic": "基本信息",
     "upstreamProxyGroupProxies": "组内代理",
-    "upstreamProxyGroupNamePlaceholder": "如：免费代理池",
+    "upstreamProxyGroupNamePlaceholder": "输入组名",
     "upstreamProxySourceUrlPlaceholder": "https://example.com/proxies.txt",
     "upstreamProxySourceUrlHelp": "定时任务（cron proxy-pull）从此地址拉取代理列表：每行一个代理，支持裸 host:port 或 http(s):// 前缀；留空则仅用手动代理",
     "upstreamProxyManualUrlsLabel": "手动代理地址（可选）",

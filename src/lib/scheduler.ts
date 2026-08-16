@@ -167,5 +167,13 @@ export function startScheduler(): void {
   console.log("[scheduler] Docker 内部定时器已启动（model-fetch / key-reset / log-archive / proxy-health / proxy-pull）");
   scheduler.start();
 
-  // 进程退出时无需显式清理：调度器随服务进程生命周期终止
+  // 容器重启后立即拉取一次代理列表：proxy-pull 的首个触发周期最长要等
+  // 一小时（每小时 :17），重启后不等调度周期即可刷新订阅源（幂等，
+  // 与定时任务共用 pullProxyGroups；无订阅地址的组/非 docker 部署内部返回空）
+  void pullProxyGroups(db, env).catch((err) => {
+    console.error(
+      "[scheduler] 启动时代理列表拉取失败:",
+      err instanceof Error ? err.message : String(err)
+    );
+  });
 }

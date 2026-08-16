@@ -458,7 +458,7 @@
     "upstreamProxySourceUrlLabel": "Subscription URL",
     "upstreamProxyGroupBasic": "Basic info",
     "upstreamProxyGroupProxies": "Group proxies",
-    "upstreamProxyGroupNamePlaceholder": "e.g. public pool",
+    "upstreamProxyGroupNamePlaceholder": "Enter a group name",
     "upstreamProxySourceUrlPlaceholder": "https://example.com/proxies.txt",
     "upstreamProxySourceUrlHelp": "Pulled periodically by the cron task (proxy-pull): one proxy per line, bare host:port or http(s):// prefix accepted; leave empty to use manual proxies only",
     "upstreamProxyManualUrlsLabel": "Manual proxies (optional)",
