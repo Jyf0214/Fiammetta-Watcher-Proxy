@@ -317,6 +317,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         });
 
         if (!response.ok) {
+          // 消费响应体释放连接（同 checkOneProxy：未读 body 挂起 keep-alive 连接）
+          void response.arrayBuffer().catch(() => {});
           return res.status(502).json({
             success: false,
             error: `上游平台返回错误 (${response.status})`,

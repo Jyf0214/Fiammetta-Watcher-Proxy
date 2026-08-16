@@ -736,6 +736,13 @@ export async function proxyV1Request(
       // 策略 1：同平台换 Key
       const nextKey = getRandomKeyExcept(currentPlatform, triedKeys);
       if (nextKey) {
+        // 消费响应体释放连接（429 是最高频上游错误，与 5xx 分支的 text() 消费对齐，
+        // 避免连接滞留；仅真正重试时消费——无切换目标时下方需读取真实错误体）
+        try {
+          await upstreamResponse.text();
+        } catch {
+          // 读取失败（如 signal 超时）不影响重试流程
+        }
         currentKey = nextKey;
         continue;
       }
@@ -748,6 +755,12 @@ export async function proxyV1Request(
       if (otherPlatforms.length > 0) {
         const nextPlatform = selectPlatform(otherPlatforms);
         if (nextPlatform) {
+          // 消费响应体释放连接（同策略 1：仅真正重试时消费）
+          try {
+            await upstreamResponse.text();
+          } catch {
+            // 读取失败（如 signal 超时）不影响重试流程
+          }
           currentPlatform = nextPlatform;
           currentKey = getNextKey(currentPlatform);
           continue;

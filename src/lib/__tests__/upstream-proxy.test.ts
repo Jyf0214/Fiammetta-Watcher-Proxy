@@ -892,3 +892,44 @@ describe("pullProxyGroups 拉取", () => {
     expect(pool.g1).toEqual([URL_A]);
   });
 });
+
+describe("健康检查响应体消费（崩溃回归）", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const CHECK_URL = "https://cp.cloudflare.com/generate_204";
+
+  function configWith(urls: string[]) {
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls, platformIds: [], healthCheckUrl: CHECK_URL }),
+        updatedAt: 1000,
+      },
+    });
+  }
+
+  it("探测响应 body 必须被读取——未消费 body 挂起 undici keep-alive 连接，每轮泄漏一个连接导致 fd/内存耗尽进程崩溃", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([URL_A]);
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(results[URL_A]).toMatchObject({ status: "ok" });
+    // 真实 Response：body 已被消费（bodyUsed=true，连接归还 keep-alive 池）
+    const response = (await fetchMock.mock.results[0].value) as Response;
+    expect(response.bodyUsed).toBe(true);
+  });
+
+  it("探测失败响应同样消费 body（错误路径不泄漏连接）", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([URL_A]);
+    const fetchMock = vi.fn(async () => new Response("error page", { status: 502 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(results[URL_A]).toMatchObject({ status: "fail" });
+    const response = (await fetchMock.mock.results[0].value) as Response;
+    expect(response.bodyUsed).toBe(true);
+  });
+});

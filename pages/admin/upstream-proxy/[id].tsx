@@ -21,6 +21,7 @@ import {
   parseHealthMap,
   parsePoolMap,
   collectGroupUrls,
+  parseUrlsText,
   maskProxyUrl,
   buildConfigJson,
   errMsg,
@@ -48,6 +49,7 @@ export default function UpstreamProxyGroupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [checking, setChecking] = useState(false);
   const { data: config, error, isLoading, isValidating, mutate } = useApi<Record<string, string>>(
     "/api/admin/config"
   );
@@ -138,17 +140,44 @@ export default function UpstreamProxyGroupPage() {
     const ok = await saveConfig(merged, "upstreamProxyGroupSaved");
     if (ok && name) {
       router.replace(`/admin/upstream-proxy/${encodeURIComponent(name)}`);
-      // 保存后立即拉取订阅源（仅 Docker 且存在配置了订阅地址的组时触发），
+      // 保存后立即拉取订阅源并验证代理连通性（仅 Docker），
       // 不等 cron 周期；失败不阻断保存成功的提示
-      if (isDocker && merged.some((g) => g.sourceUrl.trim().length > 0)) {
-        void pullProxyGroupsNow();
+      if (isDocker) {
+        void autoVerifyAfterSave(merged);
       }
     }
   };
 
+  /** 保存后自动拉取 + 健康检查：有订阅地址先拉取，拉取完成后再探测连通性。
+   *  跳过 ensureSaved 守卫：刚保存完成，配置与表单一致；且本轮 config 状态
+   *  尚未反映 mutate 后的新值，直接比较会误报「请先保存」 */
+  const autoVerifyAfterSave = async (merged: GroupFormState[]) => {
+    const hasSourceUrl = merged.some((g) => g.sourceUrl.trim().length > 0);
+    const hasCandidate = hasSourceUrl || merged.some((g) => g.urlsText.trim().length > 0);
+    if (hasSourceUrl) await pullProxyGroupsNow(true);
+    if (hasCandidate) await checkProxyHealthNow(true);
+  };
+
+  /** 手动触发拉取/检查前确认表单与已保存配置一致，避免结果与页面显示对不上。
+   *  比较构造与 handleSave 相同（编辑中的组替换到对应位置），
+   *  否则 allGroupsForm 全派生自已保存配置，恒等比较恒真、守卫失效 */
+  const ensureSaved = (): boolean => {
+    const saved = config?.[CONFIG_KEY];
+    const merged = isNew
+      ? [...allGroupsForm(), formGroup]
+      : allGroupsForm().map((g) => (g.name === id ? formGroup : g));
+    const result = buildConfigJson(merged, parsed.platformIds, parsed.healthCheckUrl ?? "");
+    if (!result.ok || result.value !== saved) {
+      message.warning(t("upstreamProxySaveFirst"));
+      return false;
+    }
+    return true;
+  };
+
   /** 立即拉取订阅源（手动按钮与「保存后自动拉取」共用）；
    *  拉取针对全部配置了订阅地址的组，成功后刷新配置与健康数据 */
-  const pullProxyGroupsNow = async () => {
+  const pullProxyGroupsNow = async (skipEnsure = false) => {
+    if (!skipEnsure && !ensureSaved()) return;
     setPulling(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/pull", { method: "POST" });
@@ -174,6 +203,26 @@ export default function UpstreamProxyGroupPage() {
     }
   };
 
+  /** 立即健康检查（手动按钮与「保存后自动验证」共用）：探测全部候选代理连通性 */
+  const checkProxyHealthNow = async (skipEnsure = false) => {
+    if (!skipEnsure && !ensureSaved()) return;
+    setChecking(true);
+    try {
+      const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        mutate();
+        message.success(t("upstreamProxyHealthDone"));
+      } else {
+        message.error(errMsg(data, t("common:error")));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (isNew) return;
     setDeleting(true);
@@ -190,8 +239,12 @@ export default function UpstreamProxyGroupPage() {
 
   const platformOptions = (platforms ?? []).map((p) => ({ label: p.name, value: p.id }));
 
-  /** 组内候选代理（已保存配置的拉取池 ∪ 手动代理）与健康摘要 */
-  const groupUrls = currentGroup ? collectGroupUrls(poolMap[currentGroup.name] ?? [], currentGroup.urls) : [];
+  /** 组内候选代理（已保存配置的拉取池 ∪ 表单当前手动代理）与健康摘要；
+   *  统计基于表单当前值（组名/手动代理），编辑后立即反映，不与标题脱节 */
+  const groupUrls = collectGroupUrls(
+    currentGroup ? (poolMap[currentGroup.name] ?? []) : [],
+    parseUrlsText(formGroup.urlsText)
+  );
   const summary: ProxyGroupSummary = {
     name: formGroup.name || currentGroup?.name || (isNew ? "" : id ?? ""),
     sourceUrl: formGroup.sourceUrl || currentGroup?.sourceUrl || "",
@@ -248,16 +301,28 @@ export default function UpstreamProxyGroupPage() {
           {t("upstreamProxyGroupProxies")}
         </h3>
         {isDocker && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => void pullProxyGroupsNow()}
-            loading={pulling}
-            icon={<RefreshCw size={14} />}
-            disabled={!currentGroup?.sourceUrl}
-          >
-            {t("upstreamProxyPullNow")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void pullProxyGroupsNow()}
+              loading={pulling}
+              icon={<RefreshCw size={14} />}
+              disabled={!currentGroup?.sourceUrl}
+            >
+              {t("upstreamProxyPullNow")}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void checkProxyHealthNow()}
+              loading={checking}
+              icon={<RefreshCw size={14} />}
+              disabled={groupUrls.length === 0}
+            >
+              {t("upstreamProxyCheckNow")}
+            </Button>
+          </div>
         )}
       </div>
       {groupUrls.length === 0 ? (

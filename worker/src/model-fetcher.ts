@@ -166,7 +166,11 @@ async function fetchPlatformModels(
   }
   clearTimeout(timeoutId);
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // 消费响应体释放连接（未读 body 会挂起 undici keep-alive 连接，长跑任务下累积泄漏）
+    void res.arrayBuffer().catch(() => {});
+    return null;
+  }
 
   try {
     const data: any = await res.json();

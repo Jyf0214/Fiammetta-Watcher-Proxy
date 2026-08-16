@@ -526,6 +526,14 @@ async function checkOneProxy(
       redirect: "follow",
     };
     const res = await fetch(healthCheckUrl, init);
+    // 必须消费响应体：未读取的 body 会使 undici 连接保持占用（keep-alive 不复用），
+    // 健康检查每轮对每个代理泄漏一个连接，fd/内存耗尽导致进程崩溃（无日志）
+    try {
+      await res.arrayBuffer();
+    } catch {
+      // 读 body 失败（含 mock/异常响应）不改变探测判定；能取消则取消，避免连接滞留
+      await res.body?.cancel().catch(() => {});
+    }
     return { ok: res.ok, latencyMs: Date.now() - start };
   } catch {
     return { ok: false, latencyMs: Date.now() - start };
@@ -566,15 +574,21 @@ async function readLimitedText(res: Response, maxBytes: number): Promise<string>
   const decoder = new TextDecoder();
   let text = "";
   let received = 0;
+  let completed = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        completed = true;
+        break;
+      }
       received += value?.byteLength ?? 0;
       if (received > maxBytes) throw new Error("拉取源响应过大");
       text += decoder.decode(value, { stream: true });
     }
   } finally {
+    // 异常中断（超限/读流错误）必须取消流，否则连接滞留（同未消费 body 的泄漏）
+    if (!completed) await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
   return text + decoder.decode();
@@ -586,7 +600,16 @@ async function pullOneSource(sourceUrl: string): Promise<string[]> {
   const timeoutId = setTimeout(() => controller.abort(), PULL_TIMEOUT_MS);
   try {
     const res = await fetch(sourceUrl, { signal: controller.signal, redirect: "follow" });
-    if (!res.ok) throw new Error(`拉取源返回 HTTP ${res.status}`);
+    if (!res.ok) {
+      // 消费响应体释放连接（同 checkOneProxy：未读 body 挂起 keep-alive 连接，
+      // 定时拉取每轮对失效源泄漏一个连接）
+      try {
+        await res.arrayBuffer();
+      } catch {
+        await res.body?.cancel().catch(() => {});
+      }
+      throw new Error(`拉取源返回 HTTP ${res.status}`);
+    }
     const text = await readLimitedText(res, PULL_MAX_BYTES);
     const urls: string[] = [];
     for (const line of text.split(/\r?\n/)) {
