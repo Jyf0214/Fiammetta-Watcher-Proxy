@@ -71,6 +71,7 @@ Called by external services. See [Cron Tasks](/en/api/cron).
 | `/api/cron/key-reset` | GET/POST | Reset key usage counters |
 | `/api/cron/log-archive` | GET/POST | Archive old request logs |
 | `/api/cron/proxy-health` | GET/POST | Outbound proxy health check (only active on Docker deployments with a proxy configured) |
+| `/api/cron/proxy-pull` | GET/POST | Outbound proxy list pull (only active for groups with a pull source on Docker deployments) |
 
 ## Admin API
 

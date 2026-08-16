@@ -488,7 +488,7 @@ describe("getProxyHealth 读取", () => {
 });
 
 describe("缓存与更新", () => {
-  it("TTL 内重复调用复用缓存（配置与健康各一次全量读取 + 一次失效检查）", async () => {
+  it("TTL 内重复调用复用缓存（配置/健康/拉取各一次全量读取 + 一次失效检查）", async () => {
     const { getUpstreamProxy } = await loadModule();
     setConfigRows({
       [CONFIG_KEY]: { value: JSON.stringify({ urls: ["http://127.0.0.1:7890"], platformIds: [] }), updatedAt: 1000 },
@@ -498,10 +498,10 @@ describe("缓存与更新", () => {
     await getUpstreamProxy(mockDb, mockEnv);
     await getUpstreamProxy(mockDb, mockEnv);
 
-    // 第一次全量读取（config+health）+ 第二次失效检查（config+health）
-    expect(mockFindFirst).toHaveBeenCalledTimes(4);
+    // 第一次全量读取（config+health+pool）+ 第二次失效检查（config+health+pool）
+    expect(mockFindFirst).toHaveBeenCalledTimes(6);
     expect(mockFindFirst.mock.calls[0][0].select).toHaveProperty("value");
-    expect(mockFindFirst.mock.calls[2][0].select).not.toHaveProperty("value");
+    expect(mockFindFirst.mock.calls[3][0].select).not.toHaveProperty("value");
   });
 
   it("配置 updatedAt 变化 → 强制重载新代理地址，旧 ProxyAgent 被 close 释放", async () => {
@@ -570,5 +570,325 @@ describe("缓存与更新", () => {
 
     expect(result.dispatcher).toBeNull();
     expect(result.url).toBeNull();
+  });
+});
+
+describe("组路由与拉取结果合并", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+  const POOL_KEY = "system:upstream_proxy_pool";
+
+  function configWith(groups: any[], platformIds: string[] = [], platformGroup: Record<string, string> = {}) {
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups, platformIds, platformGroup }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+  }
+
+  it("平台绑定组：绑定平台固定使用指定组", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith(
+      [
+        { name: "g1", urls: [URL_A] },
+        { name: "g2", urls: [URL_B] },
+      ],
+      [],
+      { p1: "g2" }
+    );
+
+    const result = await getUpstreamProxy(mockDb, mockEnv, "p1");
+
+    expect(result.url).toBe(URL_B);
+  });
+
+  it("未绑定平台走默认组（第一组）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith(
+      [
+        { name: "g1", urls: [URL_A] },
+        { name: "g2", urls: [URL_B] },
+      ],
+      ["p2"]
+    );
+
+    const result = await getUpstreamProxy(mockDb, mockEnv, "p2");
+
+    expect(result.url).toBe(URL_A);
+  });
+
+  it("绑定平台隐含走代理（无需重复加入白名单），白名单平台走默认组", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith(
+      [
+        { name: "g1", urls: [URL_A] },
+        { name: "g2", urls: [URL_B] },
+      ],
+      ["p2"],
+      { p1: "g2" }
+    );
+
+    // p1 不在白名单但绑定了组 → 仍走代理（g2）
+    const bound = await getUpstreamProxy(mockDb, mockEnv, "p1");
+    expect(bound.url).toBe(URL_B);
+
+    // p2 在白名单未绑定 → 默认组（g1）
+    const whitelisted = await getUpstreamProxy(mockDb, mockEnv, "p2");
+    expect(whitelisted.url).toBe(URL_A);
+  });
+
+  it("绑定到不存在的组 → 回退默认组", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", urls: [URL_A] }], [], { p1: "ghost" });
+
+    const result = await getUpstreamProxy(mockDb, mockEnv, "p1");
+
+    expect(result.url).toBe(URL_A);
+  });
+
+  it("组内候选 = 拉取结果 ∪ 手动代理（去重后按组轮询）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: "https://src", urls: [URL_A] }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_B, URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+
+    // 去重后 [URL_A, URL_B]，round-robin 交替
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe(URL_A);
+    expect(second.url).toBe(URL_B);
+  });
+
+  it("组内无代理（拉取尚未成功且无手动）→ 直连", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: "https://src" }]);
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(result.url).toBeNull();
+    expect(result.dispatcher).toBeNull();
+  });
+
+  it("旧版配置（顶层 urls）在组体系下仍按单组工作（兼容）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe(URL_A);
+    expect(second.url).toBe(URL_B);
+  });
+});
+
+describe("pullProxyGroups 拉取", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+  const POOL_KEY = "system:upstream_proxy_pool";
+  const SRC = "https://example.com/proxies.txt";
+
+  function configWith(groups: any[]) {
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups, platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+  }
+
+  function stubFetch(text: string | Error) {
+    if (text instanceof Error) {
+      vi.stubGlobal("fetch", vi.fn(async () => { throw text; }));
+    } else {
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, text: async () => text })));
+    }
+  }
+
+  /** 取最后一次写入指定 key 的 upsert 参数 */
+  function lastUpsertFor(key: string) {
+    const calls = mockUpsert.mock.calls.filter((c) => c[0].where.key === key);
+    return calls[calls.length - 1][0];
+  }
+
+  it("非 docker 部署返回空、不写库", async () => {
+    setPlatform("edgeone");
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results).toEqual({});
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("拉取解析：裸 host:port 补全、协议头保留、脏行与重复忽略", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    stubFetch(
+      "127.0.0.1:7890\nhttp://127.0.0.1:7891\nsocks5://127.0.0.1:1080\n\n# comment\nhttp://127.0.0.1:7890"
+    );
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1).toMatchObject({ pulled: 2, added: 2, removed: 0, kept: 0, total: 2 });
+    const upsertArgs = lastUpsertFor(POOL_KEY);
+    const pool = JSON.parse(upsertArgs.create.value) as Record<string, any>;
+    expect(pool.g1).toEqual(["http://127.0.0.1:7890", "http://127.0.0.1:7891"]);
+  });
+
+  it("交集：健康度记录保留且 status 切换为 ok，进程内黑名单清除恢复在池", async () => {
+    const { markProxyFailure, pullProxyGroups, getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({ [URL_A]: { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 } }),
+        updatedAt: 1000,
+      },
+    });
+    // 达阈值：A 进入进程内黑名单（markProxyFailure 第 3 次会覆写健康表 failCount=3）
+    for (let i = 0; i < 3; i++) {
+      await markProxyFailure(mockDb, mockEnv, URL_A);
+    }
+    // 拉取返回同一代理 → 交集
+    stubFetch(URL_A);
+
+    await pullProxyGroups(mockDb, mockEnv);
+
+    const health = JSON.parse(lastUpsertFor(HEALTH_KEY).create.value) as Record<string, any>;
+    // 健康度保留（failCount 来自预置健康表，markProxyFailure 的覆写被 mock 行
+    // 重读恢复，此处验证的是「保留历史计数」语义）
+    expect(health[URL_A]).toMatchObject({ status: "ok", failCount: 5 });
+    // 黑名单清除：A 恢复可被选中
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+    expect(result.url).toBe(URL_A);
+  });
+
+  it("移除：健康记录随代理删除、代理连接释放，交集保留并恢复", async () => {
+    const { pullProxyGroups, getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A, URL_B] }), updatedAt: 1000 },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          [URL_A]: { status: "ok", latencyMs: 10, checkedAt: 1000, failCount: 0 },
+          [URL_B]: { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 2 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+    // 先让 URL_A 建立代理连接（候选 [A,B]，round-robin 首个选中 A）
+    const before = await getUpstreamProxy(mockDb, mockEnv);
+    expect(before.url).toBe(URL_A);
+
+    // 新列表仅剩 B：A 被移除，B 为交集
+    stubFetch(URL_B);
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1).toMatchObject({ added: 0, removed: 1, kept: 1, total: 1 });
+    const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
+    expect(pool.g1).toEqual([URL_B]);
+    const health = JSON.parse(lastUpsertFor(HEALTH_KEY).create.value) as Record<string, any>;
+    expect(health[URL_A]).toBeUndefined();
+    // 交集 B：健康度保留（failCount 2）且 status 恢复 ok
+    expect(health[URL_B]).toMatchObject({ status: "ok", failCount: 2 });
+    // URL_A 的代理连接被释放
+    const closed = createdAgents.find((a) => a.url === URL_A);
+    expect(closed?.close).toHaveBeenCalled();
+  });
+
+  it("拉取失败（网络错误）→ 保留旧列表并记 error", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    stubFetch(new Error("network down"));
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1.error).toBeDefined();
+    expect(results.g1.pulled).toBe(0);
+    const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
+    expect(pool.g1).toEqual([URL_A]);
+  });
+
+  it("拉取失败 → 不重置已记录的健康状态（fail 记录保留，不误恢复）", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({ [URL_A]: { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 3 } }),
+        updatedAt: 1000,
+      },
+    });
+    stubFetch(new Error("network down"));
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1.error).toBeDefined();
+    const health = JSON.parse(lastUpsertFor(HEALTH_KEY).create.value) as Record<string, any>;
+    expect(health[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
+  });
+
+  it("空结果（HTTP 200 但无有效行）→ 保留旧列表并记 error", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    stubFetch("  \n\n");
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1.error).toBe("empty");
+    expect(results.g1.pulled).toBe(0);
+    const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
+    expect(pool.g1).toEqual([URL_A]);
+  });
+
+  it("无拉取源组（纯手动）→ 不拉取不写表", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", urls: [URL_A] }]);
+    stubFetch(URL_B);
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results).toEqual({});
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("拉取源 HTTP 非 2xx → 保留旧列表并记 error", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([{ name: "g1", sourceUrl: SRC }]);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => "" })));
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    expect(results.g1.error).toContain("500");
+    const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
+    expect(pool.g1).toEqual([URL_A]);
   });
 });

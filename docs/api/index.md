@@ -71,6 +71,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/cron/key-reset` | GET/POST | 重置 Key 用量计数器 |
 | `/api/cron/log-archive` | GET/POST | 归档过期请求日志 |
 | `/api/cron/proxy-health` | GET/POST | 出站代理健康检查（仅 Docker 部署配置了出站代理时生效） |
+| `/api/cron/proxy-pull` | GET/POST | 出站代理列表拉取（仅 Docker 部署配置了拉取源的组生效） |
 
 ## 管理后台 API
 

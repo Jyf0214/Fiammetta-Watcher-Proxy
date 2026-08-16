@@ -9,11 +9,22 @@
  *
  * 配置：configs 表 key=system:upstream_proxy，value 为 JSON：
  *   {
- *     "urls": ["http://127.0.0.1:7890", "http://127.0.0.1:7891"],  // 多代理 round-robin
- *     "platformIds": ["p1", "p2"],   // 空数组 = 所有平台经代理（勾选=白名单）
- *     "healthCheckUrl": "https://..."  // 可选，默认公网探测地址
+ *     "groups": [
+ *       { "name": "g1", "sourceUrl": "https://...", "urls": ["http://127.0.0.1:7890"] }
+ *     ],
+ *     "platformIds": ["p1", "p2"],       // 空数组 = 所有平台经代理（勾选=白名单）
+ *     "platformGroup": { "p1": "g1" },   // 平台绑定组（未绑定的白名单平台走默认组=第一组）
+ *     "healthCheckUrl": "https://..."    // 可选，默认公网探测地址
  *   }
- * 兼容旧版纯 URL 字符串格式（视为单代理 + 全部平台）。
+ * 兼容旧版纯 URL 字符串 / { urls, platformIds, healthCheckUrl } 格式
+ * （无 groups 时视为单组，行为与旧版一致）。
+ *
+ * 拉取：带 sourceUrl 的组由 cron proxy-pull（或管理页手动）定时从该地址
+ * 拉取代理列表（每行一个，兼容裸 host:port 与 http(s):// 前缀），结果存入
+ * configs 表 key=system:upstream_proxy_pool（{ groupName: [url, ...] }）。
+ * 拉取后状态同步：两次拉取交集内的代理保留健康度记录并恢复「在池」
+ * （健康表 status 切换为 ok、清除进程内黑名单）；被移除的代理连健康
+ * 记录一起清理。
  *
  * 健康度：configs 表 key=system:upstream_proxy_health 存每个代理的最近
  * 检查结果（cron proxy-health 定时 + 管理页手动触发）；业务请求网络层
@@ -29,6 +40,8 @@ import type { Dispatcher } from "undici";
 
 /** 配置键：configs 表中存储的代理服务器配置（JSON 或旧版纯 URL） */
 export const UPSTREAM_PROXY_CONFIG_KEY = "system:upstream_proxy";
+/** 拉取结果键：{ groupName: [代理地址] } */
+export const UPSTREAM_PROXY_POOL_KEY = "system:upstream_proxy_pool";
 /** 健康度记录键 */
 export const UPSTREAM_PROXY_HEALTH_KEY = "system:upstream_proxy_health";
 /** 默认健康检查探测地址（HTTP 204，轻量；可选国内可达的 Cloudflare 联通性端点） */
@@ -38,12 +51,28 @@ export const DEFAULT_PROXY_HEALTH_CHECK_URL = "https://cp.cloudflare.com/generat
 const CACHE_TTL = 30_000;
 /** 健康检查单次超时（毫秒） */
 const HEALTH_CHECK_TIMEOUT_MS = 10_000;
+/** 代理列表拉取单次超时（毫秒） */
+const PULL_TIMEOUT_MS = 15_000;
+/** 拉取响应体上限（超出视为异常源，拒绝并保留旧列表） */
+const PULL_MAX_BYTES = 512 * 1024;
 /** 业务请求网络层连续失败达到该次数 → 该代理临时标记不可用（跳过轮询） */
 export const PROXY_FAIL_THRESHOLD = 3;
 
-export interface ProxyConfig {
+/** 代理组：一源一组（sourceUrl 可空 = 纯手动组，不参与拉取） */
+export interface ProxyGroupConfig {
+  name: string;
+  /** 拉取源地址（空 = 不拉取） */
+  sourceUrl: string;
+  /** 手动代理地址（与拉取结果合并为组内候选） */
   urls: string[];
+}
+
+export interface ProxyConfig {
+  groups: ProxyGroupConfig[];
+  /** 空数组 = 所有平台经代理（勾选=白名单） */
   platformIds: string[];
+  /** 平台 → 组名映射（绑定后该平台固定使用指定组） */
+  platformGroup: Record<string, string>;
   healthCheckUrl: string;
 }
 
@@ -63,9 +92,27 @@ export interface UpstreamProxySelection {
   url: string | null;
 }
 
+/** 单组拉取结果（管理页展示；error 非空 = 本次拉取失败/结果为空，沿用旧列表） */
+export interface ProxyPullGroupResult {
+  /** 本次拉取到的代理数（沿用旧列表时为 0） */
+  pulled: number;
+  /** 拉取后组内总数（含手动代理） */
+  total: number;
+  /** 相比上次新增 */
+  added: number;
+  /** 相比上次移除 */
+  removed: number;
+  /** 两次拉取交集（健康度保留并恢复在池） */
+  kept: number;
+  error?: string;
+}
+
 let cachedConfig: ProxyConfig | null = null;
 let cachedConfigUpdatedAt: number | null = null;
 let lastConfigRefresh = 0;
+let cachedPool: Record<string, string[]> | null = null;
+let cachedPoolUpdatedAt: number | null = null;
+let lastPoolRefresh = 0;
 let cachedHealth: ProxyHealthMap | null = null;
 let cachedHealthUpdatedAt: number | null = null;
 let lastHealthRefresh = 0;
@@ -80,7 +127,83 @@ const unhealthyUrls = new Set<string>();
 /** 全部代理异常告警节流时间戳 */
 let lastAllUnhealthyWarn = 0;
 
-/** 解析并规范化配置（兼容旧版纯 URL 字符串），无有效代理时返回 null */
+/** http(s) URL 且含主机名校验（new URL 解析 + hostname 非空） */
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return /^https?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 单行代理地址规范化：兼容裸 host:port（自动补 http://）与 http(s):// 前缀；非法行返回 null */
+function normalizeProxyLine(lineRaw: string): string | null {
+  const line = lineRaw.trim();
+  if (!line) return null;
+  // 带协议头的行必须是 http/https：socks5:// 等不支持协议直接拒绝，
+  // 而不是误补成 http://socks5://... 这类畸形地址
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(line);
+  if (hasScheme && !/^https?:\/\//i.test(line)) return null;
+  const url = hasScheme ? line : `http://${line}`;
+  return isValidHttpUrl(url) ? url : null;
+}
+
+/** 校验并规范化一组手动代理地址（与旧版 urls 字段校验一致） */
+function normalizeUrls(raw: unknown): string[] {
+  const urls: string[] = [];
+  if (!Array.isArray(raw)) return urls;
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const u = normalizeProxyLine(item);
+    if (!u) {
+      console.error(
+        `[upstream-proxy] 不支持的代理地址（仅支持 http/https 且需含主机名），已忽略: ${item.slice(0, 40)}...`
+      );
+      continue;
+    }
+    if (!urls.includes(u)) urls.push(u);
+  }
+  return urls;
+}
+
+/** 解析并规范化组定义（name 必填唯一；sourceUrl 非法视为无拉取源） */
+function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[] {
+  const groups: ProxyGroupConfig[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const g = item as Record<string, unknown>;
+      const name = typeof g.name === "string" ? g.name.trim() : "";
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const sourceUrl = typeof g.sourceUrl === "string" ? g.sourceUrl.trim() : "";
+      groups.push({
+        name,
+        // 拉取地址同样要求 http(s) + 主机名，防止畸形源 URL 让拉取任务反复失败
+        sourceUrl: isValidHttpUrl(sourceUrl) ? sourceUrl : "",
+        urls: normalizeUrls(g.urls),
+      });
+    }
+  }
+
+  if (groups.length === 0) {
+    // 无显式组：旧版配置（顶层 urls）视为单组，行为与旧版一致
+    if (legacyUrls.length === 0) return [];
+    groups.push({ name: "", sourceUrl: "", urls: legacyUrls });
+    return groups;
+  }
+
+  // 新格式下顶层 urls（旧版字段）并入第一组，避免配置迁移丢数据
+  if (legacyUrls.length > 0) {
+    const first = groups[0];
+    first.urls = [...new Set([...legacyUrls, ...first.urls])];
+  }
+  return groups;
+}
+
+/** 解析并规范化配置（兼容旧版纯 URL 字符串与 {urls,...}），无有效代理时返回 null */
 function parseProxyConfig(raw: string | null | undefined): ProxyConfig | null {
   const trimmed = raw?.trim();
   if (!trimmed) return null;
@@ -100,41 +223,28 @@ function parseProxyConfig(raw: string | null | undefined): ProxyConfig | null {
 }
 
 function normalizeConfig(input: Record<string, unknown>): ProxyConfig | null {
-  const rawUrls = Array.isArray(input.urls) ? input.urls : [];
-  const urls: string[] = [];
-  for (const item of rawUrls) {
-    if (typeof item !== "string") continue;
-    const u = item.trim();
-    if (!u) continue;
-    // 协议 + host 双重校验：http://（空 host）会让 ProxyAgent 在请求期抛错
-    if (!/^https?:\/\//i.test(u) || !isValidHttpUrl(u)) {
-      console.error(
-        `[upstream-proxy] 不支持的代理地址（仅支持 http/https 且需含主机名），已忽略: ${u.slice(0, 40)}...`
-      );
-      continue;
-    }
-    if (!urls.includes(u)) urls.push(u);
-  }
-  if (urls.length === 0) return null;
+  const legacyUrls = normalizeUrls(input.urls);
+  const groups = normalizeGroups(input.groups, legacyUrls);
+  if (groups.length === 0) return null;
 
   const platformIds = Array.isArray(input.platformIds)
     ? [...new Set(input.platformIds.filter((p): p is string => typeof p === "string" && p.length > 0))]
     : [];
 
+  // 平台绑定组：仅保留绑定到已存在组的映射（绑定失效时路由回退默认组）
+  const groupNames = new Set(groups.map((g) => g.name));
+  const platformGroup: Record<string, string> = {};
+  if (input.platformGroup && typeof input.platformGroup === "object" && !Array.isArray(input.platformGroup)) {
+    for (const [pid, groupName] of Object.entries(input.platformGroup as Record<string, unknown>)) {
+      if (!pid || typeof groupName !== "string" || !groupNames.has(groupName)) continue;
+      platformGroup[pid] = groupName;
+    }
+  }
+
   let healthCheckUrl = typeof input.healthCheckUrl === "string" ? input.healthCheckUrl.trim() : "";
   if (!isValidHttpUrl(healthCheckUrl)) healthCheckUrl = DEFAULT_PROXY_HEALTH_CHECK_URL;
 
-  return { urls, platformIds, healthCheckUrl };
-}
-
-/** http(s) URL 且含主机名校验（new URL 解析 + hostname 非空） */
-function isValidHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return /^https?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
-  } catch {
-    return false;
-  }
+  return { groups, platformIds, platformGroup, healthCheckUrl };
 }
 
 /** 解析健康度记录（容忍脏数据：非法条目丢弃） */
@@ -161,10 +271,32 @@ function parseHealthMap(raw: string | null | undefined): ProxyHealthMap {
   }
 }
 
-/**
- * 读取代理配置（带缓存：TTL 内先用 configs.updatedAt 做廉价失效检查，
- * 管理后台保存后立即生效）
- */
+/** 解析拉取结果记录（容忍脏数据：组值非字符串数组的条目丢弃） */
+function parsePoolMap(raw: string | null | undefined): Record<string, string[]> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, string[]> = {};
+    for (const [groupName, urls] of Object.entries(parsed)) {
+      if (!Array.isArray(urls)) continue;
+      // 用 normalizeProxyLine 校验合法性：带非 http(s) 协议头的行与无 host 的行一律丢弃
+      const cleaned = [
+        ...new Set(
+          urls.filter((u): u is string => typeof u === "string" && normalizeProxyLine(u) !== null)
+        ),
+      ];
+      if (cleaned.length > 0) map[groupName] = cleaned;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+// ===== 缓存读写（config / pool / health）=====
+
+/** 读取代理配置（带缓存：TTL 内先用 configs.updatedAt 做廉价失效检查，管理后台保存后立即生效） */
 async function readProxyConfig(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -202,6 +334,66 @@ async function readProxyConfig(
   }
   lastConfigRefresh = now;
   return cachedConfig;
+}
+
+/** 读取拉取结果（缓存模式与配置一致） */
+async function readProxyPool(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<Record<string, string[]>> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const now = Date.now();
+
+  if (lastPoolRefresh !== 0 && now - lastPoolRefresh < CACHE_TTL) {
+    try {
+      const meta = await prisma.configs.findFirst({
+        where: { key: UPSTREAM_PROXY_POOL_KEY },
+        select: { updatedAt: true },
+      });
+      // 行缺失时 meta?.updatedAt 为 undefined，归一到 null 再比较（同 readProxyConfig）
+      if ((meta?.updatedAt ?? null) === cachedPoolUpdatedAt) return cachedPool ?? {};
+    } catch (err) {
+      console.error("[upstream-proxy] 拉取结果失效检查失败，使用缓存:", err);
+      return cachedPool ?? {};
+    }
+  }
+
+  try {
+    const row = await prisma.configs.findFirst({
+      where: { key: UPSTREAM_PROXY_POOL_KEY },
+      select: { value: true, updatedAt: true },
+    });
+    cachedPool = parsePoolMap(row?.value ?? null);
+    cachedPoolUpdatedAt = row?.updatedAt ?? null;
+  } catch (err) {
+    console.error("[upstream-proxy] 读取拉取结果失败:", err);
+    cachedPool = null;
+    cachedPoolUpdatedAt = null;
+  }
+  lastPoolRefresh = now;
+  return cachedPool ?? {};
+}
+
+/** 写入拉取结果并同步内存缓存 */
+async function writeProxyPool(
+  db: D1Database | Database,
+  env: WorkerEnv | undefined,
+  pool: Record<string, string[]>
+): Promise<void> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const now = Math.floor(Date.now() / 1000);
+  await prisma.configs.upsert({
+    where: { key: UPSTREAM_PROXY_POOL_KEY },
+    create: {
+      id: crypto.randomUUID(),
+      key: UPSTREAM_PROXY_POOL_KEY,
+      value: JSON.stringify(pool),
+      updatedAt: now,
+    },
+    update: { value: JSON.stringify(pool), updatedAt: now },
+  });
+  cachedPool = pool;
+  cachedPoolUpdatedAt = now;
 }
 
 /** 读取健康度记录（缓存模式与配置一致） */
@@ -264,6 +456,8 @@ async function writeProxyHealth(
   cachedHealthUpdatedAt = now;
 }
 
+// ===== ProxyAgent 池 =====
+
 /** 获取/创建 url 对应的 ProxyAgent（池化复用） */
 async function getAgent(url: string): Promise<Dispatcher> {
   let agent = proxyAgents.get(url);
@@ -325,11 +519,189 @@ async function checkOneProxy(
   }
 }
 
+/** 收集全部组的代理候选（拉取结果 ∪ 手动代理，去重） */
+function collectAllGroupUrls(config: ProxyConfig, pool: Record<string, string[]>): string[] {
+  const urls = new Set<string>();
+  for (const group of config.groups) {
+    for (const u of group.urls) urls.add(u);
+    for (const u of pool[group.name] ?? []) urls.add(u);
+  }
+  return [...urls];
+}
+
+/** 目标组选择：平台绑定优先，未绑定走默认组（第一组） */
+function resolveTargetGroup(config: ProxyConfig, platformId: string | undefined): ProxyGroupConfig {
+  if (platformId && config.platformGroup[platformId]) {
+    const bound = config.groups.find((g) => g.name === config.platformGroup[platformId]);
+    if (bound) return bound;
+  }
+  return config.groups[0];
+}
+
+// ===== 拉取 =====
+
+/** 流式限量读取响应体，超过上限立即抛错，防止超大响应全量进内存 */
+async function readLimitedText(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) {
+    const text = await res.text();
+    if (text.length > maxBytes) throw new Error("拉取源响应过大");
+    return text;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value?.byteLength ?? 0;
+      if (received > maxBytes) throw new Error("拉取源响应过大");
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return text + decoder.decode();
+}
+
+/** 从单个源地址拉取代理列表（每行一个，兼容裸 host:port；非法行忽略） */
+async function pullOneSource(sourceUrl: string): Promise<string[]> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PULL_TIMEOUT_MS);
+  try {
+    const res = await fetch(sourceUrl, { signal: controller.signal, redirect: "follow" });
+    if (!res.ok) throw new Error(`拉取源返回 HTTP ${res.status}`);
+    const text = await readLimitedText(res, PULL_MAX_BYTES);
+    const urls: string[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const u = normalizeProxyLine(line);
+      if (u && !urls.includes(u)) urls.push(u);
+    }
+    return urls;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 拉取各组的代理列表（cron proxy-pull 与管理页「立即拉取」共用）
+ *
+ * 状态同步（以最新拉取列表为准）：
+ * - 交集（两次拉取都有）：健康表记录保留（status 切换为 ok = 恢复在池，
+ *   failCount/延迟等历史保留），进程内黑名单/计数清除；
+ * - 新增：不写健康表，由健康检查任务探测后记录；
+ * - 移除：健康表记录、进程内黑名单、ProxyAgent 连接一并清理；
+ * - 拉取失败或结果为空：沿用旧列表（避免源短暂异常清空代理池），记 error。
+ */
+export async function pullProxyGroups(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<Record<string, ProxyPullGroupResult>> {
+  // 与 getUpstreamProxy 相同的部署门控：非 Docker 部署不创建代理/写库
+  if (process.env.DEPLOY_PLATFORM !== "docker") return {};
+
+  const config = await readProxyConfig(db, env);
+  if (!config) return {};
+  const pullGroups = config.groups.filter((g) => g.sourceUrl.length > 0);
+  if (pullGroups.length === 0) return {};
+
+  const prevPool = await readProxyPool(db, env);
+  const prevHealth = await readProxyHealth(db, env);
+  const nextPool: Record<string, string[]> = { ...prevPool };
+  const nextHealth: ProxyHealthMap = { ...prevHealth };
+  const results: Record<string, ProxyPullGroupResult> = {};
+
+  for (const group of pullGroups) {
+    const prevUrls = prevPool[group.name] ?? [];
+    let fetched: string[];
+    let error: string | undefined;
+    try {
+      fetched = await pullOneSource(group.sourceUrl);
+      if (fetched.length === 0) {
+        // 空结果按异常处理：保留旧列表，防止源偶发空响应清空代理池
+        error = "empty";
+        fetched = prevUrls;
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      fetched = prevUrls;
+    }
+    fetched = [...new Set(fetched)];
+
+    const total = [...new Set([...fetched, ...group.urls])].length;
+
+    if (error) {
+      // 拉取失败/空结果：沿用旧列表，且不改变任何健康状态——源故障与
+      // 代理本身的连通性无关，不应误"恢复"被惩罚中的代理
+      if (fetched.length > 0) nextPool[group.name] = fetched;
+      else delete nextPool[group.name];
+      results[group.name] = { pulled: 0, total, added: 0, removed: 0, kept: 0, error };
+      continue;
+    }
+
+    const prevSet = new Set(prevUrls);
+    const nextSet = new Set(fetched);
+    const kept = prevUrls.filter((u) => nextSet.has(u));
+    const added = fetched.filter((u) => !prevSet.has(u));
+    const removed = prevUrls.filter((u) => !nextSet.has(u));
+
+    // 交集：保留健康度记录，状态切换为 ok（最新拉取列表确认其存在 = 恢复在池），
+    // 清除进程内黑名单与计数，真实连通性由后续健康检查重新判定
+    for (const u of kept) {
+      const entry = nextHealth[u];
+      if (entry) entry.status = "ok"; // failCount/延迟等历史保留，展示用
+      unhealthyUrls.delete(u);
+      proxyFailCounts.set(u, 0);
+    }
+    // 移除：健康记录随代理一起删除，进程内状态同步清理
+    for (const u of removed) {
+      delete nextHealth[u];
+      unhealthyUrls.delete(u);
+      proxyFailCounts.delete(u);
+    }
+
+    if (fetched.length > 0) nextPool[group.name] = fetched;
+    else delete nextPool[group.name];
+    results[group.name] = {
+      pulled: added.length,
+      total,
+      added: added.length,
+      removed: removed.length,
+      kept: kept.length,
+    };
+  }
+
+  // 组被删除/重命名后清理残留键，避免孤儿组池数据长期滞留
+  const groupNames = new Set(config.groups.map((g) => g.name));
+  for (const k of Object.keys(nextPool)) {
+    if (!groupNames.has(k)) delete nextPool[k];
+  }
+
+  try {
+    await writeProxyPool(db, env, nextPool);
+  } catch (err) {
+    console.error("[upstream-proxy] 拉取结果写入失败:", err);
+  }
+  try {
+    await writeProxyHealth(db, env, nextHealth);
+  } catch (err) {
+    console.error("[upstream-proxy] 拉取后健康状态写入失败:", err);
+  }
+
+  // 释放被移除代理的连接（fire-and-forget close，安全）
+  await releaseStaleAgents(new Set(collectAllGroupUrls(config, nextPool)));
+  return results;
+}
+
+// ===== 请求路由 =====
+
 /**
  * 选择出站代理（无代理配置/非 Docker 部署/平台不在白名单时返回 null）
  *
- * 多代理按 round-robin 轮询；健康度异常（表记录 fail 或进程内连续失败
- * 达阈值）的代理跳过；全部异常时回退全部代理轮询并告警。
+ * 组选择：平台绑定组优先；未绑定的白名单平台走默认组（第一组）。
+ * 组内多代理按 round-robin 轮询；健康度异常（表记录 fail 或进程内连续
+ * 失败达阈值）的代理跳过；全部异常时回退组内全部代理轮询并告警。
  * 调用方应把返回值注入上游 fetch 的 init.dispatcher（undici 扩展字段），
  * 并在网络层失败时用返回的 url 调用 markProxyFailure 回标记。
  */
@@ -349,16 +721,32 @@ export async function getUpstreamProxy(
   }
 
   // 平台白名单：空列表 = 所有平台经代理；非空时仅列表内平台经代理，
-  // 未传 platformId 的调用方无法判断归属，按不在名单内处理（直连）
-  if (config.platformIds.length > 0 && (!platformId || !config.platformIds.includes(platformId))) {
+  // 未传 platformId 的调用方无法判断归属，按不在名单内处理（直连）。
+  // 已绑定组的平台隐含走代理（绑定本身即声明），无需重复加入白名单
+  const boundGroup = platformId ? config.platformGroup[platformId] : undefined;
+  if (
+    config.platformIds.length > 0 &&
+    !boundGroup &&
+    (!platformId || !config.platformIds.includes(platformId))
+  ) {
     return { dispatcher: null, url: null };
   }
 
-  // 保持代理池与配置集合同步
-  await releaseStaleAgents(new Set(config.urls));
+  const group = resolveTargetGroup(config, platformId);
+  const pool = await readProxyPool(db, env);
+  const allUrls = collectAllGroupUrls(config, pool);
+  const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
+  if (groupUrls.length === 0) {
+    // 组内无代理（如拉取尚未成功）：返回直连，同时保持代理池与其他组同步
+    await releaseStaleAgents(new Set(allUrls));
+    return { dispatcher: null, url: null };
+  }
+
+  // 保持代理池与全部组配置集合同步（跨组复用连接）
+  await releaseStaleAgents(new Set(allUrls));
 
   const health = await readProxyHealth(db, env);
-  let candidates = config.urls.filter(
+  let candidates = groupUrls.filter(
     (url) => health[url]?.status !== "fail" && !unhealthyUrls.has(url)
   );
   if (candidates.length === 0) {
@@ -370,7 +758,7 @@ export async function getUpstreamProxy(
       console.warn("[upstream-proxy] 所有代理健康度异常，回退全部代理轮询");
       lastAllUnhealthyWarn = now;
     }
-    candidates = config.urls;
+    candidates = groupUrls;
   }
 
   const url = candidates[roundRobinIndex % candidates.length];
@@ -423,11 +811,15 @@ export async function runProxyHealthCheck(
   const config = await readProxyConfig(db, env);
   if (!config) return {};
 
+  const pool = await readProxyPool(db, env);
+  const allUrls = collectAllGroupUrls(config, pool);
+  if (allUrls.length === 0) return {};
+
   const prev = await readProxyHealth(db, env);
   const results: ProxyHealthMap = {};
 
   await Promise.allSettled(
-    config.urls.map(async (url) => {
+    allUrls.map(async (url) => {
       const { ok, latencyMs } = await checkOneProxy(url, config.healthCheckUrl);
       const prevEntry = prev[url];
       const failCount = ok ? 0 : (prevEntry?.failCount ?? 0) + 1;
@@ -447,10 +839,10 @@ export async function runProxyHealthCheck(
 
   try {
     // 合并写入：健康检查与 markProxyFailure 可能并发读写健康表（各自读改写
-    // 整表），保留 prev 中仍属于当前配置、但本次未生成结果的条目，避免
+    // 整表），保留 prev 中仍属于当前候选、但本次未生成结果的条目，避免
     // 全表丢弃性覆盖（进程内集合才是轮询判定的权威，表数据为展示与重启恢复）
     const merged: ProxyHealthMap = {};
-    for (const url of config.urls) merged[url] = results[url] ?? prev[url];
+    for (const url of allUrls) merged[url] = results[url] ?? prev[url];
     await writeProxyHealth(db, env, merged);
   } catch (err) {
     console.error("[upstream-proxy] 健康度结果写入失败:", err);

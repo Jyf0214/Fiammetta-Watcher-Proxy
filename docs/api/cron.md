@@ -13,6 +13,7 @@ FWP 提供定时任务端点，用于系统维护。触发机制因部署方式�
 | `GET/POST /api/cron/key-reset` | Key 用量重置 | 每小时 | 按周期重置 Key 的月度/日度用量计数器（仅在周期开始时实际清零） |
 | `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据 |
 | `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 按需 | 检查出站代理连通性（仅 Docker 部署配置了出站代理时生效） |
+| `GET/POST /api/cron/proxy-pull` | 出站代理列表拉取 | 每小时 | 从各代理组的拉取地址拉取最新代理列表（仅 Docker 部署配置了拉取源的组生效） |
 
 ## 认证
 
@@ -76,6 +77,10 @@ curl -X GET https://your-domain/api/cron/log-archive \
 
 # 出站代理健康检查（仅 Docker 部署配置了出站代理时使用）
 curl -X GET https://your-domain/api/cron/proxy-health \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# 出站代理列表拉取（仅 Docker 部署配置了拉取源的组使用）
+curl -X GET https://your-domain/api/cron/proxy-pull \
   -H "Authorization: Bearer your-CRON_SECRET"
 ```
 

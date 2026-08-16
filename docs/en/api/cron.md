@@ -13,6 +13,7 @@ FWP provides scheduled task endpoints for system maintenance. How they are trigg
 | `GET/POST /api/cron/key-reset` | Key Usage Reset | Hourly | Reset key monthly/daily usage counters (only cleared when the period starts) |
 | `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics |
 | `GET/POST /api/cron/proxy-health` | Outbound proxy health check | As needed | Check outbound proxy connectivity (only active on Docker deployments with a proxy configured) |
+| `GET/POST /api/cron/proxy-pull` | Outbound proxy list pull | Hourly | Pull the latest proxy list from each group's source URL (only active for groups with a pull source on Docker deployments) |
 
 ## Authentication
 
@@ -76,6 +77,10 @@ curl -X GET https://your-domain/api/cron/log-archive \
 
 # Outbound proxy health check (only for Docker deployments with a proxy configured)
 curl -X GET https://your-domain/api/cron/proxy-health \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# Outbound proxy list pull (only for groups with a pull source on Docker deployments)
+curl -X GET https://your-domain/api/cron/proxy-pull \
   -H "Authorization: Bearer your-CRON_SECRET"
 ```
 
