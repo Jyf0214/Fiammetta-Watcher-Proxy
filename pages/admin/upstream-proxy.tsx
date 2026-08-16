@@ -163,6 +163,19 @@ function isProxyLineValid(line: string): boolean {
   }
 }
 
+/** 展示用代理地址脱敏：剥离 URL 中的 user:pass 凭据（健康列表仅展示，匹配仍用完整 URL）。
+ *  用正则而非 URL 序列化，避免剥离后补尾斜杠导致展示与真实地址不一致 */
+function maskProxyUrl(url: string): string {
+  return url.replace(/\/\/[^@\s]+@/, "//***@");
+}
+
+/** 健康检查时间展示：unix 秒 → 「MM-DD HH:mm」（本地时区） */
+function formatChecked(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** 组内全部候选地址（拉取结果 ∪ 手动代理，规范化 + 去重，供展示与健康查询共用） */
 function collectGroupUrls(poolUrls: string[], manualUrls: string[]): string[] {
   return [...new Set([...poolUrls, ...manualUrls].map(normalizeProxyUrl))];
@@ -272,7 +285,8 @@ export default function UpstreamProxyPage() {
       })),
       platformIds,
       platformGroup,
-      healthCheckUrl: checkUrlTrimmed || DEFAULT_CHECK_URL,
+      // 留空时不写字段，由后端 normalizeConfig 填充默认探测地址（与后端默认值保持单一来源）
+      ...(checkUrlTrimmed ? { healthCheckUrl: checkUrlTrimmed } : {}),
     });
   };
 
@@ -397,6 +411,28 @@ export default function UpstreamProxyPage() {
 
   const platformOptions = (platforms ?? []).map((p) => ({ label: p.name, value: p.id }));
 
+  /** 健康面板统计：全部组候选代理的 ok/fail/未检查计数 */
+  const allHealthUrls = groups.flatMap((g) =>
+    collectGroupUrls(poolMap[g.name] ?? [], parseUrlsText(g.urlsText))
+  );
+  const healthStats = {
+    total: allHealthUrls.length,
+    ok: allHealthUrls.filter((u) => healthMap[u]?.status === "ok").length,
+    fail: allHealthUrls.filter((u) => healthMap[u]?.status === "fail").length,
+    none: allHealthUrls.filter((u) => !healthMap[u]).length,
+  };
+
+  /** 健康状态文案（含检查时间；组内列表与健康面板共用） */
+  const renderHealthText = (status: "ok" | "fail" | "none", entry?: ProxyHealthEntry): string => {
+    if (status === "ok" && entry) {
+      return `${t("upstreamProxyStatusOk")} · ${entry.latencyMs}ms${entry.checkedAt > 0 ? ` · ${t("upstreamProxyCheckedAt")}${formatChecked(entry.checkedAt)}` : ""}`;
+    }
+    if (status === "fail" && entry) {
+      return `${t("upstreamProxyStatusFail")} · ${entry.failCount}${t("upstreamProxyFailCountSuffix")}${entry.checkedAt > 0 ? ` · ${t("upstreamProxyCheckedAt")}${formatChecked(entry.checkedAt)}` : ""}`;
+    }
+    return t("upstreamProxyStatusNone");
+  };
+
   return (
     <AdminLayout>
       <PageContainer>
@@ -419,6 +455,23 @@ export default function UpstreamProxyPage() {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                {t("upstreamProxyPlatformsLabel")}
+              </label>
+              <Select
+                mode="multiple"
+                value={platformIds}
+                onChange={(v: string[]) => setPlatformIds(v)}
+                options={platformOptions}
+                placeholder={t("upstreamProxyPlatformsPlaceholder")}
+                allowClear
+                className="w-full"
+                maxTagCount={4}
+              />
+              <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyPlatformsHelp")}</p>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
                 {t("upstreamProxyGroupsLabel")}
               </label>
@@ -430,6 +483,19 @@ export default function UpstreamProxyPage() {
                       key={g.id}
                       className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 space-y-3"
                     >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                          {t("upstreamProxyGroupCardTitle", { n: idx + 1 })}
+                        </span>
+                        <Button
+                          variant="dangerGhost"
+                          size="sm"
+                          onClick={() => removeGroup(idx)}
+                          icon={<Trash2 size={14} />}
+                        >
+                          {t("upstreamProxyRemoveGroup")}
+                        </Button>
+                      </div>
                       <div className="flex items-center gap-2">
                         <Input
                           value={g.name}
@@ -443,14 +509,6 @@ export default function UpstreamProxyPage() {
                           placeholder={t("upstreamProxySourceUrlPlaceholder")}
                           allowClear
                         />
-                        <Button
-                          variant="dangerGhost"
-                          size="sm"
-                          onClick={() => removeGroup(idx)}
-                          icon={<Trash2 size={14} />}
-                        >
-                          {t("upstreamProxyRemoveGroup")}
-                        </Button>
                       </div>
                       <p className="text-xs text-zinc-400 -mt-1">{t("upstreamProxySourceUrlHelp")}</p>
 
@@ -506,15 +564,11 @@ export default function UpstreamProxyPage() {
                                           : "bg-zinc-300 dark:bg-zinc-600"
                                     }`}
                                   />
-                                  <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate">
-                                    {url}
+                                  <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
+                                    {maskProxyUrl(url)}
                                   </span>
-                                  <span className="ml-auto shrink-0 text-zinc-400">
-                                    {status === "ok"
-                                      ? `${t("upstreamProxyStatusOk")} · ${entry.latencyMs}ms`
-                                      : status === "fail"
-                                        ? `${t("upstreamProxyStatusFail")} · ${entry.failCount}${t("upstreamProxyFailCountSuffix")}`
-                                        : t("upstreamProxyStatusNone")}
+                                  <span className="ml-auto shrink-0 text-zinc-400 text-right">
+                                    {renderHealthText(status, entry)}
                                   </span>
                                 </li>
                               );
@@ -529,23 +583,6 @@ export default function UpstreamProxyPage() {
                   {t("upstreamProxyAddGroup")}
                 </Button>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                {t("upstreamProxyPlatformsLabel")}
-              </label>
-              <Select
-                mode="multiple"
-                value={platformIds}
-                onChange={(v: string[]) => setPlatformIds(v)}
-                options={platformOptions}
-                placeholder={t("upstreamProxyPlatformsPlaceholder")}
-                allowClear
-                className="w-full"
-                maxTagCount={4}
-              />
-              <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyPlatformsHelp")}</p>
             </div>
 
             <div>
@@ -593,36 +630,39 @@ export default function UpstreamProxyPage() {
                 {groups.length === 0 ? (
                   <p className="text-xs text-zinc-400">{t("upstreamProxyHealthEmpty")}</p>
                 ) : (
-                  <ul className="space-y-1.5">
-                    {groups.flatMap((g) => {
-                      const groupUrls = collectGroupUrls(poolMap[g.name] ?? [], parseUrlsText(g.urlsText));
-                      return groupUrls.map((url) => {
-                        const entry = healthMap[url];
-                        const status = entry?.status ?? "none";
-                        return (
-                          <li key={`${g.name}:${url}`} className="flex items-center gap-2 text-xs">
-                            <span
-                              className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                                status === "ok"
-                                  ? "bg-emerald-500"
-                                  : status === "fail"
-                                    ? "bg-rose-500"
-                                    : "bg-zinc-300 dark:bg-zinc-600"
-                              }`}
-                            />
-                            <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate">{url}</span>
-                            <span className="ml-auto shrink-0 text-zinc-400">
-                              {status === "ok"
-                                ? `${t("upstreamProxyStatusOk")} · ${entry.latencyMs}ms`
-                                : status === "fail"
-                                  ? `${t("upstreamProxyStatusFail")} · ${entry.failCount}${t("upstreamProxyFailCountSuffix")}`
-                                  : t("upstreamProxyStatusNone")}
-                            </span>
-                          </li>
-                        );
-                      });
-                    })}
-                  </ul>
+                  <>
+                    <p className="text-xs text-zinc-400 mb-2">
+                      {t("upstreamProxyHealthStats", healthStats)}
+                    </p>
+                    <ul className="space-y-1.5">
+                      {groups.flatMap((g) => {
+                        const groupUrls = collectGroupUrls(poolMap[g.name] ?? [], parseUrlsText(g.urlsText));
+                        return groupUrls.map((url) => {
+                          const entry = healthMap[url];
+                          const status = entry?.status ?? "none";
+                          return (
+                            <li key={`${g.name}:${url}`} className="flex items-center gap-2 text-xs">
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full shrink-0 ${
+                                  status === "ok"
+                                    ? "bg-emerald-500"
+                                    : status === "fail"
+                                      ? "bg-rose-500"
+                                      : "bg-zinc-300 dark:bg-zinc-600"
+                                }`}
+                              />
+                              <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
+                                {maskProxyUrl(url)}
+                              </span>
+                              <span className="ml-auto shrink-0 text-zinc-400 text-right">
+                                {renderHealthText(status, entry)}
+                              </span>
+                            </li>
+                          );
+                        });
+                      })}
+                    </ul>
+                  </>
                 )}
               </div>
             )}

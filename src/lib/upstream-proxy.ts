@@ -137,6 +137,21 @@ function isValidHttpUrl(value: string): boolean {
   }
 }
 
+/** 日志用代理地址脱敏：剥离 URL 中的 user:pass 凭据，防止凭据进入服务端日志 */
+function maskProxyUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.username && !parsed.password) return url;
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString();
+  } catch {
+    // 非法地址（可能含畸形凭据片段）：按 `//user:pass@` 特征打码；
+    // [^@\s] 允许密码含 @，避免打码后泄漏剩余凭据片段
+    return url.replace(/\/\/[^@\s]+@/, "//***@");
+  }
+}
+
 /** 单行代理地址规范化：兼容裸 host:port（自动补 http://）与 http(s):// 前缀；非法行返回 null */
 function normalizeProxyLine(lineRaw: string): string | null {
   const line = lineRaw.trim();
@@ -158,7 +173,7 @@ function normalizeUrls(raw: unknown): string[] {
     const u = normalizeProxyLine(item);
     if (!u) {
       console.error(
-        `[upstream-proxy] 不支持的代理地址（仅支持 http/https 且需含主机名），已忽略: ${item.slice(0, 40)}...`
+        `[upstream-proxy] 不支持的代理地址（仅支持 http/https 且需含主机名），已忽略: ${maskProxyUrl(item).slice(0, 60)}`
       );
       continue;
     }

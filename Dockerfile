@@ -13,6 +13,10 @@ RUN addgroup --system --gid 1001 nodejs && \
 ARG DB_TYPE=pg
 ENV DB_TYPE=$DB_TYPE
 
+# 部署平台：构建期内联 NEXT_PUBLIC_DEPLOY_PLATFORM（前端展示/门控用），
+# 必须与运行阶段一致，否则管理页会显示“当前部署平台：—”
+ENV DEPLOY_PLATFORM=docker
+
 # 安装依赖（--ignore-scripts 跳过 prepare 钩子，Prisma Client 由 prebuild 钩子生成）
 # --legacy-peer-deps：项目必须 legacy 模式（React 19 与 vitepress 链 @docsearch/react 的 peer <19 冲突）。
 # 容器内无 .npmrc（本文件未复制它），strict 模式下 npm ci 的 lockfile 校验会报 EUSAGE
