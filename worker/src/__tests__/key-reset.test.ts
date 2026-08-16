@@ -98,7 +98,7 @@ describe("handleScheduledReset", () => {
       expect.objectContaining({
         where: { id: "key-1" },
         data: expect.objectContaining({
-          usedTokens: 0n,
+          usedTokens: 0,
         }),
       })
     );

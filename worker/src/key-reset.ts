@@ -92,7 +92,9 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
       await prisma.apiKeys.update({
         where: { id: key.id },
         data: {
-          usedTokens: 0n,
+          // Next.js SWC 构建 target 低于 ES2020 不支持 0n 字面量；number 写入
+          // Prisma BigInt 字段自动转换，运行时读出仍为 bigint
+          usedTokens: 0,
           updatedAt: currentTime,
         },
       });
