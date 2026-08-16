@@ -92,7 +92,7 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
       await prisma.apiKeys.update({
         where: { id: key.id },
         data: {
-          usedTokens: 0,
+          usedTokens: 0n,
           updatedAt: currentTime,
         },
       });

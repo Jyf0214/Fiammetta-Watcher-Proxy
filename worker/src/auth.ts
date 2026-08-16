@@ -19,7 +19,7 @@ export interface ApiKeyRecord {
   id: string;
   key: string;
   name: string;
-  usedTokens: number;
+  usedTokens: bigint;
   rpmLimit: number | null;
   tpmLimit: number | null;
   callLimit: number | null;
@@ -122,7 +122,7 @@ export async function validateApiKey(
 
     // 检查 Token 总额度限制（usedTokens 达到 tokenLimit 后拒绝新请求；0 表示不设限制）
     const effectiveTokenLimit = apiKey.tokenLimit ?? null;
-    if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && apiKey.usedTokens >= effectiveTokenLimit) {
+    if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && Number(apiKey.usedTokens) >= effectiveTokenLimit) {
       return {
         error: Response.json(
           { error: { message: "API Key Token 额度已达上限", type: "rate_limit_error" } },

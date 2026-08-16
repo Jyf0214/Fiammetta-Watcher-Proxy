@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "key" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "used_tokens" INTEGER NOT NULL DEFAULT 0,
+    "used_tokens" BIGINT NOT NULL DEFAULT 0,
     "token_limit" INTEGER,
     "rpm_limit" INTEGER,
     "tpm_limit" INTEGER,

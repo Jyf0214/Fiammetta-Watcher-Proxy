@@ -20,7 +20,7 @@ function makeKey(overrides: Record<string, unknown> = {}) {
     id: "key-id",
     key: "sk-test",
     name: "test",
-    usedTokens: 0,
+    usedTokens: 0n,
     tokenLimit: null,
     rpmLimit: null,
     tpmLimit: null,
@@ -48,25 +48,25 @@ beforeEach(() => {
 
 describe("validateApiKey tokenLimit 检查", () => {
   it("tokenLimit 为 null 时不限制（即使 usedTokens 很大）", async () => {
-    mockFindFirst(makeKey({ usedTokens: 99999, tokenLimit: null }));
+    mockFindFirst(makeKey({ usedTokens: 99999n, tokenLimit: null }));
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("apiKey" in result).toBe(true);
   });
 
   it("tokenLimit 为 0 时不限制（0 表示不设限制）", async () => {
-    mockFindFirst(makeKey({ usedTokens: 99999, tokenLimit: 0 }));
+    mockFindFirst(makeKey({ usedTokens: 99999n, tokenLimit: 0 }));
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("apiKey" in result).toBe(true);
   });
 
   it("usedTokens 未达 tokenLimit 时放行", async () => {
-    mockFindFirst(makeKey({ usedTokens: 90, tokenLimit: 100 }));
+    mockFindFirst(makeKey({ usedTokens: 90n, tokenLimit: 100 }));
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("apiKey" in result).toBe(true);
   });
 
   it("usedTokens 恰好达到 tokenLimit 时返回 429", async () => {
-    mockFindFirst(makeKey({ usedTokens: 100, tokenLimit: 100 }));
+    mockFindFirst(makeKey({ usedTokens: 100n, tokenLimit: 100 }));
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("error" in result).toBe(true);
     if ("error" in result) {
@@ -77,7 +77,7 @@ describe("validateApiKey tokenLimit 检查", () => {
   });
 
   it("usedTokens 超过 tokenLimit 时返回 429", async () => {
-    mockFindFirst(makeKey({ usedTokens: 150, tokenLimit: 100 }));
+    mockFindFirst(makeKey({ usedTokens: 150n, tokenLimit: 100 }));
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("error" in result).toBe(true);
     if ("error" in result) {

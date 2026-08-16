@@ -85,7 +85,7 @@ describe("handleScheduledReset", () => {
         id: "key-1",
         name: "Test Key",
         resetPeriod: "daily",
-        usedTokens: 5000,
+        usedTokens: 5000n,
         status: "disabled",
         updatedAt: yesterdayTs,
       },
@@ -98,7 +98,7 @@ describe("handleScheduledReset", () => {
       expect.objectContaining({
         where: { id: "key-1" },
         data: expect.objectContaining({
-          usedTokens: 0,
+          usedTokens: 0n,
         }),
       })
     );
@@ -131,7 +131,7 @@ describe("handleScheduledReset", () => {
         id: "key-1",
         name: "Today Key",
         resetPeriod: "daily",
-        usedTokens: 1000,
+        usedTokens: 1000n,
         status: "active",
         updatedAt: nowTs,
       },
@@ -155,7 +155,7 @@ describe("handleScheduledReset", () => {
         id: "key-1",
         name: "Test Key",
         resetPeriod: "daily",
-        usedTokens: 5000,
+        usedTokens: 5000n,
         status: "active",
         updatedAt: yesterdayTs,
       },

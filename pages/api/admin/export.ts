@@ -202,7 +202,8 @@ export default async function handler(
 
     // 返回 JSON 文件下载
     const filename = `fwp-export-${exportType}-${new Date(now * 1000).toISOString().slice(0, 10)}.json`;
-    const jsonContent = JSON.stringify(exportData, null, 2);
+    const jsonContent = JSON.stringify(exportData, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value, 2);
 
     // 导出含明文密钥，禁止浏览器/CDN 缓存
     res.setHeader("Cache-Control", "no-store");

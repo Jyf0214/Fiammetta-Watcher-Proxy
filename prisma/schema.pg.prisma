@@ -68,7 +68,7 @@ model apiKeys {
   id              String   @id
   key             String   @unique
   name            String
-  usedTokens      Int      @default(0) @map("used_tokens")
+  usedTokens      BigInt   @default(0) @map("used_tokens")
   tokenLimit      Int?     @map("token_limit")
   rpmLimit        Int?     @map("rpm_limit")
   tpmLimit        Int?     @map("tpm_limit")

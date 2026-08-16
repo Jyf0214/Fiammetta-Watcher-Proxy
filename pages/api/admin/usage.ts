@@ -95,7 +95,7 @@ export default async function handler(
     );
 
     // 合并 Key 信息和统计数据
-    const result = keys.map((k: { id: string; name: string; key: string; status: string; tokenLimit: number | null; usedTokens: number; createdAt: number }) => {
+    const result = keys.map((k: { id: string; name: string; key: string; status: string; tokenLimit: number | null; usedTokens: bigint; createdAt: number }) => {
       const g = statsMap.get(k.id);
       const totalTokens = g?._sum.tokens ?? 0;
       const totalRequests = g?._count.id ?? 0;
@@ -116,7 +116,7 @@ export default async function handler(
         key: maskKey(k.key),
         status: k.status,
         tokenLimit: k.tokenLimit,
-        usedTokens: k.usedTokens,
+        usedTokens: Number(k.usedTokens),
         createdAt: k.createdAt,
         stats: {
           totalRequests,

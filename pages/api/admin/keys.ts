@@ -52,7 +52,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   try {
     const db = await createDb();
     const keys = await db.apiKeys.findMany({ orderBy: { createdAt: "desc" } });
-    const maskedKeys = keys.map((k) => ({ ...k, key: maskKey(k.key) }));
+    const maskedKeys = keys.map((k) => ({ ...k, key: maskKey(k.key), usedTokens: Number(k.usedTokens) }));
     return res.status(200).json({ success: true, data: maskedKeys, total: maskedKeys.length });
   } catch (err) {
     console.error("[GET /api/admin/keys] 获取 Key 列表失败:", err instanceof Error ? err.message : String(err));
@@ -129,7 +129,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       },
     });
 
-    return res.status(200).json({ success: true, data: newKey, message: "API Key 创建成功" });
+    return res.status(200).json({ success: true, data: { ...newKey, usedTokens: Number(newKey.usedTokens) }, message: "API Key 创建成功" });
   } catch (err) {
     console.error("[POST /api/admin/keys] 创建 Key 失败:", err instanceof Error ? err.message : String(err));
     return res.status(500).json({ success: false, error: { message: "创建 Key 失败", type: "server_error" } });

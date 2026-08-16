@@ -144,7 +144,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
       },
     });
 
-    return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key) }, message: "API Key 更新成功" });
+    return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key), usedTokens: Number(updated.usedTokens) }, message: "API Key 更新成功" });
   } catch (err) {
     console.error("[PUT /api/admin/keys/[id]] 更新失败:", err instanceof Error ? err.message : String(err));
     return res.status(500).json({ success: false, error: { message: "更新 API Key 失败", type: "server_error" } });

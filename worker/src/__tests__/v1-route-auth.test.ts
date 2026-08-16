@@ -26,7 +26,7 @@ function makeApiKey() {
     id: "key-id",
     key: "sk-test",
     name: "test",
-    usedTokens: 0,
+    usedTokens: 0n,
     rpmLimit: null,
     tpmLimit: null,
     callLimit: null,

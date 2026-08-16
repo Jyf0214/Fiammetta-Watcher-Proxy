@@ -54,7 +54,7 @@ const apiKey = {
   id: "key-id",
   key: "sk-client-key",
   name: "client",
-  usedTokens: 0,
+  usedTokens: 0n,
   rpmLimit: null,
   tpmLimit: null,
   callLimit: null,
