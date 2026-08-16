@@ -13,6 +13,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
 import { getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 const COOKIE_NAME = "admin_token";
 
@@ -298,18 +299,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 // ==================== POST — 管理员登录 ====================
 
 async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
+  // 登录会写入 Cookie 与审计日志，属于写操作：校验来源防 login CSRF
+  // （跨站表单伪造登录请求）；非生产环境无来源标识/本地开发放行
+  if (!checkCsrfOrigin(req, res)) return;
+
   const env = {
     JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
     ENVIRONMENT: process.env.ENVIRONMENT,
   };
-  if (!env.JWT_SECRET) return res.status(500).json({ success: false, error: "JWT_SECRET 环境变量未配置" });
+  // 未认证调用方不暴露部署/配置细节（JWT_SECRET 是否配置、最小长度、
+  // 管理员账号是否就绪），否则响应状态差异会成为配置状态枚举 oracle；
+  // 具体原因只写服务端日志
+  if (!env.JWT_SECRET) {
+    console.error("[POST /api/admin/auth] JWT_SECRET 环境变量未配置");
+    return res.status(500).json({ success: false, error: "服务器配置错误，请检查部署配置" });
+  }
   if (env.JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
-    return res.status(500).json({ success: false, error: `JWT_SECRET 强度不足：至少需要 ${MIN_JWT_SECRET_LENGTH} 个字符` });
+    console.error(`[POST /api/admin/auth] JWT_SECRET 强度不足：至少需要 ${MIN_JWT_SECRET_LENGTH} 个字符`);
+    return res.status(500).json({ success: false, error: "服务器配置错误，请检查部署配置" });
   }
   if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD) {
-    return res.status(500).json({ success: false, error: "管理员账号未配置（ADMIN_USERNAME / ADMIN_PASSWORD）" });
+    console.error("[POST /api/admin/auth] 管理员账号未配置（ADMIN_USERNAME / ADMIN_PASSWORD）");
+    return res.status(500).json({ success: false, error: "服务器配置错误，请检查部署配置" });
   }
 
   try {
@@ -323,7 +336,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
       if (preCheck.count >= LOGIN_MAX_ATTEMPTS) {
         return res.status(429).json({
           success: false,
-          error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+          error: `登录尝试次数过多（${LOGIN_MAX_ATTEMPTS} 次/${LOGIN_WINDOW_MS / 60000} 分钟），请稍后再试`,
           resetAt: preCheck.resetAt,
         });
       }
@@ -346,7 +359,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
         if (dbLimit.limited) {
           return res.status(429).json({
             success: false,
-            error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+            error: `登录尝试次数过多（${LOGIN_MAX_ATTEMPTS} 次/${LOGIN_WINDOW_MS / 60000} 分钟），请稍后再试`,
             resetAt: dbLimit.resetAt,
           });
         }
@@ -419,7 +432,10 @@ async function handleGetAdmin(req: NextApiRequest, res: NextApiResponse) {
     JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME,
   };
-  if (!env.JWT_SECRET) return res.status(500).json({ success: false, error: "JWT_SECRET 环境变量未配置" });
+  if (!env.JWT_SECRET) {
+    console.error("[GET /api/admin/auth] JWT_SECRET 环境变量未配置");
+    return res.status(500).json({ success: false, error: "服务器配置错误，请检查部署配置" });
+  }
 
   try {
     const admin = await getAdmin(req, env);

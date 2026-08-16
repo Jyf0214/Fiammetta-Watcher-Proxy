@@ -43,7 +43,15 @@ const mockFindMany = vi.fn();
 const mockDeleteMany = vi.fn();
 const mockCreateMany = vi.fn();
 const mockGetDbKind = vi.fn();
-const mockTransaction = vi.fn(async (fn: (tx: any) => Promise<any>) => fn({}));
+const mockTransaction = vi.fn(async (fn: (tx: any) => Promise<any>) =>
+  fn({
+    platformModels: {
+      findMany: mockFindMany,
+      deleteMany: mockDeleteMany,
+      createMany: mockCreateMany,
+    },
+  })
+);
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     platforms: { findMany: mockFindMany },

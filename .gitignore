@@ -42,8 +42,9 @@ tsconfig.tsbuildinfo
 # OpenNext build output
 .open-next/
 
-# lite 构建门控临时目录（构建中断时可能残留）
+# 构建门控临时目录（构建中断时可能残留）
 .lite-gate-tmp/
+.build-gate-tmp/
 
 # EdgeOne CLI build output
 .edgeone/

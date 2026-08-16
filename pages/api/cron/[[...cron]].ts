@@ -21,6 +21,25 @@ const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) =
   "log-archive": runArchiveTask,
 };
 
+/** 常量时间字符串比较，防止通过响应时差枚举 CRON_SECRET（与 auth.ts 实现一致） */
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.length !== bufB.length) {
+    let result = bufA.length ^ bufB.length;
+    for (let i = 0; i < bufA.length; i++) {
+      result |= bufA[i] ^ (bufB[i % bufB.length] || 0);
+    }
+    return result === 0;
+  }
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET" && req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return res.status(405).json({ error: "Method Not Allowed" }); }
 
@@ -29,7 +48,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 403 消息不泄露 CRON_SECRET 配置细节与指引（未配置/错误头的状态码差异与文档约定一致）
     return res.status(403).json({ success: false, error: "Forbidden" });
   }
-  if (req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader !== "string" || !timingSafeStringEqual(authHeader, `Bearer ${secret}`)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const param = req.query.cron;
   const task = Array.isArray(param) ? param[0] : param;

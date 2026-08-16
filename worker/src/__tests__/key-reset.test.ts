@@ -2,12 +2,12 @@
  * key-reset.ts 定时重置测试
  *
  * 覆盖：
- * - getPeriodStart（daily / monthly / 未知值）
+ * - getPeriodStart（daily / monthly / never 返回 0）
  * - handleScheduledReset 批量重置逻辑
  *   - needsReset 判断（daily / monthly / never）
  *   - 重置 usedTokens → 0
- *   - disabled → active 状态恢复
- *   - 旧日志清理
+ *   - disabled 状态不被周期重置自动复活
+ *   - 仅清理保留期外日志
  *   - 平台异常状态恢复
  *
  * Mock @/lib/prisma 的 createDb
@@ -56,11 +56,9 @@ describe("getPeriodStart", () => {
     expect(result).toBe(Math.floor(start.getTime() / 1000));
   });
 
-  it("未知值按 monthly 处理", () => {
-    const result = getPeriodStart("unknown");
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    expect(result).toBe(Math.floor(start.getTime() / 1000));
+  it("never/未知值返回 0（不重置，窗口追溯到最早记录）", () => {
+    expect(getPeriodStart("never")).toBe(0);
+    expect(getPeriodStart("unknown")).toBe(0);
   });
 });
 
@@ -79,7 +77,7 @@ describe("handleScheduledReset", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it("daily Key 跨天时重置 usedTokens 并恢复 disabled→active", async () => {
+  it("daily Key 跨天时重置 usedTokens 且不恢复 disabled 状态", async () => {
     // 昨天更新的 daily key
     const yesterdayTs = Math.floor((Date.now() - 86400000) / 1000);
     mockFindMany.mockResolvedValueOnce([
@@ -101,10 +99,14 @@ describe("handleScheduledReset", () => {
         where: { id: "key-1" },
         data: expect.objectContaining({
           usedTokens: 0,
-          status: "active",
         }),
       })
     );
+    // disabled 是显式禁用状态，周期重置不得自动复活
+    const updateCall = mockUpdate.mock.calls.find(
+      (call) => call[0]?.where?.id === "key-1"
+    );
+    expect(updateCall![0].data.status).toBeUndefined();
   });
 
   it("never Key 不被查询（findMany where not never）", async () => {
@@ -146,7 +148,7 @@ describe("handleScheduledReset", () => {
     expect(apiUpdateCalls.length).toBe(0);
   });
 
-  it("重置时清理旧日志（deleteMany）", async () => {
+  it("不删除请求日志（保留期外日志由 log-archiver 归档时统一删除）", async () => {
     const yesterdayTs = Math.floor((Date.now() - 86400000) / 1000);
     mockFindMany.mockResolvedValueOnce([
       {
@@ -162,13 +164,9 @@ describe("handleScheduledReset", () => {
 
     await handleScheduledReset(mockDb);
 
-    expect(mockDeleteMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          keyId: "key-1",
-        }),
-      })
-    );
+    // key-reset 不承担日志删除：archiver 未运行时直接删明细会造成统计空洞
+    // （既不留在 request_logs 也不进 daily_stats），删除由归档任务全权负责
+    expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 
   it("平台 cooldown 过期时恢复为 healthy", async () => {

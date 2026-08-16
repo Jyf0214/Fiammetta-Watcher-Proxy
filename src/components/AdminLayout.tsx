@@ -22,6 +22,7 @@ import {
   Database,
   WifiOff,
   Settings,
+  Globe,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -45,6 +46,7 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor", order: 8 },
   { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system", order: 9 },
   { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 10 },
+  { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 11 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）
@@ -214,6 +216,7 @@ function TopHeader({
     "/admin/audit": "audit",
     "/admin/data-manager": "dataManager",
     "/admin/system-keys": "systemKeys",
+    "/admin/upstream-proxy": "upstreamProxy",
   };
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "dashboard";

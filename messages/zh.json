@@ -85,6 +85,7 @@
     "autoModelDesc": "配置自动模型 ID 和查看平台模型发现状态",
     "autoModelDiscovered": "已发现的模型",
     "requestTemplates": "请求模板",
+    "upstreamProxy": "出站代理",
     "dataManager": "数据管理",
     "dataManagerDesc": "导出和导入系统数据，支持备份和迁移",
     "systemKeys": "系统 API Key",
@@ -447,7 +448,17 @@
     "sysKeyCopied": "已复制到剪贴板",
     "sysKeyCopyFailed": "复制失败",
     "sysKeyLastUsed": "最后使用",
-    "sysKeyDeleteConfirm": "确认删除此系统 Key？"
+    "sysKeyDeleteConfirm": "确认删除此系统 Key？",
+    "upstreamProxyTitle": "出站代理",
+    "upstreamProxyDesc": "配置网关访问上游 API 时使用的代理服务器",
+    "upstreamProxyUrlLabel": "代理服务器地址",
+    "upstreamProxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "upstreamProxyUrlHelp": "支持 http/https 协议（如 http://127.0.0.1:7890），用于访问上游 API 时出网。留空保存可清除代理配置，恢复直连。",
+    "upstreamProxySaved": "代理配置已保存",
+    "upstreamProxyPlatform": "当前部署平台",
+    "upstreamProxyNotActive": "当前部署平台不支持出站代理，保存的配置将在 Docker 部署时生效",
+    "upstreamProxyActive": "出站代理已启用，上游请求将经代理服务器转发",
+    "upstreamProxyUrlInvalid": "代理地址必须以 http:// 或 https:// 开头"
   },
   "home": {
     "navFeatures": "功能",

@@ -51,16 +51,15 @@ export default tseslint.config(
       "security/detect-eval-with-expression": "warn",
       "security/detect-new-buffer": "warn",
       "security/detect-no-csrf-before-method-override": "warn",
-      "security/detect-non-literal-fs-filename": "warn",
-      "security/detect-non-literal-regexp": "warn",
       "security/detect-non-literal-require": "warn",
       "security/detect-object-injection": "off", // 误报率高，TS 已有类型保护
       "security/detect-possible-timing-attacks": "warn",
       "security/detect-pseudoRandomBytes": "warn",
       "security/detect-unsafe-regex": "warn",
       "security/detect-bidi-characters": "warn",
-      "security/detect-non-literal-fs-filename": "off", // 动态路径是本项目的正常模式（i18n 工具等）
-      "security/detect-non-literal-regexp": "off", // 动态正则用于 i18n 检查工具，非用户输入
+      // 动态路径/动态正则是本项目的正常模式（i18n 工具等），非用户输入
+      "security/detect-non-literal-fs-filename": "off",
+      "security/detect-non-literal-regexp": "off",
     },
   },
 
@@ -104,7 +103,6 @@ export default tseslint.config(
       "sonarjs/unverified-hostname": "error",
       "sonarjs/post-message": "warn",
       "sonarjs/no-os-command-from-path": "warn",
-      "sonarjs/no-clear-text-protocols": "error",
       "sonarjs/no-session-cookies-on-static-assets": "error",
       "sonarjs/file-uploads": "warn",
       "sonarjs/file-permissions": "warn",

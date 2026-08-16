@@ -12,6 +12,7 @@ import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { detectModelType } from "@/lib/detect-model-type";
+import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
 
 /** MySQL/TiDB 锁等待超时错误码 */
 const LOCK_WAIT_TIMEOUT_CODE = 1205;
@@ -51,21 +52,20 @@ function isLockWaitTimeout(err: unknown): boolean {
 async function executeWithRetry<T>(
   prisma: any,
   dbKind: string,
-  fn: () => Promise<T>,
+  fn: (tx: any) => Promise<T>,
   operationName: string
 ): Promise<T> {
   // D1 不支持事务，也不重试（D1 无锁等待超时问题）
   if (dbKind === "d1") {
-    return fn();
+    return fn(prisma);
   }
 
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // 非 D1 数据库使用事务
-      return await prisma.$transaction(async (_tx: any) => {
-        // 将 tx 绑定到 fn 的上下文（通过闭包）
-        return await fn();
+      // 非 D1 数据库使用事务：fn 内所有查询必须使用 tx（事务客户端），保证批量操作原子性
+      return await prisma.$transaction(async (tx: any) => {
+        return await fn(tx);
       });
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -299,28 +299,34 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
 
-      const response = await fetch(modelsUrl, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-        // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
-        redirect: "manual",
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        return res.status(502).json({
-          success: false,
-          error: `上游平台返回错误 (${response.status})`,
+      try {
+        // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
+        const dispatcher = await getUpstreamProxyDispatcher(db);
+        const response = await fetch(modelsUrl, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+          // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
+          redirect: "manual",
+          ...(dispatcher ? { dispatcher } : {}),
         });
-      }
 
-      const data = await response.json() as { data?: OpenAIModel[] };
-      upstreamModels = Array.isArray(data.data) ? data.data : [];
+        if (!response.ok) {
+          return res.status(502).json({
+            success: false,
+            error: `上游平台返回错误 (${response.status})`,
+          });
+        }
+
+        const data = await response.json() as { data?: OpenAIModel[] };
+        upstreamModels = Array.isArray(data.data) ? data.data : [];
+      } finally {
+        // fetch 抛错/提前返回均需清理定时器，避免残留 15 秒后才触发 abort
+        clearTimeout(timeout);
+      }
     } catch (fetchErr) {
       const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       if (message.includes("abort")) {
@@ -328,6 +334,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
       return res.status(502).json({ success: false, error: "无法连接到上游平台" });
     }
+
+    // 上游模型列表按 id 去重：个别供应商返回重复 id 时 createMany 会撞唯一约束整批失败
+    upstreamModels = upstreamModels.filter(
+      (m, idx, arr) => arr.findIndex((x) => x.id === m.id) === idx
+    );
 
     if (upstreamModels.length === 0) {
       return res.status(200).json({
@@ -357,7 +368,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     await executeWithRetry(
       db,
       dbKind,
-      async () => {
+      async (tx: any) => {
         // 1. 批量新增上游有但本地没有的模型
         const toCreate = upstreamModels
           .filter((upstream) => !existingMap.has(upstream.id))
@@ -375,7 +386,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         if (toCreate.length > 0) {
           // 分批插入（D1 限制每次最多 100 条，其他数据库也建议分批）
           for (let i = 0; i < toCreate.length; i += 100) {
-            await db.platformModels.createMany({
+            await tx.platformModels.createMany({
               data: toCreate.slice(i, i + 100),
             });
           }
@@ -394,7 +405,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
           for (const upstream of upstreamModels) {
             const existing = existingMap.get(upstream.id);
             if (existing) {
-              await db.platformModels.update({
+              await tx.platformModels.update({
                 where: { id: existing.id },
                 data: {
                   fetchedAt: now,
@@ -413,7 +424,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         );
 
         if (toDelete.length > 0) {
-          await db.platformModels.deleteMany({
+          await tx.platformModels.deleteMany({
             where: {
               id: { in: toDelete.map((m) => m.id) },
             },

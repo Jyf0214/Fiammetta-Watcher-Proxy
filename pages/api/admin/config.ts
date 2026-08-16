@@ -16,7 +16,7 @@ export default async function handler(
 ) {
   const admin = await getAdminFromRequest(req);
   if (!admin) {
-    res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+    res.status(401).json({ success: false, error: "未授权" });
     return;
   }
 

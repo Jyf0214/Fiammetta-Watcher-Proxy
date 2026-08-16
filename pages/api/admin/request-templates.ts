@@ -135,6 +135,13 @@ export default async function handler(
         return;
       }
 
+      // description 类型校验与 PUT 一致：非字符串返回 400（此前静默置空
+      // 会掩盖客户端传错类型的错误）
+      if (description !== undefined && typeof description !== "string") {
+        res.status(400).json({ success: false, error: "模板描述必须为字符串" });
+        return;
+      }
+
       // 读取现有模板
       const templates = await loadTemplates(db);
 
@@ -142,7 +149,7 @@ export default async function handler(
       const newTemplate: RequestTemplate = {
         id: crypto.randomUUID(),
         name: name.trim(),
-        description: description?.trim() || "",
+        description: typeof description === "string" ? description.trim() : "",
         models: Array.isArray(models) && models.length > 0 ? models : ["*"],
         mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>),
         // 创建时接受 enabled（表单开关），缺省保持默认启用
@@ -192,9 +199,22 @@ export default async function handler(
         return;
       }
 
-      // 更新字段（仅更新传入的字段）
-      if (name !== undefined) templates[idx].name = name.trim();
-      if (description !== undefined) templates[idx].description = description.trim();
+      // 更新字段（仅更新传入的字段）；name/description 非字符串时
+      // trim() 会抛 TypeError → 500，先做类型校验
+      if (name !== undefined) {
+        if (typeof name !== "string") {
+          res.status(400).json({ success: false, error: "模板名称必须为字符串" });
+          return;
+        }
+        templates[idx].name = name.trim();
+      }
+      if (description !== undefined) {
+        if (typeof description !== "string") {
+          res.status(400).json({ success: false, error: "模板描述必须为字符串" });
+          return;
+        }
+        templates[idx].description = description.trim();
+      }
       if (models !== undefined) templates[idx].models = models;
       if (mergeBody !== undefined) templates[idx].mergeBody = sanitizeMergeBody(mergeBody as Record<string, unknown>);
       if (enabled !== undefined) templates[idx].enabled = enabled;

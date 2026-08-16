@@ -113,7 +113,7 @@ export async function validateApiKey(
       if (callCount >= effectiveCallLimit) {
         return {
           error: Response.json(
-            { error: { message: "API Key 调用次数已达上限", type: "invalid_request_error" } },
+            { error: { message: "API Key 调用次数已达上限", type: "rate_limit_error" } },
             { status: 429 }
           ),
         };
@@ -125,7 +125,7 @@ export async function validateApiKey(
     if (effectiveTokenLimit !== null && effectiveTokenLimit > 0 && apiKey.usedTokens >= effectiveTokenLimit) {
       return {
         error: Response.json(
-          { error: { message: "API Key Token 额度已达上限", type: "invalid_request_error" } },
+          { error: { message: "API Key Token 额度已达上限", type: "rate_limit_error" } },
           { status: 429 }
         ),
       };
@@ -136,7 +136,7 @@ export async function validateApiKey(
     console.error("[auth] API Key 验证失败:", err instanceof Error ? err.message : String(err));
     return {
       error: Response.json(
-        { error: { message: "服务器内部错误", type: "internal_server_error" } },
+        { error: { message: "服务器内部错误", type: "server_error" } },
         { status: 500 }
       ),
     };

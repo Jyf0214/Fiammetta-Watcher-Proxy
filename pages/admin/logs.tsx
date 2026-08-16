@@ -218,7 +218,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       align: "right",
       render: (v: number) => {
         if (v > 0) {
-          const d = formatDuration(v);
+          const d = formatDuration(v, t);
           return `${d.value} ${d.suffix}`;
         }
         return t("na");
@@ -490,7 +490,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       align: "right",
       render: (v: number) => {
         if (v > 0) {
-          const d = formatDuration(Math.round(v));
+          const d = formatDuration(Math.round(v), t);
           return `${d.value} ${d.suffix}`;
         }
         return "-";

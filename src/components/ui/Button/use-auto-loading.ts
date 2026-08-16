@@ -79,11 +79,14 @@ export function useAutoLoading(
   const isLoading = isControlled ? loading : internalLoading;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 组件卸载时清理定时器
+  // 组件卸载时清理定时器。
+  // 注意：清理函数内必须实时读取 timerRef.current——定时器在点击后才写入 ref，
+  // 若在 effect 运行时快照（const timer = timerRef.current）会捕获到挂载时的 null，
+  // 卸载时永远清不到真正挂起的定时器
   useEffect(() => {
-    const timer = timerRef.current;
     return () => {
-      if (timer) clearTimeout(timer);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
     };
   }, []);
 

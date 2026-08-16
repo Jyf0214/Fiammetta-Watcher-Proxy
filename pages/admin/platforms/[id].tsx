@@ -105,6 +105,9 @@ export default function PlatformDetailPage() {
     setPrevId(id);
     setSyncedForId(null);
     setSyncedForNew(false);
+    // 平台切换后清空上一平台的模型测试状态，避免残留结果串显
+    setTestResults(null);
+    setTestLoading(false);
   }
 
   // 新增模式：进入时初始化默认表单值（仅一次，重复渲染不覆盖）
@@ -232,7 +235,9 @@ export default function PlatformDetailPage() {
     try {
       const values = await form.validateFields();
       const validKeys = namedKeys.filter((k) => k.key && k.key.trim());
-      if (validKeys.length === 0 && isNew) {
+      if (validKeys.length === 0) {
+        // 编辑模式同样拦截：PUT 不传 apiKeys 会静默保留旧密钥，
+        // 清空输入框后保存只会让旧密钥"复活"且无提示
         message.error(t("keyRequired"));
         return;
       }

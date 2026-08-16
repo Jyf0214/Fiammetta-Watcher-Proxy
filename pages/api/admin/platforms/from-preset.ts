@@ -11,7 +11,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createDb } from "@/lib/prisma";
+import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
@@ -119,61 +119,75 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const db = await createDb();
+    const dbKind = await getDbKind();
 
-    // 创建平台（预设模板：启用、默认优先级/权重）
-    await db.platforms.create({
-      data: {
-        id: platformId,
-        name: escapeHtml(finalName),
-        baseUrl: finalBaseUrl,
-        apiKeys: JSON.stringify(parsedApiKeys),
-        type: preset.type,
-        presetId: preset.id,
-        enabled: true,
-        priority: 0,
-        weight: 1,
-        rpmLimit: null,
-        tpmLimit: null,
-        status: "healthy",
-        failCount: 0,
-        forwardHeaders: "[]",
-        injectStreamOptions: true,
-        whitelisted: false,
-        extraHeaders: "{}",
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
-
-    // 批量写入预设模型（模型 ID 列表，类型由 ID 自动推导；每批 100 条）
+    // 平台创建 + 预设模型批量写入 + 审计日志原子提交：
+    // 非 D1 数据库用事务，避免平台创建成功但模型写入失败留下半成品平台；
+    // D1 不支持事务（与 models.ts executeWithRetry 注释一致），直接顺序执行
     const modelCount = preset.models.length;
-    for (let i = 0; i < modelCount; i += 100) {
-      const batch = preset.models.slice(i, i + 100);
-      await db.platformModels.createMany({
-        data: batch.map((modelId) => ({
-          id: newId("m"),
-          platformId,
-          modelId,
-          modelName: modelId,
-          type: detectModelType(modelId),
-          source: "manual",
+    const runCreate = async (tx: any) => {
+      // 创建平台（预设模板：启用、默认优先级/权重）
+      await tx.platforms.create({
+        data: {
+          id: platformId,
+          name: escapeHtml(finalName),
+          baseUrl: finalBaseUrl,
+          apiKeys: JSON.stringify(parsedApiKeys),
+          type: preset.type,
+          presetId: preset.id,
           enabled: true,
-          fetchedAt: now,
-        })),
+          priority: 0,
+          weight: 1,
+          rpmLimit: null,
+          tpmLimit: null,
+          status: "healthy",
+          failCount: 0,
+          forwardHeaders: "[]",
+          injectStreamOptions: true,
+          whitelisted: false,
+          extraHeaders: "{}",
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      // 批量写入预设模型（模型 ID 列表，类型由 ID 自动推导；每批 100 条）
+      for (let i = 0; i < modelCount; i += 100) {
+        const batch = preset.models.slice(i, i + 100);
+        await tx.platformModels.createMany({
+          data: batch.map((modelId) => ({
+            id: newId("m"),
+            platformId,
+            modelId,
+            modelName: modelId,
+            type: detectModelType(modelId),
+            source: "manual",
+            enabled: true,
+            fetchedAt: now,
+          })),
+        });
+      }
+
+      // 审计日志
+      await tx.auditLogs.create({
+        data: {
+          id: newId(),
+          adminId: getAuditAdminId(admin),
+          action: "create_platform",
+          detail: JSON.stringify({ platformId, name: finalName, fromPreset: presetId, modelCount }),
+          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          createdAt: now,
+        },
+      });
+    };
+
+    if (dbKind === "d1") {
+      await runCreate(db);
+    } else {
+      await db.$transaction(async (tx: any) => {
+        await runCreate(tx);
       });
     }
-
-    // 审计日志
-    await db.auditLogs.create({
-      data: {
-        id: newId(),
-        adminId: getAuditAdminId(admin),
-        action: "create_platform",
-        detail: JSON.stringify({ platformId, name: finalName, fromPreset: presetId, modelCount }),
-        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
-        createdAt: now,
-      },
-    });
 
     return res.status(200).json({
       success: true,

@@ -152,6 +152,16 @@ function makeRes(): any {
     setHeader() {
       return res;
     },
+    // Pages 流式分支监听 res close（客户端断开取消上游），测试桩需提供
+    on() {
+      return res;
+    },
+    off() {
+      return res;
+    },
+    once() {
+      return res;
+    },
     get statusCode() {
       return statusCode;
     },
@@ -195,7 +205,7 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
 
     expect(res.calls.length).toBe(1);
     expect(res.calls[0].status).toBe(503);
-    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything());
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
     expect(logParams.status).toBe(503);
@@ -218,7 +228,7 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
 
     expect(res.calls.length).toBe(1);
     expect(res.calls[0].status).toBe(503);
-    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything());
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
     expect(logParams.status).toBe(503);

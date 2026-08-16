@@ -4,6 +4,15 @@
 
 Go to "Platform Management" in the admin panel and click "Add Platform".
 
+## One-Click Create from Presets
+
+The platform management ships with **83 preset platforms** (1882 built-in models) — create a platform without filling in config manually:
+
+- Entry 1: click the "+" button on the platform list page and pick a preset in the selector (searchable)
+- Entry 2: click the grid icon to open the "Platform Presets" discovery page (card grid + search + one-click create)
+
+Creation auto-fills the platform type, priority, weight and the built-in model list (models are written to the platform model table automatically); **API Keys must be filled in separately** (may be left empty and added later on the detail page), and presets without a default Base URL require a manual address.
+
 ## Configuration
 
 | Field | Description |
@@ -59,7 +68,7 @@ Platforms can be toggled on/off. Disabled platforms won't receive requests.
 ## Next Steps
 
 - [API Key Management](/en/guide/api-key) — create and manage API keys
-- [Model Mapping](/en/guide/model-map) — configure model name mappings
+- [Request Templates](/en/guide/request-templates) — customize upstream request fields
 - [API Reference](/en/api/) — endpoint usage
 - [Environment Variables](/en/deployment/env) — full env var reference
 

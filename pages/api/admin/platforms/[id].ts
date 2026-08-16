@@ -133,12 +133,12 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       );
     }
 
-    if (
-      body.name !== undefined &&
-      typeof body.name === "string" &&
-      body.name.length > 100
-    ) {
-      errors.push("平台名称不能超过 100 个字符");
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") {
+        errors.push("平台名称必须为字符串");
+      } else if (body.name.length > 100) {
+        errors.push("平台名称不能超过 100 个字符");
+      }
     }
 
     if (errors.length > 0) {
@@ -214,7 +214,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       } else if (typeof body.forwardHeaders === "string") {
         try {
           const parsed = JSON.parse(body.forwardHeaders);
-          if (Array.isArray(parsed)) {
+          if (!Array.isArray(parsed)) {
+            errors.push("forwardHeaders 必须是 JSON 数组");
+          } else {
             const validHeaders = parsed
               .filter(
                 (h: unknown): h is string =>
@@ -224,8 +226,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
             updateData.forwardHeaders = JSON.stringify(validHeaders);
           }
         } catch {
-          // JSON 解析失败，保留原值
+          errors.push("forwardHeaders 必须是合法的 JSON 数组");
         }
+      } else {
+        errors.push("forwardHeaders 必须是字符串");
       }
     }
 
@@ -250,7 +254,9 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       } else if (typeof body.extraHeaders === "string") {
         try {
           const parsed = JSON.parse(body.extraHeaders);
-          if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            errors.push("extraHeaders 必须是 JSON 键值对对象");
+          } else {
             const normalized: Record<string, string> = {};
             let count = 0;
             for (const [k, v] of Object.entries(parsed)) {
@@ -262,8 +268,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
             updateData.extraHeaders = JSON.stringify(normalized);
           }
         } catch {
-          // JSON 解析失败，保留原值
+          errors.push("extraHeaders 必须是合法的 JSON 对象");
         }
+      } else {
+        errors.push("extraHeaders 必须是字符串");
       }
     }
 
@@ -276,52 +284,61 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       if (rawApiKeys === "") {
         updateData.apiKeys = "[]";
       } else {
+        let parsed: unknown;
         try {
-          const parsed = JSON.parse(rawApiKeys);
-          if (Array.isArray(parsed)) {
-            // 检查是否为对象数组格式 [{name, key}]
-            if (
-              parsed.length > 0 &&
-              typeof parsed[0] === "object" &&
-              parsed[0] !== null &&
-              "key" in parsed[0]
-            ) {
-              // 命名密钥格式
-              const validKeys = parsed
-                .filter(
-                  (k: unknown): k is Record<string, unknown> =>
-                    typeof k === "object" &&
-                    k !== null &&
-                    typeof (k as Record<string, unknown>).key === "string" &&
-                    ((k as Record<string, unknown>).key as string).trim().length > 0 &&
-                    ((k as Record<string, unknown>).key as string).length <= 500
-                )
-                .map((k) => {
-                  const obj: Record<string, unknown> = {
-                    name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : "Key",
-                    key: (k.key as string).trim(),
-                  };
-                  if (k.whitelisted === true) obj.whitelisted = true;
-                  if (k.enabled === false) obj.enabled = false;
-                  if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
-                  return obj;
-                });
-              updateData.apiKeys = JSON.stringify(validKeys);
-            } else {
-              // 旧格式：字符串数组
-              const validKeys = parsed.filter(
-                (k: unknown): k is string =>
-                  typeof k === "string" &&
-                  k.trim().length > 0 &&
-                  k.length <= 500
-              );
-              updateData.apiKeys = JSON.stringify(validKeys);
-            }
-          }
+          parsed = JSON.parse(rawApiKeys);
         } catch {
-          // JSON 解析失败，保留原值
+          errors.push("apiKeys 必须是合法的 JSON 数组");
+          parsed = null;
+        }
+        if (Array.isArray(parsed)) {
+          // 检查是否为对象数组格式 [{name, key}]
+          if (
+            parsed.length > 0 &&
+            typeof parsed[0] === "object" &&
+            parsed[0] !== null &&
+            "key" in parsed[0]
+          ) {
+            // 命名密钥格式
+            const validKeys = parsed
+              .filter(
+                (k: unknown): k is Record<string, unknown> =>
+                  typeof k === "object" &&
+                  k !== null &&
+                  typeof (k as Record<string, unknown>).key === "string" &&
+                  ((k as Record<string, unknown>).key as string).trim().length > 0 &&
+                  ((k as Record<string, unknown>).key as string).length <= 500
+              )
+              .map((k) => {
+                const obj: Record<string, unknown> = {
+                  name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : "Key",
+                  key: (k.key as string).trim(),
+                };
+                if (k.whitelisted === true) obj.whitelisted = true;
+                if (k.enabled === false) obj.enabled = false;
+                if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+                return obj;
+              });
+            updateData.apiKeys = JSON.stringify(validKeys);
+          } else {
+            // 旧格式：字符串数组
+            const validKeys = parsed.filter(
+              (k: unknown): k is string =>
+                typeof k === "string" &&
+                k.trim().length > 0 &&
+                k.length <= 500
+            );
+            updateData.apiKeys = JSON.stringify(validKeys);
+          }
+        } else if (parsed !== null) {
+          errors.push("apiKeys 必须是 JSON 数组");
         }
       }
+    }
+
+    // JSON 字段校验失败时返回错误，不做静默保留
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, error: errors.join("; ") });
     }
 
     // 无任何更新字段时直接返回

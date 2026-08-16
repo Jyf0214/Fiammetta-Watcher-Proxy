@@ -45,6 +45,14 @@ export default function AutoModelPage() {
 
   // 防抖：快速多次切换时合并保存
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 最新启用集合镜像：防抖回调读取 ref 而非过期闭包，避免最后一次切换丢失
+  const enabledModelIdsRef = useRef<Set<string>>(new Set());
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   // ===== 数据层（SWR）：config 与 platforms 并行拉取，平台模型并行批量请求 =====
 
@@ -96,7 +104,9 @@ export default function AutoModelPage() {
   useEffect(() => {
     if (!initializedRef.current && config !== undefined && (models ?? []).length > 0) {
       initializedRef.current = true;
-      setEnabledModelIds(new Set(savedModelIds));
+      const next = new Set(savedModelIds);
+      enabledModelIdsRef.current = next;
+      setEnabledModelIds(next);
     }
   }, [config, models, savedModelIds]);
 
@@ -133,7 +143,11 @@ export default function AutoModelPage() {
       navigator.clipboard.writeText(autoModelId).then(
         () => {
           setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
+          if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+          copiedTimerRef.current = setTimeout(() => {
+            copiedTimerRef.current = null;
+            setCopied(false);
+          }, 2000);
         },
         () => message.error(t("common:copyFailed"))
       );
@@ -182,12 +196,13 @@ export default function AutoModelPage() {
       const next = new Set(prev);
       if (checked) next.add(modelId);
       else next.delete(modelId);
+      enabledModelIdsRef.current = next;
       return next;
     });
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      persistEnabledModels(enabledModelIds);
+      persistEnabledModels(enabledModelIdsRef.current);
     }, 500);
   };
 

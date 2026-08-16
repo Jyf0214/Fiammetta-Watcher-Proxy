@@ -49,13 +49,27 @@ export function checkAndUpdateCircuitBreakerState(
   }
 
   if (entry.state === "half-open") {
-    if (entry.halfOpenPending >= DEFAULT_HALF_OPEN_MAX) {
-      return "open";
-    }
+    // 探测配额满的放行控制由 selectPlatform 层负责（isHalfOpenProbeFull），
+    // 这里只做状态转换：pending 满不转换状态，等待进行中的探测完成后清零
     return "half-open";
   }
 
   return entry.state;
+}
+
+/**
+ * 半开状态探测配额是否已满
+ *
+ * 配额满表示 DEFAULT_HALF_OPEN_MAX 个探测请求正在飞行中，
+ * 该平台不能再承接新探测，直到进行中的探测完成（success/failure 清零）。
+ */
+export function isHalfOpenProbeFull(platformId: string): boolean {
+  const entry = breakers.get(platformId);
+  return (
+    !!entry &&
+    entry.state === "half-open" &&
+    entry.halfOpenPending >= DEFAULT_HALF_OPEN_MAX
+  );
 }
 
 /**
@@ -69,13 +83,32 @@ export function incrementHalfOpenPending(platformId: string): void {
 }
 
 /**
+ * 释放半开探测配额
+ *
+ * 请求被选中 half-open 平台后、实际发出上游请求前被门禁拒绝
+ * （平台/Key 级 RPM/TPM 限流）时不经过 recordSuccess/recordFailure，
+ * 需在此显式释放，否则配额被占满后平台被排除、恢复探测饿死
+ * （此前只能等 refreshCache 的 syncCircuitBreakersFromDatabase 归零）
+ */
+export function releaseHalfOpenPending(platformId: string): void {
+  const entry = breakers.get(platformId);
+  if (entry && entry.state === "half-open" && entry.halfOpenPending > 0) {
+    entry.halfOpenPending--;
+  }
+}
+
+/**
  * 记录请求成功 — 更新熔断器状态
  *
  * 成功时：
  * - closed → 保持 closed，清零失败计数
  * - half-open → 转为 closed（恢复）
  */
-export async function recordSuccess(platformId: string, db: D1Database): Promise<void> {
+export async function recordSuccess(
+  platformId: string,
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<void> {
   const entry = breakers.get(platformId);
   if (!entry) return;
 
@@ -88,7 +121,7 @@ export async function recordSuccess(platformId: string, db: D1Database): Promise
     console.log(`[circuit-breaker] 平台 ${platformId} 恢复为 closed`);
 
     // 更新数据库状态
-    await updatePlatformStatus(platformId, "healthy", 0, null, db);
+    await updatePlatformStatus(platformId, "healthy", 0, null, db, env);
   } else if (entry.state === "closed") {
     // closed 状态成功 → 清零失败计数
     if (entry.failureCount > 0) {
@@ -104,7 +137,11 @@ export async function recordSuccess(platformId: string, db: D1Database): Promise
  * - closed → 失败计数递增，达到阈值则熔断（open）
  * - half-open → 失败则回到 open
  */
-export async function recordFailure(platformId: string, db: D1Database): Promise<void> {
+export async function recordFailure(
+  platformId: string,
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<void> {
   const now = Date.now();
   let entry = breakers.get(platformId);
 
@@ -136,7 +173,7 @@ export async function recordFailure(platformId: string, db: D1Database): Promise
       `[circuit-breaker] 平台 ${platformId} 半开状态失败，回到 open，冷却至 ${new Date(entry.cooldownEnd).toISOString()}`
     );
 
-    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db);
+    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
   } else if (
     entry.state === "closed" &&
     entry.failureCount >= DEFAULT_FAILURE_THRESHOLD
@@ -148,7 +185,7 @@ export async function recordFailure(platformId: string, db: D1Database): Promise
       `[circuit-breaker] 平台 ${platformId} 连续失败 ${entry.failureCount} 次，熔断至 ${new Date(entry.cooldownEnd).toISOString()}`
     );
 
-    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db);
+    await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
   }
 }
 
@@ -162,10 +199,13 @@ async function updatePlatformStatus(
   status: string,
   failCount: number,
   cooldownEnd: number | null,
-  db: D1Database
+  db: D1Database,
+  env?: WorkerEnv
 ): Promise<void> {
   try {
-    const prisma = await createDb({ DB: db });
+    // 必须传 DB_TYPE：只传 DB 时 createDb 按默认 d1 连接，非 D1 部署下
+    // 熔断器状态会写入 D1 空库，管理后台永远显示 healthy
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
     await prisma.platforms.update({
       where: { id: platformId },
       data: {
@@ -280,9 +320,11 @@ export function selectPlatform(
 
     const breakerState = checkAndUpdateCircuitBreakerState(p.id);
     if (breakerState === "open") return false;
-    if (breakerState === "half-open") {
-      // 半开状态限制并发探测
-      incrementHalfOpenPending(p.id);
+    if (breakerState === "half-open" && isHalfOpenProbeFull(p.id)) {
+      // 半开探测配额已满：本调用不再新开探测。
+      // 注意不能在 filter 中对所有候选 +1——未被选中的平台计数虚增，
+      // 3 次调用后会被误判为配额满而永久排除（自锁）
+      return false;
     }
 
     // 检查冷却期（数据库 cooldownEnd 为 Unix 秒，需与 Date.now() 的毫秒对齐）
@@ -299,13 +341,27 @@ export function selectPlatform(
 
   // 权重轮询
   const totalWeight = topPriority.reduce((sum, p) => sum + p.weight, 0);
-  if (totalWeight <= 0) return topPriority[0] ?? null;
-
-  let random = Math.random() * totalWeight;
-  for (const p of topPriority) {
-    random -= p.weight;
-    if (random <= 0) return p;
+  let chosen: PlatformConfig | null = null;
+  if (totalWeight <= 0) {
+    chosen = topPriority[0] ?? null;
+  } else {
+    let random = Math.random() * totalWeight;
+    for (const p of topPriority) {
+      random -= p.weight;
+      if (random <= 0) {
+        chosen = p;
+        break;
+      }
+    }
+    if (!chosen) chosen = topPriority[topPriority.length - 1] ?? null;
   }
 
-  return topPriority[topPriority.length - 1] ?? null;
+  // 仅在真正选中时占用半开探测配额（此前在 filter 阶段对全部候选计数，
+  // 未被选中的 half-open 平台计数随每次 selectPlatform 调用虚增而从不走探测）
+  if (chosen) {
+    const entry = breakers.get(chosen.id);
+    if (entry && entry.state === "half-open") entry.halfOpenPending++;
+  }
+
+  return chosen;
 }

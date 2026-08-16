@@ -1,6 +1,8 @@
 /**
  * API Key 管理 — 单个 Key 操作
  *
+ * GET    /api/admin/keys/[id] — 获取单个 Key 的完整密钥（列表接口只返回掩码，
+ *        复制功能需要先经此端点取明文；管理员认证即可，读操作无 CSRF 风险）
  * PUT    /api/admin/keys/[id] — 更新 API Key 属性
  * DELETE /api/admin/keys/[id] — 删除 API Key（级联删除关联日志）
  *
@@ -29,12 +31,14 @@ function getClientIp(req: NextApiRequest): string {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);
-  if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+  if (!admin) return res.status(401).json({ success: false, error: "未授权" });
 
   const id = req.query.id as string;
   if (!id) return res.status(400).json({ success: false, error: { message: "缺少 Key ID", type: "invalid_request_error" } });
 
   switch (req.method) {
+    case "GET":
+      return handleGetSecret(req, res, id);
     case "PUT":
       if (!checkCsrfOrigin(req, res)) return;
       return handlePut(req, res, admin, id);
@@ -42,8 +46,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!checkCsrfOrigin(req, res)) return;
       return handleDelete(req, res, admin, id);
     default:
-      res.setHeader("Allow", ["PUT", "DELETE"]);
-      return res.status(405).json({ success: false, error: "Method not allowed" });
+      res.setHeader("Allow", ["GET", "PUT", "DELETE"]);
+      return res.status(405).json({ success: false, error: "方法不允许" });
+  }
+}
+
+/** 获取单个 Key 的完整密钥（列表/更新接口均只返回掩码） */
+async function handleGetSecret(req: NextApiRequest, res: NextApiResponse, id: string) {
+  try {
+    const db = await createDb();
+    const existing = await db.apiKeys.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
+    return res.status(200).json({ success: true, data: { id, key: existing.key } });
+  } catch (err) {
+    console.error("[GET /api/admin/keys/[id]] 获取密钥失败:", err instanceof Error ? err.message : String(err));
+    return res.status(500).json({ success: false, error: { message: "获取 API Key 失败", type: "server_error" } });
   }
 }
 
@@ -70,8 +87,13 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
         return res.status(400).json({ success: false, error: { message: "tokenLimit 必须是非负整数", type: "invalid_request_error" } });
       }
     }
-    if (body.name !== undefined && typeof body.name === "string" && body.name.length > 100) {
-      return res.status(400).json({ success: false, error: { message: "Key 名称不能超过 100 个字符", type: "invalid_request_error" } });
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") {
+        return res.status(400).json({ success: false, error: { message: "Key 名称必须是字符串", type: "invalid_request_error" } });
+      }
+      if (body.name.length > 100) {
+        return res.status(400).json({ success: false, error: { message: "Key 名称不能超过 100 个字符", type: "invalid_request_error" } });
+      }
     }
     if (body.status !== undefined) {
       const allowed = ["active", "disabled", "expired"];
@@ -106,7 +128,6 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (body.tokenLimit !== undefined) updateData.tokenLimit = body.tokenLimit ?? null;
     if (body.resetPeriod !== undefined) updateData.resetPeriod = body.resetPeriod;
     if (body.status !== undefined) updateData.status = body.status;
-    if (body.enabled !== undefined) updateData.enabled = !!body.enabled;
     if (expiresAtTimestamp !== undefined) updateData.expiresAt = expiresAtTimestamp;
 
     const updated = await db.apiKeys.update({ where: { id }, data: updateData });

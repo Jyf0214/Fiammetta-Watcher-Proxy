@@ -48,6 +48,5 @@ npm run dev
 
 - [平台配置](/guide/platform) — 配置上游 AI 服务提供商
 - [API Key 管理](/guide/api-key) — 创建和管理 API Key
-- [模型映射](/guide/model-map) — 配置模型名称映射
 - [API 参考](/api/) — 各端点调用方式
 - [环境变量](/deployment/env) — 完整环境变量参考

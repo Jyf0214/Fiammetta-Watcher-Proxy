@@ -35,6 +35,14 @@ Platform A (weight=3) : Platform B (weight=2) : Platform C (weight=1)
 - Skip down platforms completely (circuit breaker)
 - Degraded platforms still participate normally but carry failure counts, closer to the breaker threshold
 
+## Auto Model ID
+
+On the "Auto Model" page you can generate an auto-model ID (format `fwp-auto-model-xxxxxxxxxxxxxxxx`), copy it, or regenerate. Set the client's `model` to this ID and FWP automatically picks the best platform and a non-frozen model:
+
+- Discovery results are deduplicated by model ID with source tags (`manual` added manually / `auto` discovered)
+- Each model has a switch to join or leave the auto-routing pool
+- Failed models are frozen for 3 minutes to prevent repeated failures
+
 ## Platform Model Discovery
 
 FWP periodically (every 6 hours by default) discovers models supported by each platform:
@@ -45,11 +53,11 @@ FWP periodically (every 6 hours by default) discovers models supported by each p
 
 Discovery calls the OpenAI-compatible `/models` endpoint: OpenAI-compatible platforms (`openai` / `azure` / `custom`) discover normally; **Anthropic-type platforms do not support auto-discovery** (no `/models` endpoint in the native protocol).
 
-See [Model Mapping](/en/guide/model-map) for mappings and wildcards, and the [Deployment Guide](/en/deployment/) / [Cron Tasks](/en/api/cron) for scheduling.
+See the [Admin Panel Usage Guide](/en/guide/usage) for model name resolution (exact match and wildcards) and data-management maintenance, and the [Deployment Guide](/en/deployment/) / [Cron Tasks](/en/api/cron) for scheduling.
 
 ## Next Steps
 
-- [Model Mapping](/en/guide/model-map) — configure model name mappings
+- [Admin Panel Usage Guide](/en/guide/usage) — Auto Model page operations
 - [API Reference](/en/api/) — endpoint usage
 - [Cron Tasks](/en/api/cron) — scheduled task endpoints
 

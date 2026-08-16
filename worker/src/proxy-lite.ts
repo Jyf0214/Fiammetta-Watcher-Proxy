@@ -719,7 +719,7 @@ async function handleUpstreamResponseLite(
       if (currentKey) {
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
-      return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
+      return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
     }
 
     // 总超时使命完成：流式响应允许长时间持续传输，改由空闲超时保护（无数据才切断）
@@ -871,7 +871,7 @@ async function handleUpstreamResponseLite(
       if (currentKey) {
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
-      return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
+      return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
     }
 
     clearTimeout(upstreamTimeoutId);
@@ -968,7 +968,7 @@ async function handleUpstreamResponseLite(
     if (currentKey) {
       ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
     }
-    return liteErrorResponse(config, 502, "上游返回空响应，请求已重试仍无内容", "upstream_error");
+    return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
   }
 
   // 提取 usage（只写日志，不更新 Key 用量）

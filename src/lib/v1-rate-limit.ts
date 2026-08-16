@@ -43,7 +43,7 @@ export async function checkPlatformRpm(platformId: string, rpmLimit: number | nu
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(rpmCounters, RATE_PREFIX, platformId, ws);
-  if (c >= rpmLimit - 1) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(rpmCounters, RATE_PREFIX, platformId, ws);
   return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS };
 }
@@ -63,7 +63,7 @@ export async function checkApiKeyRpm(apiKeyId: string, rpmLimit: number | null, 
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(rpmCounters, RATE_PREFIX, `key:${apiKeyId}`, ws);
-  if (c >= rpmLimit - 1) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(rpmCounters, RATE_PREFIX, `key:${apiKeyId}`, ws);
   return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS };
 }

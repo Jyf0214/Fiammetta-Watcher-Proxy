@@ -75,7 +75,11 @@ export default async function handler(
         reuseUserAgent: p.reuseUserAgent,
         customUserAgent: p.customUserAgent,
         extraHeaders: p.extraHeaders,
-        status: p.status,
+        presetId: p.presetId,
+        whitelisted: p.whitelisted,
+        // 运行态字段（status/failCount/lastFailAt/cooldownEnd）不导出：
+        // 导入时强制恢复为 healthy 初始态，导出包含它们会造成"导出什么、
+        // 导入什么"的语义不一致
       }));
 
       // 模型映射
@@ -118,34 +122,45 @@ export default async function handler(
         createdAt: k.createdAt,
       }));
 
-      // 请求日志（最近 30 天，最多 10000 条）
+      // 请求日志（最近 30 天）：where 先过滤再分页循环拉取，
+      // 避免 take 10000 截断后 filter 导致 30 天内数据丢失
       const thirtyDaysAgo = now - 30 * 24 * 60 * 60;
-      const requestLogsData = await db.requestLogs.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 10000,
-      });
-
-      exportData.requestLogs = requestLogsData
-        .filter((r) => r.createdAt >= thirtyDaysAgo)
-        .map((r) => ({
-          keyId: r.keyId,
-          keyName: r.keyName,
-          platformId: r.platformId,
-          model: r.model,
-          endpoint: r.endpoint,
-          method: r.method,
-          status: r.status,
-          latency: r.latency,
-          tokens: r.tokens,
-          promptTokens: r.promptTokens,
-          completionTokens: r.completionTokens,
-          ttft: r.ttft,
-          cost: r.cost,
-          isError: r.isError,
-          ipAddress: r.ipAddress,
-          errorMessage: r.errorMessage,
-          createdAt: r.createdAt,
-        }));
+      const requestLogsExport: Array<Record<string, unknown>> = [];
+      {
+        let skip = 0;
+        for (;;) {
+          const batch = await db.requestLogs.findMany({
+            where: { createdAt: { gte: thirtyDaysAgo } },
+            orderBy: { createdAt: "desc" },
+            take: 10000,
+            skip,
+          });
+          for (const r of batch) {
+            requestLogsExport.push({
+              keyId: r.keyId,
+              keyName: r.keyName,
+              platformId: r.platformId,
+              model: r.model,
+              endpoint: r.endpoint,
+              method: r.method,
+              status: r.status,
+              latency: r.latency,
+              tokens: r.tokens,
+              promptTokens: r.promptTokens,
+              completionTokens: r.completionTokens,
+              ttft: r.ttft,
+              cost: r.cost,
+              isError: r.isError,
+              ipAddress: r.ipAddress,
+              errorMessage: r.errorMessage,
+              createdAt: r.createdAt,
+            });
+          }
+          if (batch.length < 10000) break;
+          skip += 10000;
+        }
+      }
+      exportData.requestLogs = requestLogsExport;
 
       // 每日统计（最近 1000 条）
       const dailyStatsData = await db.dailyStats.findMany({
@@ -189,6 +204,8 @@ export default async function handler(
     const filename = `fwp-export-${exportType}-${new Date(now * 1000).toISOString().slice(0, 10)}.json`;
     const jsonContent = JSON.stringify(exportData, null, 2);
 
+    // 导出含明文密钥，禁止浏览器/CDN 缓存
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.status(200).send(jsonContent);

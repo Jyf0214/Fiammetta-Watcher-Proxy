@@ -44,8 +44,9 @@ export async function checkPlatformRpm(
   const current = await kv.get(key, { type: "text" });
   const count = current ? parseInt(current, 10) : 0;
 
-  // 预留 1 的缓冲，防止 KV TOCTOU 竞态导致超限
-  if (count >= rpmLimit - 1) {
+  // 每窗口最多放行 rpmLimit 个请求（与 TPM 分支一致的判定语义）；
+  // KV 读改写非原子，并发下可能略微超限（KV 限流固有局限，尽力而为）
+  if (count >= rpmLimit) {
     return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
   }
 
@@ -56,7 +57,7 @@ export async function checkPlatformRpm(
 
   return {
     allowed: true,
-    remaining: rpmLimit - count - 2,
+    remaining: rpmLimit - count - 1,
     resetAt: windowStart + WINDOW_MS,
   };
 }
@@ -115,8 +116,9 @@ export async function checkApiKeyRpm(
   const current = await kv.get(key, { type: "text" });
   const count = current ? parseInt(current, 10) : 0;
 
-  // 预留 1 的缓冲，防止 KV TOCTOU 竞态导致超限
-  if (count >= rpmLimit - 1) {
+  // 每窗口最多放行 rpmLimit 个请求（与 TPM 分支一致的判定语义）；
+  // KV 读改写非原子，并发下可能略微超限（KV 限流固有局限，尽力而为）
+  if (count >= rpmLimit) {
     return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
   }
 
@@ -126,7 +128,7 @@ export async function checkApiKeyRpm(
 
   return {
     allowed: true,
-    remaining: rpmLimit - count - 2,
+    remaining: rpmLimit - count - 1,
     resetAt: windowStart + WINDOW_MS,
   };
 }

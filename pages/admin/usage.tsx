@@ -81,7 +81,36 @@ export default function UsagePage() {
     const avgTps = data.length > 0
       ? Math.round((data.reduce((s, d) => s + (d.tps || 0), 0) / data.length) * 100) / 100
       : 0;
-    return { totalRequests, totalTokens, avgTps };
+    // 单日/单小时真实峰值（而非汇总求和）
+    const peakTokens = data.reduce((m, d) => Math.max(m, d.tokens), 0);
+
+    // 连续活跃统计：按日期（YYYY-MM-DD 前缀）单调序号判断相邻相差 1 天，
+    // 避免 Date 解析的时区歧义（daily 为 UTC 午夜、hourly 为本地时间）；
+    // 先按日去重再算连续——同一自然日多条记录（如 hourly）不得重置 streak
+    const daySeq = Array.from(
+      new Set(
+        data.map((d) => {
+          const [y, m, dd] = d.date.slice(0, 10).split("-").map(Number);
+          return y * 372 + m * 31 + dd;
+        })
+      )
+    ).sort((a, b) => a - b);
+    let longestStreak = 0;
+    let run = 0;
+    let prevDay = NaN;
+    for (const day of daySeq) {
+      run = day === prevDay + 1 ? run + 1 : 1;
+      if (run > longestStreak) longestStreak = run;
+      prevDay = day;
+    }
+    // 当前连续：从最新一个有数据的日期回推
+    let currentStreak = 0;
+    for (let i = daySeq.length - 1; i >= 0; i--) {
+      if (i < daySeq.length - 1 && daySeq[i] !== daySeq[i + 1] - 1) break;
+      currentStreak += 1;
+    }
+
+    return { totalRequests, totalTokens, avgTps, peakTokens, currentStreak, longestStreak };
   }, [trendData]);
 
   const tabItems = [
@@ -204,9 +233,9 @@ export default function UsagePage() {
         {/* 活动热力统计 */}
         <HeatmapCard
           stats={{
-            peakTokens: trendSummary?.totalTokens,
-            currentStreak: (trendData?.length ?? 0) > 0 ? 1 : 0,
-            longestStreak: (trendData?.length ?? 0) > 0 ? 1 : 0,
+            peakTokens: trendSummary?.peakTokens,
+            currentStreak: trendSummary?.currentStreak,
+            longestStreak: trendSummary?.longestStreak,
           }}
           isLoading={trendLoading}
           className="mb-4"

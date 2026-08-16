@@ -85,6 +85,7 @@
     "autoModelDesc": "Configure auto model ID and view platform model discovery status",
     "autoModelDiscovered": "Discovered Models",
     "requestTemplates": "Request Templates",
+    "upstreamProxy": "Upstream Proxy",
     "dataManager": "Data Manager",
     "dataManagerDesc": "Export and import system data for backup and migration",
     "systemKeys": "System API Keys",
@@ -447,7 +448,17 @@
     "sysKeyCopied": "Copied to clipboard",
     "sysKeyCopyFailed": "Copy failed",
     "sysKeyLastUsed": "Last Used",
-    "sysKeyDeleteConfirm": "Delete this system key?"
+    "sysKeyDeleteConfirm": "Delete this system key?",
+    "upstreamProxyTitle": "Upstream Proxy",
+    "upstreamProxyDesc": "Configure a proxy server for outbound upstream API requests",
+    "upstreamProxyUrlLabel": "Proxy server URL",
+    "upstreamProxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "upstreamProxyUrlHelp": "Supports http/https proxies (e.g. http://127.0.0.1:7890) for outbound upstream API traffic. Save with an empty value to clear the proxy and use direct connections.",
+    "upstreamProxySaved": "Proxy configuration saved",
+    "upstreamProxyPlatform": "Current deployment platform",
+    "upstreamProxyNotActive": "The current deployment platform does not support the upstream proxy; saved configuration will take effect on Docker deployments",
+    "upstreamProxyActive": "Upstream proxy enabled — upstream requests will be forwarded through the proxy server",
+    "upstreamProxyUrlInvalid": "Proxy URL must start with http:// or https://"
   },
   "home": {
     "navFeatures": "Features",

@@ -11,7 +11,7 @@
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
-import { recordSuccess, recordFailure, selectPlatform } from "./load-balancer";
+import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
   checkPlatformRpm,
@@ -38,6 +38,13 @@ import {
 } from "@/lib/anthropic";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
+
+/**
+ * 单请求 TPM 预估 token 数上界。
+ * max_tokens 仅是输出上限，客户端可能传极大值（如 1000000），
+ * 不钳制会一次烧尽整个 TPM 配额；8192 是高估但不离谱的单次输出预估值
+ */
+const MAX_ESTIMATED_TOKENS = 8192;
 
 // ==================== 上游错误脱敏 ====================
 
@@ -264,6 +271,8 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformRpm.allowed) {
+    // 请求未发出：释放半开探测配额（否则被门禁拒绝的探测槽位永远不归还）
+    releaseHalfOpenPending(route.platform.id);
     // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
     try {
       await recordRequestLog({
@@ -298,15 +307,17 @@ export async function proxyV1Request(
     env.KV
   );
   if (!keyRpm.allowed) {
+    releaseHalfOpenPending(route.platform.id);
     return v1ErrorResponse(config, 429, "API Key 请求频率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyRpm.resetAt - Date.now()) / 1000),
     });
   }
 
   // TPM 检查：用请求体中的 max_tokens 作为预估 token 数
-  const estimatedTokens = Math.max(
-    1,
-    Number(body.max_tokens || body.max_completion_tokens) || 1
+  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
+  const estimatedTokens = Math.min(
+    MAX_ESTIMATED_TOKENS,
+    Math.max(1, Number(body.max_tokens || body.max_completion_tokens) || 1)
   );
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 estimatedTokens）
@@ -320,6 +331,8 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformTpm.allowed) {
+    // 请求未发出：释放半开探测配额
+    releaseHalfOpenPending(route.platform.id);
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
     try {
       await recordRequestLog({
@@ -355,6 +368,7 @@ export async function proxyV1Request(
     env.KV
   );
   if (!keyTpm.allowed) {
+    releaseHalfOpenPending(route.platform.id);
     return v1ErrorResponse(config, 429, "API Key Token 速率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyTpm.resetAt - Date.now()) / 1000),
     });
@@ -636,7 +650,7 @@ export async function proxyV1Request(
       clearTimeout(upstreamTimeoutId);
 
       try {
-        await recordFailure(currentPlatform.id, env.DB);
+        await recordFailure(currentPlatform.id, env.DB, env);
       } catch (recordError) {
         console.error(
           `${logTag} 熔断器记录失败:`,
@@ -755,7 +769,7 @@ export async function proxyV1Request(
     }
     clearTimeout(upstreamTimeoutId);
     try {
-      await recordFailure(currentPlatform.id, env.DB);
+      await recordFailure(currentPlatform.id, env.DB, env);
     } catch (recordError) {
       console.error(
         `${logTag} 熔断器记录失败:`,
@@ -959,7 +973,7 @@ async function handleUpstreamResponse(
     if (!stream) {
       clearTimeout(upstreamTimeoutId);
       try {
-        await recordFailure(platform.id, env.DB);
+        await recordFailure(platform.id, env.DB, env);
       } catch {
         console.error(`${logTag} 流式响应缺失时熔断器记录失败`);
       }
@@ -978,7 +992,7 @@ async function handleUpstreamResponse(
         return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
       console.error(`${logTag} 流式响应首块读取失败:`, readError);
-      await recordFailure(platform.id, env.DB);
+      await recordFailure(platform.id, env.DB, env);
       return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstChunk.done) {
@@ -1075,7 +1089,7 @@ async function handleUpstreamResponse(
       : pipedStream;
     // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
     // 若在返回 Response 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
-    ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
+    ctx.waitUntil(recordSuccess(platform.id, env.DB, env).catch(() => {}));
 
     return new Response(finalStream, {
       status: 200,
@@ -1109,7 +1123,7 @@ async function handleUpstreamResponse(
       if (upstreamController.signal.aborted) {
         return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
-      await recordFailure(platform.id, env.DB);
+      await recordFailure(platform.id, env.DB, env);
       return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstMultipart.done) {
@@ -1120,7 +1134,7 @@ async function handleUpstreamResponse(
 
     clearTimeout(upstreamTimeoutId);
     // 不阻塞首字节：multipart 响应同样在返回 Response 前把写库后置到 waitUntil（与流式分支一致）
-    ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
+    ctx.waitUntil(recordSuccess(platform.id, env.DB, env).catch(() => {}));
 
     ctx.waitUntil(
       recordRequestLog({
@@ -1180,7 +1194,7 @@ async function handleUpstreamResponse(
     if (upstreamController.signal.aborted) {
       return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
     }
-    await recordFailure(platform.id, env.DB);
+    await recordFailure(platform.id, env.DB, env);
     return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
   } finally {
     clearTimeout(upstreamTimeoutId);
@@ -1253,14 +1267,14 @@ async function handleUpstreamResponse(
           console.error(`${logTag} 日志写入失败:`, logError);
         })
       );
-      ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
+      ctx.waitUntil(recordSuccess(platform.id, env.DB, env).catch(() => {}));
       return new Response(converted, {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     } catch {
       try {
-        await recordFailure(platform.id, env.DB);
+        await recordFailure(platform.id, env.DB, env);
       } catch {
         // 熔断记录失败不影响响应
       }
@@ -1313,7 +1327,7 @@ async function handleUpstreamResponse(
     })
   );
 
-  ctx.waitUntil(recordSuccess(platform.id, env.DB).catch(() => {}));
+  ctx.waitUntil(recordSuccess(platform.id, env.DB, env).catch(() => {}));
 
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）

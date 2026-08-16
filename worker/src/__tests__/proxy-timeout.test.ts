@@ -175,7 +175,7 @@ describe("proxyV1Request 上游状态码处理", () => {
     // 5xx 不可重试：只发一次上游请求
     expect(fetch).toHaveBeenCalledTimes(1);
     // 触发熔断器
-    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB);
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
     expect(recordSuccess).not.toHaveBeenCalled();
   });
 
@@ -258,7 +258,7 @@ describe("proxyV1Request 上游状态码处理", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.id).toBe("ok");
-    expect(recordSuccess).toHaveBeenCalledWith("test-platform", env.DB);
+    expect(recordSuccess).toHaveBeenCalledWith("test-platform", env.DB, env);
   });
 
   it("上游返回 402：立即禁用 Key（errorCount+5 ����值）并重试换 Key，成功后返回 200", async () => {

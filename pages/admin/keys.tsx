@@ -27,8 +27,9 @@ interface ApiKeyItem {
   tpmLimit: number | null;
   status: string;
   resetPeriod: string;
-  expiresAt: string | null;
-  createdAt: string;
+  // 数据库存秒级 Unix 时间戳（number），非 ISO 字符串
+  expiresAt: number | null;
+  createdAt: number;
 }
 
 /** 移动端 API Key 卡片 — 与平台管理风格统一 */
@@ -245,6 +246,21 @@ export default function KeysPage() {
     }
   };
 
+  // 列表接口只返回脱敏掩码，复制前先经 GET /api/admin/keys/[id] 取完整密钥
+  const copyApiKey = async (item: ApiKeyItem) => {
+    try {
+      const res = await fetch(`/api/admin/keys/${item.id}`);
+      const data: Record<string, any> = await res.json();
+      if (data.success && typeof data.data?.key === "string") {
+        await copyToClipboard(data.data.key);
+      } else {
+        message.error(t("common:copyFailed"));
+      }
+    } catch {
+      message.error(t("common:copyFailed"));
+    }
+  };
+
   // 桌面端表格列（保持表格模式）
   const columns = [
     {
@@ -293,7 +309,7 @@ export default function KeysPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: 180,
-      render: (v: string) => formatDateTime(v),
+      render: (v: number) => formatDateTime(v),
       responsive: ["lg" as const],
     },
     {
@@ -314,7 +330,7 @@ export default function KeysPage() {
           </button>
           <button
             type="button"
-            onClick={() => copyToClipboard(item.key)}
+            onClick={() => copyApiKey(item)}
             title={t("copyKey")}
             className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
           >

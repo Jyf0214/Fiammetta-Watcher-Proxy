@@ -36,7 +36,8 @@ export default defineConfig({
               items: [
                 { text: '平台配置', link: '/guide/platform' },
                 { text: 'API Key 管理', link: '/guide/api-key' },
-                { text: '模型映射', link: '/guide/model-map' },
+                { text: '系统 API Key', link: '/guide/system-key' },
+                { text: '请求模板', link: '/guide/request-templates' },
                 { text: '自动分流', link: '/guide/auto-model' },
               ]
             },
@@ -112,7 +113,8 @@ export default defineConfig({
               items: [
                 { text: 'Platform Config', link: '/en/guide/platform' },
                 { text: 'API Key Management', link: '/en/guide/api-key' },
-                { text: 'Model Mapping', link: '/en/guide/model-map' },
+                { text: 'System API Key', link: '/en/guide/system-key' },
+                { text: 'Request Templates', link: '/en/guide/request-templates' },
                 { text: 'Auto Routing', link: '/en/guide/auto-model' },
               ]
             },

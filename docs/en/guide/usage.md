@@ -11,7 +11,7 @@ The dashboard provides a global view of system status:
 - **Request stats**: Total requests
 - **Token stats**: Total token consumption
 - **Performance**: Average TTFT, average request duration
-- **Trend charts**: Mini trend charts for each metric
+- **Trend charts**: Mini trend charts per stat card in detail view (requests, tokens, TPS; no trend for TTFT/duration without per-period data)
 
 The dashboard auto-refreshes every 30 seconds. Supports grid view and detail view modes.
 
@@ -111,7 +111,7 @@ Based on `resetPeriod`:
 
 ## Model Mapping
 
-Map client-requested model names to actual upstream model names. There is **no dedicated management page** in the current version — maintain mappings via Export/Import JSON in the "Data Manager" page (see [Model Mapping](/en/guide/model-map)).
+Model mappings map client-requested model names to actual upstream model names (including `*` wildcard prefix matching, e.g. `gpt-4*`). There is **no dedicated management page** — maintain mappings via Export/Import JSON in the "Data Manager": add records (`alias` / `targetModel` / `platformId`) in the exported `modelMaps` array and import; mappings whose `alias` already exists are skipped on import.
 
 ### Configuration
 
@@ -170,10 +170,12 @@ Every API request is logged with:
 | Duration | Total request duration |
 | Error Message | Error details on failure |
 
+Supports filtering by date range, API Key, status code (200/400/401/429/500/503) and error/normal state.
+
 ### Log Archival
 
 - Detailed logs older than 30 days are automatically aggregated into daily statistics
-- Aggregation dimensions: date + API Key + model
+- Aggregation dimensions: date + API Key + model (records carry their platform info), including request count, error count, token counts and average TTFT/duration/TPS
 - Manual archival trigger available
 
 ### Audit Logs
@@ -204,7 +206,7 @@ Import previously exported JSON files for:
 - Backup restoration
 - Configuration sync
 
-Import results show imported and skipped counts per data type.
+Import uses a **preview-then-confirm** flow: it shows per-type counts and issues (missing required fields, duplicate unique keys, masked values), then imports in dependency order after confirmation. Import **only adds, never deletes** existing data; each type has a count cap — split into batches if exceeded. The result shows imported and skipped counts per data type (with skip reasons).
 
 ## System Settings
 

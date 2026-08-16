@@ -124,7 +124,11 @@ export default async function handler(
     if (startTimestamp < detailSince) {
       const histRows = await orm.dailyStats.findMany({
         where: {
-          date: { gte: startTimestamp, lt: detailSince },
+          // 归档按天整块删除：最晚删到 detailSince 所在自然日一整天（归档截止
+          // 时刻 cutoffTs 落在该天内，批次 endTs 截断到 cutoffTs 后仍按整天处理），
+          // daily_stats 中该日记录 date = detailSince。历史查询必须含 detailSince，
+          // 否则该天数据既不在历史也不在明细（request_logs 已删）→ 整日丢失
+          date: { gte: startTimestamp, lte: detailSince },
           ...(keyId ? { keyId } : {}),
         },
         select: {

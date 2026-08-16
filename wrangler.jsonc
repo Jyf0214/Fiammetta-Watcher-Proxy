@@ -1,5 +1,6 @@
 {
-  "main": ".open-next/worker.js",
+  // build:cf 会把 OpenNext 产物 mv 为 _worker.js（见 package.json），main 必须指向改后文件名
+  "main": ".open-next/_worker.js",
   "name": "fiammetta",
   "compatibility_date": "2025-04-02",
   "compatibility_flags": ["nodejs_compat"],

@@ -17,6 +17,32 @@ function newId(prefix = "c"): string {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 掩码 API 密钥（与 keys.ts 等保持一致） */
+function maskKey(key: string): string {
+  if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
+  return "***";
+}
+
+/** 列表接口掩码 apiKeys（JSON 数组字符串），避免密钥明文下发到前端 */
+function maskApiKeysJson(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return "[]";
+    return JSON.stringify(
+      parsed.map((k) => {
+        if (typeof k === "string") return maskKey(k);
+        if (typeof k === "object" && k !== null && typeof (k as { key?: unknown }).key === "string") {
+          return { ...k, key: maskKey((k as { key: string }).key) };
+        }
+        return k;
+      })
+    );
+  } catch {
+    // 非 JSON（异常数据）：不下发任何原文
+    return "[]";
+  }
+}
+
 /**
  * GET /api/admin/platforms — 获取平台列表
  */
@@ -61,6 +87,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const data = platforms.map((p) => ({
         ...p,
+        // 列表不下发密钥明文（详情编辑回填由 [id].ts 单独提供）
+        apiKeys: maskApiKeysJson(p.apiKeys ?? "[]"),
         keyStatuses: keyStatusesByPlatform[p.id] ?? {},
       }));
 

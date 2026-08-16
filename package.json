@@ -8,6 +8,7 @@
     "db:dev": "node scripts/dev-postgres.mjs",
     "prebuild": "node scripts/prepare-db.mjs",
     "build": "next build",
+    "prebuild:lite": "node scripts/prepare-db.mjs",
     "build:lite": "bash scripts/lite-gate.sh && next build && bash scripts/lite-gate-restore.sh",
     "build:cf": "export DEPLOY_PLATFORM=cf && bash scripts/build-gate.sh && node scripts/prepare-db.mjs && opennextjs-cloudflare build && mv .open-next/worker.js .open-next/_worker.js && cp -r .open-next/assets/* .open-next/ && cp public/_headers .open-next/_headers && node -e \"require('fs').writeFileSync('.open-next/_routes.json', JSON.stringify({version:1,include:['/*'],exclude:['/_next/static/*','/favicon.ico','/robots.txt','/sitemap.xml','/BUILD_ID']},null,2))\" && bash scripts/build-gate-restore.sh",
     "preview": "DEPLOY_PLATFORM=cf opennextjs-cloudflare build && DEPLOY_PLATFORM=cf opennextjs-cloudflare preview",
@@ -44,7 +45,8 @@
     "react-i18next": "^17.0.10",
     "recharts": "^3.10.0",
     "swr": "^2.5.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "undici": "^7.29.0"
   },
   "optionalDependencies": {
     "mariadb": "^3.4.5",

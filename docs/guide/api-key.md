@@ -29,6 +29,6 @@
 ## 下一步
 
 - [平台配置](/guide/platform) — 配置上游 AI 服务提供商
-- [模型映射](/guide/model-map) — 配置模型名称映射
+- [系统 API Key](/guide/system-key) — 管理后台 API 认证
 - [API 参考](/api/) — 使用 API Key 调用各端点
 

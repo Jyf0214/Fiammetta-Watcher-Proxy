@@ -8,7 +8,8 @@
  *
  * 重置判断基于 updated_at 字段：
  * - 如果上次更新日期与当前日期不在同一周期，则执行重置
- * - 重置时同时将 status 恢复为 active（防止因超限被禁用的 Key 在新周期仍被禁用）
+ * - 不修改 status：disabled 是管理员/系统的显式禁用状态，周期重置不得自动复活
+ * - 重置时仅清理保留期外（已归档）的日志，保留期内明细供统计/趋势读取
  *
  * 入口：handleScheduledReset — Worker Cron Trigger 调用（批量重置所有 Key）
  */
@@ -42,6 +43,11 @@ function needsReset(key: {
 
 /**
  * 计算当前周期的起始时间（Unix 时间戳，秒）
+ *
+ * daily：今天凌晨；monthly：本月 1 号凌晨；
+ * never（及未知值）：返回 0——用量不按周期归零，auth.ts 的 callLimit 检查
+ * 据此统计自创建起的全部请求（此前 fallback 到 monthly 窗口导致 never 的
+ * 调用次数限制每月重置、形同虚设）
  */
 export function getPeriodStart(resetPeriod: string): number {
   const now = new Date();
@@ -49,8 +55,12 @@ export function getPeriodStart(resetPeriod: string): number {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     return Math.floor(start.getTime() / 1000);
   }
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return Math.floor(start.getTime() / 1000);
+  if (resetPeriod === "monthly") {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return Math.floor(start.getTime() / 1000);
+  }
+  // never / 未知值：不重置，窗口追溯到最早记录
+  return 0;
 }
 
 /**
@@ -79,24 +89,17 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
     for (const key of keysToCheck) {
       if (!needsReset(key)) continue;
 
-      const periodStart = getPeriodStart(key.resetPeriod!);
-
       await prisma.apiKeys.update({
         where: { id: key.id },
         data: {
           usedTokens: 0,
-          ...(key.status === "disabled" ? { status: "active" } : {}),
           updatedAt: currentTime,
         },
       });
 
-      await prisma.requestLogs.deleteMany({
-        where: {
-          keyId: key.id,
-          createdAt: { lt: periodStart },
-        },
-      });
-
+      // 保留期外日志的删除由 log-archiver 全权负责（聚合进 daily_stats 后
+      // 按 id 删除），此处不重复删除——archiver 未运行时直接删明细会造成
+      // 统计空洞（既不留在 request_logs 也不进 daily_stats）
       resetCount++;
       console.log(
         `[key-reset] 已重置 Key "${key.name}" (${key.id.slice(0, 8)}...) ` +

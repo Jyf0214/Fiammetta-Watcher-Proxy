@@ -33,6 +33,8 @@ import {
   cleanupStaleBreakers,
   syncCircuitBreakersFromDatabase,
   incrementHalfOpenPending,
+  releaseHalfOpenPending,
+  isHalfOpenProbeFull,
 } from "../load-balancer";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -179,8 +181,58 @@ describe("熔断器状态机", () => {
     incrementHalfOpenPending("p1");
     incrementHalfOpenPending("p1");
     incrementHalfOpenPending("p1");
-    // 超过 max 后 checkAndUpdateCircuitBreakerState 返回 open
-    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("open");
+    // 配额满：状态查询仍返回 half-open（不因配额满转换状态），
+    // 配额满的放行控制由 selectPlatform 层（isHalfOpenProbeFull）负责
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("half-open");
+    expect(isHalfOpenProbeFull("p1")).toBe(true);
+
+    // 探测完成（成功）→ 转 closed，配额清零
+    await recordSuccess("p1", mockDb);
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
+  });
+
+  it("releaseHalfOpenPending 释放被门禁拒绝请求占用的探测配额", async () => {
+    // 触发熔断 + 进入 half-open
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("p1", mockDb);
+    }
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(61000);
+    checkAndUpdateCircuitBreakerState("p1");
+    vi.useRealTimers();
+
+    incrementHalfOpenPending("p1");
+    incrementHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
+
+    // 两个请求都在发出前被门禁拒绝 → 释放配额
+    releaseHalfOpenPending("p1");
+    releaseHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
+
+    // 再占满：配额满时释放一个即恢复可探测
+    incrementHalfOpenPending("p1");
+    incrementHalfOpenPending("p1");
+    incrementHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(true);
+    releaseHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
+  });
+
+  it("releaseHalfOpenPending 对非 half-open/零配额平台为无操作", async () => {
+    // 未熔断（closed）平台：释放不应报错也不影响状态
+    releaseHalfOpenPending("p1");
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+    // 零配额释放不产生负数
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("p1", mockDb);
+    }
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(61000);
+    checkAndUpdateCircuitBreakerState("p1");
+    vi.useRealTimers();
+    releaseHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
   });
 });
 
@@ -248,6 +300,37 @@ describe("selectPlatform", () => {
     }
     const platforms = [makePlatform({ id: "p1" }), makePlatform({ id: "p2" })];
     expect(selectPlatform(platforms)).toBeNull();
+  });
+
+  it("未选中的 half-open 平台不虚增探测计数（防自锁）", async () => {
+    // 熔断 p1、p2 并进入 half-open
+    for (const id of ["p1", "p2"]) {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(id, mockDb);
+      }
+    }
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(61000);
+    checkAndUpdateCircuitBreakerState("p1");
+    checkAndUpdateCircuitBreakerState("p2");
+    vi.useRealTimers();
+
+    // 固定随机值使权重轮询总是选中第一个候选（p1）
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const p1 = makePlatform({ id: "p1" });
+      const p2 = makePlatform({ id: "p2" });
+      // 前 3 次选中 p1（真实占用配额），第 4 次 p1 配额满被排除后轮到 p2
+      for (let i = 0; i < 4; i++) {
+        selectPlatform([p1, p2]);
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+    // p1 被真实选中 3 次 → 配额满；p2 从未被选中 → 配额 0。
+    // 旧实现在 filter 中对全部候选 +1，p2 会在 3 次调用后虚增满配额而永久排除（自锁）
+    expect(isHalfOpenProbeFull("p1")).toBe(true);
+    expect(isHalfOpenProbeFull("p2")).toBe(false);
   });
 });
 

@@ -56,7 +56,15 @@ export function estimateInputTokens(body: Record<string, unknown>): number {
 
   if (req.system) {
     tokens += estimateTextTokens(
-      typeof req.system === "string" ? req.system : req.system.map((b) => b.text).join("\n")
+      typeof req.system === "string"
+        ? req.system
+        : req.system
+            .filter(
+              (b): b is { type: "text"; text: string } =>
+                typeof (b as { text?: unknown }).text === "string"
+            )
+            .map((b) => b.text)
+            .join("\n")
     );
   }
   if (Array.isArray(req.messages)) {

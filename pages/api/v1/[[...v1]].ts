@@ -11,11 +11,12 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
-import { recordSuccess, recordFailure, selectPlatform } from "../../../worker/src/load-balancer";
+import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
+import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
@@ -38,6 +39,13 @@ interface ProxyConfig {
   /** 上游请求体构造钩子（Anthropic 分支用，把下游格式转为 OpenAI 格式） */
   buildUpstreamBody?: (body: Record<string, unknown>) => Record<string, unknown>;
 }
+
+/**
+ * 单请求 TPM 预估 token 数上界。
+ * max_tokens 仅是输出上限，客户端可能传极大值（如 1000000），
+ * 不钳制会一次烧尽整个 TPM 配额；8192 是高估但不离谱的单次输出预估值
+ */
+const MAX_ESTIMATED_TOKENS = 8192;
 
 /** 提取上游错误体中的可读消息 */
 function extractUpstreamErrorMessage(text: string): string {
@@ -243,24 +251,29 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
 
   const pRpm = await checkPlatformRpm(route.platform.id, route.platform.rpmLimit);
   if (!pRpm.allowed) {
+    // 请求未发出：释放半开探测配额（否则被门禁拒绝的探测槽位永远不归还）
+    releaseHalfOpenPending(route.platform.id);
     // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台请求频率超限", db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台请求频率超限", "rate_limit_error", { retry_after: Math.ceil((pRpm.resetAt - Date.now()) / 1000) }); return;
   }
   const kRpm = await checkApiKeyRpm(apiKey.id, apiKey.rpmLimit);
-  if (!kRpm.allowed) { sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return; }
-  const est = Math.max(1, Number(body.max_tokens || body.max_completion_tokens) || 1);
+  if (!kRpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return; }
+  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
+  const est = Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number(body.max_tokens || body.max_completion_tokens) || 1));
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 est）
   const anthropicInputEstimate = config.protocol === "anthropic" ? estimateInputTokens(rawBody) : est;
   const pTpm = await checkPlatformTpm(route.platform.id, route.platform.tpmLimit, est);
   if (!pTpm.allowed) {
+    // 请求未发出：释放半开探测配额
+    releaseHalfOpenPending(route.platform.id);
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台 Token 速率超限", db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台 Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((pTpm.resetAt - Date.now()) / 1000) }); return;
   }
   const kTpm = await checkApiKeyTpm(apiKey.id, apiKey.tpmLimit, est);
-  if (!kTpm.allowed) { sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return; }
+  if (!kTpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return; }
 
   const MAX_UPSTREAM_RETRIES = 3;
   const isStream = config.supportsStreaming !== false && body.stream === true;
@@ -345,7 +358,12 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (cur.reuseUserAgent && cur.customUserAgent) {
       headers.set("User-Agent", cur.customUserAgent);
     }
-    try { upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual" }); }
+    try {
+      // 出站代理（仅 Docker 部署，DEPLOY_PLATFORM=docker）：上游请求经代理
+      // 服务器出网；其他部署形态返回 null（直连），边缘运行时不受影响
+      const dispatcher = await getUpstreamProxyDispatcher(dummyDb, env);
+      upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(dispatcher ? { dispatcher } : {}) });
+    }
     catch (e) {
       clearTimeout(upstreamTimeoutId);
       if (e instanceof DOMException && e.name === "AbortError") {
@@ -374,7 +392,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       let errText = "";
       try { errText = await upRes.text(); } catch { /* 读取错误体失败（如 signal 超时） */ }
       clearTimeout(upstreamTimeoutId);
-      try { await recordFailure(cur.id, dummyDb); } catch {}
+      try { await recordFailure(cur.id, dummyDb, env); } catch {}
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), db: dummyDb, env }).catch(() => {});
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
@@ -410,7 +428,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let errText = "";
     try { errText = await upRes.text(); } catch { /* 读取错误体失败（如 signal 超时） */ }
     clearTimeout(upstreamTimeoutId);
-    try { await recordFailure(cur.id, dummyDb); } catch {}
+    try { await recordFailure(cur.id, dummyDb, env); } catch {}
     // 日志 status 记录实际返回下游的状态：空响应耗尽时下游收到 502，
     // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
     void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), db: dummyDb, env }).catch(() => {});
@@ -440,8 +458,16 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
     const s = upRes.body;
-    if (!s) { clearTimeout(upstreamTimeoutId); try { await recordFailure(platform.id, dummyDb); } catch {} sendV1Error(res, config, 500, "上游未返回流式响应", "server_error"); return; }
+    if (!s) { clearTimeout(upstreamTimeoutId); try { await recordFailure(platform.id, dummyDb, env); } catch {} sendV1Error(res, config, 500, "上游未返回流式响应", "server_error"); return; }
     const r = s.getReader();
+    // 客户端断开（关页面/网络切换）：取消上游流并停止写入，避免上游连接悬挂
+    let clientClosed = false;
+    res.on("close", () => {
+      clientClosed = true;
+      r.cancel().catch(() => {});
+    });
+    // 吞掉连接重置错误（客户端断开时 write/end 可能触发），避免未捕获异常
+    res.on("error", () => {});
     // 先读第一块判断是否为空流：200 + 空 SSE 视为空响应，交由调用方重试；
     // 等待第一块仍受总超时（signal）保护
     let first: ReadableStreamReadResult<Uint8Array>;
@@ -458,13 +484,45 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     clearTimeout(upstreamTimeoutId);
     // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
     // 若在设置 SSE headers 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
-    void recordSuccess(platform.id, dummyDb).catch(() => {});
+    void recordSuccess(platform.id, dummyDb, env).catch(() => {});
     // no-transform：阻止 next start（Node 服务器）内置 gzip 压缩流式响应。
     // compression 中间件会把每个 write 导入 zlib 流，输出攒够 16KB 才下发，
     // 导致思考内容被整体缓冲、首字节随思考延伸而推迟，且大响应尾部有截断风险。
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache, no-transform"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
     let tt = 0, pt = 0, ct = 0, buf = "";
+    // SSE 行缓冲上限：防异常/恶意上游发送无换行的超长数据导致内存无限增长
+    const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
+    // 带背压的写入：write 返回 false（写缓冲超过 highWaterMark）时暂停读取，
+    // 等 drain 或客户端断开后继续，避免慢客户端下内存写缓冲无限增长；
+    // 停滞客户端（连接保持但不读，TCP 窗口满）drain/close 永不触发，超时后
+    // 取消上游流并终止转发，避免处理器被永久挂起（此前无超时会被无限阻塞）
+    const WRITE_DRAIN_TIMEOUT_MS = 30_000;
+    const writeChunk = async (chunk: string) => {
+      if (clientClosed) return;
+      if (!res.write(chunk)) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            res.off("drain", onDrain);
+            res.off("close", onClose);
+            resolve();
+          };
+          const onDrain = () => finish();
+          const onClose = () => { clientClosed = true; finish(); };
+          const timer = setTimeout(() => {
+            clientClosed = true;
+            r.cancel().catch(() => {});
+            finish();
+          }, WRITE_DRAIN_TIMEOUT_MS);
+          res.once("drain", onDrain);
+          res.once("close", onClose);
+        });
+      }
+    };
     // 流内 error 事件（上游 200 + data: {"error": ...}）：HTTP 头无法反映失败，日志须按错误码记录
     let streamError: { code: number; message: string } | undefined;
     // 上游正常结束的标志：SSE 流必须以 data: [DONE] 收尾。
@@ -489,15 +547,24 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     let pendingChunk = first.value;
     try {
       while (true) {
-        if (idleTimedOut) break;
+        if (idleTimedOut || clientClosed) break;
         buf += d.decode(pendingChunk, { stream: true });
+        // 缓冲超限：取消上游流并终止（走下方 !sawDone 分支记录失败与熔断）
+        if (buf.length > MAX_SSE_BUFFER_BYTES) {
+          r.cancel().catch(() => {});
+          break;
+        }
         const lines = buf.split("\n"); buf = lines.pop() || "";
-        for (const l of lines) {
-          if (l === "data: [DONE]") { sawDone = true; if (!streamer) res.write(l + "\n"); continue; }
+        for (const raw of lines) {
+          // CRLF 上游（行尾 \r）：只去除 \r 再判断，避免 [DONE]/data: 前缀匹配
+          // 失败误判截断；不 trimEnd 剥掉全部行尾空白，OpenAI 直通分支的
+          // 纯文本 data 行行尾空格需原样透传
+          const l = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+          if (l === "data: [DONE]") { sawDone = true; if (!streamer) await writeChunk(l + "\n"); continue; }
           if (!l.startsWith("data: ")) {
             // 非 data 行（空行分隔符等）：OpenAI 分支原样透传；
             // 上游 Anthropic 的 event: 行由转换器消费，丢弃
-            if (!streamer && !upstreamStreamer) res.write(l + "\n");
+            if (!streamer && !upstreamStreamer) await writeChunk(l + "\n");
             continue;
           }
           try {
@@ -507,16 +574,16 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
               ? upstreamStreamer.feedData(data).split("\n").filter((x) => x.length > 0)
               : [l];
             for (const ol of outLines) {
-              if (ol === "data: [DONE]") { sawDone = true; if (!streamer) res.write(ol + "\n"); continue; }
+              if (ol === "data: [DONE]") { sawDone = true; if (!streamer) await writeChunk(ol + "\n"); continue; }
               try {
                 const d = JSON.parse(ol.slice(6));
                 if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
                 if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } }
                 if (streamer) {
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
-                  if (d.choices || d.usage) res.write(streamer.feedChunk(d));
+                  if (d.choices || d.usage) await writeChunk(streamer.feedChunk(d));
                 } else {
-                  res.write(ol + "\n");
+                  await writeChunk(ol + "\n");
                 }
               } catch {}
             }
@@ -532,17 +599,17 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
           // 流内 error / 空闲超时：Anthropic 客户端靠 event: error 感知失败，不能再发正常收尾（message_stop）
           const code = streamError?.code ?? 504;
           const message = streamError?.message ?? `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`;
-          res.write(`event: error\ndata: ${JSON.stringify(formatAnthropicError(code, message))}\n\n`);
+          await writeChunk(`event: error\ndata: ${JSON.stringify(formatAnthropicError(code, message))}\n\n`);
         } else {
           // Anthropic 收尾：关闭内容块 → message_delta（stop_reason/usage）→ message_stop
-          res.write(streamer.finish());
+          await writeChunk(streamer.finish());
         }
       } else if (buf) {
         // 上游 Anthropic 时 buf 残留的是 event: 行等转换器已消费的行，不写出
-        if (!upstreamStreamer) res.write(buf + "\n");
+        if (!upstreamStreamer) await writeChunk(buf + "\n");
       }
     } catch (e) {
-      if (!idleTimedOut) console.error(`${tag} 流式错误:`, e instanceof Error ? e.message : String(e));
+      if (!idleTimedOut && !clientClosed) console.error(`${tag} 流式错误:`, e instanceof Error ? e.message : String(e));
     } finally {
       clearInterval(watchdog);
     }
@@ -551,27 +618,29 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     } else if (streamError) {
       // 流内 error：按错误码记录失败日志（不计 Key 用量），下游实际收到的是 200 + error 流
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, db: dummyDb, env }).catch(() => {});
-    } else if (!sawDone) {
+    } else if (!sawDone && !clientClosed) {
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
       // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
-      try { await recordFailure(platform.id, dummyDb); } catch {}
+      // 客户端主动断开时不走此分支（流未读完是断开所致，非上游失败，不应触发熔断）
+      try { await recordFailure(platform.id, dummyDb, env); } catch {}
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", db: dummyDb, env }).catch(() => {});
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft, duration: Date.now() - start, isError: false, db: dummyDb, env }); } catch {}
     }
-    res.end(); return;
+    try { res.end(); } catch { /* 客户端已断开，忽略结束写入错误 */ }
+    return;
   }
   const ct = upRes.headers.get("content-type") || "";
   if (ct.includes("multipart/")) {
     let ab: ArrayBuffer;
-    try { ab = await upRes.arrayBuffer(); } catch { clearTimeout(upstreamTimeoutId); if (upstreamController.signal.aborted) { sendV1Error(res, config, 504, "上游响应读取超时", "timeout_error"); return; } try { await recordFailure(platform.id, dummyDb); } catch {} sendV1Error(res, config, 500, "读取上游响应失败", "server_error"); return; }
+    try { ab = await upRes.arrayBuffer(); } catch { clearTimeout(upstreamTimeoutId); if (upstreamController.signal.aborted) { sendV1Error(res, config, 504, "上游响应读取超时", "timeout_error"); return; } try { await recordFailure(platform.id, dummyDb, env); } catch {} sendV1Error(res, config, 500, "读取上游响应失败", "server_error"); return; }
     clearTimeout(upstreamTimeoutId);
     // 空响应：空 multipart 视为空响应，交由调用方重试
     if (ab.byteLength === 0) return EMPTY_UPSTREAM_RESPONSE;
     // 不阻塞响应：写库后置为 fire-and-forget（与流式分支一致）
-    void recordSuccess(platform.id, dummyDb).catch(() => {}); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
+    void recordSuccess(platform.id, dummyDb, env).catch(() => {}); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
     res.setHeader("Content-Type", ct); res.status(200).send(Buffer.from(ab)); return;
   }
   let body: string;
@@ -579,7 +648,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   catch {
     clearTimeout(upstreamTimeoutId);
     if (upstreamController.signal.aborted) { sendV1Error(res, config, 504, "上游响应读取超时", "timeout_error"); return; }
-    await recordFailure(platform.id, dummyDb); sendV1Error(res, config, 500, "读取上游响应失败", "server_error"); return;
+    await recordFailure(platform.id, dummyDb, env); sendV1Error(res, config, 500, "读取上游响应失败", "server_error"); return;
   }
   clearTimeout(upstreamTimeoutId);
   // 空响应：2xx 但响应体为空（上游返回空 body），判定无效交由调用方重试
@@ -601,17 +670,17 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       const converted = JSON.stringify(convertOpenAIResponse(openaiBody, model));
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
-      void recordSuccess(platform.id, dummyDb).catch(() => {});
+      void recordSuccess(platform.id, dummyDb, env).catch(() => {});
       res.status(200).send(converted);
     } catch {
-      try { await recordFailure(platform.id, dummyDb); } catch {}
+      try { await recordFailure(platform.id, dummyDb, env); } catch {}
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: "上游响应格式错误", db: dummyDb, env }).catch(() => {});
       res.status(502).json(formatAnthropicError(502, "上游响应格式错误"));
     }
     return;
   }
   void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, db: dummyDb, env }).catch(() => {});
-  void recordSuccess(platform.id, dummyDb).catch(() => {});
+  void recordSuccess(platform.id, dummyDb, env).catch(() => {});
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
   res.status(upRes.status).send(upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body);
@@ -670,7 +739,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 未认证时不泄露模型清单与平台名（历史漏洞：认证前直接返回列表，可
     // 匿名枚举模型 ID/owned_by，并经响应数据外带盲 SSRF 探测结果）
     if (full === "/v1/models" && req.method === "GET") return await handleModelsList(res);
-    if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(decodeURIComponent(full.slice("/v1/models/".length)), res); }
+    // 模型 ID 直接用 full 切片：Next.js 的 catch-all query（req.query.v1）已做
+    // 一次 URL 解码，不再 decodeURIComponent（二次解码会误解模型名中的 %xx，
+    // 非法转义序列还会抛 URIError 500）；Worker 侧基于原始 pathname 才需显式解码
+    if (full.startsWith("/v1/models/") && req.method === "GET") { return await handleModelDetail(full.slice("/v1/models/".length), res); }
     await proxyV1RequestPages(req, res, cfg, auth.apiKey);
   } catch (err) {
     console.error("[v1-proxy] 未捕获异常:", err instanceof Error ? err.message : String(err));

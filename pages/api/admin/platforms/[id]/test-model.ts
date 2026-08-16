@@ -10,6 +10,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
+import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
 
 /** 测试超时（毫秒） */
 const TEST_TIMEOUT_MS = 30_000;
@@ -113,6 +114,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       const start = Date.now();
 
       try {
+        // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
+        const dispatcher = await getUpstreamProxyDispatcher(db);
         const response = await fetch(chatUrl, {
           method: "POST",
           headers: {
@@ -127,6 +130,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
           }),
           signal: controller.signal,
           redirect: "manual",
+          ...(dispatcher ? { dispatcher } : {}),
         });
 
         const latencyMs = Date.now() - start;

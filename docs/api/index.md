@@ -107,7 +107,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 
 ### 模型映射
 
-模型映射（`model_maps`）当前版本没有独立的管理 API，通过[导出/导入](/guide/model-map)维护。
+模型映射（`model_maps`）没有独立的管理 API，通过[数据管理](/guide/usage)的导出/导入维护。
 
 ### 请求模板 API
 
@@ -115,16 +115,16 @@ curl -X POST https://your-domain/v1/chat/completions \
 |------|------|------|
 | `/api/admin/request-templates` | GET | 获取所有请求模板 |
 | `/api/admin/request-templates` | POST | 创建请求模板 |
-| `/api/admin/request-templates` | PUT | 更新请求模板（id 在请求体或查询参数中） |
-| `/api/admin/request-templates` | DELETE | 删除请求模板（id 在请求体或查询参数中） |
+| `/api/admin/request-templates` | PUT | 更新请求模板（id 在请求体中） |
+| `/api/admin/request-templates` | DELETE | 删除请求模板（id 在查询参数或请求体中） |
 
 ### 系统密钥 API
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/admin/system-keys` | GET | 获取所有系统密钥 |
-| `/api/admin/system-keys` | POST | 创建系统密钥 |
-| `/api/admin/system-keys/{id}` | PATCH | 更新系统密钥 |
+| `/api/admin/system-keys` | POST | 创建系统密钥（密钥仅返回一次） |
+| `/api/admin/system-keys/{id}` | PATCH | 启用/禁用系统密钥 |
 | `/api/admin/system-keys/{id}` | DELETE | 删除系统密钥 |
 
 ### 监控统计 API

@@ -107,7 +107,7 @@ Admin APIs require JWT authentication (via `admin_token` cookie).
 
 ### Model Mapping
 
-Model mappings (`model_maps`) have no dedicated admin API in the current version — maintain them via [Export/Import](/en/guide/model-map).
+Model mappings (`model_maps`) have no dedicated admin API — maintain them via [Data Management](/en/guide/usage) export/import.
 
 ### Request Templates
 
@@ -115,16 +115,16 @@ Model mappings (`model_maps`) have no dedicated admin API in the current version
 |----------|--------|-------------|
 | `/api/admin/request-templates` | GET | List all request templates |
 | `/api/admin/request-templates` | POST | Create request template |
-| `/api/admin/request-templates` | PUT | Update request template (id in request body or query) |
-| `/api/admin/request-templates` | DELETE | Delete request template (id in request body or query) |
+| `/api/admin/request-templates` | PUT | Update request template (id in request body) |
+| `/api/admin/request-templates` | DELETE | Delete request template (id in query or request body) |
 
 ### System Keys
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/admin/system-keys` | GET | List all system keys |
-| `/api/admin/system-keys` | POST | Create system key |
-| `/api/admin/system-keys/{id}` | PATCH | Update system key |
+| `/api/admin/system-keys` | POST | Create system key (key shown only once) |
+| `/api/admin/system-keys/{id}` | PATCH | Enable/disable system key |
 | `/api/admin/system-keys/{id}` | DELETE | Delete system key |
 
 ### Monitoring & Statistics

@@ -66,7 +66,9 @@ interface ReqLike {
 function makeReq(overrides: ReqLike = {}): NextApiRequest {
   return {
     method: "POST",
-    headers: { host: "example.com" },
+    // 默认带同源 Origin（模拟浏览器请求）；login POST 的 CSRF 校验
+    // （checkCsrfOrigin）在生产环境要求 POST 必须携带 Origin/Referer
+    headers: { host: "example.com", origin: "http://example.com" },
     body: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
     cookies: {},
     socket: { remoteAddress: IP_SUCCESS },
@@ -318,30 +320,30 @@ describe("POST /api/admin/auth — 登录失败", () => {
 // ==================== POST — 配置错误（500） ====================
 
 describe("POST /api/admin/auth — 配置错误", () => {
-  it("JWT_SECRET 未配置返回 500", async () => {
+  it("JWT_SECRET 未配置返回 500（通用文案，不泄露配置细节）", async () => {
     delete process.env.JWT_SECRET;
     const res = await callHandler({});
     expect(res.statusCode).toBe(500);
-    expect(res.body).toEqual({ success: false, error: "JWT_SECRET 环境变量未配置" });
+    expect(res.body).toEqual({ success: false, error: "服务器配置错误，请检查部署配置" });
   });
 
-  it("JWT_SECRET 强度不足（< 32 字符）返回 500", async () => {
+  it("JWT_SECRET 强度不足（< 32 字符）返回 500（通用文案）", async () => {
     process.env.JWT_SECRET = "short-secret";
     const res = await callHandler({});
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({
       success: false,
-      error: "JWT_SECRET 强度不足：至少需要 32 个字符",
+      error: "服务器配置错误，请检查部署配置",
     });
   });
 
-  it("管理员账号未配置返回 500", async () => {
+  it("管理员账号未配置返回 500（通用文案）", async () => {
     delete process.env.ADMIN_PASSWORD;
     const res = await callHandler({});
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({
       success: false,
-      error: "管理员账号未配置（ADMIN_USERNAME / ADMIN_PASSWORD）",
+      error: "服务器配置错误，请检查部署配置",
     });
   });
 });
@@ -367,6 +369,11 @@ describe("POST /api/admin/auth — DB 滑动窗口限流", () => {
       success: false,
       error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
     });
+    // 文案由 LOGIN_MAX_ATTEMPTS/LOGIN_WINDOW_MS 模板插值生成，断言模板
+    // 形态而非固定常量：将来调整限流参数时测试不会因"碰巧一致"静默变红
+    expect(String((sixth.body as { error: string }).error)).toMatch(
+      /^登录尝试次数过多（\d+ 次\/\d+ 分钟），请稍后再试$/
+    );
     const resetAt = (sixth.body as { resetAt: string }).resetAt;
     expect(typeof resetAt).toBe("string");
     expect(Date.parse(resetAt)).toBeGreaterThan(Date.now());
@@ -520,11 +527,11 @@ describe("GET /api/admin/auth — 获取当前管理员", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("JWT_SECRET 未配置返回 500", async () => {
+  it("JWT_SECRET 未配置返回 500（通用文案）", async () => {
     delete process.env.JWT_SECRET;
     const res = await callHandler({ method: "GET" });
     expect(res.statusCode).toBe(500);
-    expect(res.body).toEqual({ success: false, error: "JWT_SECRET 环境变量未配置" });
+    expect(res.body).toEqual({ success: false, error: "服务器配置错误，请检查部署配置" });
   });
 });
 

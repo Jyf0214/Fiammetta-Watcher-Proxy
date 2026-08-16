@@ -47,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 async function handleGet(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);
-  if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+  if (!admin) return res.status(401).json({ success: false, error: "未授权" });
 
   try {
     const db = await createDb();
@@ -62,7 +62,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);
-  if (!admin) return res.status(401).json({ success: false, error: { message: "未授权", type: "invalid_request_error" } });
+  if (!admin) return res.status(401).json({ success: false, error: "未授权" });
   if (!checkCsrfOrigin(req, res)) return;
   if (!await checkAdminRateLimit(admin.adminId, res)) return;
 

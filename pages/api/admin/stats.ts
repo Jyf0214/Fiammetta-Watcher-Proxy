@@ -126,12 +126,13 @@ export default async function handler(
 
     // ---- 历史部分（daily_stats）累加 ----
     // 平均 TTFT/延迟的历史近似：
-    // daily_stats 未存"ttft > 0 的样本数"，且未按 isError 区分样本（归档时所有
-    // 请求都参与均值，错误请求的 ttft=0 也会稀释 daily_stats 的 avgTtft）。
-    // 这里用每行 (totalRequests - errorRequests) 作为非错误请求数近似，并仅对
-    // avgTtft > 0 的行把 avgTtft × 该数计入分子——与明细部分"ttft=0 贡献 0
-    // 分子但计入分母"的稀释语义一致，是现有接口 avgTtft 口径在归档数据上的
-    // 最佳近似（与 log-archiver 合并旧记录时"用总请求数近似样本数"同级）。
+    // daily_stats 未存"ttft > 0 的样本数"。归档聚合（log-archiver）只对非错误
+    // 请求累加 ttft/latency/tps 样本（错误请求仅计入 errorRequests），与明细
+    // 部分口径一致；这里用每行 (totalRequests - errorRequests) 作为非错误请求
+    // 数近似，并仅对 avgTtft > 0 的行把 avgTtft × 该数计入分子——与明细部分
+    // "ttft=0 贡献 0 分子但计入分母"的稀释语义一致，是现有接口 avgTtft 口径
+    // 在归档数据上的最佳近似（与 log-archiver 合并旧记录时"用总请求数近似
+    // 样本数"同级）。
     let histRequests = 0;
     let histTokens = 0;
     let histPerfCount = 0;

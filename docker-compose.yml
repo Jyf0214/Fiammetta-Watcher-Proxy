@@ -42,9 +42,9 @@ services:
         limits:
           memory: 512M
           cpus: '1.0'
-    # 健康检查：定期检测应用是否正常响应
+    # 健康检查：定期检测应用是否正常响应（与 PORT 一致，compose 解析时展开）
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-3000}/"]
       interval: 30s
       timeout: 5s
       retries: 3

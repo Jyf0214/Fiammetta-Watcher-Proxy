@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { message } from "antd";
 import {
   Download,
@@ -158,6 +158,13 @@ export default function DataManagerPage() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 流式导入的 AbortController 引用（组件卸载时中止未完成的导入）
+  const importAbortRef = useRef<AbortController | null>(null);
+
+  // 组件卸载时中止仍在进行的导入，避免请求泄漏与卸载后 setState
+  useEffect(() => {
+    return () => importAbortRef.current?.abort();
+  }, []);
 
   // 流式导入进度状态
   const [totalProcessed, setTotalProcessed] = useState(0);
@@ -268,12 +275,16 @@ export default function DataManagerPage() {
       setStepProgressList([]);
       setCurrentStepKey(null);
 
+      const controller = new AbortController();
+      importAbortRef.current = controller;
+
       try {
         // 发起流式请求
         const res = await fetch("/api/admin/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -372,12 +383,17 @@ export default function DataManagerPage() {
           }
         }
       } catch (err) {
+        // 主动中止（组件卸载）：静默退出，不弹错误提示
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
         message.error(err instanceof Error ? err.message : t("dmErrExport"));
         setImportResult({
           success: false,
           message: err instanceof Error ? err.message : t("dmErrExport"),
         });
       } finally {
+        importAbortRef.current = null;
         setImporting(false);
         setCurrentStepKey(null);
       }

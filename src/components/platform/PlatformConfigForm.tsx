@@ -73,6 +73,9 @@ export function PlatformConfigForm({
   const formName = Form.useWatch("name", form);
   const formBaseUrl = Form.useWatch("baseUrl", form);
   const formType = Form.useWatch("type", form);
+  // 响应式读取：条件渲染 customUserAgent 必须用 useWatch——
+  // getFieldValue 是快照读取，不会触发重渲染（开关切换后输入框不出现/不消失）
+  const formReuseUserAgent = Form.useWatch("reuseUserAgent", form);
 
   const handleBatchSubmit = () => {
     const lines = batchText
@@ -375,7 +378,7 @@ export function PlatformConfigForm({
                   >
                     <Switch />
                   </Form.Item>
-                  {form.getFieldValue("reuseUserAgent") && (
+                  {formReuseUserAgent && (
                     <Form.Item
                       name="customUserAgent"
                       label={t("customUserAgent")}

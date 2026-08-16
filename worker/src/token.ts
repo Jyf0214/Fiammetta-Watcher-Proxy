@@ -224,7 +224,7 @@ export function createUsageTransformer(params: {
       // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
       const truncated = !sawDone && !streamError && chunkCount > 0;
       if (truncated) {
-        try { await recordFailure(params.platformId, params.db); } catch {}
+        try { await recordFailure(params.platformId, params.db, params.env); } catch {}
       }
 
       // 复用同一个 PrismaClient 完成所有 DB 操作

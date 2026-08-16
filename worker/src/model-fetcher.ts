@@ -16,6 +16,7 @@ import { detectModelType } from "@/lib/detect-model-type";
 import type { WorkerEnv } from "./config";
 import { parseApiKeys, parseApiKeyObjects, getNextKey } from "./platform-keys";
 import { isSafeUrl } from "@/lib/admin-security";
+import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
 import type { PlatformConfig } from "@/lib/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -53,21 +54,20 @@ function isLockWaitTimeout(err: unknown): boolean {
 async function executeWithRetry<T>(
   prisma: any,
   dbKind: string,
-  fn: () => Promise<T>,
+  fn: (tx: any) => Promise<T>,
   operationName: string
 ): Promise<T> {
   // D1 不支持事务，也不重试（D1 无锁等待超时问题）
   if (dbKind === "d1") {
-    return fn();
+    return fn(prisma);
   }
 
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // 非 D1 数据库使用事务
-      return await prisma.$transaction(async (_tx: any) => {
-        // 将 tx 绑定到 fn 的上下文（通过闭包）
-        return await fn();
+      // 非 D1 数据库使用事务：fn 内所有查询必须使用 tx（事务客户端），保证删除+插入原子替换
+      return await prisma.$transaction(async (tx: any) => {
+        return await fn(tx);
       });
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -93,12 +93,16 @@ interface UpstreamModel {
 /**
  * 从单个平台获取模型列表
  */
-async function fetchPlatformModels(platform: {
-  id: string;
-  baseUrl: string;
-  apiKeys: string;
-  name: string;
-}): Promise<UpstreamModel[] | null> {
+async function fetchPlatformModels(
+  platform: {
+    id: string;
+    baseUrl: string;
+    apiKeys: string;
+    name: string;
+  },
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<UpstreamModel[] | null> {
   const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
 
   // SSRF 防护：模型拉取同样必须校验上游地址（此前无校验，平台 baseUrl 指向内网时
@@ -141,11 +145,14 @@ async function fetchPlatformModels(platform: {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
+    // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
+    const dispatcher = await getUpstreamProxyDispatcher(db, env);
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
       // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
       redirect: "manual",
+      ...(dispatcher ? { dispatcher } : {}),
     });
     clearTimeout(timeoutId);
 
@@ -171,7 +178,10 @@ async function fetchPlatformModels(platform: {
     // 上游返回空列表视为获取失败，保留旧数据不清空
     if (models.length === 0) return null;
 
-    return models;
+    // 按 id 去重：个别供应商返回重复 id 时 createMany 会撞 @@unique([platformId, modelId]) 整批失败
+    const deduped = Array.from(new Map(models.map((m) => [m.id, m])).values());
+
+    return deduped;
   } catch {
     return null;
   }
@@ -205,7 +215,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
 
     const results = await Promise.allSettled(
       platforms.map(async (platform: PlatformSelect) => {
-        const models = await fetchPlatformModels(platform);
+        const models = await fetchPlatformModels(platform, db, env);
         if (models === null) {
           console.warn(
             `[model-fetcher] 平台 ${platform.name}(${platform.id}) 模型拉取失败，保留旧数据`
@@ -219,9 +229,9 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
         await executeWithRetry(
           prisma,
           dbKind,
-          async () => {
+          async (tx: any) => {
             // 查询已有模型，保留用户手动设置的 enabled 状态
-            const existingModels: ExistingModel[] = await prisma.platformModels.findMany({
+            const existingModels: ExistingModel[] = await tx.platformModels.findMany({
               where: { platformId: platform.id },
               select: { modelId: true, enabled: true, source: true },
             });
@@ -230,7 +240,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
             );
 
             // 删除旧的自动发现模型（保留手动添加的）
-            await prisma.platformModels.deleteMany({
+            await tx.platformModels.deleteMany({
               where: { platformId: platform.id, source: "auto" },
             });
 
@@ -254,7 +264,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
 
               // 分批插入（D1 限制每次最多 100 条）
               for (let i = 0; i < values.length; i += 100) {
-                await prisma.platformModels.createMany({
+                await tx.platformModels.createMany({
                   data: values.slice(i, i + 100),
                 });
               }

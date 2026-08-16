@@ -206,7 +206,7 @@ export default async function handler(
 
         sendProgress(step.key, stepTotal, importResult.imported, importResult.skipped, totalProcessed, totalRecords, importResult.error, importResult.skipReasons);
       } catch (err) {
-        console.error(`[import] 导入 ${step.key} 失败:`, err);
+        console.error(`[import] 导入 ${step.key} 失败:`, err instanceof Error ? err.message : String(err));
         totalProcessed += stepTotal;
 
         sendProgress(step.key, stepTotal, 0, stepTotal, totalProcessed, totalRecords);
@@ -233,7 +233,7 @@ export default async function handler(
         },
       });
     } catch (auditErr) {
-      console.warn("[POST /api/admin/import] 审计日志写入失败（不影响导入）:", auditErr);
+      console.warn("[POST /api/admin/import] 审计日志写入失败（不影响导入）:", auditErr instanceof Error ? auditErr.message : String(auditErr));
     }
 
     // 汇总导入结果（含跳过原因）
@@ -257,7 +257,7 @@ export default async function handler(
     writeEvent({ type: "complete", ...result });
     res.end();
   } catch (err) {
-    console.error("[POST /api/admin/import] 导入数据失败:", err);
+    console.error("[POST /api/admin/import] 导入数据失败:", err instanceof Error ? err.message : String(err));
     // 尝试发送错误事件
     try {
       if (!res.headersSent) {
@@ -526,6 +526,10 @@ async function importPlatforms(
       extraHeaders: sanitizeExtraHeaders(p.extraHeaders),
       status: "healthy",
       failCount: 0,
+      // 用户配置字段（运行态除外）：白名单平台与预设来源需随迁移保留，
+      // 否则跨环境备份恢复后白名单平台会重新被 429 封禁、预设关联丢失
+      whitelisted: sanitizeBoolean(p.whitelisted, false),
+      presetId: sanitizeNullableString(p.presetId),
       createdAt: now,
       updatedAt: now,
     }));
@@ -684,7 +688,7 @@ async function importApiKeys(
         rpmLimit: sanitizeNonNegativeInt(k.rpmLimit),
         tpmLimit: sanitizeNonNegativeInt(k.tpmLimit),
         callLimit: sanitizeNonNegativeInt(k.callLimit),
-        callUsed: 0,
+        callUsed: sanitizeNonNegativeInt(k.callUsed) ?? 0,
         tokenLimit: sanitizeNonNegativeInt(k.tokenLimit),
         resetPeriod: sanitizeEnum(k.resetPeriod, VALID_RESET_PERIODS, "monthly"),
         status: sanitizeEnum(k.status, VALID_KEY_STATUSES, "active"),

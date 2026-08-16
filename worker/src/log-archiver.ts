@@ -180,6 +180,7 @@ async function archiveSingleDay(
     completionTokens: number;
     ttft: number;
     latency: number;
+    isError: boolean;
   }> = [];
   const logIds: string[] = [];
   {
@@ -198,6 +199,7 @@ async function archiveSingleDay(
           completionTokens: true,
           ttft: true,
           latency: true,
+          isError: true,
         },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: PAGE_SIZE,
@@ -264,7 +266,18 @@ async function archiveSingleDay(
       groups.set(groupKey, group);
     }
 
+    // 总请求数含错误请求（与 stats.ts detailAgg 无 isError 过滤的口径一致）
     group.totalRequests++;
+
+    // 错误请求只计入 errorRequests，不贡献 tokens/ttft/latency/tps：
+    // 与明细统计口径一致（stats.ts/trend.ts 的 perfAgg 按 isError:false 过滤，
+    // 错误请求 tokens 恒为 0、ttft=0 会稀释均值）。此前未读 isError 字段导致
+    // errorRequests 恒为 0，历史部分 perfCount=totalRequests 把错误请求误当样本。
+    if (log.isError) {
+      group.errorRequests++;
+      continue;
+    }
+
     group.totalTokens += log.tokens || 0;
     group.totalPromptTokens += log.promptTokens || 0;
     group.totalCompletionTokens += log.completionTokens || 0;

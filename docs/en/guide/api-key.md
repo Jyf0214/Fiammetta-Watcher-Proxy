@@ -29,6 +29,6 @@ Resets are executed by scheduled tasks: on Cloudflare the Worker's built-in Cron
 ## Next Steps
 
 - [Platform Configuration](/en/guide/platform) — configure upstream AI service providers
-- [Model Mapping](/en/guide/model-map) — configure model name mappings
+- [System API Key](/en/guide/system-key) — admin API authentication
 - [API Reference](/en/api/) — call endpoints with an API key
 

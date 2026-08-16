@@ -174,16 +174,32 @@ export function ResponsiveTable<T>(props: TableProps<T>) {
   } = props;
 
   const isMobile = useIsMobile();
+  // 移动端本地分页页码（仅未受控分页场景生效，服务端分页由父组件控制）
+  const [mobilePage, setMobilePage] = useState(1);
 
   // ── 移动端：卡片列表 ──
   if (isMobile) {
+    const pagObj = pagination !== false && typeof pagination === "object" ? pagination : null;
+    const total = pagObj?.total ?? dataSource?.length ?? 0;
+    const pageSize = pagObj?.pageSize ?? 10;
+    // 未受控分页（调用方只传 pageSize/showTotal，如 keys 页全量数据）：
+    // 按 pageSize 切片，与桌面端 antd Table 内置分页行为对齐；
+    // 受控分页（服务端分页，含 current/total）保持透传，由父组件控制
+    const localPaged =
+      pagObj != null && pagObj.current == null && (dataSource?.length ?? 0) > pageSize;
+    const maxPage = Math.max(1, Math.ceil(total / pageSize));
+    const clampedPage = Math.min(mobilePage, maxPage);
+    const pageData = localPaged
+      ? (dataSource ?? []).slice((clampedPage - 1) * pageSize, clampedPage * pageSize)
+      : (dataSource ?? []);
+
     return (
       <div>
         {loading ? (
           <MobileSpinner />
         ) : (
           <MobileCards
-            data={dataSource ?? []}
+            data={pageData}
             columns={columns as Col<T>[]}
             rowKey={rowKey as string | number | ((r: T) => string)}
           />
@@ -192,13 +208,20 @@ export function ResponsiveTable<T>(props: TableProps<T>) {
           <div className="mt-4 flex justify-center items-center gap-4">
             {typeof pagination === "object" && pagination.showTotal && (
               <span className="text-xs text-zinc-500 tabular-nums">
-                {pagination.showTotal(pagination.total ?? dataSource?.length ?? 0, [0, 0])}
+                {pagination.showTotal(total, (() => {
+                  const current = localPaged ? clampedPage : pagination.current ?? 1;
+                  const size = localPaged ? pageSize : pagination.pageSize ?? Math.max(total, 1);
+                  return [(current - 1) * size + 1, Math.min(current * size, total)];
+                })())}
               </span>
             )}
             <Pagination
               {...(typeof pagination === "object" ? pagination : {})}
               showTotal={undefined}
               size="small"
+              // 仅本地未受控分页覆盖 current/onChange；受控分页（服务端分页）
+              // 保持透传调用方提供的 current/onChange，否则翻页回调被吞、移动端失效
+              {...(localPaged ? { current: clampedPage, onChange: (p) => setMobilePage(p) } : {})}
             />
           </div>
         )}

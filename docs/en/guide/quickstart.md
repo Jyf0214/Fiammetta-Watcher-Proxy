@@ -48,6 +48,5 @@ FWP supports multiple deployment options: Cloudflare, Vercel, EdgeOne, Node.js, 
 
 - [Platform Config](/en/guide/platform) — Configure upstream AI service providers
 - [API Key Management](/en/guide/api-key) — Create and manage API keys
-- [Model Mapping](/en/guide/model-map) — Configure model name mappings
 - [API Reference](/en/api/) — endpoint usage
 - [Environment Variables](/en/deployment/env) — Complete env var reference

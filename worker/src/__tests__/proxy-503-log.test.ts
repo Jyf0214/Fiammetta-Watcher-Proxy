@@ -175,7 +175,7 @@ describe("上游 503 时日志记录状态码重现", () => {
     );
 
     expect(res.status).toBe(503);
-    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB);
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
     expect(logParams.status).toBe(503);
@@ -201,7 +201,7 @@ describe("上游 503 时日志记录状态码重现", () => {
     );
 
     expect(res.status).toBe(503);
-    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB);
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
     expect(recordRequestLog).toHaveBeenCalledTimes(1);
     const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
     expect(logParams.status).toBe(503);

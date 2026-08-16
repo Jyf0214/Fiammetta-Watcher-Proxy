@@ -20,7 +20,16 @@ export default async function handler(
     return res.status(401).json({ success: false, error: "未授权" });
   }
 
-  const dbType = await getDbKind();
+  // 健康检查结果不可缓存：CDN/代理缓存会掩盖部署后的真实状态
+  res.setHeader("Cache-Control", "no-store");
+
+  let dbType: string;
+  try {
+    dbType = await getDbKind();
+  } catch {
+    dbType = "unknown";
+  }
+
   try {
     const db = await createDb();
     await db.admins.findMany({ take: 1, select: { id: true } });
