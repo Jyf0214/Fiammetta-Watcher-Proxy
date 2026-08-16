@@ -51,7 +51,7 @@ JWT_SECRET=至少32字符的随机密钥
 PORT=3000
 NODE_ENV=production
 
-# ===== Cron 认证（可选） =====
+# ===== Cron 认证（必须配置，未配置时 /api/cron/* 端点 403 禁用） =====
 CRON_SECRET=随机密钥
 EOF
 ```

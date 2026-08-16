@@ -31,7 +31,7 @@ features:
     details: JWT 认证、速率限制、CORS 配置、CSP 安全头、SQL 注入防护
   - icon: ✓
     title: 多种部署方式
-    details: Cloudflare 零成本部署、Vercel/Netlify Serverless、Docker 容器化、Node.js 自托管
+    details: Cloudflare 零成本部署、Vercel/EdgeOne Serverless、Docker 容器化、Node.js 自托管
 ---
 
  

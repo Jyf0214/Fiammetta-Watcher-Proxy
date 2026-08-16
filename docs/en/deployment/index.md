@@ -1,13 +1,13 @@
 # Deployment Guide
 
-FWP supports 4 deployment methods, grouped by target:
+FWP supports 5 deployment methods (Cloudflare / Vercel / EdgeOne / Node.js / Docker), grouped by target (Vercel and EdgeOne share the same architecture, so they are combined in one row):
 
 | Method | Architecture | Database | Scheduled Tasks |
 |--------|--------------|----------|------------------|
 | **Cloudflare Pages + Worker** | Worker handles proxy + scheduled tasks, Pages serves the frontend and admin panel | D1 (free, zero config) or TiDB/PostgreSQL | Built into Cloudflare (free) |
 | **Vercel / EdgeOne** | Serverless functions handle everything | TiDB / MariaDB / PostgreSQL (remote) | HTTP endpoints + external scheduler (Vercel Cron requires Pro) |
 | **Node.js standalone** | Full server on your own machine | TiDB / MariaDB / PostgreSQL | HTTP endpoints + system cron |
-| **Docker** | Containerized deployment | PostgreSQL / MySQL (incl. MariaDB) | HTTP endpoints + system cron |
+| **Docker** | Containerized deployment | TiDB / PostgreSQL / MySQL (incl. MariaDB) | HTTP endpoints + system cron |
 
 ## Platform Comparison
 

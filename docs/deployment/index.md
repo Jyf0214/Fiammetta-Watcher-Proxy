@@ -1,13 +1,13 @@
 # 部署指南
 
-FWP 支持 4 种部署方式，按部署目标分组：
+FWP 支持 5 种部署方式（Cloudflare / Vercel / EdgeOne / Node.js / Docker），按部署目标分组（Vercel 与 EdgeOne 架构相同，合并为一行）：
 
 | 方式 | 架构 | 数据库 | 定时任务 |
 |------|------|--------|----------|
 | **Cloudflare Pages + Worker** | Worker 处理代理与定时任务，Pages 托管前台与管理后台 | D1（免费，零配置）或 TiDB/PostgreSQL | Cloudflare 内置（免费） |
 | **Vercel / EdgeOne** | 服务端函数处理一切 | TiDB / MariaDB / PostgreSQL（远程） | HTTP 端点 + 外部调度（Vercel Cron 需 Pro 计划） |
 | **Node.js 直接部署** | 自有服务器跑完整服务 | TiDB / MariaDB / PostgreSQL | HTTP 端点 + 系统 cron |
-| **Docker** | 容器化部署 | PostgreSQL / MySQL（含 MariaDB） | HTTP 端点 + 系统 cron |
+| **Docker** | 容器化部署 | TiDB / PostgreSQL / MySQL（含 MariaDB） | HTTP 端点 + 系统 cron |
 
 ## 平台对比
 

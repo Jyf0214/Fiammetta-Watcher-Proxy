@@ -89,7 +89,7 @@ API Keys are client credentials for accessing FWP.
 | RPM Limit | Requests per minute limit | No (default 0) |
 | TPM Limit | Tokens per minute limit | No (default 0) |
 | Reset Period | `monthly` / `daily` / `never` | No (default monthly) |
-| Expiry | Auto-disable after this date | No |
+| Expiry | Requests are rejected with 401 after this date (the create form does not expose this field yet — set it via import or API) | No |
 
 ### Quota Rules
 
@@ -120,6 +120,13 @@ Model mappings map client-requested model names to actual upstream model names (
 | Alias | Client-requested model name |
 | Target Model | Actual model name forwarded to upstream |
 | Platform | Limit to specific platform (empty = auto-select via router) |
+
+### Usage Examples
+
+| Alias | Target Model | Platform | Effect |
+|-------|--------------|----------|--------|
+| `gpt-4` | `gpt-4o` | — | Applies to all platforms |
+| `claude-3` | `claude-3-5-sonnet` | Anthropic platform | Only applies to Anthropic |
 
 ### Use Cases
 

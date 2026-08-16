@@ -10,7 +10,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
-import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
+import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 
 /** 测试超时（毫秒） */
 const TEST_TIMEOUT_MS = 30_000;
@@ -112,10 +112,12 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS);
       const start = Date.now();
+      // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
+      let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
 
       try {
         // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
-        const dispatcher = await getUpstreamProxyDispatcher(db);
+        proxy = await getUpstreamProxy(db, undefined, id);
         const response = await fetch(chatUrl, {
           method: "POST",
           headers: {
@@ -130,7 +132,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
           }),
           signal: controller.signal,
           redirect: "manual",
-          ...(dispatcher ? { dispatcher } : {}),
+          ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}),
         });
 
         const latencyMs = Date.now() - start;
@@ -166,8 +168,10 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
         }
       } catch (err) {
         const latencyMs = Date.now() - start;
-        const message = err instanceof Error ? err.message : String(err);
-        const isAbort = message.includes("abort");
+        // 超时用 DOMException.name 判定（AbortController 触发），与 v1 代理一致
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过
+        if (!isAbort && proxy?.url) void markProxyFailure(db, undefined, proxy.url).catch(() => {});
 
         results.push({
           name,
@@ -175,7 +179,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
           status: "error",
           httpStatus: 0,
           latencyMs,
-          error: isAbort ? `请求超时（${TEST_TIMEOUT_MS / 1000}s）` : message,
+          error: isAbort ? `请求超时（${TEST_TIMEOUT_MS / 1000}s）` : err instanceof Error ? err.message : String(err),
         });
       } finally {
         clearTimeout(timeout);

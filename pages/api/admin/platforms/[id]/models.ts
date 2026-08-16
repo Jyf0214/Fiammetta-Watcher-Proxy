@@ -12,7 +12,7 @@ import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { detectModelType } from "@/lib/detect-model-type";
-import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
+import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 
 /** MySQL/TiDB 锁等待超时错误码 */
 const LOCK_WAIT_TIMEOUT_CODE = 1205;
@@ -294,6 +294,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 调用上游模型列表接口
     const modelsUrl = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
     let upstreamModels: OpenAIModel[] = [];
+    // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
+    let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
 
     try {
       const controller = new AbortController();
@@ -301,7 +303,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 
       try {
         // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
-        const dispatcher = await getUpstreamProxyDispatcher(db);
+        proxy = await getUpstreamProxy(db, undefined, id);
         const response = await fetch(modelsUrl, {
           method: "GET",
           headers: {
@@ -311,7 +313,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
           signal: controller.signal,
           // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
           redirect: "manual",
-          ...(dispatcher ? { dispatcher } : {}),
+          ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}),
         });
 
         if (!response.ok) {
@@ -328,10 +330,14 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         clearTimeout(timeout);
       }
     } catch (fetchErr) {
-      const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      if (message.includes("abort")) {
+      // 超时用 DOMException.name 判定（AbortController 触发），与 v1 代理/model-fetcher 一致；
+      // 依赖错误文案 includes("abort") 不可靠
+      const isAbort = fetchErr instanceof DOMException && fetchErr.name === "AbortError";
+      if (isAbort) {
         return res.status(504).json({ success: false, error: "上游平台响应超时（15秒）" });
       }
+      // 网络层失败：回标记当前代理（超时分支已返回，此处非超时）
+      if (proxy?.url) void markProxyFailure(db, undefined, proxy.url).catch(() => {});
       return res.status(502).json({ success: false, error: "无法连接到上游平台" });
     }
 

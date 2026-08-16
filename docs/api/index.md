@@ -70,10 +70,11 @@ curl -X POST https://your-domain/v1/chat/completions \
 | `/api/cron/model-fetch` | GET/POST | 自动发现平台模型 |
 | `/api/cron/key-reset` | GET/POST | 重置 Key 用量计数器 |
 | `/api/cron/log-archive` | GET/POST | 归档过期请求日志 |
+| `/api/cron/proxy-health` | GET/POST | 出站代理健康检查（仅 Docker 部署配置了出站代理时生效） |
 
 ## 管理后台 API
 
-管理后台 API 需要管理员 JWT 认证（通过 Cookie 中的 `admin_token`）。
+管理后台 API 支持两种认证方式：管理员 JWT（通过 Cookie 中的 `admin_token`）或系统 API Key（`Authorization: Bearer <system-api-key>`，见 [系统 Key](/guide/system-key)）。
 
 ### 认证 API
 

@@ -1,6 +1,9 @@
 # Cron Tasks
 
-FWP provides 3 scheduled task endpoints for system maintenance. These are called periodically by external services (Cloudflare Cron Triggers, Vercel Cron, or any HTTP scheduler).
+FWP provides scheduled task endpoints for system maintenance. How they are triggered depends on the deployment:
+
+- **Cloudflare deployment**: scheduled tasks run automatically via the Worker's built-in `scheduled` event (model discovery, key usage reset, log archival) — **no HTTP calls** to these endpoints are needed
+- **Other deployments** (Vercel / EdgeOne / Node.js / Docker): call these endpoints periodically from an external scheduler (Vercel Cron, Cron-job.org, UptimeRobot, or any HTTP scheduler)
 
 ## Endpoint List
 
@@ -9,6 +12,7 @@ FWP provides 3 scheduled task endpoints for system maintenance. These are called
 | `GET/POST /api/cron/model-fetch` | Model Discovery | Every 6 hours | Auto-discover platform-supported models |
 | `GET/POST /api/cron/key-reset` | Key Usage Reset | Hourly | Reset key monthly/daily usage counters (only cleared when the period starts) |
 | `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics |
+| `GET/POST /api/cron/proxy-health` | Outbound proxy health check | As needed | Check outbound proxy connectivity (only active on Docker deployments with a proxy configured) |
 
 ## Authentication
 
@@ -58,7 +62,20 @@ Authorization: Bearer <CRON_SECRET>
 ### cURL
 
 ```bash
+# Model discovery
 curl -X GET https://your-domain/api/cron/model-fetch \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# Key usage reset
+curl -X GET https://your-domain/api/cron/key-reset \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# Log archival
+curl -X GET https://your-domain/api/cron/log-archive \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# Outbound proxy health check (only for Docker deployments with a proxy configured)
+curl -X GET https://your-domain/api/cron/proxy-health \
   -H "Authorization: Bearer your-CRON_SECRET"
 ```
 

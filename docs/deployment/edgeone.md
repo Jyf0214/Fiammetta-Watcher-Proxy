@@ -45,11 +45,11 @@ EdgeOne 无内置定时任务，用外部调度服务定时请求 `/api/cron/*` 
 | 检查项 | 方法 |
 |--------|------|
 | 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://你的域名/api/health` → `{"status":"ok",...}`（需管理员认证） |
-| 代理可用 | `curl https://你的域名/v1/models`（无需 API Key，返回 200 模型列表即正常；只有 POST 代理接口需要认证） |
+| 代理可用 | `curl -H "Authorization: Bearer <用户API Key>" https://你的域名/v1/models` → 返回 200 模型列表即正常（所有代理接口均需 API Key 认证） |
 | 管理后台 | 浏览器访问 `/admin`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 |
 | 数据库 | 登录后台 → 模型/日志页面确认数据读写正常 |
 
-> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。
+> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。`<用户API Key>` 指**用户 API Key**（`sk-` 格式）：在管理后台「API 密钥」页面创建，用于 V1 代理接口认证。
 
 ## 常见问题
 

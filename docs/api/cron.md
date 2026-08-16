@@ -1,6 +1,9 @@
 # Cron 任务
 
-FWP 提供 3 个定时任务端点，用于系统维护。这些端点通过外部服务（如 Cloudflare Cron Triggers、Vercel Cron 或任何 HTTP 调度器）定时调用。
+FWP 提供定时任务端点，用于系统维护。触发机制因部署方式而异：
+
+- **Cloudflare 部署**：定时任务由 Worker 内置 `scheduled` 事件自动执行（模型发现、Key 用量重置、日志归档），**无需**通过 HTTP 调用本页端点
+- **其他部署**（Vercel / EdgeOne / Node.js / Docker）：由外部调度服务（Vercel Cron、Cron-job.org、UptimeRobot 或任何 HTTP 调度器）定时调用本页端点
 
 ## 端点列表
 
@@ -9,6 +12,7 @@ FWP 提供 3 个定时任务端点，用于系统维护。这些端点通过外�
 | `GET/POST /api/cron/model-fetch` | 模型发现 | 每 6 小时 | 自动发现各平台支持的模型列表 |
 | `GET/POST /api/cron/key-reset` | Key 用量重置 | 每小时 | 按周期重置 Key 的月度/日度用量计数器（仅在周期开始时实际清零） |
 | `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据 |
+| `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 按需 | 检查出站代理连通性（仅 Docker 部署配置了出站代理时生效） |
 
 ## 认证
 
@@ -68,6 +72,10 @@ curl -X GET https://your-domain/api/cron/key-reset \
 
 # 日志归档
 curl -X GET https://your-domain/api/cron/log-archive \
+  -H "Authorization: Bearer your-CRON_SECRET"
+
+# 出站代理健康检查（仅 Docker 部署配置了出站代理时使用）
+curl -X GET https://your-domain/api/cron/proxy-health \
   -H "Authorization: Bearer your-CRON_SECRET"
 ```
 

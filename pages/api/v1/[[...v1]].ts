@@ -16,7 +16,7 @@ import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
-import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
+import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
@@ -358,11 +358,13 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (cur.reuseUserAgent && cur.customUserAgent) {
       headers.set("User-Agent", cur.customUserAgent);
     }
+    // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
+    let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
     try {
       // 出站代理（仅 Docker 部署，DEPLOY_PLATFORM=docker）：上游请求经代理
       // 服务器出网；其他部署形态返回 null（直连），边缘运行时不受影响
-      const dispatcher = await getUpstreamProxyDispatcher(dummyDb, env);
-      upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(dispatcher ? { dispatcher } : {}) });
+      proxy = await getUpstreamProxy(dummyDb, env, cur.id);
+      upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}) });
     }
     catch (e) {
       clearTimeout(upstreamTimeoutId);
@@ -371,6 +373,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游请求超时", db: dummyDb, env }).catch(() => {});
         sendV1Error(res, config, 504, "上游请求超时", "timeout_error"); return;
       }
+      // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过
+      if (proxy?.url) void markProxyFailure(dummyDb, env, proxy.url).catch(() => {});
       throw e;
     }
 

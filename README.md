@@ -4,8 +4,7 @@
 
 > [!TIP]
 > **注意：项目处于开发阶段，功能不稳定，暂不建议用于生产环境。**
-> 不稳定版本（当前分支）同样支持 Docker 构建部署，但尚未提供自动构建的预构建镜像，需自行构建；
-> 稳定版提供预构建镜像 `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest`，可直接拉取运行。
+> 本仓库（canary 分支）提供自动构建的预构建镜像：`ghcr.io/jyf0214/fiammetta-watcher-proxy:canary`（完整版）与 `:canary-lite`（精简版，仅 V1 代理与定时任务），可直接拉取运行；推送到 `canary` 分支或手动触发 Docker Build 工作流即自动构建。
 
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。可部署在 Cloudflare、EdgeOne、Vercel 或自有服务器（Docker）。
 
@@ -46,7 +45,7 @@ LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响�
 
 ### 方式一：GitHub Actions 自动部署
 
-推送到 `canary` 分支自动触发 Cloudflare 部署；EdgeOne 部署仅支持手动触发（需配置 `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets）；也可在 Actions 页面手动选择部署平台（cf / edgeone / both）。工作流步骤：
+推送到 `canary` 分支自动触发 Cloudflare 部署；若同时配置了 `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets 则一并自动部署 EdgeOne；也可在 Actions 页面手动选择部署平台（cf / edgeone / both）。工作流步骤：
 
 1. **初始化资源（pre）** — `deploy/init.py pre` 创建 D1/KV + 替换配置占位符 + 写入 DB_TYPE
 2. **安装依赖** — `npm install` + 按 DB_TYPE 生成对应方言 Prisma Client
@@ -107,7 +106,7 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 
 ### 方式三：Docker 部署
 
-不稳定版本（当前分支）支持 Docker 构建部署，但尚未提供自动构建的预构建镜像，需自行构建（构建期通过 `DB_TYPE` 参数选择数据库方言，与运行时一致）：
+本仓库（canary 分支）提供预构建镜像，可直接拉取运行：`ghcr.io/jyf0214/fiammetta-watcher-proxy:canary`（完整版）与 `:canary-lite`（精简版，仅 V1 代理与定时任务，无管理后台）。也可自行构建（构建期通过 `DB_TYPE` 参数选择数据库方言，与运行时一致）：
 
 ```bash
 # 内置 PostgreSQL，快速体验
@@ -119,7 +118,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 - 需在 `.env` 中配置数据库密码、`ADMIN_USERNAME` / `ADMIN_PASSWORD`、`JWT_SECRET` 等必填项
 - 容器启动时自动同步数据库表结构，管理员账号通过环境变量认证（无 `/setup` 引导页）
-- 稳定版预构建镜像 `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` 可直接拉取运行，详细步骤见部署教程
+- 预构建镜像由推送到 `canary` 分支或手动触发 **Docker Build** 工作流自动构建，详细步骤见部署教程
 
 ### 环境变量
 

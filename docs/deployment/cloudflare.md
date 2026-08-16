@@ -44,12 +44,12 @@ Actions 页面 → 左侧 Deploy 工作流 → Run workflow → **分支选择 `
 | 检查项 | 地址 |
 |--------|------|
 | 健康检查 | `curl -H "Authorization: Bearer <系统API Key>" https://<项目名>.pages.dev/api/health` → `{"status":"ok",...}`（需管理员认证） |
-| 代理可用 | `https://<worker名>.<账号>.workers.dev/v1/models`（无需 API Key，返回 200 模型列表即正常；只有 POST 代理接口需要认证） |
+| 代理可用 | `curl -H "Authorization: Bearer <用户API Key>" https://<worker名>.<账号>.workers.dev/v1/models` → 返回 200 模型列表即正常（所有代理接口均需 API Key 认证） |
 | 管理后台 | `https://<项目名>.pages.dev/admin`，用 Secrets 里的账号密码登录 |
 
 > Worker 与 Pages 的域名在 Dashboard → Workers & Pages 中查看。生产环境建议绑定自定义域名（Dashboard → 项目 → Custom domains）。
 
-> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `https://<项目名>.pages.dev/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。
+> 上表中的 `<系统API Key>` 指**系统 API Key**（`sk-sys-*` 格式）：部署成功后登录管理后台 `https://<项目名>.pages.dev/admin` → 左侧「系统密钥」页面生成。它用于系统级接口的 Bearer 认证，与用户 API Key 相互独立。`<用户API Key>` 指**用户 API Key**（`sk-` 格式）：在管理后台「API 密钥」页面创建，用于 V1 代理接口认证。
 
 ## 方式二：手动部署（Wrangler，调试用）
 

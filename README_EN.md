@@ -4,8 +4,7 @@ English | [简体中文](README.md)
 
 > [!TIP]
 > **Note: This project is under active development and unstable. Not recommended for production use.**
-> The unstable version (current branch) also supports Docker build-based deployment, but no pre-built image is published yet — build it yourself.
-> The stable version publishes a pre-built image `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` that can be pulled and run directly.
+> This repository (canary branch) publishes auto-built Docker images: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` (full) and `:canary-lite` (lite — V1 proxy + scheduled tasks only). Pull and run directly; images are rebuilt automatically when the `canary` tag is pushed or the Docker Build workflow is triggered manually.
 
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployable on Cloudflare, EdgeOne, Vercel, or your own server (Docker).
 
@@ -46,7 +45,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 
 ### Option 1: GitHub Actions
 
-Push to the `canary` branch triggers Cloudflare deployment; EdgeOne deployments are manual only (requires `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets). You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
+Push to the `canary` branch triggers Cloudflare deployment; if `EO_PROJECT_NAME` / `EO_API_TOKEN` secrets are also configured, EdgeOne is deployed automatically at the same time. You can also manually select the platform (cf / edgeone / both) from the Actions page. Workflow steps:
 
 1. **Init resources (pre)** — `deploy/init.py pre` creates D1/KV + replaces placeholders + writes DB_TYPE
 2. **Install deps** — `npm install` + generate multi-dialect Prisma Client
@@ -107,7 +106,7 @@ npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch m
 
 ### Option 3: Docker Deployment
 
-The unstable version (current branch) supports Docker build-based deployment. No pre-built image is published yet, so you need to build it yourself (pass `DB_TYPE` as a build arg to select the database dialect — must match the runtime):
+This repository (canary branch) publishes pre-built images you can pull and run directly: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` (full) and `:canary-lite` (lite — V1 proxy + scheduled tasks, no admin panel). You can also build it yourself (pass `DB_TYPE` as a build arg to select the database dialect — must match the runtime):
 
 ```bash
 # Built-in PostgreSQL, quick start
@@ -119,7 +118,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 - Required env vars in `.env`: database password, `ADMIN_USERNAME` / `ADMIN_PASSWORD`, `JWT_SECRET`, etc.
 - The container syncs the database schema on startup; admin is authenticated via env vars (no `/setup` onboarding page)
-- The stable version's pre-built image `ghcr.io/jyf0214/fiammetta-watcher-proxy:latest` can be pulled and run directly — see the deployment guide for details
+- Pre-built images are rebuilt automatically when the `canary` tag is pushed or the **Docker Build** workflow is triggered manually — see the deployment guide for details
 
 ### Environment Variables
 

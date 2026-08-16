@@ -16,7 +16,7 @@ import { detectModelType } from "@/lib/detect-model-type";
 import type { WorkerEnv } from "./config";
 import { parseApiKeys, parseApiKeyObjects, getNextKey } from "./platform-keys";
 import { isSafeUrl } from "@/lib/admin-security";
-import { getUpstreamProxyDispatcher } from "@/lib/upstream-proxy";
+import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 import type { PlatformConfig } from "@/lib/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -141,23 +141,34 @@ async function fetchPlatformModels(
   const apiKey = getNextKey(platformConfig);
   if (!apiKey) return null;
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
+  let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
+  let res: Response;
 
+  try {
     // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
-    const dispatcher = await getUpstreamProxyDispatcher(db, env);
-    const res = await fetch(url, {
+    proxy = await getUpstreamProxy(db, env, platform.id);
+    res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
       // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
       redirect: "manual",
-      ...(dispatcher ? { dispatcher } : {}),
+      ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}),
     });
+  } catch (err) {
     clearTimeout(timeoutId);
+    // 网络层失败（超时除外）：回标记当前代理，连续失败达阈值后轮询跳过
+    const isAbort = err instanceof DOMException && err.name === "AbortError";
+    if (!isAbort && proxy?.url) void markProxyFailure(db, env, proxy.url).catch(() => {});
+    return null;
+  }
+  clearTimeout(timeoutId);
 
-    if (!res.ok) return null;
+  if (!res.ok) return null;
 
+  try {
     const data: any = await res.json();
     const list: unknown[] = Array.isArray(data) ? data : data?.data;
     if (!Array.isArray(list)) return null;

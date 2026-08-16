@@ -70,10 +70,11 @@ Called by external services. See [Cron Tasks](/en/api/cron).
 | `/api/cron/model-fetch` | GET/POST | Auto-discover platform models |
 | `/api/cron/key-reset` | GET/POST | Reset key usage counters |
 | `/api/cron/log-archive` | GET/POST | Archive old request logs |
+| `/api/cron/proxy-health` | GET/POST | Outbound proxy health check (only active on Docker deployments with a proxy configured) |
 
 ## Admin API
 
-Admin APIs require JWT authentication (via `admin_token` cookie).
+Admin APIs support two authentication methods: an admin JWT (via `admin_token` cookie) or a System API Key (`Authorization: Bearer <system-api-key>`, see [System Key](/en/guide/system-key)).
 
 ### Authentication
 

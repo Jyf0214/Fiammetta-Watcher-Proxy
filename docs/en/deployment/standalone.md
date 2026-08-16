@@ -51,7 +51,7 @@ JWT_SECRET=random-secret-32+chars
 PORT=3000
 NODE_ENV=production
 
-# ===== Cron auth (optional) =====
+# ===== Cron auth (required — without it, /api/cron/* endpoints return 403) =====
 CRON_SECRET=random-secret
 EOF
 ```

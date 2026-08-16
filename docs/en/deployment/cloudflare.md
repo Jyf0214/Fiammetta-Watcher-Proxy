@@ -44,12 +44,12 @@ It automatically: creates the database and cache resources → builds → deploy
 | Check | URL |
 |-------|-----|
 | Health | `curl -H "Authorization: Bearer <system-api-key>" https://<project>.pages.dev/api/health` → `{"status":"ok",...}` (admin auth required) |
-| Proxy | `https://<worker>.<account>.workers.dev/v1/models` (no API Key needed — a 200 model list is expected; only POST proxy endpoints require auth) |
+| Proxy | `curl -H "Authorization: Bearer <user-api-key>" https://<worker>.<account>.workers.dev/v1/models` → a 200 model list is expected (all proxy endpoints require API Key auth) |
 | Admin panel | `https://<project>.pages.dev/admin`, log in with the credentials from Secrets |
 
 > Worker/Pages domains are listed in Dashboard → Workers & Pages. For production, bind a custom domain (Dashboard → project → Custom domains).
 
-> The `<system-api-key>` above refers to a **System API Key** (`sk-sys-*`): after deployment, log in to the admin panel at `https://<project>.pages.dev/admin` → "System Keys" page on the left and generate one. It is used for Bearer auth on system-level endpoints and is independent of user API Keys.
+> The `<system-api-key>` above refers to a **System API Key** (`sk-sys-*`): after deployment, log in to the admin panel at `https://<project>.pages.dev/admin` → "System Keys" page on the left and generate one. It is used for Bearer auth on system-level endpoints and is independent of user API Keys. `<user-api-key>` refers to a **user API Key** (`sk-` format), created on the "API Keys" page of the admin panel and used to authenticate V1 proxy endpoints.
 
 ## Option 2: Manual Deployment (Wrangler, for debugging)
 

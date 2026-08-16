@@ -31,5 +31,5 @@ features:
     details: JWT authentication, rate limiting, CORS, CSP headers, and SQL injection protection
   - icon: ✓
     title: Multiple Deployment Options
-    details: Cloudflare zero-cost deploy, Vercel/Netlify serverless, Docker containers, Node.js self-hosted
+    details: Cloudflare zero-cost deploy, Vercel/EdgeOne serverless, Docker containers, Node.js self-hosted
 ---
