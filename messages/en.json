@@ -481,7 +481,7 @@
     "upstreamProxyCheckUrlHelp": "Public endpoint used to probe proxy connectivity. Defaults to https://cp.cloudflare.com/generate_204; custom URLs must return 2xx for anonymous GET.",
     "upstreamProxySaveFirst": "Save the configuration before pulling or checking",
     "upstreamProxyHealthTitle": "Proxy health",
-    "upstreamProxyHealthStats": "{{total}} proxies · {{ok}} healthy · {{fail}} unhealthy · {{none}} not checked",
+    "upstreamProxyHealthStats": "{total} proxies · {ok} healthy · {fail} unhealthy · {none} not checked",
     "upstreamProxyCheckedAt": "checked at ",
     "upstreamProxyPullNow": "Pull now",
     "upstreamProxyPulled": "Proxy list pulled",

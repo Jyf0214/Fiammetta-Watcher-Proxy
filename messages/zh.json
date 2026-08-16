@@ -481,7 +481,7 @@
     "upstreamProxyCheckUrlHelp": "用于探测代理连通性的公网地址，默认 https://cp.cloudflare.com/generate_204；自定义地址需支持匿名 GET 返回 2xx。",
     "upstreamProxySaveFirst": "配置尚未保存，请先保存再执行操作",
     "upstreamProxyHealthTitle": "代理健康度",
-    "upstreamProxyHealthStats": "共 {{total}} 个代理 · 正常 {{ok}} · 异常 {{fail}} · 未检查 {{none}}",
+    "upstreamProxyHealthStats": "共 {total} 个代理 · 正常 {ok} · 异常 {fail} · 未检查 {none}",
     "upstreamProxyCheckedAt": "检查于 ",
     "upstreamProxyPullNow": "立即拉取",
     "upstreamProxyPulled": "拉取完成",

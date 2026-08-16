@@ -55,6 +55,9 @@ const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const PULL_TIMEOUT_MS = 15_000;
 /** 拉取响应体上限（超出视为异常源，拒绝并保留旧列表） */
 const PULL_MAX_BYTES = 512 * 1024;
+/** 健康检查并发上限：大代理池（数千个）下全量并发会瞬间创建数千个连接与
+ *  ProxyAgent，内存暴涨导致进程崩溃；分批限制并发，结果语义不变 */
+const HEALTH_CHECK_CONCURRENCY = 20;
 /** 业务请求网络层连续失败达到该次数 → 该代理临时标记不可用（跳过轮询） */
 export const PROXY_FAIL_THRESHOLD = 3;
 
@@ -856,24 +859,30 @@ export async function runProxyHealthCheck(
   const prev = await readProxyHealth(db, env);
   const results: ProxyHealthMap = {};
 
-  await Promise.allSettled(
-    allUrls.map(async (url) => {
-      const { ok, latencyMs } = await checkOneProxy(url, config.healthCheckUrl);
-      const prevEntry = prev[url];
-      const failCount = ok ? 0 : (prevEntry?.failCount ?? 0) + 1;
-      results[url] = {
-        status: ok ? "ok" : "fail",
-        latencyMs,
-        checkedAt: Math.floor(Date.now() / 1000),
-        failCount,
-      };
-      if (ok) {
-        // 恢复：清除进程内临时黑名单与失败计数
-        unhealthyUrls.delete(url);
-        proxyFailCounts.set(url, 0);
-      }
-    })
-  );
+  // 分批探测：每批 HEALTH_CHECK_CONCURRENCY 个并发，批间串行。
+  // 此前全量 Promise.allSettled 在导入数千代理后瞬间并发数千个 fetch +
+  // 数千个 ProxyAgent，内存暴涨（实测超 200MB）导致进程崩溃（无日志）
+  for (let i = 0; i < allUrls.length; i += HEALTH_CHECK_CONCURRENCY) {
+    const batch = allUrls.slice(i, i + HEALTH_CHECK_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map(async (url) => {
+        const { ok, latencyMs } = await checkOneProxy(url, config.healthCheckUrl);
+        const prevEntry = prev[url];
+        const failCount = ok ? 0 : (prevEntry?.failCount ?? 0) + 1;
+        results[url] = {
+          status: ok ? "ok" : "fail",
+          latencyMs,
+          checkedAt: Math.floor(Date.now() / 1000),
+          failCount,
+        };
+        if (ok) {
+          // 恢复：清除进程内临时黑名单与失败计数
+          unhealthyUrls.delete(url);
+          proxyFailCounts.set(url, 0);
+        }
+      })
+    );
+  }
 
   try {
     // 合并写入：健康检查与 markProxyFailure 可能并发读写健康表（各自读改写

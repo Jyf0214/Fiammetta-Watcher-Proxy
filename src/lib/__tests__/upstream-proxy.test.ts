@@ -441,6 +441,37 @@ describe("runProxyHealthCheck 健康检查", () => {
     expect(results).toEqual({});
     expect(mockUpsert).not.toHaveBeenCalled();
   });
+
+  it("大代理池分批探测：并发峰值不超过批次上限（不瞬间全量并发）", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    // 55 个代理（跨 3 批），模拟真实大源导入后的检查场景
+    const urls = Array.from(
+      { length: 55 },
+      (_, i) => `http://10.0.0.${i % 250}:8080`
+    );
+    configWith(urls);
+    let active = 0;
+    let peak = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        active++;
+        peak = Math.max(peak, active);
+        // 事件循环让位使同批探测真实重叠，才能测得并发峰值
+        await new Promise((r) => setTimeout(r, 0));
+        active--;
+        return { ok: true, status: 204 };
+      })
+    );
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(Object.keys(results)).toHaveLength(55);
+    // 并发受批次上限约束（此前全量并发下 peak 会等于代理总数）
+    expect(peak).toBeLessThanOrEqual(20);
+    // 批内仍有并发（非串行退化）
+    expect(peak).toBeGreaterThan(1);
+  });
 });
 
 describe("getProxyHealth 读取", () => {
