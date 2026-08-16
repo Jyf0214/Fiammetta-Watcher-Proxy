@@ -3,7 +3,8 @@
 FWP 提供定时任务端点，用于系统维护。触发机制因部署方式而异：
 
 - **Cloudflare 部署**：定时任务由 Worker 内置 `scheduled` 事件自动执行（模型发现、Key 用量重置、日志归档），**无需**通过 HTTP 调用本页端点
-- **其他部署**（Vercel / EdgeOne / Node.js / Docker）：由外部调度服务（Vercel Cron、Cron-job.org、UptimeRobot 或任何 HTTP 调度器）定时调用本页端点
+- **Docker 部署**：定时任务由容器内部定时器自动执行（应用启动时注册，无需任何额外配置），**无需**通过 HTTP 调用本页端点，也无需 `CRON_SECRET`
+- **其他部署**（Vercel / EdgeOne / Node.js）：由外部调度服务（Vercel Cron、Cron-job.org、UptimeRobot 或任何 HTTP 调度器）定时调用本页端点
 
 ## 端点列表
 
@@ -11,9 +12,11 @@ FWP 提供定时任务端点，用于系统维护。触发机制因部署方式�
 |------|------|----------|------|
 | `GET/POST /api/cron/model-fetch` | 模型发现 | 每 6 小时 | 自动发现各平台支持的模型列表 |
 | `GET/POST /api/cron/key-reset` | Key 用量重置 | 每小时 | 按周期重置 Key 的月度/日度用量计数器（仅在周期开始时实际清零） |
-| `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据 |
-| `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 按需 | 检查出站代理连通性（仅 Docker 部署配置了出站代理时生效） |
-| `GET/POST /api/cron/proxy-pull` | 出站代理列表拉取 | 每小时 | 从各代理组的拉取地址拉取最新代理列表（仅 Docker 部署配置了拉取源的组生效） |
+| `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据（Docker 内部定时器在 3:10 执行，错开整点的 Key 重置） |
+| `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 每 5 分钟 | 检查出站代理连通性（Docker 部署内部定时器按此频率自动执行；配置了出站代理时才生效） |
+| `GET/POST /api/cron/proxy-pull` | 出站代理列表拉取 | 每小时 | 从各代理组的拉取地址拉取最新代理列表（Docker 部署内部定时器按此频率自动执行；配置了拉取源的组才生效） |
+
+> Docker 部署下定时触发由容器内部完成，无需外部调用；本页端点仍保留，供需要手动触发或从外部调用的场景使用（需 `CRON_SECRET`）。
 
 ## 认证
 
@@ -24,6 +27,8 @@ Authorization: Bearer <CRON_SECRET>
 ```
 
 **必须配置 `CRON_SECRET`**：如果未设置，端点直接返回 403 禁用（防止无鉴权触发定时任务）。配置后务必让调度器携带上述认证头，否则调度请求会返回 401。
+
+> Docker 部署的内部定时器直接调用任务函数，**不经过**本页端点，因此**不需要**配置 `CRON_SECRET`；只有从外部手动调用端点时才需要。
 
 ## 响应格式
 

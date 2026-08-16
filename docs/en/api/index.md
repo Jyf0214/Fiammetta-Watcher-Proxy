@@ -63,7 +63,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 
 ## Cron API
 
-Called by external services. See [Cron Tasks](/en/api/cron).
+On Docker deployments, scheduled tasks run automatically via the in-container timer; other deployments call them from an external scheduler. See [Cron Tasks](/en/api/cron).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

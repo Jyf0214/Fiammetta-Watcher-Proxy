@@ -7,14 +7,14 @@ FWP supports 5 deployment methods (Cloudflare / Vercel / EdgeOne / Node.js / Doc
 | **Cloudflare Pages + Worker** | Worker handles proxy + scheduled tasks, Pages serves the frontend and admin panel | D1 (free, zero config) or TiDB/PostgreSQL | Built into Cloudflare (free) |
 | **Vercel / EdgeOne** | Serverless functions handle everything | TiDB / MariaDB / PostgreSQL (remote) | HTTP endpoints + external scheduler (Vercel Cron requires Pro) |
 | **Node.js standalone** | Full server on your own machine | TiDB / MariaDB / PostgreSQL | HTTP endpoints + system cron |
-| **Docker** | Containerized deployment | TiDB / PostgreSQL / MySQL (incl. MariaDB) | HTTP endpoints + system cron |
+| **Docker** | Containerized deployment | TiDB / PostgreSQL / MySQL (incl. MariaDB) | In-container timer, automatic |
 
 ## Platform Comparison
 
 | Item | Cloudflare | Vercel | EdgeOne | Node.js / Docker |
 |------|-----------|--------|---------|------------------|
 | Free tier | Worker CPU 10ms/request (streaming AI proxy often exceeds this) | 100GB bandwidth/month | See official pricing | None (own resources) |
-| Scheduled tasks | Built-in (free) | **Pro plan only** | External scheduler | System cron |
+| Scheduled tasks | Built-in (free) | **Pro plan only** | External scheduler | System cron (Node.js) / Docker in-container |
 | Database | D1 (default, zero config) | TiDB/MariaDB/PostgreSQL (remote) | TiDB/MariaDB/PostgreSQL (remote) | TiDB/MariaDB/PostgreSQL |
 | Deploy trigger | Manual via web UI, or push `canary` | Connect Git repo in console | Manual via web UI | Manual |
 | Best for | Zero-cost serverless | Existing Vercel / TiDB account | Tencent Cloud ecosystem | Full control |

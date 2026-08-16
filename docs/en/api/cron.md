@@ -3,7 +3,8 @@
 FWP provides scheduled task endpoints for system maintenance. How they are triggered depends on the deployment:
 
 - **Cloudflare deployment**: scheduled tasks run automatically via the Worker's built-in `scheduled` event (model discovery, key usage reset, log archival) — **no HTTP calls** to these endpoints are needed
-- **Other deployments** (Vercel / EdgeOne / Node.js / Docker): call these endpoints periodically from an external scheduler (Vercel Cron, Cron-job.org, UptimeRobot, or any HTTP scheduler)
+- **Docker deployment**: scheduled tasks run automatically via an in-container timer (registered at app startup, no extra configuration) — **no HTTP calls** to these endpoints and **no `CRON_SECRET`** are needed
+- **Other deployments** (Vercel / EdgeOne / Node.js): call these endpoints periodically from an external scheduler (Vercel Cron, Cron-job.org, UptimeRobot, or any HTTP scheduler)
 
 ## Endpoint List
 
@@ -11,9 +12,11 @@ FWP provides scheduled task endpoints for system maintenance. How they are trigg
 |----------|----------|---------------------|-------------|
 | `GET/POST /api/cron/model-fetch` | Model Discovery | Every 6 hours | Auto-discover platform-supported models |
 | `GET/POST /api/cron/key-reset` | Key Usage Reset | Hourly | Reset key monthly/daily usage counters (only cleared when the period starts) |
-| `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics |
-| `GET/POST /api/cron/proxy-health` | Outbound proxy health check | As needed | Check outbound proxy connectivity (only active on Docker deployments with a proxy configured) |
-| `GET/POST /api/cron/proxy-pull` | Outbound proxy list pull | Hourly | Pull the latest proxy list from each group's source URL (only active for groups with a pull source on Docker deployments) |
+| `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics (the Docker in-container timer runs this at 3:10, offset from the hourly key reset) |
+| `GET/POST /api/cron/proxy-health` | Outbound proxy health check | Every 5 minutes | Check outbound proxy connectivity (the Docker in-container timer runs this automatically; active only when a proxy is configured) |
+| `GET/POST /api/cron/proxy-pull` | Outbound proxy list pull | Hourly | Pull the latest proxy list from each group's source URL (the Docker in-container timer runs this automatically; active only for groups with a pull source) |
+
+> On Docker the scheduled triggering is handled inside the container — no external calls needed. The endpoints remain available for manual triggering or external callers (requires `CRON_SECRET`).
 
 ## Authentication
 
@@ -24,6 +27,8 @@ Authorization: Bearer <CRON_SECRET>
 ```
 
 **`CRON_SECRET` is required**: if it is not configured, the endpoints are disabled (403) to prevent unauthenticated triggering. Once configured, make sure your scheduler sends the correct auth header, otherwise calls return 401.
+
+> The Docker in-container timer calls the task functions directly — it does **not** go through these endpoints, so `CRON_SECRET` is **not** required there; it is only needed when calling the endpoints externally.
 
 ## Response Format
 

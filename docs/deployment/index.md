@@ -7,14 +7,14 @@ FWP 支持 5 种部署方式（Cloudflare / Vercel / EdgeOne / Node.js / Docker�
 | **Cloudflare Pages + Worker** | Worker 处理代理与定时任务，Pages 托管前台与管理后台 | D1（免费，零配置）或 TiDB/PostgreSQL | Cloudflare 内置（免费） |
 | **Vercel / EdgeOne** | 服务端函数处理一切 | TiDB / MariaDB / PostgreSQL（远程） | HTTP 端点 + 外部调度（Vercel Cron 需 Pro 计划） |
 | **Node.js 直接部署** | 自有服务器跑完整服务 | TiDB / MariaDB / PostgreSQL | HTTP 端点 + 系统 cron |
-| **Docker** | 容器化部署 | TiDB / PostgreSQL / MySQL（含 MariaDB） | HTTP 端点 + 系统 cron |
+| **Docker** | 容器化部署 | TiDB / PostgreSQL / MySQL（含 MariaDB） | 容器内部定时器自动执行 |
 
 ## 平台对比
 
 | 项目 | Cloudflare | Vercel | EdgeOne | Node.js / Docker |
 |------|-----------|--------|---------|------------------|
 | 免费额度 | Worker CPU 10ms/请求（代理流式请求容易超限） | 100GB 流量/月 | 见官方定价 | 无（自备资源） |
-| 定时任务 | 内置（免费） | **仅 Pro 计划** | 外部调度 | 系统 cron |
+| 定时任务 | 内置（免费） | **仅 Pro 计划** | 外部调度 | 系统 cron（Node.js）/ Docker 内置自动 |
 | 数据库 | D1（默认，零配置） | TiDB/MariaDB/PostgreSQL（远程） | TiDB/MariaDB/PostgreSQL（远程） | TiDB/MariaDB/PostgreSQL |
 | 部署触发 | 网页手动触发，或推 `canary` 分支 | 控制台关联 Git 仓库 | 网页手动触发 | 手动 |
 | 适合 | 零成本 Serverless | 已有 Vercel / TiDB 账号 | 腾讯云生态 | 完全掌控 |

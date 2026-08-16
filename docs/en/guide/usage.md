@@ -138,7 +138,7 @@ Model mappings map client-requested model names to actual upstream model names (
 
 Auto Model is an advanced routing feature:
 
-1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron, other deployments call `/api/cron/model-fetch` externally — see [Cron Tasks](/en/api/cron))
+1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron, on Docker by the in-container timer, other deployments call `/api/cron/model-fetch` externally — see [Cron Tasks](/en/api/cron))
 2. View discovery results on the "Auto Model" page
 3. Select specific models to include in the auto-routing pool
 4. System generates an auto-model ID — when clients use this ID, FWP automatically selects the best platform and model

@@ -24,7 +24,7 @@ Usage resets based on `resetPeriod`, triggered by scheduled tasks:
 - `daily` — Resets at midnight
 - `never` — Never resets
 
-Resets are executed by scheduled tasks: on Cloudflare the Worker's built-in Cron checks hourly; other deployments must call `/api/cron/key-reset` externally (see [Cron Tasks](/en/api/cron), protected by `CRON_SECRET`). Without any scheduled invocation, usage is never reset.
+Resets are executed by scheduled tasks: on Cloudflare the Worker's built-in Cron checks hourly; on Docker the in-container timer runs it automatically; other deployments must call `/api/cron/key-reset` externally (see [Cron Tasks](/en/api/cron), protected by `CRON_SECRET`). Without any scheduled invocation, usage is never reset.
 
 ## Next Steps
 

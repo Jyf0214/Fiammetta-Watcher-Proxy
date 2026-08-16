@@ -142,7 +142,7 @@ API Key 是客户端访问 FWP 的凭证。
 
 自动模型是 FWP 的高级路由功能：
 
-1. 系统定时（默认每 6 小时；Cloudflare 由 Cron 调度，其他部署由外部定时调用 `/api/cron/model-fetch`，见 [Cron 任务](/api/cron)）自动发现各平台支持的模型列表
+1. 系统定时（默认每 6 小时；Cloudflare 由 Cron 调度，Docker 由容器内部定时器自动执行，其他部署由外部定时调用 `/api/cron/model-fetch`，见 [Cron 任务](/api/cron)）自动发现各平台支持的模型列表
 2. 在「自动模型」页面可以查看各平台的模型发现结果
 3. 可以选择特定模型加入自动路由池
 4. 系统自动生成一个自动模型 ID，客户端使用该 ID 时，FWP 会自动选择最佳平台和模型

@@ -74,6 +74,22 @@ volumes:
   pgdata:
 ```
 
+## Scheduled Tasks
+
+The container registers an in-container timer at startup — all scheduled tasks run automatically with zero configuration:
+
+| Task | Frequency |
+|------|-----------|
+| Model discovery (model-fetch) | Every 6 hours |
+| Key usage reset (key-reset) | Hourly |
+| Log archival (log-archive) | Daily at 3:10 |
+| Outbound proxy health check (proxy-health) | Every 5 minutes |
+| Outbound proxy list pull (proxy-pull) | Hourly |
+
+No external scheduler is needed for `/api/cron/*`, and `CRON_SECRET` is **not required** (the timer calls the task functions directly, bypassing the HTTP endpoints). `CRON_SECRET` is only needed when calling the endpoints externally.
+
+> Scheduled tasks run in the container's local timezone (UTC by default; adjust with the `TZ` environment variable). Log archival is set to 3:10 to offset from the hourly key usage reset at the top of the hour, avoiding concurrent database writes.
+
 ## Lite Image (:canary-lite)
 
 The lite image provides only the V1 proxy and scheduled task APIs — no admin panel. It suits gateways that already have an admin frontend elsewhere. Environment-variable requirements are the same as the full image.

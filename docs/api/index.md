@@ -63,7 +63,7 @@ curl -X POST https://your-domain/v1/chat/completions \
 
 ## 定时任务 API
 
-通过外部服务定时调用，详见 [Cron 任务](/api/cron)。
+Docker 部署由容器内部定时器自动执行；其他部署通过外部服务定时调用。详见 [Cron 任务](/api/cron)。
 
 | 端点 | 方法 | 说明 |
 |------|------|------|

@@ -24,7 +24,7 @@
 - `daily` — 每天凌晨重置
 - `never` — 永不重置
 
-重置由定时任务执行：Cloudflare 部署由 Worker 内置 Cron 每小时检查，其他部署需外部定时调用 [Cron 任务](/api/cron) 中的 `/api/cron/key-reset`（需 `CRON_SECRET` 认证）。若部署环境未配置任何定时调度，用量不会自动重置。
+重置由定时任务执行：Cloudflare 部署由 Worker 内置 Cron 每小时检查，Docker 部署由容器内部定时器自动执行，其他部署需外部定时调用 [Cron 任务](/api/cron) 中的 `/api/cron/key-reset`（需 `CRON_SECRET` 认证）。若部署环境未配置任何定时调度，用量不会自动重置。
 
 ## 下一步
 
