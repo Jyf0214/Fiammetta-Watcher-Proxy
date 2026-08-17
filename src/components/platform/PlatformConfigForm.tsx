@@ -69,10 +69,13 @@ export function PlatformConfigForm({
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
 
-  // 响应式读取表单字段值，供 Modal 中展示
-  const formName = Form.useWatch("name", form);
-  const formBaseUrl = Form.useWatch("baseUrl", form);
-  const formType = Form.useWatch("type", form);
+  // 响应式读取表单字段值，供 Modal 中展示。
+  // 必须 preserve: true：编辑模式下 name/baseUrl/type 无对应 Form.Item 注册
+  // （basic 面板仅在新建模式渲染），antd 6 useWatch 默认走 getFieldsValue()
+  // 只返回已注册字段，未注册字段恒读不到 → 弹窗全空（antd 5→6 行为回归）
+  const formName = Form.useWatch("name", { form, preserve: true });
+  const formBaseUrl = Form.useWatch("baseUrl", { form, preserve: true });
+  const formType = Form.useWatch("type", { form, preserve: true });
   // 响应式读取：条件渲染 customUserAgent 必须用 useWatch——
   // getFieldValue 是快照读取，不会触发重渲染（开关切换后输入框不出现/不消失）
   const formReuseUserAgent = Form.useWatch("reuseUserAgent", form);

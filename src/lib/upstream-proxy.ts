@@ -156,6 +156,14 @@ export interface HealthCheckProgress {
 let healthCheckProgress: HealthCheckProgress | null = null;
 /** 进行中的检查任务 promise（互斥：并发调用复用同一任务，见 runProxyHealthCheck） */
 let runningCheck: Promise<ProxyHealthMap> | null = null;
+/** 健康表写串行链：拉取/健康检查/失败标记并发读改写同一行（configs 表
+ *  system:upstream_proxy_health），MySQL/TiDB 下行锁排队导致 Lock wait
+ *  timeout（1205）且整表覆盖丢失并发写入——进程内串行化读改写（Docker 单
+ *  实例即完备；缓存由每次写入同步，锁内重读拿到的是最新已落库状态） */
+let healthWriteTail: Promise<unknown> = Promise.resolve();
+/** 进行中的拉取任务 promise（单飞：启动拉取/cron/管理页「立即拉取」并发时
+ *  复用同一任务，避免并发拉取双写 pool 行与互相覆盖，见 pullProxyGroups） */
+let pullInFlight: Promise<Record<string, ProxyPullGroupResult>> | null = null;
 
 /** 当前健康检查进度（无进行中任务时返回空进度） */
 export function getHealthCheckProgress(): HealthCheckProgress {
@@ -510,6 +518,33 @@ async function writeProxyHealth(
   cachedHealthUpdatedAt = now;
 }
 
+/**
+ * 健康表写锁内执行读改写：串行化「读整表 → 修改 → 写整表」，杜绝并发
+ * upsert 同一行的行锁竞争（TiDB Error 1205），并让后写者基于最新已落库
+ * 状态合并（此前各路径用各自读取时刻的旧快照整表覆盖，会丢并发写入）。
+ * 调用方在 mutate 内只改需要变的条目，其余条目原样保留。
+ * 锁为进程内互斥（Docker 单实例即完备）：mutate 内不得再调用
+ * withHealthLock（会确定性死锁）；多实例部署需外部互斥。
+ * 读入的是深拷贝：mutate 修改不会污染模块缓存，写失败时缓存保持上次
+ * 已提交状态（否则幻影修改会在下一次成功写时被持久化）
+ */
+async function withHealthLock<T>(
+  db: D1Database | Database,
+  env: WorkerEnv | undefined,
+  mutate: (map: ProxyHealthMap) => T | Promise<T>
+): Promise<T> {
+  const run = async (): Promise<T> => {
+    // 健康表条目为纯 JSON 数据，JSON 深拷贝安全（条目无函数/undefined/Date）
+    const map: ProxyHealthMap = JSON.parse(JSON.stringify(await readProxyHealth(db, env)));
+    const result = await mutate(map);
+    await writeProxyHealth(db, env, map);
+    return result;
+  };
+  const p = healthWriteTail.then(run, run);
+  healthWriteTail = p.catch(() => undefined);
+  return p;
+}
+
 // ===== ProxyAgent 池 =====
 
 /**
@@ -712,100 +747,124 @@ export async function pullProxyGroups(
 ): Promise<Record<string, ProxyPullGroupResult>> {
   // 与 getUpstreamProxy 相同的部署门控：非 Docker 部署不创建代理/写库
   if (process.env.DEPLOY_PLATFORM !== "docker") return {};
+  // 单飞：启动拉取/cron/管理页「立即拉取」并发时复用进行中的任务，避免并发
+  // 拉取双写 pool 行（TiDB 行锁 1205）与互相覆盖（与 runningCheck 同模式）
+  if (pullInFlight) return pullInFlight;
 
-  const config = await readProxyConfig(db, env);
-  if (!config) return {};
-  // 禁用组不参与拉取
-  const pullGroups = config.groups.filter((g) => g.enabled && g.sourceUrl.length > 0);
-  if (pullGroups.length === 0) return {};
-
-  const prevPool = await readProxyPool(db, env);
-  const prevHealth = await readProxyHealth(db, env);
-  const nextPool: Record<string, string[]> = { ...prevPool };
-  const nextHealth: ProxyHealthMap = { ...prevHealth };
-  const results: Record<string, ProxyPullGroupResult> = {};
-
-  for (const group of pullGroups) {
-    const prevUrls = prevPool[group.name] ?? [];
-    let fetched: string[];
-    let error: string | undefined;
+  pullInFlight = (async (): Promise<Record<string, ProxyPullGroupResult>> => {
     try {
-      fetched = await pullOneSource(group.sourceUrl);
-      if (fetched.length === 0) {
-        // 空结果按异常处理：保留旧列表，防止源偶发空响应清空代理池
-        error = "empty";
-        fetched = prevUrls;
+      const config = await readProxyConfig(db, env);
+      if (!config) return {};
+      // 禁用组不参与拉取
+      const pullGroups = config.groups.filter((g) => g.enabled && g.sourceUrl.length > 0);
+      if (pullGroups.length === 0) return {};
+
+      const prevPool = await readProxyPool(db, env);
+      const nextPool: Record<string, string[]> = { ...prevPool };
+      const results: Record<string, ProxyPullGroupResult> = {};
+      // 跨组收集需要同步健康表的 URL，锁内统一应用（见下方 withHealthLock）
+      const keptUrls = new Set<string>();
+      const removedUrls = new Set<string>();
+
+      for (const group of pullGroups) {
+        const prevUrls = prevPool[group.name] ?? [];
+        let fetched: string[];
+        let error: string | undefined;
+        try {
+          fetched = await pullOneSource(group.sourceUrl);
+          if (fetched.length === 0) {
+            // 空结果按异常处理：保留旧列表，防止源偶发空响应清空代理池
+            error = "empty";
+            fetched = prevUrls;
+          }
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err);
+          fetched = prevUrls;
+        }
+        fetched = [...new Set(fetched)];
+
+        const total = [...new Set([...fetched, ...group.urls])].length;
+
+        if (error) {
+          // 拉取失败/空结果：沿用旧列表，且不改变任何健康状态——源故障与
+          // 代理本身的连通性无关，不应误"恢复"被惩罚中的代理
+          if (fetched.length > 0) nextPool[group.name] = fetched;
+          else delete nextPool[group.name];
+          results[group.name] = { pulled: 0, total, added: 0, removed: 0, kept: 0, error };
+          continue;
+        }
+
+        const prevSet = new Set(prevUrls);
+        const nextSet = new Set(fetched);
+        const kept = prevUrls.filter((u) => nextSet.has(u));
+        const added = fetched.filter((u) => !prevSet.has(u));
+        const removed = prevUrls.filter((u) => !nextSet.has(u));
+
+        // 交集：清除进程内黑名单与计数（健康表 status 切换 ok 在下方锁内统一
+        // 应用，避免此处直接读改写整表与健康检查/失败标记并发写行锁竞争），
+        // 真实连通性由后续健康检查重新判定
+        for (const u of kept) {
+          keptUrls.add(u);
+          unhealthyUrls.delete(u);
+          proxyFailCounts.set(u, 0);
+        }
+        // 移除：进程内状态同步清理（健康记录删除在下方锁内统一应用）
+        for (const u of removed) {
+          removedUrls.add(u);
+          unhealthyUrls.delete(u);
+          proxyFailCounts.delete(u);
+          proxyReqStats.delete(u);
+        }
+
+        if (fetched.length > 0) nextPool[group.name] = fetched;
+        else delete nextPool[group.name];
+        results[group.name] = {
+          pulled: added.length,
+          total,
+          added: added.length,
+          removed: removed.length,
+          kept: kept.length,
+        };
       }
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-      fetched = prevUrls;
+
+      // 组被删除/重命名后清理残留键，避免孤儿组池数据长期滞留
+      const groupNames = new Set(config.groups.map((g) => g.name));
+      for (const k of Object.keys(nextPool)) {
+        if (!groupNames.has(k)) delete nextPool[k];
+      }
+
+      try {
+        await writeProxyPool(db, env, nextPool);
+      } catch (err) {
+        console.error("[upstream-proxy] 拉取结果写入失败:", err);
+      }
+
+      // 健康表同步走写锁：交集 status 切换为 ok（最新拉取列表确认其存在 =
+      // 恢复在池，failCount/延迟等历史保留，展示用）；移除的删除健康记录。
+      // 纯新增（无交集/移除）或拉取失败不写健康表——不再像此前无条件重写
+      // 整表，减少健康行写压力，且不会覆盖并发健康检查/失败标记的写入
+      if (keptUrls.size > 0 || removedUrls.size > 0) {
+        try {
+          await withHealthLock(db, env, (health) => {
+            for (const u of keptUrls) {
+              const entry = health[u];
+              if (entry) entry.status = "ok";
+            }
+            for (const u of removedUrls) delete health[u];
+          });
+        } catch (err) {
+          console.error("[upstream-proxy] 拉取后健康状态写入失败:", err);
+        }
+      }
+
+      // 释放被移除代理的连接（fire-and-forget close，安全）
+      await releaseStaleAgents(new Set(collectAllGroupUrls(config, nextPool)));
+      return results;
+    } finally {
+      pullInFlight = null;
     }
-    fetched = [...new Set(fetched)];
-
-    const total = [...new Set([...fetched, ...group.urls])].length;
-
-    if (error) {
-      // 拉取失败/空结果：沿用旧列表，且不改变任何健康状态——源故障与
-      // 代理本身的连通性无关，不应误"恢复"被惩罚中的代理
-      if (fetched.length > 0) nextPool[group.name] = fetched;
-      else delete nextPool[group.name];
-      results[group.name] = { pulled: 0, total, added: 0, removed: 0, kept: 0, error };
-      continue;
-    }
-
-    const prevSet = new Set(prevUrls);
-    const nextSet = new Set(fetched);
-    const kept = prevUrls.filter((u) => nextSet.has(u));
-    const added = fetched.filter((u) => !prevSet.has(u));
-    const removed = prevUrls.filter((u) => !nextSet.has(u));
-
-    // 交集：保留健康度记录，状态切换为 ok（最新拉取列表确认其存在 = 恢复在池），
-    // 清除进程内黑名单与计数，真实连通性由后续健康检查重新判定
-    for (const u of kept) {
-      const entry = nextHealth[u];
-      if (entry) entry.status = "ok"; // failCount/延迟等历史保留，展示用
-      unhealthyUrls.delete(u);
-      proxyFailCounts.set(u, 0);
-    }
-    // 移除：健康记录随代理一起删除，进程内状态同步清理
-    for (const u of removed) {
-      delete nextHealth[u];
-      unhealthyUrls.delete(u);
-      proxyFailCounts.delete(u);
-      proxyReqStats.delete(u);
-    }
-
-    if (fetched.length > 0) nextPool[group.name] = fetched;
-    else delete nextPool[group.name];
-    results[group.name] = {
-      pulled: added.length,
-      total,
-      added: added.length,
-      removed: removed.length,
-      kept: kept.length,
-    };
-  }
-
-  // 组被删除/重命名后清理残留键，避免孤儿组池数据长期滞留
-  const groupNames = new Set(config.groups.map((g) => g.name));
-  for (const k of Object.keys(nextPool)) {
-    if (!groupNames.has(k)) delete nextPool[k];
-  }
-
-  try {
-    await writeProxyPool(db, env, nextPool);
-  } catch (err) {
-    console.error("[upstream-proxy] 拉取结果写入失败:", err);
-  }
-  try {
-    await writeProxyHealth(db, env, nextHealth);
-  } catch (err) {
-    console.error("[upstream-proxy] 拉取后健康状态写入失败:", err);
-  }
-
-  // 释放被移除代理的连接（fire-and-forget close，安全）
-  await releaseStaleAgents(new Set(collectAllGroupUrls(config, nextPool)));
-  return results;
+  })();
+  return pullInFlight;
 }
 
 // ===== 请求路由 =====
@@ -958,14 +1017,16 @@ export async function markProxyFailure(
 
   unhealthyUrls.add(url);
   try {
-    const health = await readProxyHealth(db, env);
-    health[url] = {
-      status: "fail",
-      latencyMs: 0,
-      checkedAt: Math.floor(Date.now() / 1000),
-      failCount: count,
-    };
-    await writeProxyHealth(db, env, health);
+    // 锁内读改写：多个代理同时失败时各自写整表会并发 upsert 同一行
+    //（TiDB 1205）且互相覆盖——串行化后每个失败条目都基于最新表状态合并
+    await withHealthLock(db, env, (health) => {
+      health[url] = {
+        status: "fail",
+        latencyMs: 0,
+        checkedAt: Math.floor(Date.now() / 1000),
+        failCount: count,
+      };
+    });
   } catch (err) {
     console.error("[upstream-proxy] 标记代理失败状态写入失败:", err);
   }
@@ -1031,13 +1092,16 @@ export async function runProxyHealthCheck(
         }
 
         try {
-          // 每批合并写入：健康检查与 markProxyFailure 可能并发读写健康表（各自
-          // 读改写整表），保留 prev 中仍属于当前候选、但本次未生成结果的条目，
-          // 避免全表丢弃性覆盖；渐进写库供管理页每批刷新（进程内集合才是轮询
+          // 每批锁内合并写入：已检查的用本轮结果覆盖，未检查的保留当前表内
+          // 最新条目——并发 markProxyFailure/拉取的写入不因本批整表覆盖丢失
+          //（此前以运行开始时的快照 prev 兜底，运行期间其他路径的写入会被
+          // 整表重写覆盖）；渐进写库供管理页每批刷新（进程内集合才是轮询
           // 判定的权威，表数据为展示与重启恢复）
-          const merged: ProxyHealthMap = {};
-          for (const url of allUrls) merged[url] = results[url] ?? prev[url];
-          await writeProxyHealth(db, env, merged);
+          await withHealthLock(db, env, (health) => {
+            for (const url of batch) {
+              if (results[url]) health[url] = results[url];
+            }
+          });
         } catch (err) {
           console.error("[upstream-proxy] 健康度结果写入失败:", err);
         }

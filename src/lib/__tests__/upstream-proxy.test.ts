@@ -19,8 +19,23 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { Dispatcher } from "undici";
 
+// 内存"数据库"：upsert 持久化写入、findFirst 读回。写锁修复后健康表读改写
+// 必须基于最新已落库状态重读，静态 mock 无法模拟（此前各路径用读取时刻的
+// 旧快照整表覆盖，mock 不持久化也能通过）
+const { dbRows } = vi.hoisted(() => ({
+  dbRows: {} as Record<string, { value: string; updatedAt: number } | null>,
+}));
 const mockFindFirst = vi.fn();
-const mockUpsert = vi.fn(async (_args: any) => ({}));
+const mockUpsert = vi.fn(async (args: any) => {
+  const key: string | undefined = args?.where?.key;
+  if (key !== undefined) {
+    dbRows[key] = {
+      value: args.create?.value ?? args.update?.value ?? "",
+      updatedAt: args.create?.updatedAt ?? args.update?.updatedAt ?? 0,
+    };
+  }
+  return {};
+});
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     configs: { findFirst: mockFindFirst, upsert: mockUpsert },
@@ -70,11 +85,14 @@ function setPlatform(value: string | undefined) {
   else process.env.DEPLOY_PLATFORM = value;
 }
 
-/** 按查询 key 返回配置行（失效检查与全量读取共用同一 mock 实现） */
+/** 按查询 key 返回配置行（失效检查与全量读取共用同一 mock 实现）；
+ *  替换语义：清空内存库再写入（upsert 已持久化，显式 set 覆盖旧行） */
 function setConfigRows(rows: Record<string, { value: string; updatedAt: number } | null>) {
+  for (const k of Object.keys(dbRows)) delete dbRows[k];
+  Object.assign(dbRows, rows);
   mockFindFirst.mockImplementation((args: any) => {
     const key: string | undefined = args?.where?.key;
-    const row = key !== undefined && key in rows ? rows[key] : null;
+    const row = key !== undefined && key in dbRows ? dbRows[key] : null;
     return Promise.resolve(row ? { value: row.value, updatedAt: row.updatedAt } : null);
   });
 }
@@ -86,6 +104,8 @@ async function loadModule() {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  // 内存库按测隔离清空（upsert 已持久化，不能依赖用例自行 setConfigRows）
+  for (const k of Object.keys(dbRows)) delete dbRows[k];
   createdAgents.length = 0;
   createdSocksDispatchers.length = 0;
   originalPlatform = process.env.DEPLOY_PLATFORM;
@@ -689,7 +709,7 @@ describe("健康检查渐进进度", () => {
     expect(mockUpsert).toHaveBeenCalledTimes(2);
     const firstWrite = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
     const secondWrite = JSON.parse(mockUpsert.mock.calls[1][0].create.value) as Record<string, any>;
-    // 首批写库只有前 20 个有结果，其余为 prev 保留（空健康表 → 无条目）
+    // 首批写库只有前 20 个有结果（未检查的保留表内现状，空健康表 → 无条目）
     expect(Object.keys(firstWrite)).toHaveLength(20);
     // 末批写库全部 25 个（前批结果保留 + 本批新增）
     expect(Object.keys(secondWrite)).toHaveLength(25);
@@ -1087,7 +1107,7 @@ describe("pullProxyGroups 拉取", () => {
         updatedAt: 1000,
       },
     });
-    // 达阈值：A 进入进程内黑名单（markProxyFailure 第 3 次会覆写健康表 failCount=3）
+    // 达阈值：A 进入进程内黑名单（markProxyFailure 第 3 次写健康表 failCount=3）
     for (let i = 0; i < 3; i++) {
       await markProxyFailure(mockDb, mockEnv, URL_A);
     }
@@ -1097,9 +1117,9 @@ describe("pullProxyGroups 拉取", () => {
     await pullProxyGroups(mockDb, mockEnv);
 
     const health = JSON.parse(lastUpsertFor(HEALTH_KEY).create.value) as Record<string, any>;
-    // 健康度保留（failCount 来自预置健康表，markProxyFailure 的覆写被 mock 行
-    // 重读恢复，此处验证的是「保留历史计数」语义）
-    expect(health[URL_A]).toMatchObject({ status: "ok", failCount: 5 });
+    // 健康度保留（failCount 为 markProxyFailure 已提交的 3——写锁内重读拿到
+    // 最新已落库状态，而非预置行的 5），status 切换为 ok 恢复在池
+    expect(health[URL_A]).toMatchObject({ status: "ok", failCount: 3 });
     // 黑名单清除：A 恢复可被选中
     const result = await getUpstreamProxy(mockDb, mockEnv);
     expect(result.url).toBe(URL_A);
@@ -1173,8 +1193,10 @@ describe("pullProxyGroups 拉取", () => {
     const results = await pullProxyGroups(mockDb, mockEnv);
 
     expect(results.g1.error).toBeDefined();
-    const health = JSON.parse(lastUpsertFor(HEALTH_KEY).create.value) as Record<string, any>;
-    expect(health[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
+    // 失败路径不再重写健康表（此前会无条件写一份未变化副本，徒增健康行写压力）：
+    // fail 记录原样留在库中，不误恢复
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthUpserts).toHaveLength(0);
   });
 
   it("空结果（HTTP 200 但无有效行）→ 保留旧列表并记 error", async () => {
@@ -1221,6 +1243,148 @@ describe("pullProxyGroups 拉取", () => {
     expect(results.g1.error).toContain("500");
     const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
     expect(pool.g1).toEqual([URL_A]);
+  });
+});
+
+describe("健康表并发写串行化（TiDB 1205 锁等待回归）", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+  const URL_X = "http://127.0.0.1:9999";
+  const POOL_KEY = "system:upstream_proxy_pool";
+  const SRC = "https://example.com/proxies.txt";
+
+  it("两代理同时达失败阈值：标记写库串行化，两个 fail 条目都不丢失", async () => {
+    const { markProxyFailure } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+
+    await Promise.all([
+      ...[0, 1, 2].map(() => markProxyFailure(mockDb, mockEnv, URL_A)),
+      ...[0, 1, 2].map(() => markProxyFailure(mockDb, mockEnv, URL_B)),
+    ]);
+
+    // 各达阈值一次 → 恰好 2 次健康表写入（此前并发 upsert 同一行会行锁排队
+    // 1205），后写者基于最新表状态合并（此前整表覆盖会丢另一个代理的条目）
+    const healthCalls = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthCalls).toHaveLength(2);
+    const written = JSON.parse(healthCalls[1][0].create.value) as Record<string, any>;
+    expect(written[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
+    expect(written[URL_B]).toMatchObject({ status: "fail", failCount: 3 });
+  });
+
+  it("健康检查批写入保留并发失败标记的条目（不整表覆盖）", async () => {
+    const { runProxyHealthCheck, markProxyFailure, getProxyHealth } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 204 })));
+
+    // 先启动健康检查（批写入须等探测完成才入锁），期间同步触发失败标记：
+    // markProxyFailure 的写先入链，健康检查批写后入链且只覆盖已检查的 URL，
+    // 候选列表之外的 fail 条目原样保留（此前合并以运行开始快照兜底会丢它）
+    const checkPromise = runProxyHealthCheck(mockDb, mockEnv);
+    for (let i = 0; i < 3; i++) {
+      await markProxyFailure(mockDb, mockEnv, URL_X);
+    }
+    await checkPromise;
+
+    const { results } = await getProxyHealth(mockDb, mockEnv);
+    expect(results[URL_A]).toMatchObject({ status: "ok" });
+    expect(results[URL_X]).toMatchObject({ status: "fail", failCount: 3 });
+  });
+
+  it("并发拉取单飞：复用进行中的任务，不重复请求源、不双写 pool", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    let fetchCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        fetchCount++;
+        await new Promise((r) => setTimeout(r, 0));
+        return { ok: true, status: 200, text: async () => URL_A };
+      })
+    );
+
+    const [r1, r2] = await Promise.all([
+      pullProxyGroups(mockDb, mockEnv),
+      pullProxyGroups(mockDb, mockEnv),
+    ]);
+
+    expect(r1).toEqual(r2);
+    expect(fetchCount).toBe(1);
+    // pool + 健康表（交集恢复 ok）各恰一次写——并发双拉取曾双写 pool 行
+    expect(mockUpsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("健康表写失败后串行链继续：后续写不受阻，失败写不污染缓存", async () => {
+    const { markProxyFailure, getProxyHealth } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    // 第一次健康表写失败（模拟瞬态 DB 错误），后续写恢复
+    mockUpsert.mockImplementationOnce(async (args: any) => {
+      if (args?.where?.key === HEALTH_KEY) throw new Error("db hiccup");
+      return {};
+    });
+
+    // 达阈值的那次写失败被吞掉记日志，调用方不抛
+    for (let i = 0; i < 3; i++) {
+      await expect(markProxyFailure(mockDb, mockEnv, URL_A)).resolves.toBeUndefined();
+    }
+    // 失败写未落库也未污染缓存：URL_A 的 fail 记录不存在（幻影修改不会在
+    // 下一次成功写时被持久化——锁内深拷贝，写失败时缓存保持已提交状态）
+    const afterFail = await getProxyHealth(mockDb, mockEnv);
+    expect(afterFail.results[URL_A]).toBeUndefined();
+
+    // 串行链未卡死：新代理达阈值 → 写入成功且基于最新表状态合并
+    for (let i = 0; i < 3; i++) {
+      await markProxyFailure(mockDb, mockEnv, URL_B);
+    }
+    const { results } = await getProxyHealth(mockDb, mockEnv);
+    expect(results[URL_B]).toMatchObject({ status: "fail", failCount: 3 });
+    expect(results[URL_A]).toBeUndefined();
+  });
+
+  it("拉取健康合并保留并发失败标记的条目（锁内只改交集/移除）", async () => {
+    const { pullProxyGroups, markProxyFailure, getProxyHealth } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({ [URL_A]: { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 2 } }),
+        updatedAt: 1000,
+      },
+    });
+    // 与拉取无关的 URL_X 进入失败黑名单并落库（与健康检查用例对称：拉取锁内
+    // 合并只改交集/移除，候选之外的 fail 条目必须原样保留）
+    for (let i = 0; i < 3; i++) {
+      await markProxyFailure(mockDb, mockEnv, URL_X);
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }))
+    );
+
+    await pullProxyGroups(mockDb, mockEnv);
+
+    const { results } = await getProxyHealth(mockDb, mockEnv);
+    expect(results[URL_A]).toMatchObject({ status: "ok", failCount: 2 });
+    expect(results[URL_X]).toMatchObject({ status: "fail", failCount: 3 });
   });
 });
 
