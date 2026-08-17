@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Tag, Select, Tabs, DatePicker, message, type TableColumnsType } from "antd";
+import { Tag, Select, Tabs, DatePicker, Tooltip, message, type TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -185,6 +185,18 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           {v}
         </Tag>
       ),
+    },
+    {
+      title: t("errorMessage"),
+      key: "errorMessage",
+      width: 220,
+      ellipsis: { showTitle: false },
+      render: (_: unknown, record: LogEntry) =>
+        record.isError && record.errorMessage ? (
+          <Tooltip title={record.errorMessage}>
+            <span className="text-red-500">{record.errorMessage}</span>
+          </Tooltip>
+        ) : "-",
     },
     {
       title: t("usage:promptTokens"),

@@ -291,6 +291,7 @@
   "log": {
     "model": "Model",
     "statusCode": "Status Code",
+    "errorMessage": "Error Message",
     "tokens": "Total Tokens",
     "ttft": "First Token Latency",
     "duration": "Duration",

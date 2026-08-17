@@ -291,6 +291,7 @@
   "log": {
     "model": "模型",
     "statusCode": "状态码",
+    "errorMessage": "错误信息",
     "tokens": "Token 总量",
     "ttft": "首 Token 延迟",
     "duration": "耗时",
