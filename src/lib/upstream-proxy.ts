@@ -68,6 +68,8 @@ export interface ProxyGroupConfig {
   sourceUrl: string;
   /** 手动代理地址（与拉取结果合并为组内候选） */
   urls: string[];
+  /** 组开关：禁用组不参与拉取/健康检查/请求路由（旧配置缺省视为启用） */
+  enabled: boolean;
 }
 
 export interface ProxyConfig {
@@ -129,6 +131,21 @@ const proxyFailCounts = new Map<string, number>();
 const unhealthyUrls = new Set<string>();
 /** 全部代理异常告警节流时间戳 */
 let lastAllUnhealthyWarn = 0;
+/** 健康检查进行中进度（管理页轮询展示；单进程内同一时刻仅一个检查任务） */
+export interface HealthCheckProgress {
+  running: boolean;
+  total: number;
+  checked: number;
+  startedAt: number;
+}
+let healthCheckProgress: HealthCheckProgress | null = null;
+/** 进行中的检查任务 promise（互斥：并发调用复用同一任务，见 runProxyHealthCheck） */
+let runningCheck: Promise<ProxyHealthMap> | null = null;
+
+/** 当前健康检查进度（无进行中任务时返回空进度） */
+export function getHealthCheckProgress(): HealthCheckProgress {
+  return healthCheckProgress ?? { running: false, total: 0, checked: 0, startedAt: 0 };
+}
 
 /** http(s) URL 且含主机名校验（new URL 解析 + hostname 非空） */
 function isValidHttpUrl(value: string): boolean {
@@ -202,6 +219,8 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
         // 拉取地址同样要求 http(s) + 主机名，防止畸形源 URL 让拉取任务反复失败
         sourceUrl: isValidHttpUrl(sourceUrl) ? sourceUrl : "",
         urls: normalizeUrls(g.urls),
+        // 组开关：旧配置无该字段视为启用
+        enabled: typeof g.enabled === "boolean" ? g.enabled : true,
       });
     }
   }
@@ -209,7 +228,7 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
   if (groups.length === 0) {
     // 无显式组：旧版配置（顶层 urls）视为单组，行为与旧版一致
     if (legacyUrls.length === 0) return [];
-    groups.push({ name: "", sourceUrl: "", urls: legacyUrls });
+    groups.push({ name: "", sourceUrl: "", urls: legacyUrls, enabled: true });
     return groups;
   }
 
@@ -545,23 +564,26 @@ async function checkOneProxy(
   }
 }
 
-/** 收集全部组的代理候选（拉取结果 ∪ 手动代理，去重） */
+/** 收集全部组的代理候选（拉取结果 ∪ 手动代理，去重）——禁用组不收集，
+ *  其代理连接由 releaseStaleAgents 按 keepUrls 集合回收 */
 function collectAllGroupUrls(config: ProxyConfig, pool: Record<string, string[]>): string[] {
   const urls = new Set<string>();
   for (const group of config.groups) {
+    if (!group.enabled) continue;
     for (const u of group.urls) urls.add(u);
     for (const u of pool[group.name] ?? []) urls.add(u);
   }
   return [...urls];
 }
 
-/** 目标组选择：平台绑定优先，未绑定走默认组（第一组） */
-function resolveTargetGroup(config: ProxyConfig, platformId: string | undefined): ProxyGroupConfig {
+/** 目标组选择：平台绑定优先，未绑定走默认组（第一组）；目标组被禁用返回 undefined（调用方走直连） */
+function resolveTargetGroup(config: ProxyConfig, platformId: string | undefined): ProxyGroupConfig | undefined {
   if (platformId && config.platformGroup[platformId]) {
     const bound = config.groups.find((g) => g.name === config.platformGroup[platformId]);
-    if (bound) return bound;
+    if (bound) return bound.enabled ? bound : undefined;
   }
-  return config.groups[0];
+  const first = config.groups[0];
+  return first?.enabled ? first : undefined;
 }
 
 // ===== 拉取 =====
@@ -644,7 +666,8 @@ export async function pullProxyGroups(
 
   const config = await readProxyConfig(db, env);
   if (!config) return {};
-  const pullGroups = config.groups.filter((g) => g.sourceUrl.length > 0);
+  // 禁用组不参与拉取
+  const pullGroups = config.groups.filter((g) => g.enabled && g.sourceUrl.length > 0);
   if (pullGroups.length === 0) return {};
 
   const prevPool = await readProxyPool(db, env);
@@ -741,8 +764,10 @@ export async function pullProxyGroups(
  * 选择出站代理（无代理配置/非 Docker 部署/平台不在白名单时返回 null）
  *
  * 组选择：平台绑定组优先；未绑定的白名单平台走默认组（第一组）。
- * 组内多代理按 round-robin 轮询；健康度异常（表记录 fail 或进程内连续
- * 失败达阈值）的代理跳过；全部异常时回退组内全部代理轮询并告警。
+ * 组内代理按最近一次健康检查延迟升序选最低（clash url-test 语义）；
+ * 健康度异常（表记录 fail 或进程内连续失败达阈值）的代理跳过；延迟未知
+ * （从未检查）时按 round-robin 轮询；全部异常时回退组内全部代理轮询并告警。
+ * 最低延迟代理故障由 markProxyFailure 黑名单机制自动切换到次优。
  * 调用方应把返回值注入上游 fetch 的 init.dispatcher（undici 扩展字段），
  * 并在网络层失败时用返回的 url 调用 markProxyFailure 回标记。
  */
@@ -774,6 +799,11 @@ export async function getUpstreamProxy(
   }
 
   const group = resolveTargetGroup(config, platformId);
+  if (!group) {
+    // 目标组被禁用：返回直连，同时回收该组代理连接（keepUrls 不含禁用组）
+    await releaseStaleAgents(new Set(collectAllGroupUrls(config, await readProxyPool(db, env))));
+    return { dispatcher: null, url: null };
+  }
   const pool = await readProxyPool(db, env);
   const allUrls = collectAllGroupUrls(config, pool);
   const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
@@ -787,23 +817,38 @@ export async function getUpstreamProxy(
   await releaseStaleAgents(new Set(allUrls));
 
   const health = await readProxyHealth(db, env);
-  let candidates = groupUrls.filter(
+  const candidates = groupUrls.filter(
     (url) => health[url]?.status !== "fail" && !unhealthyUrls.has(url)
   );
   if (candidates.length === 0) {
     // 全部代理健康度异常：回退全部代理轮询（健康检查是周期性的，
     // 期间的临时故障不应使配置了代理的请求直接改走直连）。
-    // 告警节流到每分钟一次，避免代理持续故障期间每个请求刷日志
+    // 告警节流到每分钟一次，避免代理持续故障期间每个请求刷日志。
+    // 注意：fail 条目的 latencyMs 也是实测值（>0），延迟最优选择会
+    // 固定打向最低延迟的 fail 代理，故此处强制轮询分摊
     const now = Date.now();
     if (now - lastAllUnhealthyWarn > 60_000) {
       console.warn("[upstream-proxy] 所有代理健康度异常，回退全部代理轮询");
       lastAllUnhealthyWarn = now;
     }
-    candidates = groupUrls;
+    const fallbackUrl = groupUrls[roundRobinIndex % groupUrls.length];
+    roundRobinIndex++;
+    return { dispatcher: await getAgent(fallbackUrl), url: fallbackUrl };
   }
 
-  const url = candidates[roundRobinIndex % candidates.length];
-  roundRobinIndex++;
+  // 按最近一次健康检查延迟选最优：已知延迟（>0）的代理按 latencyMs 升序
+  // 取最低（clash url-test 语义）；延迟未知（从未检查）时保持原顺序轮询，
+  // 避免健康检查未运行时流量固定打向第一个代理。最低延迟代理连续失败由
+  // markProxyFailure 黑名单自动切换到次优
+  const knownLatency: string[] = [];
+  for (const u of candidates) {
+    if ((health[u]?.latencyMs ?? 0) > 0) knownLatency.push(u);
+  }
+  const useLatency = knownLatency.length > 0;
+  const url = useLatency
+    ? knownLatency.sort((a, b) => (health[a]?.latencyMs ?? 0) - (health[b]?.latencyMs ?? 0))[0]
+    : candidates[roundRobinIndex % candidates.length];
+  if (!useLatency) roundRobinIndex++;
   return { dispatcher: await getAgent(url), url };
 }
 
@@ -840,6 +885,11 @@ export async function markProxyFailure(
 /**
  * 健康检查：对每个配置的代理发起探测请求，结果写入健康度表
  * （cron proxy-health 任务与管理页「立即检查」共用）
+ *
+ * 并发互斥：已有检查任务时复用同一 promise（手动 POST 与 cron 并发自然
+ * 串行），避免多个任务共享进度对象互相覆盖、先完成者提前复位 running。
+ * 进度对象在函数入口即设置（含 startedAt），提前返回/异常由 finally 复位，
+ * 前端轮询以 running=false 且 total>0 判完成、total=0 判「无候选」
  */
 export async function runProxyHealthCheck(
   db: D1Database | Database,
@@ -848,60 +898,79 @@ export async function runProxyHealthCheck(
   // 与 getUpstreamProxy/getProxyHealth 相同的部署门控：cron 在非 Docker
   // 部署下可能残留代理配置，不应创建 ProxyAgent 或写入健康表
   if (process.env.DEPLOY_PLATFORM !== "docker") return {};
+  if (runningCheck) return runningCheck;
 
-  const config = await readProxyConfig(db, env);
-  if (!config) return {};
+  healthCheckProgress = { running: true, total: 0, checked: 0, startedAt: Date.now() };
+  runningCheck = (async (): Promise<ProxyHealthMap> => {
+    try {
+      const config = await readProxyConfig(db, env);
+      if (!config) return {};
 
-  const pool = await readProxyPool(db, env);
-  const allUrls = collectAllGroupUrls(config, pool);
-  if (allUrls.length === 0) return {};
+      const pool = await readProxyPool(db, env);
+      const allUrls = collectAllGroupUrls(config, pool);
+      if (allUrls.length === 0) return {};
+      if (healthCheckProgress) healthCheckProgress.total = allUrls.length;
 
-  const prev = await readProxyHealth(db, env);
-  const results: ProxyHealthMap = {};
+      const prev = await readProxyHealth(db, env);
+      const results: ProxyHealthMap = {};
 
-  // 分批探测：每批 HEALTH_CHECK_CONCURRENCY 个并发，批间串行。
-  // 此前全量 Promise.allSettled 在导入数千代理后瞬间并发数千个 fetch +
-  // 数千个 ProxyAgent，内存暴涨（实测超 200MB）导致进程崩溃（无日志）
-  for (let i = 0; i < allUrls.length; i += HEALTH_CHECK_CONCURRENCY) {
-    const batch = allUrls.slice(i, i + HEALTH_CHECK_CONCURRENCY);
-    await Promise.allSettled(
-      batch.map(async (url) => {
-        const { ok, latencyMs } = await checkOneProxy(url, config.healthCheckUrl);
-        const prevEntry = prev[url];
-        const failCount = ok ? 0 : (prevEntry?.failCount ?? 0) + 1;
-        results[url] = {
-          status: ok ? "ok" : "fail",
-          latencyMs,
-          checkedAt: Math.floor(Date.now() / 1000),
-          failCount,
-        };
-        if (ok) {
-          // 恢复：清除进程内临时黑名单与失败计数
-          unhealthyUrls.delete(url);
-          proxyFailCounts.set(url, 0);
+      // 分批探测：每批 HEALTH_CHECK_CONCURRENCY 个并发，批间串行。
+      // 此前全量 Promise.allSettled 在导入数千代理后瞬间并发数千个 fetch +
+      // 数千个 ProxyAgent，内存暴涨（实测超 200MB）导致进程崩溃（无日志）
+      for (let i = 0; i < allUrls.length; i += HEALTH_CHECK_CONCURRENCY) {
+        const batch = allUrls.slice(i, i + HEALTH_CHECK_CONCURRENCY);
+        await Promise.allSettled(
+          batch.map(async (url) => {
+            const { ok, latencyMs } = await checkOneProxy(url, config.healthCheckUrl);
+            const prevEntry = prev[url];
+            const failCount = ok ? 0 : (prevEntry?.failCount ?? 0) + 1;
+            results[url] = {
+              status: ok ? "ok" : "fail",
+              latencyMs,
+              checkedAt: Math.floor(Date.now() / 1000),
+              failCount,
+            };
+            if (ok) {
+              // 恢复：清除进程内临时黑名单与失败计数
+              unhealthyUrls.delete(url);
+              proxyFailCounts.set(url, 0);
+            }
+          })
+        );
+        if (healthCheckProgress) {
+          healthCheckProgress.checked = Math.min(healthCheckProgress.checked + batch.length, allUrls.length);
         }
-      })
-    );
-  }
 
-  try {
-    // 合并写入：健康检查与 markProxyFailure 可能并发读写健康表（各自读改写
-    // 整表），保留 prev 中仍属于当前候选、但本次未生成结果的条目，避免
-    // 全表丢弃性覆盖（进程内集合才是轮询判定的权威，表数据为展示与重启恢复）
-    const merged: ProxyHealthMap = {};
-    for (const url of allUrls) merged[url] = results[url] ?? prev[url];
-    await writeProxyHealth(db, env, merged);
-  } catch (err) {
-    console.error("[upstream-proxy] 健康度结果写入失败:", err);
-  }
-  return results;
+        try {
+          // 每批合并写入：健康检查与 markProxyFailure 可能并发读写健康表（各自
+          // 读改写整表），保留 prev 中仍属于当前候选、但本次未生成结果的条目，
+          // 避免全表丢弃性覆盖；渐进写库供管理页每批刷新（进程内集合才是轮询
+          // 判定的权威，表数据为展示与重启恢复）
+          const merged: ProxyHealthMap = {};
+          for (const url of allUrls) merged[url] = results[url] ?? prev[url];
+          await writeProxyHealth(db, env, merged);
+        } catch (err) {
+          console.error("[upstream-proxy] 健康度结果写入失败:", err);
+        }
+      }
+
+      return results;
+    } finally {
+      // 异常/提前返回（无配置、无候选）也复位，不残留 running=true
+      if (healthCheckProgress) healthCheckProgress.running = false;
+      runningCheck = null;
+    }
+  })();
+  return runningCheck;
 }
 
-/** 读取最近一次健康度结果（管理页展示，非 Docker 部署返回空） */
+/** 读取最近一次健康度结果与当前检查进度（管理页展示，非 Docker 部署返回空） */
 export async function getProxyHealth(
   db: D1Database | Database,
   env?: WorkerEnv
-): Promise<ProxyHealthMap> {
-  if (process.env.DEPLOY_PLATFORM !== "docker") return {};
-  return readProxyHealth(db, env);
+): Promise<{ results: ProxyHealthMap; progress: HealthCheckProgress }> {
+  if (process.env.DEPLOY_PLATFORM !== "docker") {
+    return { results: {}, progress: { running: false, total: 0, checked: 0, startedAt: 0 } };
+  }
+  return { results: await readProxyHealth(db, env), progress: getHealthCheckProgress() };
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Input, Select, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
@@ -38,6 +38,11 @@ export default function UpstreamProxyPage() {
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [pulling, setPulling] = useState(false);
+  /** 健康检查渐进进度（轮询 GET 刷新；运行中显示「检查中 checked/total」） */
+  const [checkProgress, setCheckProgress] = useState<{ checked: number; total: number } | null>(null);
+  const checkPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 组件存活标记：轮询 fetch 挂起期间卸载后不再续排（防定时器泄漏） */
+  const mountedRef = useRef(true);
   const { data: config, error, isLoading, isValidating, mutate } = useApi<Record<string, string>>(
     "/api/admin/config"
   );
@@ -48,6 +53,14 @@ export default function UpstreamProxyPage() {
       message.error(t("common:error"));
     }
   }, [error, t]);
+
+  // 组件卸载时停止健康检查轮询
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (checkPollTimer.current) clearTimeout(checkPollTimer.current);
+    };
+  }, []);
 
   // 服务器配置值变化时回填全局字段（渲染期 prev 值比较，避免 effect 内同步 setState；
   // 值未变时不回填，不覆盖未保存的编辑）
@@ -75,6 +88,7 @@ export default function UpstreamProxyPage() {
       proxyCount: urls.length,
       okCount: urls.filter((u) => healthMap[u]?.status === "ok").length,
       failCount: urls.filter((u) => healthMap[u]?.status === "fail").length,
+      enabled: g.enabled,
     };
   });
 
@@ -88,6 +102,7 @@ export default function UpstreamProxyPage() {
       boundPlatformIds: Object.entries(parsed.platformGroup)
         .filter(([, groupName]) => groupName === g.name)
         .map(([pid]) => pid),
+      enabled: g.enabled,
     }));
 
   const buildCurrent = () => buildConfigJson(currentFormGroups(), platformIds, checkUrl);
@@ -157,6 +172,8 @@ export default function UpstreamProxyPage() {
     }
   };
 
+  /** 立即健康检查：POST 后台启动后轮询 GET 渐进刷新「检查中 X/Y」
+   * （每批写库后 mutate 同步健康数据），running=false 且已启动过视为完成 */
   const checkNow = async () => {
     if (!ensureSaved()) return;
     setChecking(true);
@@ -164,8 +181,7 @@ export default function UpstreamProxyPage() {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        mutate();
-        message.success(t("upstreamProxyHealthDone"));
+        void pollHealthProgress();
       } else {
         message.error(errMsg(data, t("common:error")));
       }
@@ -173,6 +189,42 @@ export default function UpstreamProxyPage() {
       message.error(t("common:error"));
     } finally {
       setChecking(false);
+    }
+  };
+
+  /** 轮询健康检查进度（与详情页 pollHealthProgress 同逻辑）：
+   *  running=true 继续轮询并显示「检查中 X/Y」；running=false 且 total>0 完成；
+   *  无候选（无配置/全部组禁用，total=0）静默停止；轮询上限 60 次兜底防死循环 */
+  const pollHealthProgress = async (attempt = 0): Promise<void> => {
+    if (!mountedRef.current) return;
+    try {
+      const res = await fetch("/api/admin/upstream-proxy/health");
+      const data: Record<string, any> = await res.json();
+      if (!data.success) return;
+      mutate();
+      const progress = data.data?.progress as { running: boolean; total: number; checked: number } | undefined;
+      if (!progress || progress.running) {
+        if (progress?.running && progress.total > 0) {
+          setCheckProgress({ checked: progress.checked, total: progress.total });
+        }
+        if (attempt + 1 >= 60) {
+          // 超限兜底停止：清除指示器避免残留「检查中」
+          setCheckProgress(null);
+          return;
+        }
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
+        return;
+      }
+      // running=false：total>0 = 检查完成；total=0 = 无候选可检查（合法状态，不提示）
+      setCheckProgress(null);
+      if (progress.total > 0) message.success(t("upstreamProxyHealthDone"));
+    } catch {
+      // 轮询失败静默重试（检查仍在后台继续，多等一轮）
+      if (attempt + 1 >= 60) {
+        setCheckProgress(null);
+        return;
+      }
+      checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
     }
   };
 
@@ -308,6 +360,11 @@ export default function UpstreamProxyPage() {
               <>
                 <p className="text-xs text-zinc-400 mb-2">
                   {t("upstreamProxyHealthStats", healthStats)}
+                  {checkProgress && (
+                    <span className="ml-2 text-emerald-600 dark:text-emerald-400">
+                      {t("upstreamProxyHealthChecking", checkProgress)}
+                    </span>
+                  )}
                 </p>
                 <ul className="space-y-1.5">
                   {parsed.groups.flatMap((g) => {

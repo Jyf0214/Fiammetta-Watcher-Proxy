@@ -11,7 +11,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
-import { getProxyHealth, runProxyHealthCheck } from "@/lib/upstream-proxy";
+import { getProxyHealth, runProxyHealthCheck, getHealthCheckProgress } from "@/lib/upstream-proxy";
 
 export default async function handler(
   req: NextApiRequest,
@@ -31,14 +31,26 @@ export default async function handler(
     const db = await createDb();
 
     if (req.method === "GET") {
-      const results = await getProxyHealth(db);
-      return res.status(200).json({ success: true, data: { results } });
+      const { results, progress } = await getProxyHealth(db);
+      return res.status(200).json({ success: true, data: { results, progress } });
     }
 
     if (req.method === "POST") {
       if (!checkCsrfOrigin(req, res)) return;
-      const results = await runProxyHealthCheck(db);
-      return res.status(200).json({ success: true, data: { results } });
+      // 已在检查中：直接返回当前进度，不重复启动
+      if (getHealthCheckProgress().running) {
+        const { results, progress } = await getProxyHealth(db);
+        return res.status(200).json({ success: true, data: { alreadyRunning: true, results, progress } });
+      }
+      // 后台执行并立即返回，前端轮询 GET 渐进显示「检查中 X/Y」；
+      // 数千代理的完整检查需数分钟，等全部完成才返回会让前端一直挂着
+      void runProxyHealthCheck(db).catch((err) => {
+        console.error(
+          "[API /api/admin/upstream-proxy/health] 后台健康检查异常:",
+          err instanceof Error ? err.message : String(err)
+        );
+      });
+      return res.status(200).json({ success: true, data: { started: true } });
     }
 
     res.setHeader("Allow", ["GET", "POST"]);

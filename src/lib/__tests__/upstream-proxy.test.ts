@@ -300,6 +300,79 @@ describe("多代理轮询", () => {
     expect(first.url).toBe("http://127.0.0.1:7890");
     expect(second.url).toBe("http://127.0.0.1:7891");
   });
+
+  it("全部代理健康异常（fail 条目含实测延迟）→ 回退轮询而非固定打向最低延迟的 fail 代理", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        // 健康检查写入的 fail 条目 latencyMs 是实测探测耗时（>0），
+        // 若 fallback 复用延迟最优选择会固定打向最低延迟的 fail 代理
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "fail", latencyMs: 500, checkedAt: 1000, failCount: 5 },
+          "http://127.0.0.1:7891": { status: "fail", latencyMs: 100, checkedAt: 1000, failCount: 5 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    // 回退轮询分摊：两次调用不固定同一代理（7891 延迟最低但已 fail）
+    expect([first.url, second.url]).toContain("http://127.0.0.1:7890");
+    expect([first.url, second.url]).toContain("http://127.0.0.1:7891");
+  });
+
+  it("已知延迟：按 latencyMs 升序选最低（clash url-test 语义），不轮询", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "ok", latencyMs: 120, checkedAt: 1000, failCount: 0 },
+          "http://127.0.0.1:7891": { status: "ok", latencyMs: 45, checkedAt: 1000, failCount: 0 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    // 连续多次都选最低延迟的 7891
+    expect(first.url).toBe("http://127.0.0.1:7891");
+    expect(second.url).toBe("http://127.0.0.1:7891");
+  });
+
+  it("延迟已知 + fail 混排：fail 代理被跳过，仍在 ok 中选最低", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891", "http://127.0.0.1:7892"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "ok", latencyMs: 100, checkedAt: 1000, failCount: 0 },
+          "http://127.0.0.1:7891": { status: "fail", latencyMs: 30, checkedAt: 1000, failCount: 5 },
+          "http://127.0.0.1:7892": { status: "ok", latencyMs: 200, checkedAt: 1000, failCount: 0 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    // 7891 延迟最低但已 fail，选 ok 中最低的 7890
+    expect(result.url).toBe("http://127.0.0.1:7890");
+  });
 });
 
 describe("markProxyFailure 失败回标记", () => {
@@ -479,9 +552,10 @@ describe("getProxyHealth 读取", () => {
     setPlatform("edgeone");
     const { getProxyHealth } = await loadModule();
 
-    const results = await getProxyHealth(mockDb, mockEnv);
+    const { results, progress } = await getProxyHealth(mockDb, mockEnv);
 
     expect(results).toEqual({});
+    expect(progress).toMatchObject({ running: false, total: 0, checked: 0 });
     expect(mockFindFirst).not.toHaveBeenCalled();
   });
 
@@ -494,7 +568,7 @@ describe("getProxyHealth 读取", () => {
       },
     });
 
-    const results = await getProxyHealth(mockDb, mockEnv);
+    const { results } = await getProxyHealth(mockDb, mockEnv);
 
     expect(results["http://127.0.0.1:7890"]).toMatchObject({ status: "ok", latencyMs: 42 });
   });
@@ -512,9 +586,91 @@ describe("getProxyHealth 读取", () => {
       },
     });
 
-    const results = await getProxyHealth(mockDb, mockEnv);
+    const { results } = await getProxyHealth(mockDb, mockEnv);
 
     expect(Object.keys(results)).toEqual(["http://127.0.0.1:7890"]);
+  });
+});
+
+describe("健康检查渐进进度", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+
+  it("分批探测：每批完成即合并写库（多次 upsert，值含已检查条目）", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    // 25 个代理 = 2 批（20 + 5）
+    const urls = Array.from({ length: 25 }, (_, i) => `http://10.0.${i}.1:8080`);
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls, platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 204 })));
+
+    await runProxyHealthCheck(mockDb, mockEnv);
+
+    // 每批一次合并写库：2 批 = 2 次 upsert（此前只在循环后写 1 次）
+    expect(mockUpsert).toHaveBeenCalledTimes(2);
+    const firstWrite = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
+    const secondWrite = JSON.parse(mockUpsert.mock.calls[1][0].create.value) as Record<string, any>;
+    // 首批写库只有前 20 个有结果，其余为 prev 保留（空健康表 → 无条目）
+    expect(Object.keys(firstWrite)).toHaveLength(20);
+    // 末批写库全部 25 个（前批结果保留 + 本批新增）
+    expect(Object.keys(secondWrite)).toHaveLength(25);
+  });
+
+  it("检查完成后进度复位（running=false）", async () => {
+    const { runProxyHealthCheck, getHealthCheckProgress } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 204 })));
+
+    await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(getHealthCheckProgress()).toMatchObject({ running: false, total: 2, checked: 2 });
+  });
+
+  it("并发调用复用同一任务（互斥：不重复探测、进度不被覆盖）", async () => {
+    const { runProxyHealthCheck, getHealthCheckProgress } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async (_input: any) => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // 同步连续调用（模拟手动 POST 与 cron 并发）：第二个复用第一个的任务
+    // （async 包装 promise 实例不同，但行为上串行：只探测一轮、结果一致）
+    const [r1, r2] = await Promise.all([
+      runProxyHealthCheck(mockDb, mockEnv),
+      runProxyHealthCheck(mockDb, mockEnv),
+    ]);
+
+    expect(r1).toEqual(r2);
+    // 只探测一轮（代理数 2，而非 4）
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getHealthCheckProgress()).toMatchObject({ running: false });
+  });
+
+  it("全部组禁用（无候选）→ 返回空且进度复位（不残留 running=true）", async () => {
+    const { runProxyHealthCheck, getHealthCheckProgress } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", urls: [URL_A], enabled: false }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async (_input: any) => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(results).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+    // 入口即设置进度，early return 由 finally 复位
+    expect(getHealthCheckProgress()).toMatchObject({ running: false, total: 0, checked: 0 });
   });
 });
 
@@ -720,6 +876,73 @@ describe("组路由与拉取结果合并", () => {
 
     expect(first.url).toBe(URL_A);
     expect(second.url).toBe(URL_B);
+  });
+});
+
+describe("组启用开关", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+  const SRC = "https://example.com/proxies.txt";
+
+  function configWith(groups: any[]) {
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups, platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+  }
+
+  it("缺省（无 enabled 字段）视为启用", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", urls: [URL_A] }]);
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(result.url).toBe(URL_A);
+  });
+
+  it("禁用组不参与请求路由（返回直连）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    configWith([{ name: "g1", urls: [URL_A], enabled: false }]);
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(result.url).toBeNull();
+    expect(result.dispatcher).toBeNull();
+  });
+
+  it("禁用组不参与拉取（仅拉取启用组的源）", async () => {
+    const { pullProxyGroups } = await loadModule();
+    configWith([
+      { name: "g1", sourceUrl: SRC, enabled: false },
+      { name: "g2", sourceUrl: "https://other.example/proxies.txt", enabled: true },
+    ]);
+    const fetchMock = vi.fn(async (_input: any) => ({ ok: true, status: 200, text: async () => URL_B }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    // 仅 g2 被拉取（1 次 fetch），g1 不在结果中
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://other.example/proxies.txt");
+    expect(results.g1).toBeUndefined();
+    expect(results.g2).toMatchObject({ pulled: 1 });
+  });
+
+  it("禁用组不参与健康检查（仅检查启用组的候选）", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([
+      { name: "g1", urls: [URL_A], enabled: false },
+      { name: "g2", urls: [URL_B], enabled: true },
+    ]);
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    // 只探测 g2 的候选，g1 的代理不被探测
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(results).toEqual({ [URL_B]: expect.any(Object) });
+    expect(results[URL_A]).toBeUndefined();
   });
 });
 

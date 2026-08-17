@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { Input, Select, message, Popconfirm } from "antd";
+import { Input, Select, message, Popconfirm, Switch } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
@@ -45,11 +45,17 @@ export default function UpstreamProxyGroupPage() {
     sourceUrl: "",
     urlsText: "",
     boundPlatformIds: [],
+    enabled: true,
   });
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [checking, setChecking] = useState(false);
+  /** 健康检查渐进进度（轮询 GET 刷新；运行中显示「检查中 checked/total」） */
+  const [checkProgress, setCheckProgress] = useState<{ checked: number; total: number } | null>(null);
+  const checkPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 组件存活标记：轮询 fetch 挂起期间卸载后不再续排（防定时器泄漏） */
+  const mountedRef = useRef(true);
   const { data: config, error, isLoading, isValidating, mutate } = useApi<Record<string, string>>(
     "/api/admin/config"
   );
@@ -60,6 +66,14 @@ export default function UpstreamProxyGroupPage() {
       message.error(t("common:error"));
     }
   }, [error, t]);
+
+  // 组件卸载时停止健康检查轮询
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (checkPollTimer.current) clearTimeout(checkPollTimer.current);
+    };
+  }, []);
 
   const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
   const poolMap = parsePoolMap(config?.[POOL_KEY]);
@@ -84,9 +98,10 @@ export default function UpstreamProxyGroupPage() {
         boundPlatformIds: Object.entries(parsed.platformGroup)
           .filter(([, groupName]) => groupName === g.name)
           .map(([pid]) => pid),
+        enabled: g.enabled,
       });
     } else if (isNew) {
-      setFormGroup({ id: crypto.randomUUID(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [] });
+      setFormGroup({ id: crypto.randomUUID(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [], enabled: true });
     }
   }
 
@@ -100,6 +115,7 @@ export default function UpstreamProxyGroupPage() {
       boundPlatformIds: Object.entries(parsed.platformGroup)
         .filter(([, groupName]) => groupName === g.name)
         .map(([pid]) => pid),
+      enabled: g.enabled,
     }));
 
   const saveConfig = async (groupsForm: GroupFormState[], successKey: string) => {
@@ -203,7 +219,8 @@ export default function UpstreamProxyGroupPage() {
     }
   };
 
-  /** 立即健康检查（手动按钮与「保存后自动验证」共用）：探测全部候选代理连通性 */
+  /** 立即健康检查（手动按钮与「保存后自动验证」共用）：POST 后台启动后轮询
+   *  GET 渐进刷新「检查中 X/Y」（每批写库后 mutate 同步健康数据） */
   const checkProxyHealthNow = async (skipEnsure = false) => {
     if (!skipEnsure && !ensureSaved()) return;
     setChecking(true);
@@ -211,8 +228,7 @@ export default function UpstreamProxyGroupPage() {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        mutate();
-        message.success(t("upstreamProxyHealthDone"));
+        void pollHealthProgress();
       } else {
         message.error(errMsg(data, t("common:error")));
       }
@@ -220,6 +236,41 @@ export default function UpstreamProxyGroupPage() {
       message.error(t("common:error"));
     } finally {
       setChecking(false);
+    }
+  };
+
+  /** 轮询健康检查进度：GET 渐进返回 { progress }，running=false 且已启动过
+   *  （total>0）视为完成；无候选（total=0）静默停止；轮询上限 60 次兜底 */
+  const pollHealthProgress = async (attempt = 0): Promise<void> => {
+    if (!mountedRef.current) return;
+    try {
+      const res = await fetch("/api/admin/upstream-proxy/health");
+      const data: Record<string, any> = await res.json();
+      if (!data.success) return;
+      mutate();
+      const progress = data.data?.progress as { running: boolean; total: number; checked: number } | undefined;
+      if (!progress || progress.running) {
+        if (progress?.running && progress.total > 0) {
+          setCheckProgress({ checked: progress.checked, total: progress.total });
+        }
+        if (attempt + 1 >= 60) {
+          // 超限兜底停止：清除指示器避免残留「检查中」
+          setCheckProgress(null);
+          return;
+        }
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
+        return;
+      }
+      // running=false：total>0 = 检查完成；total=0 = 无候选可检查（合法状态，不提示）
+      setCheckProgress(null);
+      if (progress.total > 0) message.success(t("upstreamProxyHealthDone"));
+    } catch {
+      // 轮询失败静默重试（检查仍在后台继续，多等一轮）
+      if (attempt + 1 >= 60) {
+        setCheckProgress(null);
+        return;
+      }
+      checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
     }
   };
 
@@ -251,6 +302,7 @@ export default function UpstreamProxyGroupPage() {
     proxyCount: groupUrls.length,
     okCount: groupUrls.filter((u) => healthMap[u]?.status === "ok").length,
     failCount: groupUrls.filter((u) => healthMap[u]?.status === "fail").length,
+    enabled: formGroup.enabled,
   };
 
   /** 组列表行数据（侧栏与返回条摘要共用） */
@@ -262,6 +314,7 @@ export default function UpstreamProxyGroupPage() {
       proxyCount: urls.length,
       okCount: urls.filter((u) => healthMap[u]?.status === "ok").length,
       failCount: urls.filter((u) => healthMap[u]?.status === "fail").length,
+      enabled: g.enabled,
     };
   });
 
@@ -302,6 +355,11 @@ export default function UpstreamProxyGroupPage() {
         </h3>
         {isDocker && (
           <div className="flex items-center gap-2">
+            {checkProgress && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 shrink-0">
+                {t("upstreamProxyHealthChecking", checkProgress)}
+              </span>
+            )}
             <Button
               variant="default"
               size="sm"
@@ -363,6 +421,18 @@ export default function UpstreamProxyGroupPage() {
       <div className={formGroupClass}>
         <h3 className={groupTitleClass}>{t("upstreamProxyGroupBasic")}</h3>
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                {t("upstreamProxyGroupEnabledLabel")}
+              </label>
+              <p className="text-xs text-zinc-400 mt-0.5">{t("upstreamProxyGroupEnabledHelp")}</p>
+            </div>
+            <Switch
+              checked={formGroup.enabled}
+              onChange={(checked) => setFormGroup({ ...formGroup, enabled: checked })}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               {t("upstreamProxyGroupNameLabel")}

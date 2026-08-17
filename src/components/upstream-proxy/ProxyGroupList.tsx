@@ -19,6 +19,8 @@ export interface ProxyGroupSummary {
   okCount: number;
   /** 组内健康 fail 数 */
   failCount: number;
+  /** 组启用开关（false 时行内徽标提示禁用） */
+  enabled: boolean;
 }
 
 /** 组内健康状态圆点：有异常红 / 全部正常绿 / 未检查灰 */
@@ -44,6 +46,7 @@ function GroupRow({
   active: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("system");
   const initial = group.name.trim().slice(0, 2).toUpperCase() || "?";
   return (
     <button
@@ -65,6 +68,11 @@ function GroupRow({
           )}
         >
           {group.name}
+          {!group.enabled && (
+            <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 align-middle">
+              {t("upstreamProxyGroupDisabled")}
+            </span>
+          )}
         </span>
         <span className="block text-[11px] text-zinc-400 truncate font-mono">
           {group.sourceUrl || "—"}

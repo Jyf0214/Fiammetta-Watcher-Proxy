@@ -21,6 +21,8 @@ export interface ParsedGroup {
   name: string;
   sourceUrl: string;
   urls: string[];
+  /** 组启用开关：禁用组不参与拉取/健康检查/请求路由（旧配置缺省视为启用） */
+  enabled: boolean;
 }
 export interface ParsedConfig {
   groups: ParsedGroup[];
@@ -35,6 +37,7 @@ export interface GroupFormState {
   sourceUrl: string;
   urlsText: string;
   boundPlatformIds: string[];
+  enabled: boolean;
 }
 
 /** 解析代理配置（兼容旧版纯 URL 字符串 / {urls,...} / 新版 groups，与后端 parseProxyConfig 对齐） */
@@ -48,7 +51,7 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
   }
   if (typeof parsed === "string") {
     return {
-      groups: [{ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: [parsed] }],
+      groups: [{ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: [parsed], enabled: true }],
       platformIds: [],
       platformGroup: {},
     };
@@ -60,6 +63,7 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
           name: LEGACY_GROUP_NAME,
           sourceUrl: "",
           urls: parsed.filter((u): u is string => typeof u === "string"),
+          enabled: true,
         },
       ],
       platformIds: [],
@@ -75,13 +79,15 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
       name: typeof g.name === "string" ? g.name.trim() : "",
       sourceUrl: typeof g.sourceUrl === "string" ? g.sourceUrl.trim() : "",
       urls: Array.isArray(g.urls) ? g.urls.filter((u): u is string => typeof u === "string") : [],
+      // 缺省视为启用（旧配置无该字段）
+      enabled: typeof g.enabled === "boolean" ? g.enabled : true,
     }))
     .filter((g) => g.name.length > 0);
 
   // 旧版字段（顶层 urls）兼容：无 groups 时视为单组
   const legacyUrls = Array.isArray(obj.urls) ? obj.urls.filter((u): u is string => typeof u === "string") : [];
   if (groups.length === 0 && legacyUrls.length > 0) {
-    groups.push({ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: legacyUrls });
+    groups.push({ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: legacyUrls, enabled: true });
   }
 
   const platformIds = Array.isArray(obj.platformIds)
@@ -208,6 +214,7 @@ export function buildConfigJson(
       sourceUrl: g.sourceUrl.trim(),
       urls: parseUrlsText(g.urlsText),
       boundPlatformIds: [...new Set(g.boundPlatformIds)],
+      enabled: g.enabled,
     }))
     .filter(
       (g) =>
@@ -243,6 +250,9 @@ export function buildConfigJson(
     value: JSON.stringify({
       groups: trimmed.map((g) => ({
         name: g.name,
+        // 显式写 enabled（与 parseProxyConfig 读取对称，保证「已保存一致性」比较成立；
+        // 旧配置无该字段保存后补齐，语义不变）
+        enabled: g.enabled,
         ...(g.sourceUrl ? { sourceUrl: g.sourceUrl } : {}),
         ...(g.urls.length > 0 ? { urls: g.urls } : {}),
       })),
