@@ -14,7 +14,15 @@
 import { fetchAllPlatformModels } from "../../worker/src/model-fetcher";
 import { handleScheduledReset } from "../../worker/src/key-reset";
 import { runArchiveTask } from "../../worker/src/log-archiver";
-import { runProxyHealthCheck, pullProxyGroups } from "./upstream-proxy";
+import {
+  runProxyHealthCheck,
+  pullProxyGroups,
+  getHealthCheckIntervalMin,
+  PROXY_HEALTH_INTERVAL_MIN_RANGE,
+} from "./upstream-proxy";
+
+/** 供测试与文档断言健康检查间隔允许范围（与 upstream-proxy 常量一致） */
+export { PROXY_HEALTH_INTERVAL_MIN_RANGE };
 
 /** 任务触发时间规格：分钟/小时集合匹配（分钟为空 = 每分钟，小时为空 = 每小时） */
 export interface ScheduleSpec {
@@ -22,11 +30,28 @@ export interface ScheduleSpec {
   hours?: Set<number>;
 }
 
-/** 调度任务：到点执行 run()（返回值仅用于调度器忽略），异常被捕获记日志，不影响其他任务 */
+/**
+ * 调度任务：到点执行 run()（返回值仅用于调度器忽略），异常被捕获记日志，不影响其他任务。
+ * spec 支持函数形式：每次 tick 求值，供依赖运行时可配置项的周期类任务使用（如 proxy-health）
+ */
 export interface ScheduledTask {
   name: string;
-  spec: ScheduleSpec;
+  spec: ScheduleSpec | (() => ScheduleSpec);
   run: () => Promise<unknown>;
+}
+
+/**
+ * 生成代理健康检查触发时刻：以固定偏移 2 分为锚点、按间隔步进（interval=5 时
+ * 为 2/7/12/.../57，与历史默认行为一致）。间隔钳制到 1~60
+ */
+export function healthCheckSpec(intervalMin: number): ScheduleSpec {
+  const interval = Math.min(
+    Math.max(Math.trunc(intervalMin), PROXY_HEALTH_INTERVAL_MIN_RANGE.min),
+    PROXY_HEALTH_INTERVAL_MIN_RANGE.max
+  );
+  const minutes = new Set<number>();
+  for (let m = 2; m < 60; m += interval) minutes.add(m);
+  return { minutes };
 }
 
 /** 当前时间是否命中调度规格（按本地时区） */
@@ -54,7 +79,8 @@ export function createScheduler(
     const now = new Date();
     for (const task of tasks) {
       if (running.has(task.name)) continue; // 上一轮未完成则跳过，不积压
-      if (!matchesSchedule(task.spec, now)) continue;
+      const spec = typeof task.spec === "function" ? task.spec() : task.spec;
+      if (!matchesSchedule(spec, now)) continue;
       const key = `${now.getHours()}:${now.getMinutes()}`;
       if (lastRunKey.get(task.name) === key) continue;
 
@@ -117,7 +143,8 @@ export function __resetSchedulerForTests(): void {
  * - model-fetch  模型发现    每 6 小时（:05）
  * - key-reset    Key 用量重置 每小时（:00）
  * - log-archive  日志归档    每天 3:10（错开 3:00 的 key-reset，避免并发写库）
- * - proxy-health 代理健康检查 每 5 分钟（分钟 % 5 == 2）
+ * - proxy-health 代理健康检查 默认每 5 分钟（间隔可在出站代理管理页自定义，
+ *   动态 spec 每次 tick 从进程内配置缓存读取，修改保存后于下一次检查生效）
  * - proxy-pull   代理列表拉取 每小时（:17）
  */
 // 与 /api/cron/[[...cron]].ts 端点一致：非 d1 方言下 createDb 忽略传入的 DB
@@ -143,9 +170,7 @@ export const DOCKER_TASKS: ScheduledTask[] = [
   },
   {
     name: "proxy-health",
-    spec: {
-      minutes: new Set([2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57]),
-    },
+    spec: () => healthCheckSpec(getHealthCheckIntervalMin()),
     run: () => runProxyHealthCheck(db, env),
   },
   {

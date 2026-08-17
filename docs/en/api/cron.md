@@ -13,7 +13,7 @@ FWP provides scheduled task endpoints for system maintenance. How they are trigg
 | `GET/POST /api/cron/model-fetch` | Model Discovery | Every 6 hours | Auto-discover platform-supported models |
 | `GET/POST /api/cron/key-reset` | Key Usage Reset | Hourly | Reset key monthly/daily usage counters (only cleared when the period starts) |
 | `GET/POST /api/cron/log-archive` | Log Archival | Daily at 3:00 | Aggregate logs older than 30 days into daily statistics (the Docker in-container timer runs this at 3:10, offset from the hourly key reset) |
-| `GET/POST /api/cron/proxy-health` | Outbound proxy health check | Every 5 minutes | Check outbound proxy connectivity (the Docker in-container timer runs this automatically; active only when a proxy is configured) |
+| `GET/POST /api/cron/proxy-health` | Outbound proxy health check | Every 5 minutes by default | Check outbound proxy connectivity (the Docker in-container timer runs this automatically; the interval can be customized to 1–60 minutes under Global settings on the outbound proxy page; active only when a proxy is configured) |
 | `GET/POST /api/cron/proxy-pull` | Outbound proxy list pull | Hourly | Pull the latest proxy list from each group's source URL (the Docker in-container timer runs this automatically; active only for groups with a pull source) |
 
 > On Docker the scheduled triggering is handled inside the container — no external calls needed. The endpoints remain available for manual triggering or external callers (requires `CRON_SECRET`).

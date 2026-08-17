@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Input, Select, message } from "antd";
+import { Input, InputNumber, Select, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
@@ -35,6 +35,8 @@ export default function UpstreamProxyPage() {
   const { t } = useTranslation("system");
   const [platformIds, setPlatformIds] = useState<string[]>([]);
   const [checkUrl, setCheckUrl] = useState("");
+  /** 健康检查间隔（分钟，1~60；null = 未设置，使用后端默认 5） */
+  const [healthIntervalMin, setHealthIntervalMin] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -98,6 +100,7 @@ export default function UpstreamProxyPage() {
     const parsed = parseProxyConfig(config[CONFIG_KEY]);
     setPlatformIds(parsed.platformIds);
     setCheckUrl(parsed.healthCheckUrl ?? "");
+    setHealthIntervalMin(parsed.healthCheckIntervalMin ?? null);
   }
 
   const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
@@ -136,7 +139,7 @@ export default function UpstreamProxyPage() {
       enabled: g.enabled,
     }));
 
-  const buildCurrent = () => buildConfigJson(currentFormGroups(), platformIds, checkUrl);
+  const buildCurrent = () => buildConfigJson(currentFormGroups(), platformIds, checkUrl, healthIntervalMin);
 
   const save = async () => {
     const result = buildCurrent();
@@ -399,6 +402,21 @@ export default function UpstreamProxyPage() {
                 allowClear
               />
               <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyCheckUrlHelp")}</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                {t("upstreamProxyHealthIntervalLabel")}
+              </label>
+              <InputNumber
+                value={healthIntervalMin}
+                onChange={(v) => setHealthIntervalMin(v ?? null)}
+                min={1}
+                max={60}
+                precision={0}
+                placeholder={`5 (${t("upstreamProxyHealthIntervalDefault")})`}
+                className="w-full"
+              />
+              <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyHealthIntervalHelp")}</p>
             </div>
           </div>
           <Button variant="primary" size="sm" onClick={save} loading={saving} icon={<Save size={14} />} className="mt-4">

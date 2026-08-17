@@ -83,7 +83,7 @@ The container registers an in-container timer at startup — all scheduled tasks
 | Model discovery (model-fetch) | Every 6 hours |
 | Key usage reset (key-reset) | Hourly |
 | Log archival (log-archive) | Daily at 3:10 |
-| Outbound proxy health check (proxy-health) | Every 5 minutes |
+| Outbound proxy health check (proxy-health) | Every 5 minutes (customizable to 1–60 minutes under Global settings on the outbound proxy page) |
 | Outbound proxy list pull (proxy-pull) | Hourly |
 
 No external scheduler is needed for `/api/cron/*`, and `CRON_SECRET` is **not required** (the timer calls the task functions directly, bypassing the HTTP endpoints). `CRON_SECRET` is only needed when calling the endpoints externally.

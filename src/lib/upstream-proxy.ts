@@ -14,7 +14,8 @@
  *     ],
  *     "platformIds": ["p1", "p2"],       // 空数组 = 所有平台经代理（勾选=白名单）
  *     "platformGroup": { "p1": "g1" },   // 平台绑定组（未绑定的白名单平台走默认组=第一组）
- *     "healthCheckUrl": "https://..."    // 可选，默认公网探测地址
+ *     "healthCheckUrl": "https://...",   // 可选，默认公网探测地址
+ *     "healthCheckIntervalMin": 5        // 可选，健康检查间隔分钟（1~60，默认 5）
  *   }
  * 兼容旧版纯 URL 字符串 / { urls, platformIds, healthCheckUrl } 格式
  * （无 groups 时视为单组，行为与旧版一致）。
@@ -46,6 +47,10 @@ export const UPSTREAM_PROXY_POOL_KEY = "system:upstream_proxy_pool";
 export const UPSTREAM_PROXY_HEALTH_KEY = "system:upstream_proxy_health";
 /** 默认健康检查探测地址（HTTP 204，轻量；可选国内可达的 Cloudflare 联通性端点） */
 export const DEFAULT_PROXY_HEALTH_CHECK_URL = "https://cp.cloudflare.com/generate_204";
+/** 默认健康检查间隔（分钟）：与调度器 proxy-health 任务默认频率一致 */
+export const DEFAULT_PROXY_HEALTH_INTERVAL_MIN = 5;
+/** 健康检查间隔允许范围（分钟）：调度器按该间隔生成触发时刻 */
+export const PROXY_HEALTH_INTERVAL_MIN_RANGE = { min: 1, max: 60 } as const;
 
 /** 缓存有效期：与 request-templates 的模板缓存一致（30s + updatedAt 失效检查） */
 const CACHE_TTL = 30_000;
@@ -85,6 +90,8 @@ export interface ProxyConfig {
   /** 平台 → 组名映射（绑定后该平台固定使用指定组） */
   platformGroup: Record<string, string>;
   healthCheckUrl: string;
+  /** 健康检查间隔（分钟，1~60）：调度器 proxy-health 任务按此周期触发；缺省默认 5 */
+  healthCheckIntervalMin: number;
 }
 
 export interface ProxyHealthEntry {
@@ -306,7 +313,25 @@ function normalizeConfig(input: Record<string, unknown>): ProxyConfig | null {
   let healthCheckUrl = typeof input.healthCheckUrl === "string" ? input.healthCheckUrl.trim() : "";
   if (!isValidHttpUrl(healthCheckUrl)) healthCheckUrl = DEFAULT_PROXY_HEALTH_CHECK_URL;
 
-  return { groups, platformIds, platformGroup, healthCheckUrl };
+  // 健康检查间隔：非法值/越界回退默认（管理页保存时已校验，此处防御脏数据）
+  const rawInterval = input.healthCheckIntervalMin;
+  const interval =
+    typeof rawInterval === "number" &&
+    Number.isInteger(rawInterval) &&
+    rawInterval >= PROXY_HEALTH_INTERVAL_MIN_RANGE.min &&
+    rawInterval <= PROXY_HEALTH_INTERVAL_MIN_RANGE.max
+      ? rawInterval
+      : DEFAULT_PROXY_HEALTH_INTERVAL_MIN;
+
+  return { groups, platformIds, platformGroup, healthCheckUrl, healthCheckIntervalMin: interval };
+}
+
+/**
+ * 当前生效的健康检查间隔（分钟）：进程内配置缓存的最新值，未加载过配置时返回默认。
+ * 供 Docker 调度器 proxy-health 动态 spec 使用（readProxyConfig 每次刷新缓存时更新）
+ */
+export function getHealthCheckIntervalMin(): number {
+  return cachedConfig?.healthCheckIntervalMin ?? DEFAULT_PROXY_HEALTH_INTERVAL_MIN;
 }
 
 /** 解析健康度记录（容忍脏数据：非法条目丢弃） */

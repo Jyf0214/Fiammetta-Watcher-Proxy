@@ -220,7 +220,12 @@ export default function UpstreamProxyGroupPage() {
     }));
 
   const saveConfig = async (groupsForm: GroupFormState[], successKey: string) => {
-    const result = buildConfigJson(groupsForm, parsed.platformIds, parsed.healthCheckUrl ?? "");
+    const result = buildConfigJson(
+      groupsForm,
+      parsed.platformIds,
+      parsed.healthCheckUrl ?? "",
+      parsed.healthCheckIntervalMin ?? null
+    );
     if (!result.ok) {
       message.error(t(VALIDATION_KEYS[result.error]));
       return false;
@@ -283,7 +288,12 @@ export default function UpstreamProxyGroupPage() {
     const merged = isNew
       ? [...allGroupsForm(), formGroup]
       : allGroupsForm().map((g) => (g.name === id ? formGroup : g));
-    const result = buildConfigJson(merged, parsed.platformIds, parsed.healthCheckUrl ?? "");
+    const result = buildConfigJson(
+      merged,
+      parsed.platformIds,
+      parsed.healthCheckUrl ?? "",
+      parsed.healthCheckIntervalMin ?? null
+    );
     if (!result.ok || result.value !== saved) {
       message.warning(t("upstreamProxySaveFirst"));
       return false;

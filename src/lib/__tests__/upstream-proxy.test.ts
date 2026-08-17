@@ -278,6 +278,40 @@ describe("配置解析与代理创建", () => {
 
     expect(result.dispatcher).toBeNull();
   });
+
+  it("健康检查间隔：合法值生效，供调度器动态 spec 读取", async () => {
+    const { getUpstreamProxy, getHealthCheckIntervalMin } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({
+          urls: ["https://proxy.example.com:8443"],
+          platformIds: [],
+          healthCheckIntervalMin: 10,
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    // 缓存未加载时返回默认 5
+    expect(getHealthCheckIntervalMin()).toBe(5);
+    await getUpstreamProxy(mockDb, mockEnv);
+    // 配置加载后返回配置值
+    expect(getHealthCheckIntervalMin()).toBe(10);
+  });
+
+  it("健康检查间隔：缺失/非法/越界回退默认 5", async () => {
+    for (const value of [undefined, 0, 61, 5.5, "10", "abc"]) {
+      vi.resetModules();
+      const { getUpstreamProxy, getHealthCheckIntervalMin } = await loadModule();
+      const config: Record<string, unknown> = { urls: ["https://proxy.example.com:8443"], platformIds: [] };
+      if (value !== undefined) config.healthCheckIntervalMin = value;
+      setConfigRows({ [CONFIG_KEY]: { value: JSON.stringify(config), updatedAt: 1000 } });
+
+      await getUpstreamProxy(mockDb, mockEnv);
+
+      expect(getHealthCheckIntervalMin()).toBe(5);
+    }
+  });
 });
 
 describe("平台白名单", () => {
@@ -1529,5 +1563,50 @@ describe("业务流量统计与路由降权", () => {
 
     expect(first.url).toBe(URL_A);
     expect(second.url).toBe(URL_B);
+  });
+});
+
+describe("健康检查间隔配置（healthCheckIntervalMin）", () => {
+  /** 注入配置后加载一次模块，返回 getUpstreamProxy 后的最新缓存值 */
+  async function intervalAfterLoad(
+    value: unknown,
+    raw?: string
+  ): Promise<number> {
+    vi.resetModules();
+    const mod = await import("../upstream-proxy");
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value:
+          raw ??
+          JSON.stringify({ urls: ["http://127.0.0.1:7890"], ...(value !== undefined ? { healthCheckIntervalMin: value } : {}) }),
+        updatedAt: 1000,
+      },
+    });
+    await mod.getUpstreamProxy(mockDb, mockEnv);
+    return mod.getHealthCheckIntervalMin();
+  }
+
+  it("合法间隔（10）→ 缓存生效，调度器读取配置值", async () => {
+    expect(await intervalAfterLoad(10)).toBe(10);
+  });
+
+  it("缺省（无字段）→ 默认 5", async () => {
+    expect(await intervalAfterLoad(undefined)).toBe(5);
+  });
+
+  it("越界/非法值回退默认 5（0、61、小数、字符串、null）", async () => {
+    for (const bad of [0, 61, 2.5, "10", null]) {
+      expect(await intervalAfterLoad(bad)).toBe(5);
+    }
+  });
+
+  it("边界值 1 与 60 均合法", async () => {
+    expect(await intervalAfterLoad(1)).toBe(1);
+    expect(await intervalAfterLoad(60)).toBe(60);
+  });
+
+  it("无代理配置（{} / 纯 URL 旧格式）→ 默认 5，不抛错", async () => {
+    expect(await intervalAfterLoad(undefined, "{}")).toBe(5);
+    expect(await intervalAfterLoad(undefined, "http://127.0.0.1:7890")).toBe(5);
   });
 });

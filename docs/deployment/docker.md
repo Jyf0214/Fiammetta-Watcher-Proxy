@@ -83,7 +83,7 @@ volumes:
 | 模型发现（model-fetch） | 每 6 小时 |
 | Key 用量重置（key-reset） | 每小时 |
 | 日志归档（log-archive） | 每天 3:10 |
-| 出站代理健康检查（proxy-health） | 每 5 分钟 |
+| 出站代理健康检查（proxy-health） | 每 5 分钟（可在出站代理管理页「全局设置」自定义 1~60 分钟） |
 | 出站代理列表拉取（proxy-pull） | 每小时 |
 
 无需外部调度器调用 `/api/cron/*`，也无需配置 `CRON_SECRET`（内部定时器直接执行任务函数，不经过 HTTP 端点）。`CRON_SECRET` 仅在从外部手动调用端点时需要。

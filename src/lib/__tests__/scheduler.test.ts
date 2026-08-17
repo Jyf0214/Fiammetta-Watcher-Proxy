@@ -4,8 +4,16 @@ import {
   matchesSchedule,
   startScheduler,
   DOCKER_TASKS,
+  healthCheckSpec,
   __resetSchedulerForTests,
+  type ScheduleSpec,
 } from "../scheduler";
+import { PROXY_HEALTH_INTERVAL_MIN_RANGE } from "../upstream-proxy";
+
+/** 解析任务 spec（支持函数形式：取当前求值结果） */
+function resolveSpec(spec: ScheduleSpec | (() => ScheduleSpec)): ScheduleSpec {
+  return typeof spec === "function" ? spec() : spec;
+}
 
 describe("matchesSchedule 调度匹配", () => {
   it("分钟集合命中 → true；未命中 → false", () => {
@@ -204,13 +212,73 @@ describe("startScheduler 入口门控", () => {
   });
 });
 
+describe("healthCheckSpec 间隔生成", () => {
+  it("间隔 5 → 2/7/12/.../57（与历史默认一致）", () => {
+    expect([...healthCheckSpec(5).minutes!].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 12 }, (_, i) => i * 5 + 2)
+    );
+  });
+
+  it("间隔 1 → 每分钟（2~59）；间隔 60 → 仅 :02", () => {
+    expect([...healthCheckSpec(1).minutes!].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 58 }, (_, i) => i + 2)
+    );
+    expect([...healthCheckSpec(60).minutes!].sort((a, b) => a - b)).toEqual([2]);
+  });
+
+  it("越界/非整数钳制到允许范围（0→1、99→60、2.7→2）", () => {
+    expect([...healthCheckSpec(0).minutes!].length).toBe(58);
+    expect([...healthCheckSpec(99).minutes!]).toEqual([2]);
+    expect([...healthCheckSpec(2.7).minutes!].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 29 }, (_, i) => i * 2 + 2)
+    );
+  });
+
+  it("范围常量与文档一致（1~60）", () => {
+    expect(PROXY_HEALTH_INTERVAL_MIN_RANGE).toEqual({ min: 1, max: 60 });
+  });
+});
+
+describe("函数形式 spec（每次 tick 动态求值）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("spec 函数每次 tick 重新求值，返回值变化即时生效", async () => {
+    let minutes = new Set([5]);
+    const specFn = vi.fn(() => ({ minutes }));
+    const runA = vi.fn().mockResolvedValue(undefined);
+    const s = createScheduler(
+      [{ name: "a", spec: specFn, run: runA }],
+      { tickMs: 60_000, firstTickDelayMs: 0 }
+    );
+    vi.setSystemTime(new Date(2026, 7, 16, 10, 5, 0));
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runA).toHaveBeenCalledTimes(1);
+
+    // 运行中切换 spec（模拟保存后配置更新）：下一 tick（10:06）命中新分钟并执行
+    minutes = new Set([6]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(runA).toHaveBeenCalledTimes(2);
+    expect(specFn.mock.calls.length).toBeGreaterThanOrEqual(2);
+    s.stop();
+  });
+});
+
 describe("DOCKER_TASKS 任务表与文档频率一致", () => {
   /** 归一化 spec 为可比较形状（排序后的分钟/小时数组，空 = 每分钟/每小时） */
-  const normalize = (t: (typeof DOCKER_TASKS)[number]) => [
-    t.name,
-    [...(t.spec.minutes ?? [])].sort((a, b) => a - b),
-    [...(t.spec.hours ?? [])].sort((a, b) => a - b),
-  ];
+  const normalize = (t: (typeof DOCKER_TASKS)[number]) => {
+    const spec = resolveSpec(t.spec);
+    return [
+      t.name,
+      [...(spec.minutes ?? [])].sort((a, b) => a - b),
+      [...(spec.hours ?? [])].sort((a, b) => a - b),
+    ];
+  };
 
   it("5 个任务齐全，name/spec 与文档建议频率一致", () => {
     expect(DOCKER_TASKS.map(normalize)).toEqual([
@@ -227,9 +295,12 @@ describe("DOCKER_TASKS 任务表与文档频率一致", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("proxy-health 分钟集合 = 分钟 % 5 == 2 的完整 12 个值", () => {
+  it("proxy-health 默认间隔（5）分钟集合 = 分钟 % 5 == 2 的完整 12 个值", () => {
     const health = DOCKER_TASKS.find((t) => t.name === "proxy-health");
+    expect(health).toBeDefined();
+    // 默认配置未加载时动态 spec 按默认 5 分钟生成（与历史行为一致）
+    const minutes = resolveSpec(health!.spec).minutes ?? [];
     const expected = Array.from({ length: 12 }, (_, i) => i * 5 + 2);
-    expect([...(health?.spec.minutes ?? [])].sort((a, b) => a - b)).toEqual(expected);
+    expect([...minutes].sort((a, b) => a - b)).toEqual(expected);
   });
 });

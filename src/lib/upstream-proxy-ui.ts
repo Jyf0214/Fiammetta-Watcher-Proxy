@@ -29,6 +29,8 @@ export interface ParsedConfig {
   platformIds: string[];
   platformGroup: Record<string, string>;
   healthCheckUrl?: string;
+  /** 健康检查间隔分钟（1~60，缺省后端默认 5） */
+  healthCheckIntervalMin?: number;
 }
 
 export interface GroupFormState {
@@ -100,7 +102,11 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
     }
   }
   const healthCheckUrl = typeof obj.healthCheckUrl === "string" ? obj.healthCheckUrl : undefined;
-  return { groups, platformIds, platformGroup, healthCheckUrl };
+  const healthCheckIntervalMin =
+    typeof obj.healthCheckIntervalMin === "number" && Number.isInteger(obj.healthCheckIntervalMin)
+      ? obj.healthCheckIntervalMin
+      : undefined;
+  return { groups, platformIds, platformGroup, healthCheckUrl, healthCheckIntervalMin };
 }
 
 /** 解析健康度记录（容忍脏数据） */
@@ -198,7 +204,8 @@ export type ConfigValidationError =
   | "upstreamProxyGroupNameDup"
   | "upstreamProxyGroupNameReserved"
   | "upstreamProxyInvalidSourceUrl"
-  | "upstreamProxyInvalidUrls";
+  | "upstreamProxyInvalidUrls"
+  | "upstreamProxyInvalidInterval";
 
 /**
  * 表单 → 配置 JSON 字符串（全空返回 "{}"；供保存与「已保存一致性」校验共用）。
@@ -207,8 +214,22 @@ export type ConfigValidationError =
 export function buildConfigJson(
   groups: GroupFormState[],
   platformIds: string[],
-  checkUrl: string
+  checkUrl: string,
+  healthIntervalMin: number | null | undefined
 ): { ok: true; value: string } | { ok: false; error: ConfigValidationError } {
+  // 健康检查间隔：1~60 的整数；留空不写字段（后端默认 5）
+  let interval: number | undefined;
+  if (healthIntervalMin !== null && healthIntervalMin !== undefined) {
+    if (
+      !Number.isInteger(healthIntervalMin) ||
+      healthIntervalMin < 1 ||
+      healthIntervalMin > 60
+    ) {
+      return { ok: false, error: "upstreamProxyInvalidInterval" };
+    }
+    interval = healthIntervalMin;
+  }
+
   const trimmed = groups
     .map((g) => ({
       name: g.name.trim(),
@@ -221,7 +242,7 @@ export function buildConfigJson(
       (g) =>
         g.name.length > 0 || g.sourceUrl.length > 0 || g.urls.length > 0 || g.boundPlatformIds.length > 0
     );
-  if (trimmed.length === 0) return { ok: true, value: "{}" };
+  if (trimmed.length === 0 && interval === undefined) return { ok: true, value: "{}" };
 
   // 校验组名：必填且唯一；"new" 保留给新建页路由，禁止作为组名
   const names = trimmed.map((g) => g.name);
@@ -261,6 +282,8 @@ export function buildConfigJson(
       platformGroup,
       // 留空时不写字段，由后端 normalizeConfig 填充默认探测地址（与后端默认值保持单一来源）
       ...(checkUrlTrimmed ? { healthCheckUrl: checkUrlTrimmed } : {}),
+      // 留空时不写字段，后端默认 5 分钟（与后端默认值保持单一来源）
+      ...(interval !== undefined ? { healthCheckIntervalMin: interval } : {}),
     }),
   };
 }
