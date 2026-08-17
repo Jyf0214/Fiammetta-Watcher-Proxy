@@ -448,32 +448,60 @@ export default function UpstreamProxyPage() {
                     </span>
                   )}
                 </p>
-                <ul className="space-y-1.5">
-                  {parsed.groups.flatMap((g) => {
+                <ul className="space-y-3">
+                  {parsed.groups.map((g) => {
                     const groupUrls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
-                    return groupUrls.map((url) => {
-                      const entry = healthMap[url];
-                      const status = entry?.status ?? "none";
-                      return (
-                        <li key={`${g.name}:${url}`} className="flex items-center gap-2 text-xs">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                              status === "ok"
-                                ? "bg-emerald-500"
-                                : status === "fail"
-                                  ? "bg-rose-500"
-                                  : "bg-zinc-300 dark:bg-zinc-600"
-                            }`}
-                          />
-                          <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
-                            {maskProxyUrl(url)}
+                    if (groupUrls.length === 0) return null;
+                    const okCount = groupUrls.filter((u) => healthMap[u]?.status === "ok").length;
+                    const failCount = groupUrls.filter((u) => healthMap[u]?.status === "fail").length;
+                    return (
+                      <li key={g.name}>
+                        {/* 组标题行：组名 + 禁用徽标 + 组内健康统计 */}
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate min-w-0">
+                            {g.name}
                           </span>
-                          <span className="ml-auto shrink-0 text-zinc-400 text-right">
-                            {renderHealthText(status, entry, t)}
+                          {!g.enabled && (
+                            <span className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400">
+                              {t("upstreamProxyGroupDisabled")}
+                            </span>
+                          )}
+                          <span className="ml-auto shrink-0 text-[10px] text-zinc-400">
+                            {t("upstreamProxyHealthStats", {
+                              total: groupUrls.length,
+                              ok: okCount,
+                              fail: failCount,
+                              none: groupUrls.length - okCount - failCount,
+                            })}
                           </span>
-                        </li>
-                      );
-                    });
+                        </div>
+                        <ul className="space-y-1.5">
+                          {groupUrls.map((url) => {
+                            const entry = healthMap[url];
+                            const status = entry?.status ?? "none";
+                            return (
+                              <li key={url} className="flex items-center gap-2 text-xs">
+                                <span
+                                  className={`inline-block h-2 w-2 rounded-full shrink-0 ${
+                                    status === "ok"
+                                      ? "bg-emerald-500"
+                                      : status === "fail"
+                                        ? "bg-rose-500"
+                                        : "bg-zinc-300 dark:bg-zinc-600"
+                                  }`}
+                                />
+                                <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
+                                  {maskProxyUrl(url)}
+                                </span>
+                                <span className="ml-auto shrink-0 text-zinc-400 text-right">
+                                  {renderHealthText(status, entry, t)}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    );
                   })}
                 </ul>
               </>
