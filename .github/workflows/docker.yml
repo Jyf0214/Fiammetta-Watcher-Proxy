@@ -67,8 +67,8 @@ jobs:
             DB_TYPE=${{ inputs.db_type || 'pg' }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:canary-lite
-            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}-lite
+            ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
+            ghcr.io/jyf0214/fiammetta-watcher-proxy:sha-${{ github.sha }}-lite
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
