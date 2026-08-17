@@ -436,6 +436,7 @@ function errorIncrement(status: number): number {
  * - 累加错误计数（429→+1, 401→+2, 其余→+1）
  * - 达到 5 次后自动将密钥 enabled 设为 false，不再变更 errorCount
  * - 已禁用的密钥再次调用不会变更 errorCount
+ * - 白名单 Key 或白名单平台的密钥豁免：不累计错误计数、不自动禁用，仅临时降级（与 banKey 语义一致）
  *
  * 同时写入内存禁用集合，保证即时生效（下一次密钥选择立即跳过）
  */
@@ -458,6 +459,16 @@ export async function recordKeyError(
     const keys = parseApiKeyObjects(platform.apiKeys);
     const target = keys.find((k) => k.key === key);
     if (!target) return;
+
+    // 白名单 Key 或白名单平台：不累计错误计数、不自动禁用，仅临时降级（同 banKey）
+    if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) {
+      const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
+      whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
+      console.log(
+        `[platform-keys] 白名单密钥 ${keyFingerprint(key)} 收到上游错误 ${upstreamStatus}，仅降级不计数（平台 ${platformId}）`
+      );
+      return;
+    }
 
     // 已禁用的密钥不再变更错误计数
     if (target.enabled === false) return;

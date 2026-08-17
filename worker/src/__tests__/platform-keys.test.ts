@@ -5,9 +5,14 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getAllKeys, getNextKey, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist } from "../platform-keys";
+import { getAllKeys, getNextKey, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled } from "../platform-keys";
 import { keyStatusKey } from "@/lib/key-status";
 import type { PlatformConfig } from "@/lib/types";
+
+// recordKeyError 通过 update 持久化 apiKeys，这里用共享状态模拟"写入后可见"
+const prismaState = vi.hoisted(() => ({
+  apiKeysByPlatform: {} as Record<string, string>,
+}));
 
 // loadWhitelist / loadKeyStatusFromKV 内部通过 createDb 查库，这里替换为内存 mock
 vi.mock("@/lib/prisma", () => ({
@@ -15,7 +20,15 @@ vi.mock("@/lib/prisma", () => ({
     platforms: {
       findMany: async () => [
         { id: "platform-1", apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]), whitelisted: false },
+        { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
       ],
+      findFirst: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        apiKeys: prismaState.apiKeysByPlatform[where.id] ?? "",
+      }),
+      update: async ({ where, data }: { where: { id: string }; data: { apiKeys: string } }) => {
+        prismaState.apiKeysByPlatform[where.id] = data.apiKeys;
+      },
     },
   })),
 }));
@@ -157,6 +170,69 @@ describe("parseApiKeys", () => {
 
   it("非数组 JSON 返回空数组", () => {
     expect(parseApiKeys('{"key":"value"}')).toEqual([]);
+  });
+});
+
+// ==================== recordKeyError 白名单豁免 ====================
+
+describe("recordKeyError 白名单豁免", () => {
+  beforeEach(() => {
+    // 重置持久化状态：platform-1 含白名单 Key w，whitelisted-platform 为白名单平台
+    prismaState.apiKeysByPlatform = {
+      "platform-1": JSON.stringify([
+        { name: "normal", key: "sk-normal" },
+        { name: "w", key: "sk-whitelisted", whitelisted: true },
+      ]),
+      "whitelisted-platform": JSON.stringify([{ name: "normal", key: "sk-normal" }]),
+    };
+  });
+
+  it("白名单 Key 收到错误不累计计数、不被禁用，仅降级", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    for (let i = 0; i < 5; i++) {
+      await recordKeyError("sk-whitelisted", 401, "platform-1", {} as D1Database);
+    }
+
+    expect(isKeyDisabled("sk-whitelisted", "platform-1")).toBe(false);
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
+    // errorCount / enabled 未被持久化
+    expect(prismaState.apiKeysByPlatform["platform-1"]).not.toContain('"errorCount"');
+    expect(prismaState.apiKeysByPlatform["platform-1"]).not.toContain('"enabled":false');
+  });
+
+  it("非白名单 Key 达阈值仍自动禁用（回归）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    // 401 每次 +2，3 次 = 6 >= 5
+    for (let i = 0; i < 3; i++) {
+      await recordKeyError("sk-normal", 401, "platform-1", {} as D1Database);
+    }
+
+    expect(isKeyDisabled("sk-normal", "platform-1")).toBe(true);
+    expect(prismaState.apiKeysByPlatform["platform-1"]).toContain('"enabled":false');
+    expect(prismaState.apiKeysByPlatform["platform-1"]).toContain('"errorCount":6');
+  });
+
+  it("402 一次即达阈值，白名单 Key 同样豁免", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    await recordKeyError("sk-whitelisted", 402, "platform-1", {} as D1Database);
+
+    expect(isKeyDisabled("sk-whitelisted", "platform-1")).toBe(false);
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
+    expect(prismaState.apiKeysByPlatform["platform-1"]).not.toContain('"enabled":false');
+  });
+
+  it("白名单平台的普通 Key 同样豁免", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+
+    for (let i = 0; i < 5; i++) {
+      await recordKeyError("sk-normal", 401, "whitelisted-platform", {} as D1Database);
+    }
+
+    expect(isKeyDisabled("sk-normal", "whitelisted-platform")).toBe(false);
+    expect(isKeyDeprioritized("sk-normal", "whitelisted-platform")).toBe(true);
   });
 });
 
