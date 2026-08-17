@@ -58,17 +58,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push (lite)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.lite
-          build-args: |
-            DB_TYPE=${{ inputs.db_type || 'pg' }}
-          push: true
-          tags: |
-            ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
-            ghcr.io/jyf0214/fiammetta-watcher-proxy:sha-${{ github.sha }}-lite
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      
