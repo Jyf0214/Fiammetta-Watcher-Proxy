@@ -7,7 +7,7 @@
 
 import type { PlatformConfig, PlatformApiKeyObject } from "@/lib/types";
 import type { WorkerEnv } from "./config";
-import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus } from "@/lib/key-status";
+import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 
 /** 命名密钥格式 */
 export interface NamedApiKey {
@@ -626,4 +626,35 @@ export function clearKeyCooldown(key: string, platformId: string): void {
  */
 export function markKeyDisabled(key: string, platformId: string): void {
   disabledKeys.add(banKeyId(platformId, key));
+}
+
+/**
+ * 从进程内存态构造平台 Key 状态（管理后台同进程读取用）
+ *
+ * Docker/EdgeOne 等非 Cloudflare 部署下 pages/api/admin 与 v1 路由同 Node
+ * 进程，模块级 keyCooldowns/whitelistedKeyCooldowns 共享，直接读取即可
+ * 反映 429 封禁/降级的实时状态；Cloudflare 部署下 admin 进程无内存态
+ * （返回空），由 KV 路径（readPlatformKeyStatus）提供状态。
+ * 键为密钥指纹，与 KV 持久化格式一致，前端可统一按指纹消费。
+ */
+export function getKeyStatusesFromMemory(
+  platformId: string,
+  keys: string[]
+): PlatformKeyStatus {
+  const result: PlatformKeyStatus = {};
+  const now = Date.now();
+  for (const key of keys) {
+    if (typeof key !== "string" || key.trim().length === 0) continue;
+    const fp = keyFingerprint(key);
+    const bannedEnd = keyCooldowns.get(banKeyId(platformId, key));
+    if (bannedEnd !== undefined && bannedEnd > now) {
+      result[fp] = { status: "banned", expireAt: bannedEnd };
+      continue;
+    }
+    const deprioritizedEnd = whitelistedKeyCooldowns.get(banKeyId(platformId, key));
+    if (deprioritizedEnd !== undefined && deprioritizedEnd > now) {
+      result[fp] = { status: "deprioritized", expireAt: deprioritizedEnd };
+    }
+  }
+  return result;
 }

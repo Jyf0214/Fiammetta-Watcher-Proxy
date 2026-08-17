@@ -11,6 +11,7 @@ import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
+import { getKeyStatusesFromMemory, parseApiKeys } from "../../../worker/src/platform-keys";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -83,6 +84,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             keyStatusesByPlatform[p.id] = await readPlatformKeyStatus(kv, p.id);
           })
         );
+      }
+      // 合并同进程内存态（非 Cloudflare 部署：admin 与 v1 路由同 Node 进程，
+      // 429 封禁/降级直接读内存；无 KV 时是唯一状态源）
+      for (const p of platforms) {
+        const memoryStatuses = getKeyStatusesFromMemory(p.id, parseApiKeys(p.apiKeys ?? "[]"));
+        keyStatusesByPlatform[p.id] = {
+          ...(keyStatusesByPlatform[p.id] ?? {}),
+          ...memoryStatuses,
+        };
       }
 
       const data = platforms.map((p) => ({

@@ -10,6 +10,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
+import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
+import { getKeyStatusesFromMemory, parseApiKeys } from "../../../../worker/src/platform-keys";
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
@@ -50,6 +52,23 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
       []
     );
 
+    // 密钥实时状态（429 封禁/白名单降级）：KV 持久化状态（Cloudflare 部署）
+    // 合并同进程内存态（Docker/EdgeOne 部署：admin 与 v1 路由同 Node 进程，
+    // 直接读模块级冷却 Map 即可反映实时封禁，且无 KV 时是唯一状态源）
+    let keyStatuses: PlatformKeyStatus = {};
+    let kv: KVNamespace | undefined;
+    try {
+      const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+      kv = getCloudflareContext().env.KV as KVNamespace | undefined;
+    } catch {
+      // 本地开发或非 Cloudflare 环境没有 KV binding
+    }
+    if (kv) {
+      keyStatuses = await readPlatformKeyStatus(kv, id);
+    }
+    const memoryStatuses = getKeyStatusesFromMemory(id, parseApiKeys(platform.apiKeys ?? "[]"));
+    keyStatuses = { ...keyStatuses, ...memoryStatuses };
+
     return res.status(200).json({
       success: true,
       data: {
@@ -60,6 +79,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
         reuseUserAgent: platform.reuseUserAgent ?? false,
         customUserAgent: platform.customUserAgent ?? "",
         extraHeaders: platform.extraHeaders ?? "{}",
+        keyStatuses,
       },
     });
   } catch (err) {

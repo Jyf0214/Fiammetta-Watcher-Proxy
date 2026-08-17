@@ -15,7 +15,8 @@ export default function PlatformsPage() {
   const { t } = useTranslation("common");
 
   // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
-  const { data: platforms, error, isLoading, isValidating } = useApi<Platform[]>("/api/admin/platforms");
+  // refreshInterval 30s：密钥 429 封禁/降级状态与平台熔断状态轮询刷新（#12）
+  const { data: platforms, error, isLoading, isValidating } = useApi<Platform[]>("/api/admin/platforms", { refreshInterval: 30_000 });
 
   // 请求失败提示
   useEffect(() => {

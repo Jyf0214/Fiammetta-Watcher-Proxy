@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/router";
 import { Form, message } from "antd";
 import Switch from "@/components/ui/Switch";
@@ -10,7 +10,7 @@ import {
 } from "@/components/platform/PlatformList";
 import { PlatformConfigForm } from "@/components/platform/PlatformConfigForm";
 import { ModelsPanel, type TestResult } from "@/components/platform/ModelsPanel";
-import { ArrowLeft, RefreshCw, Zap, Settings } from "lucide-react";
+import { ArrowLeft, RefreshCw, Zap, Settings, ShieldOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
@@ -54,6 +54,7 @@ export default function PlatformDetailPage() {
 
   // ===== 数据层（SWR）：列表 / 详情 / 模型三路并行，key 含 id 变化时自动重新请求 =====
   // 列表 key 与平台列表页（/admin/platforms）共享同一缓存：详情页左侧栏与列表页数据自动一致
+  // refreshInterval 30s：密钥 429 封禁/降级状态与平台熔断状态轮询刷新（#12）
   const listKey = "/api/admin/platforms";
   // 详情与模型仅在非新建模式下请求（key 为 null 时不发请求）
   const detailKey = !id || isNew ? null : `/api/admin/platforms/${id}`;
@@ -64,14 +65,14 @@ export default function PlatformDetailPage() {
     error: listError,
     isValidating: listLoading,
     mutate: mutateList,
-  } = useApi<Platform[]>(listKey);
+  } = useApi<Platform[]>(listKey, { refreshInterval: 30_000 });
 
   const {
     data: platform,
     error: detailError,
     isLoading: detailLoading,
     mutate: mutateDetail,
-  } = useApi<Platform | null>(detailKey);
+  } = useApi<Platform | null>(detailKey, { refreshInterval: 30_000 });
 
   const {
     data: models,
@@ -79,6 +80,18 @@ export default function PlatformDetailPage() {
     isValidating: modelsLoading,
     mutate: mutateModels,
   } = useApi<ModelItem[]>(modelsKey);
+
+  // 密钥实时状态汇总（keyStatuses 键为密钥指纹；429 封禁/白名单降级）
+  const keyStatusSummary = useMemo(() => {
+    const statuses = platform?.keyStatuses ?? {};
+    let banned = 0;
+    let deprioritized = 0;
+    for (const value of Object.values(statuses)) {
+      if (value?.status === "banned") banned++;
+      else if (value?.status === "deprioritized") deprioritized++;
+    }
+    return { banned, deprioritized, total: banned + deprioritized };
+  }, [platform]);
 
   // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
@@ -611,6 +624,19 @@ export default function PlatformDetailPage() {
                       )}
                       {unbanning ? t("common:loading") : t("platformUnban")}
                     </button>
+                  </div>
+                )}
+                {/* 密钥 429 封禁/降级提示条 — 任一 Key 处于临时封禁/降级时显示 */}
+                {keyStatusSummary.total > 0 && (
+                  <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/40 text-sm text-orange-700 dark:text-orange-400">
+                    <ShieldOff size={16} className="shrink-0" />
+                    <span>
+                      {t("keyStatusSummary", {
+                        count: keyStatusSummary.total,
+                        banned: keyStatusSummary.banned,
+                        deprioritized: keyStatusSummary.deprioritized,
+                      })}
+                    </span>
                   </div>
                 )}
                 {/* 配置表单（上） */}

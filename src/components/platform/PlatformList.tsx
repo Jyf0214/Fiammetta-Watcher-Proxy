@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { Input } from "antd";
-import { Plus, Search, ChevronDown, Cloud, WalletCards, LayoutGrid } from "lucide-react";
+import { Plus, Search, ChevronDown, Cloud, WalletCards, LayoutGrid, ShieldOff, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { BrandIcon, BRAND_MAP } from "@/components/platform/BrandIcon";
@@ -83,7 +83,7 @@ export function StatusDot({ status, enabled }: { status: string; enabled: boolea
   return <span className={cn("w-2 h-2 rounded-full shrink-0", color)} />;
 }
 
-/** 单个列表行 — 图标 + 名称 + 状态点，整行点击进入独立路由 */
+/** 单个列表行 — 图标 + 名称 + 密钥状态徽标 + 状态点，整行点击进入独立路由 */
 function PlatformRow({
   platform,
   active,
@@ -93,6 +93,20 @@ function PlatformRow({
   active: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("platform");
+  // 密钥实时状态徽标：统计该平台 429 封禁/降级中的密钥数（keyStatuses 键为指纹）
+  const keyStatusCounts = useMemo(() => {
+    const statuses = platform.keyStatuses ?? {};
+    let banned = 0;
+    let deprioritized = 0;
+    for (const value of Object.values(statuses)) {
+      if (value?.status === "banned") banned++;
+      else if (value?.status === "deprioritized") deprioritized++;
+    }
+    return { banned, deprioritized };
+  }, [platform.keyStatuses]);
+  const hasKeyStatus = keyStatusCounts.banned > 0 || keyStatusCounts.deprioritized > 0;
+
   return (
     <button
       type="button"
@@ -111,6 +125,27 @@ function PlatformRow({
       )}>
         {platform.name}
       </span>
+      {hasKeyStatus && (
+        <span
+          className="shrink-0 flex items-center gap-1"
+          title={t("keyStatusTip")}
+        >
+          {keyStatusCounts.banned > 0 && (
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/30">
+              <ShieldOff size={10} className="inline" />
+              {t("keyStatusBanned")}
+              {keyStatusCounts.banned > 1 ? ` ${keyStatusCounts.banned}` : ""}
+            </span>
+          )}
+          {keyStatusCounts.deprioritized > 0 && (
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/30">
+              <ShieldCheck size={10} className="inline" />
+              {t("keyStatusDeprioritized")}
+              {keyStatusCounts.deprioritized > 1 ? ` ${keyStatusCounts.deprioritized}` : ""}
+            </span>
+          )}
+        </span>
+      )}
       <StatusDot status={platform.status} enabled={platform.enabled} />
     </button>
   );

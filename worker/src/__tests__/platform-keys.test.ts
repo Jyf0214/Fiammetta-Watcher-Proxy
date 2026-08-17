@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getAllKeys, getNextKey, getRandomKeyExcept, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled, loadKeyStatusFromKV } from "../platform-keys";
+import { getAllKeys, getNextKey, getRandomKeyExcept, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled, loadKeyStatusFromKV, getKeyStatusesFromMemory } from "../platform-keys";
 import { keyStatusKey } from "@/lib/key-status";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -380,5 +380,52 @@ describe("loadKeyStatusFromKV", () => {
     expect(isKeyDisabled("sk-whitelisted", "platform-1")).toBe(false);
     // 白名单密钥不会进入禁用集合
     expect(isKeyDisabled("sk-normal", "whitelisted-platform")).toBe(false);
+  });
+});
+
+// ==================== getKeyStatusesFromMemory（管理后台同进程读取） ====================
+
+describe("getKeyStatusesFromMemory", () => {
+  it("普通 Key 封禁后按指纹返回 banned 状态与到期时间", async () => {
+    await banKey("sk-banned", undefined, "platform-1");
+
+    const statuses = getKeyStatusesFromMemory("platform-1", ["sk-banned", "sk-normal"]);
+    const fp = Object.keys(statuses);
+    expect(fp.length).toBe(1);
+    expect(statuses[fp[0]].status).toBe("banned");
+    expect(statuses[fp[0]].expireAt).toBeGreaterThan(Date.now());
+  });
+
+  it("白名单 Key 降级后返回 deprioritized 状态", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    await banKey("sk-whitelisted", undefined, "platform-1");
+
+    const statuses = getKeyStatusesFromMemory("platform-1", ["sk-whitelisted"]);
+    const entries = Object.values(statuses);
+    expect(entries.length).toBe(1);
+    expect(entries[0].status).toBe("deprioritized");
+  });
+
+  it("无任何状态时返回空对象", () => {
+    const statuses = getKeyStatusesFromMemory("platform-1", ["sk-clean"]);
+    expect(statuses).toEqual({});
+  });
+
+  it("已到期冷却不计入（过期自动清理语义）", async () => {
+    // 负时长构造已过期冷却
+    await banKey("sk-expired", -1000, "platform-1");
+    expect(isKeyBanned("sk-expired", "platform-1")).toBe(false);
+
+    const statuses = getKeyStatusesFromMemory("platform-1", ["sk-expired"]);
+    expect(statuses).toEqual({});
+  });
+
+  it("平台维度隔离：platform-a 封禁不影响 platform-b 的状态读取", async () => {
+    await banKey("sk-shared", undefined, "platform-a");
+
+    const a = getKeyStatusesFromMemory("platform-a", ["sk-shared"]);
+    expect(Object.keys(a).length).toBe(1);
+    const b = getKeyStatusesFromMemory("platform-b", ["sk-shared"]);
+    expect(b).toEqual({});
   });
 });
