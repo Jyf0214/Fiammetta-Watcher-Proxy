@@ -85,3 +85,28 @@ export async function writePlatformKeyStatus(
     );
   }
 }
+
+/**
+ * 删除单个 Key 的状态（读-改-写，保留其他 Key 的状态）
+ *
+ * 手动启用密钥时调用：banKey 写入的 banned 状态无 TTL，只写不删的话
+ * 残留记录会在冷启动时被 loadKeyStatusFromKV 恢复，继续封禁该 Key。
+ * 已知限制同 writePlatformKeyStatus：KV 无原子读改写，并发写可能丢失一次。
+ */
+export async function removePlatformKeyStatus(
+  kv: KVNamespace,
+  platformId: string,
+  fp: string
+): Promise<void> {
+  try {
+    const current = await readPlatformKeyStatus(kv, platformId);
+    if (!(fp in current)) return;
+    delete current[fp];
+    await kv.put(keyStatusKey(platformId), JSON.stringify(current));
+  } catch (err) {
+    console.error(
+      `[key-status] 删除平台 ${platformId} Key 状态失败:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}

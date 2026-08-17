@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getAllKeys, getNextKey, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled } from "../platform-keys";
+import { getAllKeys, getNextKey, getRandomKeyExcept, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled, loadKeyStatusFromKV } from "../platform-keys";
 import { keyStatusKey } from "@/lib/key-status";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     platforms: {
       findMany: async () => [
-        { id: "platform-1", apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]), whitelisted: false },
+        { id: "platform-1", apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }, { name: "d", key: "sk-disabled", enabled: false }]), whitelisted: false },
         { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
       ],
       findFirst: async ({ where }: { where: { id: string } }) => ({
@@ -131,6 +131,44 @@ describe("getNextKey", () => {
     expect(getNextKey(p1)).toBe("sk-1b");
     expect(getNextKey(p2)).toBe("sk-2b");
     expect(getNextKey(p1)).toBe("sk-1a");
+  });
+
+  it("跳过 DB enabled=false 的密钥（进程重启后内存 disabledKeys 为空也不复活）", () => {
+    const platform = makePlatform({
+      id: "db-disabled",
+      apiKeys: ["sk-bad", "sk-good"],
+      apiKeyObjects: [
+        { name: "bad", key: "sk-bad", whitelisted: false, enabled: false, errorCount: 5 },
+        { name: "good", key: "sk-good", whitelisted: false, enabled: true, errorCount: 0 },
+      ],
+    });
+    expect(getNextKey(platform)).toBe("sk-good");
+    expect(getNextKey(platform)).toBe("sk-good");
+  });
+
+  it("全部密钥 DB 禁用时返回 null", () => {
+    const platform = makePlatform({
+      id: "all-db-disabled",
+      apiKeys: ["sk-bad1", "sk-bad2"],
+      apiKeyObjects: [
+        { name: "bad1", key: "sk-bad1", whitelisted: false, enabled: false, errorCount: 5 },
+        { name: "bad2", key: "sk-bad2", whitelisted: false, enabled: false, errorCount: 5 },
+      ],
+    });
+    expect(getNextKey(platform)).toBeNull();
+  });
+
+  it("getRandomKeyExcept 跳过 DB enabled=false 的密钥（重试路径不复活禁用 Key）", () => {
+    const platform = makePlatform({
+      id: "random-db-disabled",
+      apiKeys: ["sk-bad", "sk-good"],
+      apiKeyObjects: [
+        { name: "bad", key: "sk-bad", whitelisted: false, enabled: false, errorCount: 5 },
+        { name: "good", key: "sk-good", whitelisted: false, enabled: true, errorCount: 0 },
+      ],
+    });
+    const key = getRandomKeyExcept(platform, new Set());
+    expect(key).toBe("sk-good");
   });
 });
 
@@ -285,16 +323,16 @@ describe("banKey KV 持久化", () => {
 
   it("白名单平台的 Key 收到 429 后写入降级状态而非封禁", async () => {
     const kv = makeMockKv();
-    // Mock 白名单平台
-    vi.doMock("@/lib/prisma", () => ({
-      createDb: vi.fn(async () => ({
-        platforms: {
-          findMany: async () => [
-            { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
-          ],
-        },
-      })),
-    }));
+    // 单次覆盖 createDb：本次调用只返回白名单平台（mockResolvedValueOnce
+    // 消费后自动恢复顶部 vi.mock 的默认实现，不影响后续测试）
+    const { createDb } = await import("@/lib/prisma");
+    vi.mocked(createDb).mockResolvedValueOnce({
+      platforms: {
+        findMany: async () => [
+          { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
+        ],
+      },
+    } as never);
     await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
 
     await banKey("sk-normal", undefined, "whitelisted-platform", kv);
@@ -324,5 +362,23 @@ describe("banKey KV 持久化", () => {
     // platform-b 同值密钥不受影响，仍可轮询
     const key = getNextKey(makePlatform({ id: "platform-b", apiKeys: ["sk-shared"] }));
     expect(key).toBe("sk-shared");
+  });
+});
+
+// ==================== loadKeyStatusFromKV ====================
+
+describe("loadKeyStatusFromKV", () => {
+  it("无 KV 时从 DB 恢复持久化禁用密钥（非 Cloudflare 部署重启后禁用不复活）", async () => {
+    // 先确保内存态干净：启用状态下断言
+    expect(isKeyDisabled("sk-disabled", "platform-1")).toBe(false);
+
+    // 无 KV（undefined）：退化为仅从 DB 恢复 enabled=false 的密钥
+    await loadKeyStatusFromKV({} as D1Database, undefined, { DB_TYPE: "d1" });
+
+    expect(isKeyDisabled("sk-disabled", "platform-1")).toBe(true);
+    // 正常密钥不受影响
+    expect(isKeyDisabled("sk-whitelisted", "platform-1")).toBe(false);
+    // 白名单密钥不会进入禁用集合
+    expect(isKeyDisabled("sk-normal", "whitelisted-platform")).toBe(false);
   });
 });

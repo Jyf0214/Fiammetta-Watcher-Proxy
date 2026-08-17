@@ -66,6 +66,7 @@ const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
   auditLogs: { labelKey: "dmStepAuditLogs" },
   requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
   dailyStats: { labelKey: "dmStepDailyStats" },
+  platformModels: { labelKey: "dmStepPlatformModels" },
 };
 
 // ==================== 导入前预览分析 ====================

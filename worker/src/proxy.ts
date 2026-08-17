@@ -815,9 +815,11 @@ export async function proxyV1Request(
       console.error(`${logTag} 日志写入失败:`, logError);
     }
 
-    // 自动模型冻结
+    // 自动模型冻结：冻结实际发送的目标模型（currentTargetModel）。
+    // 此前冻结 requestedModel（自动模型场景下是自动模型 ID），与 routeRequest
+    // 检查的候选具体模型名（frozenModels 键）不相等，冻结机制从未命中。
     if (isAutoModelRequest(requestedModel)) {
-      freezeAutoModel(requestedModel);
+      freezeAutoModel(currentTargetModel);
     }
 
     // 空响应特判：绝不向下游透传空响应，返回 502 + 明确错误

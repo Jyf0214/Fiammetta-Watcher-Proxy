@@ -10,6 +10,7 @@ export {
   keyStatusKey,
   readPlatformKeyStatus,
   writePlatformKeyStatus,
+  removePlatformKeyStatus,
   KEY_STATUS_PREFIX,
   type KeyStatusValue,
   type PlatformKeyStatus,

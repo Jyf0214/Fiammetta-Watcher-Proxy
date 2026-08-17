@@ -133,6 +133,7 @@
     "dmStepRequestLogs": "请求日志",
     "dmStepRequestLogsDetail": "大量数据，可能需要较长时间",
     "dmStepDailyStats": "每日统计",
+    "dmStepPlatformModels": "平台模型",
     "dmPreviewTitle": "导入预览",
     "dmPreviewRecords": "条记录",
     "dmPreviewIssueHint": "检测到疑似异常记录（缺少必填字段/重复/脱敏），导入时将自动跳过",

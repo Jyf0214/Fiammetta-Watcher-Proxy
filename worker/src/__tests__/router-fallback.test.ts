@@ -42,14 +42,20 @@ function makeFakePrisma(
   platforms: any[],
   platformModels: { platformId: string; modelId: string }[],
   mappings: any[] = [],
-  autoModelId: string | null = null
+  autoModelId: string | null = null,
+  autoModelSelectedConfig: string | null = null
 ) {
   return {
     platforms: { findMany: async () => platforms },
     modelMappings: { findMany: async () => mappings },
     platformModels: { findMany: async () => platformModels },
     configs: {
-      findFirst: async () => (autoModelId ? { value: autoModelId } : null),
+      findFirst: async ({ where }: { where: { key: string } }) => {
+        if (where.key === "system:auto_model_selected") {
+          return autoModelSelectedConfig ? { value: autoModelSelectedConfig } : null;
+        }
+        return autoModelId ? { value: autoModelId } : null;
+      },
     },
   };
 }
@@ -218,5 +224,111 @@ describe("routeRequest 对不存在模型的 fallback 行为", () => {
 
     const route = await routeRequest("my-deepseek", dummyDb, env);
     expect(route).toBeNull();
+  });
+});
+
+// ==================== 自动模型分流白名单（system:auto_model_selected） ====================
+
+describe("routeRequest 自动模型分流白名单", () => {
+  const AUTO = "fwp-auto-model";
+
+  it("未配置白名单时全部模型参与分流（向后兼容）", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-a", "A"), makePlatform("p-b", "B")],
+        [
+          { platformId: "p-a", modelId: "gpt-4o" },
+          { platformId: "p-b", modelId: "claude-3" },
+        ],
+        [],
+        AUTO
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    const route = await routeRequest(AUTO, dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(["p-a", "p-b"]).toContain(route!.platform.id);
+    expect(["gpt-4o", "claude-3"]).toContain(route!.targetModel);
+  });
+
+  it("白名单只含部分模型时仅路由到入选模型", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-a", "A"), makePlatform("p-b", "B")],
+        [
+          { platformId: "p-a", modelId: "gpt-4o" },
+          { platformId: "p-b", modelId: "claude-3" },
+        ],
+        [],
+        AUTO,
+        JSON.stringify(["gpt-4o"])
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    const route = await routeRequest(AUTO, dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.platform.id).toBe("p-a");
+    expect(route!.targetModel).toBe("gpt-4o");
+  });
+
+  it("白名单为空数组（UI 全部关闭）时无模型参与，返回 null", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-a", "A")],
+        [{ platformId: "p-a", modelId: "gpt-4o" }],
+        [],
+        AUTO,
+        JSON.stringify([])
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    const route = await routeRequest(AUTO, dummyDb, env);
+    expect(route).toBeNull();
+  });
+
+  it("白名单数组元素全非法时降级为全部参与（垃圾数据容错）", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-a", "A")],
+        [{ platformId: "p-a", modelId: "gpt-4o" }],
+        [],
+        AUTO,
+        JSON.stringify([1, 2])
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    const route = await routeRequest(AUTO, dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.targetModel).toBe("gpt-4o");
+  });
+
+  it("高优先级平台无入选模型时路由到有入选模型的平台（不 500）", async () => {
+    // p-a 优先级更高但入选模型只有 p-b 的 claude-3：
+    // 旧实现先 selectPlatform 选中 p-a 再查模型落空返回 null，即使 p-b 有可用模型
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [
+          { ...makePlatform("p-a", "A"), priority: 10 },
+          makePlatform("p-b", "B"),
+        ],
+        [
+          { platformId: "p-a", modelId: "gpt-4o" },
+          { platformId: "p-b", modelId: "claude-3" },
+        ],
+        [],
+        AUTO,
+        JSON.stringify(["claude-3"])
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    const route = await routeRequest(AUTO, dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.platform.id).toBe("p-b");
+    expect(route!.targetModel).toBe("claude-3");
   });
 });

@@ -82,13 +82,30 @@ export default async function handler(
         // 导入什么"的语义不一致
       }));
 
-      // 模型映射
+      // 模型映射（id 必须导出：导入时保留原始 id 才能恢复 platformId 关联）
       const modelMaps = await db.modelMappings.findMany();
 
       exportData.modelMaps = modelMaps.map((m) => ({
+        id: m.id,
         alias: m.alias,
         targetModel: m.targetModel,
         platformId: m.platformId,
+      }));
+
+      // 平台模型（自动发现结果）：不导出则跨环境恢复后路由缓存无模型，
+      // v1 请求全部「模型不存在」，直到下一轮 model-fetch 才重建
+      const platformModels = await db.platformModels.findMany();
+
+      exportData.platformModels = platformModels.map((pm) => ({
+        id: pm.id,
+        platformId: pm.platformId,
+        modelId: pm.modelId,
+        ownedBy: pm.ownedBy,
+        modelName: pm.modelName,
+        type: pm.type,
+        source: pm.source,
+        enabled: pm.enabled,
+        fetchedAt: pm.fetchedAt,
       }));
 
       // 系统配置
@@ -137,6 +154,7 @@ export default async function handler(
           });
           for (const r of batch) {
             requestLogsExport.push({
+              id: r.id,
               keyId: r.keyId,
               keyName: r.keyName,
               platformId: r.platformId,

@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
@@ -94,9 +94,9 @@ function sendV1Error(
  * lib/prisma.ts 的解析链，导致 Pages 侧 v1 代理被推断为 d1 并连接错误的库。
  * 改为从 Cloudflare Context 取完整 env，并同步到 process.env（与 Worker 入口一致）。
  */
-let pagesEnvPromise: Promise<WorkerEnv & { KV?: KVNamespace }> | null = null;
+let pagesEnvPromise: Promise<WorkerEnv & { KV?: KVNamespace; DB?: D1Database }> | null = null;
 
-async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
+async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D1Database }> {
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const { env } = getCloudflareContext() as { env: Record<string, any> };
@@ -112,6 +112,9 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
       PG_URL: env.PG_URL,
       MARIADB_URL: env.MARIADB_URL,
       KV: env.KV,
+      // D1 binding 必须透传：v1 路由的 createDb 依赖 env.DB 构造 PrismaD1，
+      // 缺失时 D1 部署下所有统计/熔断/错误计数写入静默失败
+      DB: env.DB,
     };
   } catch {
     // 本地开发或非 Cloudflare 环境：回退 process.env
@@ -125,14 +128,21 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
   }
 }
 
-function createPagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
+function createPagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D1Database }> {
   if (!pagesEnvPromise) pagesEnvPromise = resolvePagesEnv();
   return pagesEnvPromise;
 }
-const dummyDb = {} as D1Database;
+// Pages 环境下无独立 D1 binding 变量，业务模块统一接收 { DB } 参数；
+// 首次请求时把真实 binding 同步进来，避免 D1 部署下 createDb 构造 PrismaD1 失败
+let dummyDb: D1Database = {} as D1Database;
+let dbBound = false;
+/** 首次绑定闩锁：并发请求共享同一次绑定，避免 dbBound 提前置位后并发请求用空 DB */
+let dbBindPromise: Promise<void> | null = null;
 
 /** 白名单是否已加载（Pages 进程内懒加载，首次请求触发，后续请求跳过） */
 let whitelistLoaded = false;
+/** Key 持久化状态是否已加载（同 whitelistLoaded 模式） */
+let keyStatusLoaded = false;
 
 // ==================== 上游超时与重试配置 ====================
 
@@ -446,7 +456,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
     void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
     if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
-    if (isAutoModelRequest(requestedModel)) freezeAutoModel(requestedModel);
+    // 自动模型冻结：冻结实际发送的目标模型（tgt）——冻结 requestedModel（自动模型 ID）
+    // 与 routeRequest 检查的候选具体模型名不相等，冻结机制从未命中
+    if (isAutoModelRequest(requestedModel)) freezeAutoModel(tgt);
     // 空响应特判：绝不向下游透传空响应，返回 502 + 明确错误
     if (isEmptyResponse) {
       res.setHeader("Content-Type", "application/json");
@@ -717,12 +729,39 @@ function getApiKeyHeader(req: NextApiRequest): string | undefined {
 export default async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   let cfg: ProxyConfig | undefined;
   try {
+    // 首次请求时把真实 D1 binding 同步进 dummyDb：业务模块统一以 { DB: dummyDb }
+    // 调用 createDb，若 dummyDb 是空对象，D1 部署下 PrismaD1({}) 抛错被 .catch(()=>{})
+    // 吞掉，日志/用量/熔断/错误计数全部静默丢失。
+    // 用 promise 闩锁而非先置 dbBound：并发首请求 await 期间若跳过绑定直接用空 DB，
+    // PrismaD1({}) 构造的坏实例会被 cachedPrisma 按 dbKind 永久缓存，之后所有请求复用
+    if (!dbBound) {
+      dbBindPromise ??= (async () => {
+        const pagesEnv = await createPagesEnv();
+        if (pagesEnv.DB) dummyDb = pagesEnv.DB;
+      })();
+      try {
+        await dbBindPromise;
+        dbBound = true;
+      } catch (bindErr) {
+        // 绑定失败：不置 dbBound，允许下次请求重试（本次请求按外层 catch 失败响应）
+        dbBindPromise = null;
+        throw bindErr;
+      }
+    }
     // 首次请求时加载 Key 白名单：recordKeyError / banKey 的豁免判定（isKeyWhitelisted /
     // isPlatformWhitelisted）依赖该内存集合，不加载则白名单在 Pages 部署模式下永不生效；
     // loadWhitelist 内部已容错（失败仅记日志），重复并发加载幂等无害，与 worker 入口同模式
     if (!whitelistLoaded) {
       whitelistLoaded = true;
       await loadWhitelist(dummyDb, await createPagesEnv());
+    }
+    // 首次请求时恢复 Key 持久化状态（DB enabled=false 的禁用密钥）：
+    // 不恢复则进程重启后自动禁用（402/错误计数达阈值）的密钥复活且不再累计错误；
+    // 非 Cloudflare 部署无 KV，loadKeyStatusFromKV 会退化为仅从 DB 恢复禁用集合
+    if (!keyStatusLoaded) {
+      keyStatusLoaded = true;
+      const pagesEnv = await createPagesEnv();
+      await loadKeyStatusFromKV(dummyDb, pagesEnv.KV, pagesEnv);
     }
     const v1 = (req.query.v1 as string[])?.join("/") || "";
     const full = `/v1/${v1}`;

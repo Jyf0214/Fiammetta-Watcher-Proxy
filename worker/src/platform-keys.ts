@@ -183,10 +183,12 @@ export function isPlatformWhitelisted(platformId?: string): boolean {
  * 从 KV 恢复 Key 封禁/降级状态到内存（冷启动后调用）
  *
  * KV 中只存密钥指纹，需要结合平台密钥明文计算指纹后才能映射回内存 Map。
+ * 无 KV（非 Cloudflare 部署）时仍恢复持久化禁用集合（DB enabled=false），
+ * 否则进程重启后自动禁用的密钥会复活且不再累计错误。
  */
 export async function loadKeyStatusFromKV(
   db: D1Database,
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   env?: WorkerEnv
 ): Promise<void> {
   try {
@@ -195,6 +197,23 @@ export async function loadKeyStatusFromKV(
     const platforms = await prisma.platforms.findMany({
       select: { id: true, apiKeys: true },
     });
+
+    if (!kv) {
+      // 无 KV：仅从 DB 恢复持久化禁用的密钥（错误计数达阈值自动禁用）
+      let loaded = 0;
+      for (const p of platforms) {
+        for (const ko of parseApiKeyObjects(p.apiKeys)) {
+          if (ko.enabled === false) {
+            disabledKeys.add(banKeyId(p.id, ko.key));
+            loaded++;
+          }
+        }
+      }
+      if (loaded > 0) {
+        console.log(`[platform-keys] 已从数据库恢复 ${loaded} 个持久化禁用 Key（无 KV）`);
+      }
+      return;
+    }
 
     let loaded = 0;
     for (const p of platforms) {
@@ -260,16 +279,31 @@ export function getAllKeys(platform: PlatformConfig): string[] {
 }
 
 /**
+ * 获取平台持久化禁用（DB enabled=false）的密钥集合
+ *
+ * 内存 disabledKeys 仅靠冷启动 loadKeyStatusFromKV 恢复，进程重启后可能为空；
+ * DB 的 enabled 字段是权威状态，选择时必须直接过滤，防止被禁用的密钥复活。
+ */
+function getDisabledKeysFromDb(platform: PlatformConfig): Set<string> {
+  const set = new Set<string>();
+  for (const ko of platform.apiKeyObjects ?? []) {
+    if (ko.enabled === false) set.add(ko.key);
+  }
+  return set;
+}
+
+/**
  * Round-robin 获取下一个密钥
  *
  * 优先级：非白名单正常 Key > 白名单正常 Key > 白名单降级 Key
- * 跳过已封禁的 Key。如果平台没有可用密钥，返回 null。
+ * 跳过已封禁、已禁用（DB enabled=false）的 Key。如果平台没有可用密钥，返回 null。
  */
 export function getNextKey(platform: PlatformConfig): string | null {
   const allKeys = getAllKeys(platform);
   if (allKeys.length === 0) return null;
 
   const counter = counters.get(platform.id) ?? 0;
+  const dbDisabled = getDisabledKeysFromDb(platform);
 
   // 优先级1：非白名单、未封禁、未降级、未持久化禁用的 Key
   for (let i = 0; i < allKeys.length; i++) {
@@ -279,7 +313,8 @@ export function getNextKey(platform: PlatformConfig): string | null {
       !isKeyWhitelisted(key) &&
       !isKeyBanned(key, platform.id) &&
       !isKeyDeprioritized(key, platform.id) &&
-      !isKeyDisabled(key, platform.id)
+      !isKeyDisabled(key, platform.id) &&
+      !dbDisabled.has(key)
     ) {
       counters.set(platform.id, counter + i + 1);
       return key;
@@ -290,7 +325,7 @@ export function getNextKey(platform: PlatformConfig): string | null {
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id)) {
+    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id) && !dbDisabled.has(key)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -300,7 +335,7 @@ export function getNextKey(platform: PlatformConfig): string | null {
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id)) {
+    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id) && !dbDisabled.has(key)) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -315,42 +350,34 @@ export function getNextKey(platform: PlatformConfig): string | null {
  * 随机获取一个未尝试过的密钥（429 重试用）
  *
  * 优先级：非白名单正常 Key > 白名单正常 Key > 白名单降级 Key
- * 排除已尝试过和已封禁的密钥。
+ * 排除已尝试过、已封禁、已禁用（DB enabled=false）的密钥。
  */
 export function getRandomKeyExcept(
   platform: PlatformConfig,
   excludeKeys: Set<string>
 ): string | null {
   const allKeys = getAllKeys(platform);
+  const dbDisabled = getDisabledKeysFromDb(platform);
+  const usable = (k: string) =>
+    !excludeKeys.has(k) &&
+    !isKeyDisabled(k, platform.id) &&
+    !dbDisabled.has(k);
 
-  // 优先级1：非白名单、未封禁、未降级、未持久化禁用
+  // 优先级1：非白名单、未封禁、未降级
   const tier1 = allKeys.filter(
-    (k) =>
-      !excludeKeys.has(k) &&
-      !isKeyWhitelisted(k) &&
-      !isKeyBanned(k, platform.id) &&
-      !isKeyDeprioritized(k, platform.id) &&
-      !isKeyDisabled(k, platform.id)
+    (k) => usable(k) && !isKeyWhitelisted(k) && !isKeyBanned(k, platform.id) && !isKeyDeprioritized(k, platform.id)
   );
   if (tier1.length > 0) return tier1[Math.floor(Math.random() * tier1.length)];
 
-  // 优先级2：白名单中未降级、未持久化禁用
+  // 优先级2：白名单中未降级
   const tier2 = allKeys.filter(
-    (k) =>
-      !excludeKeys.has(k) &&
-      isKeyWhitelisted(k) &&
-      !isKeyDeprioritized(k, platform.id) &&
-      !isKeyDisabled(k, platform.id)
+    (k) => usable(k) && isKeyWhitelisted(k) && !isKeyDeprioritized(k, platform.id)
   );
   if (tier2.length > 0) return tier2[Math.floor(Math.random() * tier2.length)];
 
-  // 优先级3：白名单中已降级但未持久化禁用
+  // 优先级3：白名单中已降级
   const tier3 = allKeys.filter(
-    (k) =>
-      !excludeKeys.has(k) &&
-      isKeyWhitelisted(k) &&
-      isKeyDeprioritized(k, platform.id) &&
-      !isKeyDisabled(k, platform.id)
+    (k) => usable(k) && isKeyWhitelisted(k) && isKeyDeprioritized(k, platform.id)
   );
   if (tier3.length > 0) return tier3[Math.floor(Math.random() * tier3.length)];
 
@@ -579,6 +606,17 @@ export function isKeyDisabled(key: string, platformId?: string): boolean {
  */
 export function clearKeyDisabled(key: string, platformId: string): void {
   disabledKeys.delete(banKeyId(platformId, key));
+}
+
+/**
+ * 清除密钥的 429 临时封禁/降级冷却（仅内存层，不操作 KV）
+ *
+ * 手动启用密钥时必须调用：只清 disabledKeys 不清 keyCooldowns 的话，
+ * 密钥仍被 isKeyBanned 拦截到冷却自然到期（最多 5 分钟）。
+ */
+export function clearKeyCooldown(key: string, platformId: string): void {
+  keyCooldowns.delete(banKeyId(platformId, key));
+  whitelistedKeyCooldowns.delete(banKeyId(platformId, key));
 }
 
 /**

@@ -34,6 +34,7 @@ interface FullImportResult {
   details: {
     platforms?: ImportResult;
     modelMaps?: ImportResult;
+    platformModels?: ImportResult;
     apiKeys?: ImportResult;
     configs?: ImportResult;
     auditLogs?: ImportResult;
@@ -60,6 +61,7 @@ function generateId(): string {
 const MAX_PER_TYPE: Record<string, number> = {
   platforms: 500,
   modelMaps: 1000,
+  platformModels: 5000,
   apiKeys: 5000,
   configs: 200,
   auditLogs: 10000,
@@ -175,6 +177,7 @@ export default async function handler(
     }> = [
       { key: "platforms", data: body.platforms, fn: importPlatforms },
       { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
+      { key: "platformModels", data: body.platformModels, fn: importPlatformModels },
       { key: "configs", data: body.configs, fn: importConfigs },
       { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
       { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
@@ -192,6 +195,11 @@ export default async function handler(
     };
 
     let totalProcessed = 0;
+
+    // 本次请求重新累积导入 id：模块级 Set 若跨请求保留，下一次导入时残留 id
+    // 会被当作「本批已导入」的平台/Key 引用，插入时外键违反导致整批莫名失败
+    importedPlatformIds.clear();
+    importedApiKeyIds.clear();
 
     for (const step of steps) {
       const arr = step.data;
@@ -297,6 +305,11 @@ const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
 
 /** Prisma Int 字段为 32 位有符号（TiDB/MySQL INT），超出会整批失败 */
 const MAX_INT_VALUE = 2147483647;
+
+// 本次导入产生的新 id 集合（按步骤顺序传递：platforms → modelMaps/requestLogs/platformModels
+// 的外键校验需要知道「本次导入的 platform id」，仅查已有库会把新导入的引用误判为悬空置 null）
+const importedPlatformIds = new Set<string>();
+const importedApiKeyIds = new Set<string>();
 
 /** Float 字段安全上界：双精度可精确表示范围内，避免科学计数法溢出 */
 const MAX_FLOAT_VALUE = 1e15;
@@ -456,11 +469,13 @@ async function importPlatforms(
   let skipped = 0;
   const skipReasons: Record<string, number> = {};
 
-  // 预加载已有平台名称，用于去重
-  const existingNames = await db.platforms.findMany({ select: { name: true } });
+  // 预加载已有平台名称与 id，用于去重与 id 冲突检测
+  const existingNames = await db.platforms.findMany({ select: { name: true, id: true } });
   const existingNameSet = new Set(existingNames.map((r) => r.name));
+  const existingIdSet = new Set(existingNames.map((r) => r.id));
   // 批内去重：同一次导入中的重复名称只保留第一条
   const batchSeenNames = new Set<string>();
+  const batchSeenIds = new Set<string>();
 
   // SSRF 防护（含 DNS Rebinding 检测）
   const validPlatforms: Array<Record<string, unknown>> = [];
@@ -507,36 +522,50 @@ async function importPlatforms(
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < validPlatforms.length; i += BATCH_SIZE) {
     const batch = validPlatforms.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((p) => ({
-      id: generateId(),
-      name: p._name as string,
-      baseUrl: p._baseUrl as string,
-      // apiKeys 列在各方言均为长文本（LongText/Text），不截断，避免切断 JSON 导致密钥失效
-      apiKeys: p._normalizedApiKeys as string,
-      type: sanitizeEnum(p.type, VALID_PLATFORM_TYPES, "openai"),
-      enabled: sanitizeBoolean(p.enabled, true),
-      priority: sanitizeNonNegativeInt(p.priority) ?? 0,
-      weight: sanitizeNonNegativeInt(p.weight) ?? 1,
-      rpmLimit: sanitizeNonNegativeInt(p.rpmLimit),
-      tpmLimit: sanitizeNonNegativeInt(p.tpmLimit),
-      forwardHeaders: sanitizeForwardHeaders(p.forwardHeaders),
-      injectStreamOptions: sanitizeBoolean(p.injectStreamOptions, true),
-      reuseUserAgent: sanitizeBoolean(p.reuseUserAgent, false),
-      customUserAgent: sanitizeNullableString(p.customUserAgent),
-      extraHeaders: sanitizeExtraHeaders(p.extraHeaders),
-      status: "healthy",
-      failCount: 0,
-      // 用户配置字段（运行态除外）：白名单平台与预设来源需随迁移保留，
-      // 否则跨环境备份恢复后白名单平台会重新被 429 封禁、预设关联丢失
-      whitelisted: sanitizeBoolean(p.whitelisted, false),
-      presetId: sanitizeNullableString(p.presetId),
-      createdAt: now,
-      updatedAt: now,
-    }));
+    const batchData = batch.map((p) => {
+      // 保留导出时的原始 id：跨环境恢复时 modelMaps/requestLogs 的 platformId
+      // 引用才能继续成立；id 已存在（目标库冲突）或缺失时重生成
+      let platformId: string;
+      const rawId = sanitizeNullableString(p.id);
+      if (rawId && !existingIdSet.has(rawId) && !batchSeenIds.has(rawId)) {
+        platformId = rawId;
+      } else {
+        platformId = generateId();
+      }
+      batchSeenIds.add(platformId);
+      return {
+        id: platformId,
+        name: p._name as string,
+        baseUrl: p._baseUrl as string,
+        // apiKeys 列在各方言均为长文本（LongText/Text），不截断，避免切断 JSON 导致密钥失效
+        apiKeys: p._normalizedApiKeys as string,
+        type: sanitizeEnum(p.type, VALID_PLATFORM_TYPES, "openai"),
+        enabled: sanitizeBoolean(p.enabled, true),
+        priority: sanitizeNonNegativeInt(p.priority) ?? 0,
+        weight: sanitizeNonNegativeInt(p.weight) ?? 1,
+        rpmLimit: sanitizeNonNegativeInt(p.rpmLimit),
+        tpmLimit: sanitizeNonNegativeInt(p.tpmLimit),
+        forwardHeaders: sanitizeForwardHeaders(p.forwardHeaders),
+        injectStreamOptions: sanitizeBoolean(p.injectStreamOptions, true),
+        reuseUserAgent: sanitizeBoolean(p.reuseUserAgent, false),
+        customUserAgent: sanitizeNullableString(p.customUserAgent),
+        extraHeaders: sanitizeExtraHeaders(p.extraHeaders),
+        status: "healthy",
+        failCount: 0,
+        // 用户配置字段（运行态除外）：白名单平台与预设来源需随迁移保留，
+        // 否则跨环境备份恢复后白名单平台会重新被 429 封禁、预设关联丢失
+        whitelisted: sanitizeBoolean(p.whitelisted, false),
+        presetId: sanitizeNullableString(p.presetId),
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
 
     try {
       const result = await db.platforms.createMany({ data: batchData });
       imported += result.count;
+      // 记录本次导入成功的平台 id，供后续步骤（modelMaps/requestLogs/platformModels）外键校验
+      for (const row of batchData) importedPlatformIds.add(row.id as string);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入平台失败:", errMsg);
@@ -569,8 +598,15 @@ async function importModelMaps(
   const batchSeenAliases = new Set<string>();
 
   // 外键校验：platformId 不存在时置 null，避免悬空引用导致路由 500（此模型不存在）
+  // 校验集合 = 已有平台 id ∪ 本次导入的平台 id（导入保留原始 id，新平台引用必须保留）
   const existingPlatforms = await db.platforms.findMany({ select: { id: true } });
   const validPlatformIds = new Set(existingPlatforms.map((r) => r.id));
+  for (const pid of importedPlatformIds) validPlatformIds.add(pid);
+
+  // 已有 modelMappings id（保留原始 id 时避免主键冲突）
+  const existingMapIds = await db.modelMappings.findMany({ select: { id: true } });
+  const existingMapIdSet = new Set(existingMapIds.map((r) => r.id));
+  const batchSeenMapIds = new Set<string>();
 
   const validMaps: Array<Record<string, unknown>> = [];
   for (const m of modelMaps) {
@@ -598,8 +634,17 @@ async function importModelMaps(
     const batch = validMaps.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((m) => {
       const rawPlatformId = sanitizeNullableString(m.platformId);
+      // 保留导出时的原始 id（冲突时重生成）
+      let mapId: string;
+      const rawMapId = sanitizeNullableString(m.id);
+      if (rawMapId && !existingMapIdSet.has(rawMapId) && !batchSeenMapIds.has(rawMapId)) {
+        mapId = rawMapId;
+      } else {
+        mapId = generateId();
+      }
+      batchSeenMapIds.add(mapId);
       return {
-        id: generateId(),
+        id: mapId,
         alias: sanitizeString(m.alias),
         targetModel: sanitizeString(m.targetModel) || sanitizeString(m.alias),
         platformId: rawPlatformId && validPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
@@ -614,6 +659,106 @@ async function importModelMaps(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入模型映射失败:", errMsg);
+      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
+      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
+      skipped += batch.length;
+    }
+  }
+
+  return { imported, skipped, skipReasons };
+}
+
+/**
+ * 导入平台模型（自动发现结果）
+ *
+ * 按 (platformId, modelId) 去重（与 platform_models 唯一约束一致）。
+ * platformId 不在已有库也不在本次导入的平台集合时跳过，避免悬空引用。
+ */
+async function importPlatformModels(
+  db: DbClient,
+  platformModels: Array<Record<string, unknown>>
+): Promise<ImportResult> {
+  let imported = 0;
+  let skipped = 0;
+  const skipReasons: Record<string, number> = {};
+
+  // 已有记录去重键
+  const existingRows = await db.platformModels.findMany({
+    select: { platformId: true, modelId: true },
+  });
+  const existingKeys = new Set(
+    existingRows.map((r) => `${r.platformId}\0${r.modelId}`)
+  );
+  // 平台存在性：已有库 ∪ 本次导入
+  const existingPlatformRows = await db.platforms.findMany({ select: { id: true } });
+  const validPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
+  for (const pid of importedPlatformIds) validPlatformIds.add(pid);
+
+  const batchSeen = new Set<string>();
+  const validRows: Array<Record<string, unknown>> = [];
+  for (const pm of platformModels) {
+    const platformId = sanitizeNullableString(pm.platformId);
+    const modelId = sanitizeNullableString(pm.modelId);
+    if (!platformId || !modelId) {
+      skipReasons["缺少 platformId/modelId 字段"] = (skipReasons["缺少 platformId/modelId 字段"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    if (!validPlatformIds.has(platformId)) {
+      skipReasons["platformId 不存在"] = (skipReasons["platformId 不存在"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    const dedupKey = `${platformId}\0${modelId}`;
+    if (existingKeys.has(dedupKey) || batchSeen.has(dedupKey)) {
+      skipReasons["平台模型已存在"] = (skipReasons["平台模型已存在"] || 0) + 1;
+      skipped++;
+      continue;
+    }
+    batchSeen.add(dedupKey);
+    validRows.push(pm);
+  }
+
+  if (validRows.length === 0) {
+    return { imported, skipped, skipReasons };
+  }
+
+  // 已有 id（保留原始 id 时避免主键冲突）
+  const existingIds = await db.platformModels.findMany({ select: { id: true } });
+  const existingIdSet = new Set(existingIds.map((r) => r.id));
+  const batchSeenIds = new Set<string>();
+
+  const now = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+    const batch = validRows.slice(i, i + BATCH_SIZE);
+    const batchData = batch.map((pm) => {
+      let pmId: string;
+      const rawId = sanitizeNullableString(pm.id);
+      if (rawId && !existingIdSet.has(rawId) && !batchSeenIds.has(rawId)) {
+        pmId = rawId;
+      } else {
+        pmId = generateId();
+      }
+      batchSeenIds.add(pmId);
+      return {
+        id: pmId,
+        platformId: sanitizeNullableString(pm.platformId) as string,
+        modelId: truncateStr(pm.modelId),
+        ownedBy: sanitizeNullableString(pm.ownedBy),
+        modelName: sanitizeNullableString(pm.modelName),
+        type: sanitizeEnum(pm.type, new Set(["chat", "embedding", "image", "audio", "video", "moderation"]), "chat"),
+        source: sanitizeEnum(pm.source, new Set(["auto", "manual"]), "auto"),
+        enabled: sanitizeBoolean(pm.enabled, true),
+        fetchedAt: sanitizeNonNegativeInt(pm.fetchedAt) ?? now,
+      };
+    });
+
+    try {
+      const result = await db.platformModels.createMany({ data: batchData });
+      imported += result.count;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[import] 批量导入平台模型失败:", errMsg);
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
       skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;
@@ -677,11 +822,24 @@ async function importApiKeys(
 
   // 批量插入
   const now = Math.floor(Date.now() / 1000);
+  // 已有 apiKeys id（保留原始 id 时避免主键冲突）
+  const existingKeyIds = await db.apiKeys.findMany({ select: { id: true } });
+  const existingKeyIdSet = new Set(existingKeyIds.map((r) => r.id));
+  const batchSeenKeyIds = new Set<string>();
   for (let i = 0; i < validKeys.length; i += BATCH_SIZE) {
     const batch = validKeys.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((k) => {
+      // 保留导出时的原始 id：requestLogs 的 keyId 引用才能跨环境成立
+      let keyId: string;
+      const rawKeyId = sanitizeNullableString(k.id);
+      if (rawKeyId && !existingKeyIdSet.has(rawKeyId) && !batchSeenKeyIds.has(rawKeyId)) {
+        keyId = rawKeyId;
+      } else {
+        keyId = generateId();
+      }
+      batchSeenKeyIds.add(keyId);
       return {
-        id: generateId(),
+        id: keyId,
         key: k.key as string,
         name: sanitizeString(k.name) || "导入的 Key",
         usedTokens: sanitizeNonNegativeInt(k.usedTokens) ?? 0,
@@ -701,6 +859,8 @@ async function importApiKeys(
     try {
       const result = await db.apiKeys.createMany({ data: batchData });
       imported += result.count;
+      // 记录本次导入成功的 key id，供 requestLogs 外键校验
+      for (const row of batchData) importedApiKeyIds.add(row.id as string);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入 API Key 失败:", errMsg);
@@ -931,23 +1091,42 @@ export async function importRequestLogs(
   }
 
   // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
-  // 备份中的旧 ID 在目标库中可能不存在（导入 platforms/apiKeys 时生成了新 UUID），需置 null 避免外键约束失败
+  // 校验集合 = 已有 id ∪ 本次导入的 id（导入保留原始 id 后，新插入的 Key/平台引用必须保留）
   const existingKeyRows = referencedKeyIds.size > 0
     ? await db.apiKeys.findMany({ where: { id: { in: Array.from(referencedKeyIds) } }, select: { id: true } })
     : [];
   const existingKeyIds = new Set(existingKeyRows.map((r) => r.id));
+  for (const kid of importedApiKeyIds) existingKeyIds.add(kid);
 
   const existingPlatformRows = referencedPlatformIds.size > 0
     ? await db.platforms.findMany({ where: { id: { in: Array.from(referencedPlatformIds) } }, select: { id: true } })
     : [];
   const existingPlatformIds = new Set(existingPlatformRows.map((r) => r.id));
+  for (const pid of importedPlatformIds) existingPlatformIds.add(pid);
+
+  // 已有 requestLogs id（保留原始 id 时避免主键冲突）
+  const existingLogIds = await db.requestLogs.findMany({
+    where: { id: { in: validLogs.map((l) => sanitizeNullableString(l.id)).filter((x): x is string => !!x) } },
+    select: { id: true },
+  });
+  const existingLogIdSet = new Set(existingLogIds.map((r) => r.id));
+  const batchSeenLogIds = new Set<string>();
 
   // 构建安全的插入数据：外键不存在时置 null，数值字段钳制为合法范围，字符串截断防超长整批失败
   const buildValues = (log: Record<string, unknown>) => {
     const rawKeyId = sanitizeNullableString(log.keyId);
     const rawPlatformId = sanitizeNullableString(log.platformId);
+    // 保留导出时的原始 id（冲突时重生成）
+    let logId: string;
+    const rawLogId = sanitizeNullableString(log.id);
+    if (rawLogId && !existingLogIdSet.has(rawLogId) && !batchSeenLogIds.has(rawLogId)) {
+      logId = rawLogId;
+    } else {
+      logId = generateId();
+    }
+    batchSeenLogIds.add(logId);
     return {
-      id: generateId(),
+      id: logId,
       keyId: rawKeyId && existingKeyIds.has(rawKeyId) ? rawKeyId : null,
       keyName: sanitizeNullableString(log.keyName),
       platformId: rawPlatformId && existingPlatformIds.has(rawPlatformId) ? rawPlatformId : null,

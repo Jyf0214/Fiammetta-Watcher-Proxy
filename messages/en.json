@@ -133,6 +133,7 @@
     "dmStepRequestLogs": "Request logs",
     "dmStepRequestLogsDetail": "Large dataset, may take a while",
     "dmStepDailyStats": "Daily stats",
+    "dmStepPlatformModels": "Platform models",
     "dmPreviewTitle": "Import Preview",
     "dmPreviewRecords": "records",
     "dmPreviewIssueHint": "Suspicious records detected (missing fields / duplicates / masked values); they will be skipped during import",

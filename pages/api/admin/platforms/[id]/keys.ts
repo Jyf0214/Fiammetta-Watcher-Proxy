@@ -14,8 +14,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
-import { keyFingerprint } from "@/lib/key-status";
-import { clearKeyDisabled, markKeyDisabled } from "../../../../../worker/src/platform-keys";
+import { keyFingerprint, removePlatformKeyStatus } from "@/lib/key-status";
+import { clearKeyDisabled, clearKeyCooldown, markKeyDisabled } from "../../../../../worker/src/platform-keys";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -67,8 +67,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ success: false, error: "密钥不存在" });
     }
 
+    // 启用：清零错误计数
     if (enabled) {
-      // 启用：清零错误计数
       target.enabled = true;
       delete target.errorCount;
     } else {
@@ -83,9 +83,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       data: { apiKeys: updatedJson, updatedAt: now },
     });
 
-    // 启用时同步清理 Worker 内存层的 disabledKeys；禁用时同步标记（即时生效）
+    // 启用时同步清理内存层的 disabledKeys 与 429 临时封禁/降级冷却（即时生效），
+    // 并删除 KV 中残留的 banned 记录（无 TTL，冷启动时会被恢复继续封禁）；
+    // 禁用时同步标记（即时生效）
     if (enabled) {
       clearKeyDisabled(targetKey, id);
+      clearKeyCooldown(targetKey, id);
+      try {
+        const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+        const kv = getCloudflareContext().env.KV as KVNamespace | undefined;
+        if (kv) await removePlatformKeyStatus(kv, id, keyFingerprint(targetKey));
+      } catch {
+        // 本地开发或非 Cloudflare 环境没有 KV binding
+      }
     } else {
       markKeyDisabled(targetKey, id);
     }

@@ -21,6 +21,8 @@ let platformCache: PlatformConfig[] = [];
 let modelMapCache: ModelMapConfig[] = [];
 let platformModelCache: Map<string, Set<string>> = new Map();
 let autoModelId: string | null = null;
+/** 自动模型分流白名单（system:auto_model_selected 配置的模型 ID 集合）；null 表示未配置（全部参与） */
+let autoModelSelected: Set<string> | null = null;
 let lastRefresh = 0;
 const CACHE_TTL = 30_000;
 const EMPTY_CACHE_RETRY = 5_000;
@@ -116,7 +118,7 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-    const [platformRows, modelMapRows, platformModelRows, autoConfigValue] =
+    const [platformRows, modelMapRows, platformModelRows, autoConfigValue, autoSelectedValue] =
       await Promise.all([
         // 查询启用的平台
         prisma.platforms.findMany({
@@ -134,6 +136,8 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
         }),
         // 查询自动模型 ID
         getConfig(db, "system:auto_model_id", env),
+        // 查询自动模型分流白名单（auto-model 页「参与自动分流」开关）
+        getConfig(db, "system:auto_model_selected", env),
       ]);
 
     const newPlatforms: PlatformConfig[] = platformRows.map((p) => ({
@@ -174,6 +178,21 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
     modelMapCache = newModelMaps;
     platformModelCache = newPlatformModelCache;
     autoModelId = autoConfigValue;
+    // 解析分流白名单：键不存在 / 非法 JSON / 非数组 → null（全部参与，兼容旧配置）；
+    // 显式空数组 → 空集合（UI 全部关闭 = 无模型参与）；
+    // 数组元素全非法（如 [1,2]）→ 过滤后为空且原始非空数组 → 降级为全部参与
+    try {
+      const parsed = autoSelectedValue ? JSON.parse(autoSelectedValue) : null;
+      const filtered = Array.isArray(parsed)
+        ? parsed.filter((m): m is string => typeof m === "string")
+        : [];
+      autoModelSelected =
+        Array.isArray(parsed) && (filtered.length > 0 || parsed.length === 0)
+          ? new Set(filtered)
+          : null;
+    } catch {
+      autoModelSelected = null;
+    }
     lastRefresh = Date.now();
 
     // 清理已删除平台的断路器条目，并从数据库同步熔断器状态
@@ -256,28 +275,28 @@ export async function routeRequest(
   await refreshCache(db, env);
 
   // 自动模型处理
-  let actualModel = requestedModel;
   if (autoModelId !== null && requestedModel === autoModelId) {
-    // 自动模型：选择第一个可用平台的一个模型
-    const autoPlatform = selectPlatform(platformCache);
-    if (!autoPlatform) return null;
-
-    // 从平台模型缓存中选择一个未冻结的模型
-    const platformModels = platformModelCache.get(autoPlatform.id);
-    if (platformModels) {
+    // 自动模型：先收集「存在入选且未冻结模型」的候选平台，再按优先级/权重选平台。
+    // 不能先 selectPlatform 再查该平台模型——选中平台无入选模型时即使其它平台
+    // 有可用模型也会 500「此模型不存在」
+    const eligiblePlatforms: PlatformConfig[] = [];
+    const modelByPlatform = new Map<string, string>();
+    for (const platform of platformCache) {
+      const platformModels = platformModelCache.get(platform.id);
+      if (!platformModels) continue;
       for (const modelId of platformModels) {
-        if (!isAutoModelFrozen(modelId)) {
-          actualModel = modelId;
+        if (!isAutoModelFrozen(modelId) && (!autoModelSelected || autoModelSelected.has(modelId))) {
+          eligiblePlatforms.push(platform);
+          modelByPlatform.set(platform.id, modelId);
           break;
         }
       }
     }
-    // 如果没找到可用模型，使用默认
-    if (actualModel === autoModelId) {
-      return null;
-    }
 
-    return { platform: autoPlatform, targetModel: actualModel };
+    const autoPlatform = selectPlatform(eligiblePlatforms);
+    if (!autoPlatform) return null;
+
+    return { platform: autoPlatform, targetModel: modelByPlatform.get(autoPlatform.id) as string };
   }
 
   // 普通模型：解析映射
