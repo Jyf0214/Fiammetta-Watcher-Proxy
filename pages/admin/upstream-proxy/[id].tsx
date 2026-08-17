@@ -56,6 +56,10 @@ export default function UpstreamProxyGroupPage() {
   const checkPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 组件存活标记：轮询 fetch 挂起期间卸载后不再续排（防定时器泄漏） */
   const mountedRef = useRef(true);
+  /** 轮询链单飞守卫：任一启动入口（挂载同步/手动检查/保存后自动验证）只允许一条活动链 */
+  const pollChainActive = useRef(false);
+  /** 挂载同步一次性标记：检查期间 config 每批变化会重跑挂载 effect，防重复同步 */
+  const syncedOnMount = useRef(false);
   const { data: config, error, isLoading, isValidating, mutate } = useApi<Record<string, string>>(
     "/api/admin/config"
   );
@@ -75,13 +79,13 @@ export default function UpstreamProxyGroupPage() {
     };
   }, []);
 
+  const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
+  const isDocker = deployPlatform === "docker";
+
   const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
   const poolMap = parsePoolMap(config?.[POOL_KEY]);
   const parsed = parseProxyConfig(config?.[CONFIG_KEY]);
   const currentGroup = isNew ? undefined : parsed.groups.find((g) => g.name === id);
-
-  const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
-  const isDocker = deployPlatform === "docker";
 
   // 路由 id / 服务器配置值变化时回填表单（渲染期 prev 值比较；值未变时不覆盖未保存的编辑）
   const [prevKey, setPrevKey] = useState<string>("");
@@ -228,7 +232,7 @@ export default function UpstreamProxyGroupPage() {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        void pollHealthProgress();
+        void startPolling();
       } else {
         message.error(errMsg(data, t("common:error")));
       }
@@ -239,40 +243,92 @@ export default function UpstreamProxyGroupPage() {
     }
   };
 
-  /** 轮询健康检查进度：GET 渐进返回 { progress }，running=false 且已启动过
-   *  （total>0）视为完成；无候选（total=0）静默停止；轮询上限 60 次兜底 */
-  const pollHealthProgress = async (attempt = 0): Promise<void> => {
-    if (!mountedRef.current) return;
+  /** 轮询健康检查进度（与列表页 pollHealthProgress 同逻辑）：
+   *  running=true 继续轮询并显示「检查中 X/Y」；running=false 且 total>0 完成；
+   *  无候选（无配置/全部组禁用，total=0）静默停止；progress 元组 60s 无变化
+   *  （后端任务停滞/丢失）时停止轮询并清指示器，防死循环。
+   *  所有终止路径复位 pollChainActive，使后续启动入口可再开新链 */
+  const pollHealthProgress = async (lastKey = "", stalled = 0): Promise<void> => {
+    if (!mountedRef.current) {
+      pollChainActive.current = false;
+      return;
+    }
     try {
       const res = await fetch("/api/admin/upstream-proxy/health");
       const data: Record<string, any> = await res.json();
-      if (!data.success) return;
+      if (!data.success) {
+        // 接口失败（如瞬时 500/会话过期）：与 catch 分支一致按停滞累计，
+        // 后端检查仍在继续，多等一轮；连续失败才终止并清指示器
+        if (stalled + 1 >= 30) {
+          pollChainActive.current = false;
+          setCheckProgress(null);
+          return;
+        }
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
+        return;
+      }
       mutate();
       const progress = data.data?.progress as { running: boolean; total: number; checked: number } | undefined;
       if (!progress || progress.running) {
         if (progress?.running && progress.total > 0) {
           setCheckProgress({ checked: progress.checked, total: progress.total });
         }
-        if (attempt + 1 >= 60) {
-          // 超限兜底停止：清除指示器避免残留「检查中」
+        const key = `${progress?.running ?? "?"}|${progress?.total ?? "?"}|${progress?.checked ?? "?"}`;
+        const nextStalled = key === lastKey ? stalled + 1 : 0;
+        if (nextStalled >= 30) {
+          // 60s 无任何进展（后端任务停滞）→ 停止轮询并清除指示器
           setCheckProgress(null);
+          pollChainActive.current = false;
           return;
         }
-        checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(key, nextStalled), 2000);
         return;
       }
       // running=false：total>0 = 检查完成；total=0 = 无候选可检查（合法状态，不提示）
       setCheckProgress(null);
+      pollChainActive.current = false;
       if (progress.total > 0) message.success(t("upstreamProxyHealthDone"));
     } catch {
-      // 轮询失败静默重试（检查仍在后台继续，多等一轮）
-      if (attempt + 1 >= 60) {
+      // 轮询失败按停滞累计（检查仍在后台继续，多等一轮）
+      if (stalled + 1 >= 30) {
         setCheckProgress(null);
+        pollChainActive.current = false;
         return;
       }
-      checkPollTimer.current = setTimeout(() => void pollHealthProgress(attempt + 1), 2000);
+      checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
     }
   };
+
+  /** 轮询链单飞入口：挂载同步/手动检查/保存后自动验证统一走此启动，已有活动链时
+   *  不再重复启动（检查期间 config 每批变化会重跑挂载 effect，无此守卫将叠加多条并行链） */
+  const startPolling = (): void => {
+    if (pollChainActive.current) return;
+    pollChainActive.current = true;
+    void pollHealthProgress();
+  };
+
+  // 挂载/配置就绪后同步进行中的健康检查：页面刷新后立即恢复「检查中 X/Y」，
+  // 无需重新点击检查（进度在服务端进程内，不随刷新丢失）。
+  // syncedOnMount 一次性标记：检查期间 config 每批变化（轮询 mutate 拉新数据）
+  // 会重跑本 effect，只允许首次同步（活动链由 startPolling 单飞守卫兜底）
+  useEffect(() => {
+    if (!isDocker || !config || syncedOnMount.current) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/upstream-proxy/health");
+        const data: Record<string, any> = await res.json();
+        if (!data.success) return;
+        if (data.data?.progress?.running) void startPolling();
+      } catch {
+        // 静默：接口异常时保持无进度状态；不置位标记，config 变化时重试同步
+        return;
+      }
+      // fetch 成功即视为已同步（无论是否在跑），此后 config 每批变化不再重复触发
+      syncedOnMount.current = true;
+    })();
+    // startPolling/pollHealthProgress 为组件内函数，仅需在挂载/配置就绪时触发一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDocker, config]);
 
   const handleDelete = async () => {
     if (isNew) return;
