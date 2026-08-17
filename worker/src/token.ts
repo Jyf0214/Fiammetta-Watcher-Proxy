@@ -6,6 +6,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import { maskProxyUrl } from "@/lib/upstream-proxy";
 import { recordFailure } from "./load-balancer";
 import type { WorkerEnv } from "./config";
 
@@ -94,6 +95,8 @@ export async function recordRequestLog(params: {
   duration: number;
   isError: boolean;
   errorMessage?: string;
+  /** 出站代理地址（仅 Docker 部署经代理的请求记录；直连/其他部署为空） */
+  proxyUrl?: string;
   db: D1Database;
   env?: WorkerEnv;
 }): Promise<void> {
@@ -116,6 +119,9 @@ export async function recordRequestLog(params: {
         ttft: params.ttft,
         isError: params.isError,
         errorMessage: params.errorMessage ?? null,
+        // 落库前剥离 user:pass 凭据（日志表高容量长留存，管理 API 原样返回；
+        // 统计聚合与前端展示统一以脱敏地址为键）
+        proxyUrl: params.proxyUrl ? maskProxyUrl(params.proxyUrl) : null,
         createdAt: Math.floor(Date.now() / 1000),
       },
     });

@@ -9,6 +9,8 @@
  * - markProxyFailure：网络层失败达阈值后写入健康表并跳过轮询
  * - runProxyHealthCheck：探测结果写入健康表（cron 与管理页共用）
  * - 缓存：TTL 内复用；configs.updatedAt 变化强制重载
+ * - 业务流量统计与路由降权：recordProxyTraffic 分类 / isProxyStatDegraded
+ *   阈值与窗口 / 统计降权跳过 / 全部降权回退轮询
  *
  * 模块级缓存跨测试共享，每个用例用 vi.resetModules + 动态 import 取新模块实例
  * （与 request-templates.test.ts 的模式一致）
@@ -37,6 +39,21 @@ vi.mock("undici", () => ({
       this.url = url;
       createdAgents.push(this);
     }
+  },
+}));
+
+// mock fetch-socks：socks4/socks5 代理经 socksDispatcher 创建（undici Agent 子类），
+// 捕获实例与解析出的 socks 目标列表（类型/主机/端口/凭据）
+const { createdSocksDispatchers } = vi.hoisted(() => ({ createdSocksDispatchers: [] as any[] }));
+vi.mock("fetch-socks", () => ({
+  socksDispatcher: (proxies: any) => {
+    const dispatcher = {
+      proxies,
+      close: vi.fn(async () => {}),
+      dispatch() {},
+    };
+    createdSocksDispatchers.push(dispatcher);
+    return dispatcher;
   },
 }));
 
@@ -70,6 +87,7 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   createdAgents.length = 0;
+  createdSocksDispatchers.length = 0;
   originalPlatform = process.env.DEPLOY_PLATFORM;
   originalDbType = process.env.DB_TYPE;
   setPlatform("docker");
@@ -159,11 +177,69 @@ describe("配置解析与代理创建", () => {
     expect(result.url).toBeNull();
   });
 
-  it("不支持的协议（socks5://）被忽略 → null 且不抛错", async () => {
+  it("socks4/socks5 代理 → 经 fetch-socks socksDispatcher 创建转发 agent（类型/凭据解析、池化复用）", async () => {
     const { getUpstreamProxy } = await loadModule();
     setConfigRows({
       [CONFIG_KEY]: {
-        value: JSON.stringify({ urls: ["socks5://127.0.0.1:1080"], platformIds: [] }),
+        value: JSON.stringify({
+          urls: ["socks5://user:pass@127.0.0.1:1080", "socks4://127.0.0.1:1081"],
+          platformIds: [],
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+    const third = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe("socks5://user:pass@127.0.0.1:1080");
+    expect(second.url).toBe("socks4://127.0.0.1:1081");
+    expect(third.url).toBe("socks5://user:pass@127.0.0.1:1080");
+    expect(createdSocksDispatchers).toHaveLength(2);
+    // socks5 带凭据：类型/主机/端口/凭据解析（decodeURIComponent）
+    expect(createdSocksDispatchers[0].proxies).toEqual([
+      { type: 5, host: "127.0.0.1", port: 1080, userId: "user", password: "pass" },
+    ]);
+    // socks4 无凭据：仅类型/主机/端口
+    expect(createdSocksDispatchers[1].proxies).toEqual([{ type: 4, host: "127.0.0.1", port: 1081 }]);
+    // 池化复用：第三次调用复用第一次的实例（不新建、不泄漏）
+    expect(third.dispatcher).toBe(first.dispatcher);
+    expect(createdSocksDispatchers).toHaveLength(2);
+    expect(createdAgents).toHaveLength(0);
+  });
+
+  it("socks 凭据含畸形百分号转义 → 原样保留不抛错（URIError 防护）；IPv6 主机去方括号", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({
+          urls: ["socks5://user:pa%ss@127.0.0.1:1080", "socks4://[::1]:1081"],
+          platformIds: [],
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.dispatcher).not.toBeNull();
+    expect(second.dispatcher).not.toBeNull();
+    // WHATWG URL 对 userinfo 中畸形 % 序列原样保留，decodeURIComponent 抛 URIError
+    // 会导致请求 500——解码失败回退原值（不抛错、代理仍可路由）
+    expect(createdSocksDispatchers[0].proxies).toEqual([
+      { type: 5, host: "127.0.0.1", port: 1080, userId: "user", password: "pa%ss" },
+    ]);
+    // IPv6 字面量去方括号后交给 socks 库（[::1] → ::1）
+    expect(createdSocksDispatchers[1].proxies).toEqual([{ type: 4, host: "::1", port: 1081 }]);
+  });
+
+  it("不支持的协议（ftp://）被忽略 → null 且不抛错", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["ftp://127.0.0.1:21"], platformIds: [] }),
         updatedAt: 1000,
       },
     });
@@ -171,6 +247,7 @@ describe("配置解析与代理创建", () => {
     const result = await getUpstreamProxy(mockDb, mockEnv);
 
     expect(result.dispatcher).toBeNull();
+    expect(result.url).toBeNull();
   });
 
   it("非法 JSON（非对象非字符串）→ null", async () => {
@@ -984,7 +1061,7 @@ describe("pullProxyGroups 拉取", () => {
     expect(mockFindFirst).not.toHaveBeenCalled();
   });
 
-  it("拉取解析：裸 host:port 补全、协议头保留、脏行与重复忽略", async () => {
+  it("拉取解析：裸 host:port 补全、协议头保留（含 socks4/socks5）、脏行与重复忽略", async () => {
     const { pullProxyGroups } = await loadModule();
     configWith([{ name: "g1", sourceUrl: SRC }]);
     stubFetch(
@@ -993,10 +1070,10 @@ describe("pullProxyGroups 拉取", () => {
 
     const results = await pullProxyGroups(mockDb, mockEnv);
 
-    expect(results.g1).toMatchObject({ pulled: 2, added: 2, removed: 0, kept: 0, total: 2 });
+    expect(results.g1).toMatchObject({ pulled: 3, added: 3, removed: 0, kept: 0, total: 3 });
     const upsertArgs = lastUpsertFor(POOL_KEY);
     const pool = JSON.parse(upsertArgs.create.value) as Record<string, any>;
-    expect(pool.g1).toEqual(["http://127.0.0.1:7890", "http://127.0.0.1:7891"]);
+    expect(pool.g1).toEqual(["http://127.0.0.1:7890", "http://127.0.0.1:7891", "socks5://127.0.0.1:1080"]);
   });
 
   it("交集：健康度记录保留且 status 切换为 ok，进程内黑名单清除恢复在池", async () => {
@@ -1185,5 +1262,108 @@ describe("健康检查响应体消费（崩溃回归）", () => {
     expect(results[URL_A]).toMatchObject({ status: "fail" });
     const response = (await fetchMock.mock.results[0].value) as Response;
     expect(response.bodyUsed).toBe(true);
+  });
+});
+
+describe("业务流量统计与路由降权", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+
+  /** 两个健康（无延迟 → 轮询模式）代理的配置 */
+  function configWithTwoHealthy() {
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }),
+        updatedAt: 1000,
+      },
+    });
+  }
+
+  it("isProxyStatDegraded：样本<5 不降权；错误率>0.8 降权（含 errOther）；窗口过期自动恢复", async () => {
+    const { isProxyStatDegraded } = await loadModule();
+    const now = Date.now();
+    // 样本不足（即使全错）不降权
+    expect(isProxyStatDegraded({ total: 4, ok: 0, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    // 错误率 5/6 > 0.8 → 降权（429 计入错误）
+    expect(isProxyStatDegraded({ total: 6, ok: 1, err429: 5, errOther: 0, lastAt: now })).toBe(true);
+    // errOther（网络层失败 status=0 / 非 429 错误）同样计入错误
+    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 0, errOther: 5, lastAt: now })).toBe(true);
+    // 错误率 4/6 ≈ 0.667 ≤ 0.8 → 不降权
+    expect(isProxyStatDegraded({ total: 6, ok: 2, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    // 边界：恰好 0.8（4/5）不降权（严格大于才降权）
+    expect(isProxyStatDegraded({ total: 5, ok: 1, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    // 窗口滑动（lastAt 超过 10 分钟）→ 自动恢复
+    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 5, errOther: 0, lastAt: now - 11 * 60_000 })).toBe(false);
+  });
+
+  it("recordProxyTraffic 分类：429 计入错误 / 200 计入成功，错误率超阈值的代理被路由跳过", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWithTwoHealthy();
+    // A：6 次请求 5 次 429（错误率 5/6 > 0.8 → 降权）
+    for (let i = 0; i < 5; i++) recordProxyTraffic(URL_A, 429);
+    recordProxyTraffic(URL_A, 200);
+    // B：6 次请求 2 次 429（错误率 1/3 ≤ 0.8 → 正常；证明 200 计入成功）
+    for (let i = 0; i < 2; i++) recordProxyTraffic(URL_B, 429);
+    for (let i = 0; i < 4; i++) recordProxyTraffic(URL_B, 200);
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe(URL_B);
+    expect(second.url).toBe(URL_B);
+  });
+
+  it("recordProxyTraffic 跨窗口重置：窗口过期后计数归零，旧错误基数不继续推高错误率", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWithTwoHealthy();
+    vi.useFakeTimers();
+    try {
+      // 窗口内 A 达降权阈值（5/5 全错）→ 路由只选 B
+      for (let i = 0; i < 5; i++) recordProxyTraffic(URL_A, 429);
+      const result = await getUpstreamProxy(mockDb, mockEnv);
+      expect(result.url).toBe(URL_B);
+
+      // 窗口滑动（11 分钟）后 A 新来 1 成功 + 4 次 429：重置后错误率恰为
+      // 0.8（严格大于才降权 → 不降权）；若未重置则为 9/10 = 0.9（降权）——
+      // 该用例可区分两种实现
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      recordProxyTraffic(URL_A, 200);
+      for (let i = 0; i < 4; i++) recordProxyTraffic(URL_A, 429);
+      const r1 = await getUpstreamProxy(mockDb, mockEnv);
+      const r2 = await getUpstreamProxy(mockDb, mockEnv);
+      // A 恢复为候选（轮询游标已推进，连续两轮覆盖 A/B）
+      expect([r1.url, r2.url]).toEqual([URL_B, URL_A]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recordProxyTraffic 忽略空地址（直连请求不产生统计条目）", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWithTwoHealthy();
+    // 直连（undefined）不记统计；也验证不抛错
+    recordProxyTraffic(undefined, 200);
+    recordProxyTraffic("", 500);
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    // 无统计条目 → 保持原轮询行为
+    expect([first.url, second.url]).toEqual([URL_A, URL_B]);
+  });
+
+  it("全部候选统计降权 → 回退全部代理轮询（不改变走代理语义）", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWithTwoHealthy();
+    for (let i = 0; i < 5; i++) {
+      recordProxyTraffic(URL_A, 429);
+      recordProxyTraffic(URL_B, 429);
+    }
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe(URL_A);
+    expect(second.url).toBe(URL_B);
   });
 });

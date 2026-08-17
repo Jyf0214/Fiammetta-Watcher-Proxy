@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS "request_logs" (
     "ip_address" TEXT,
     "user_agent" TEXT,
     "error_message" TEXT,
+    "proxy_url" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0
 );
 
@@ -191,6 +192,7 @@ CREATE INDEX IF NOT EXISTS "request_logs_key_id_created_at_idx" ON "request_logs
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "request_logs_platform_id_created_at_idx" ON "request_logs"("platform_id", "created_at");
+CREATE INDEX IF NOT EXISTS "request_logs_proxy_url_created_at_idx" ON "request_logs"("proxy_url", "created_at");
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "daily_stats_date_idx" ON "daily_stats"("date");

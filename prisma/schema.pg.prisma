@@ -154,11 +154,13 @@ model requestLogs {
   ipAddress        String? @map("ip_address")
   userAgent        String? @db.Text @map("user_agent")
   errorMessage     String? @db.Text @map("error_message")
+  proxyUrl         String? @db.Text @map("proxy_url")
   createdAt        Int     @default(0) @map("created_at")
 
   @@index([createdAt])
   @@index([keyId, createdAt])
   @@index([platformId, createdAt])
+  @@index([proxyUrl, createdAt])
   @@map("request_logs")
 }
 

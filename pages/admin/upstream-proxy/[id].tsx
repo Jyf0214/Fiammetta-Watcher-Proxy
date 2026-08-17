@@ -24,9 +24,32 @@ import {
   parseUrlsText,
   maskProxyUrl,
   buildConfigJson,
+  formatChecked,
   errMsg,
   type GroupFormState,
 } from "@/lib/upstream-proxy-ui";
+
+/** 统计 API 返回的单代理分类计数（前端展示侧简化聚合） */
+interface ProxyTrafficStatUI {
+  total: number;
+  ok: number;
+  err429: number;
+  /** 401/403/5xx/其他 合并计数 */
+  errOther: number;
+  availability: number;
+}
+
+/** 统计 API 原始返回形状（pages/api/admin/upstream-proxy/stats.ts） */
+interface ProxyTrafficStatsApi {
+  total: number;
+  ok: number;
+  err429: number;
+  err401: number;
+  err403: number;
+  err5xx: number;
+  other: number;
+  availability: number;
+}
 
 /**
  * 代理组详情/新建页 — 编辑组名、订阅地址、手动代理与绑定平台
@@ -53,6 +76,15 @@ export default function UpstreamProxyGroupPage() {
   const [checking, setChecking] = useState(false);
   /** 健康检查渐进进度（轮询 GET 刷新；运行中显示「检查中 checked/total」） */
   const [checkProgress, setCheckProgress] = useState<{ checked: number; total: number } | null>(null);
+  /** 按代理聚合的真实请求统计（stats API；url → 分类计数） */
+  const [trafficStats, setTrafficStats] = useState<Record<string, ProxyTrafficStatUI> | null>(null);
+  /** 统计元信息：窗口小时数 + 最近拉取/检查时间（秒级 unix） */
+  const [statsMeta, setStatsMeta] = useState<{
+    hours: number;
+    poolUpdatedAt: number | null;
+    lastHealthAt: number | null;
+  }>({ hours: 24, poolUpdatedAt: null, lastHealthAt: null });
+  const [statsLoading, setStatsLoading] = useState(false);
   const checkPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 组件存活标记：轮询 fetch 挂起期间卸载后不再续排（防定时器泄漏） */
   const mountedRef = useRef(true);
@@ -81,6 +113,71 @@ export default function UpstreamProxyGroupPage() {
 
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   const isDocker = deployPlatform === "docker";
+
+  /** 解析 stats API 响应为前端展示结构并写入状态（错误分类合并为 errOther：
+   *  401/403/5xx/其他；调用方须保证仅在异步回调中调用，避免渲染期同步 setState） */
+  const applyStats = (data: unknown): void => {
+    const body = data as
+      | {
+          success?: boolean;
+          data?: {
+            hours?: number;
+            poolUpdatedAt?: number | null;
+            lastHealthAt?: number | null;
+            stats?: Record<string, ProxyTrafficStatsApi>;
+          };
+        }
+      | null;
+    if (!body?.success) return;
+    const converted: Record<string, ProxyTrafficStatUI> = {};
+    for (const [url, s] of Object.entries(body.data?.stats ?? {})) {
+      converted[url] = {
+        total: s.total,
+        ok: s.ok,
+        err429: s.err429,
+        errOther: s.err401 + s.err403 + s.err5xx + s.other,
+        availability: s.availability,
+      };
+    }
+    setTrafficStats(converted);
+    setStatsMeta({
+      hours: body.data?.hours ?? 24,
+      poolUpdatedAt: body.data?.poolUpdatedAt ?? null,
+      lastHealthAt: body.data?.lastHealthAt ?? null,
+    });
+  };
+
+  /** 手动刷新统计（带 loading 指示与成功提示） */
+  const refreshStats = async (): Promise<void> => {
+    setStatsLoading(true);
+    try {
+      const res = await fetch("/api/admin/upstream-proxy/stats?hours=24");
+      applyStats(await res.json());
+      message.success(t("upstreamProxyStatsUpdated"));
+    } catch {
+      // 静默：统计失败不影响页面主体
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // 挂载后加载一次统计（仅 Docker；stats API 在非 Docker 部署返回 400）
+  useEffect(() => {
+    if (!isDocker) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/upstream-proxy/stats?hours=24");
+        const data: unknown = await res.json();
+        if (!cancelled) applyStats(data);
+      } catch {
+        // 静默：统计失败不影响页面主体
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isDocker]);
 
   const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
   const poolMap = parsePoolMap(config?.[POOL_KEY]);
@@ -352,6 +449,25 @@ export default function UpstreamProxyGroupPage() {
     currentGroup ? (poolMap[currentGroup.name] ?? []) : [],
     parseUrlsText(formGroup.urlsText)
   );
+
+  /** 组级请求统计聚合（组内各代理分类计数求和；无请求数据时 availability 为 undefined）。
+   *  trafficStats 键为落库的脱敏地址（requestLogs.proxyUrl 写入前剥离凭据），
+    查表统一用 maskProxyUrl(u) */
+  const groupTraffic: {
+    total: number;
+    ok: number;
+    err429: number;
+    errOther: number;
+    availability: number | undefined;
+  } = {
+    total: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.total ?? 0), 0),
+    ok: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.ok ?? 0), 0),
+    err429: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.err429 ?? 0), 0),
+    errOther: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.errOther ?? 0), 0),
+    availability: undefined,
+  };
+  if (groupTraffic.total > 0) groupTraffic.availability = groupTraffic.ok / groupTraffic.total;
+
   const summary: ProxyGroupSummary = {
     name: formGroup.name || currentGroup?.name || (isNew ? "" : id ?? ""),
     sourceUrl: formGroup.sourceUrl || currentGroup?.sourceUrl || "",
@@ -359,11 +475,14 @@ export default function UpstreamProxyGroupPage() {
     okCount: groupUrls.filter((u) => healthMap[u]?.status === "ok").length,
     failCount: groupUrls.filter((u) => healthMap[u]?.status === "fail").length,
     enabled: formGroup.enabled,
+    availability: groupTraffic.availability,
   };
 
   /** 组列表行数据（侧栏与返回条摘要共用） */
   const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
+    const gTotal = urls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.total ?? 0), 0);
+    const gOk = urls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.ok ?? 0), 0);
     return {
       name: g.name,
       sourceUrl: g.sourceUrl,
@@ -371,6 +490,7 @@ export default function UpstreamProxyGroupPage() {
       okCount: urls.filter((u) => healthMap[u]?.status === "ok").length,
       failCount: urls.filter((u) => healthMap[u]?.status === "fail").length,
       enabled: g.enabled,
+      availability: gTotal > 0 ? gOk / gTotal : undefined,
     };
   });
 
@@ -402,20 +522,36 @@ export default function UpstreamProxyGroupPage() {
   const formGroupClass = "rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 p-4";
   const groupTitleClass = "text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3";
 
-  /** 组内代理列表（只读健康视图） */
+  /** 统计小格（组级统计条）：标签 + 数值 */
+  const statCell = (label: string, value: string, valueClass = "text-zinc-900 dark:text-zinc-100") => (
+    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 px-3 py-2">
+      <p className="text-[10px] text-zinc-400 truncate">{label}</p>
+      <p className={`text-sm font-bold font-mono mt-0.5 ${valueClass}`}>{value}</p>
+    </div>
+  );
+
+  /** 代理列表与可用性监控区块 — 更新状态（最近拉取/检查）+ 组级统计 +
+   *  每代理健康与真实请求统计（请求数 / 200 / 429 / 其他错误 / 可用率） */
   const proxyListView = (
-    <div className={formGroupClass}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
-          {t("upstreamProxyGroupProxies")}
-        </h3>
+    <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+      <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 flex-wrap">
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("upstreamProxyMonitoring")}</h3>
         {isDocker && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             {checkProgress && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400 shrink-0">
                 {t("upstreamProxyHealthChecking", checkProgress)}
               </span>
             )}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void refreshStats()}
+              loading={statsLoading}
+              icon={<RefreshCw size={14} />}
+            >
+              {t("upstreamProxyRefreshStats")}
+            </Button>
             <Button
               variant="default"
               size="sm"
@@ -439,129 +575,200 @@ export default function UpstreamProxyGroupPage() {
           </div>
         )}
       </div>
-      {groupUrls.length === 0 ? (
-        <p className="text-xs text-zinc-400">{t("upstreamProxyGroupEmpty")}</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {groupUrls.map((url) => {
-            const entry = healthMap[url];
-            const status = entry?.status ?? "none";
-            return (
-              <li key={url} className="flex items-center gap-2 text-xs">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                    status === "ok"
-                      ? "bg-emerald-500"
-                      : status === "fail"
-                        ? "bg-rose-500"
-                        : "bg-zinc-300 dark:bg-zinc-600"
-                  }`}
-                />
-                <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
-                  {maskProxyUrl(url)}
-                </span>
-                <span className="ml-auto shrink-0 text-zinc-400 text-right">
-                  {renderHealthText(status, entry, t)}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <div className="p-4 flex flex-col gap-4">
+        {isDocker && (
+          <>
+            {/* 定期更新状态：最近拉取/最近检查（只读展示，不提供配置） + 统计窗口 */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-400">
+              <span>
+                {t("upstreamProxyLastPull")}：
+                {statsMeta.poolUpdatedAt ? formatChecked(statsMeta.poolUpdatedAt) : "—"}
+              </span>
+              <span>
+                {t("upstreamProxyLastCheck")}：
+                {statsMeta.lastHealthAt ? formatChecked(statsMeta.lastHealthAt) : "—"}
+              </span>
+              <span>{t("upstreamProxyStatsPeriod", { hours: statsMeta.hours })}</span>
+            </div>
+            <p className="text-[11px] text-zinc-400 -mt-2">{t("upstreamProxyCronHint")}</p>
+            {/* 组级统计：可用率 + 请求数 + 200 + 429 + 其他错误 */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {statCell(
+                t("upstreamProxyAvailability"),
+                groupTraffic.availability === undefined
+                  ? "—"
+                  : `${Math.round(groupTraffic.availability * 100)}%`,
+                groupTraffic.availability === undefined
+                  ? "text-zinc-400"
+                  : groupTraffic.availability >= 0.9
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : groupTraffic.availability >= 0.5
+                      ? "text-amber-600 dark:text-amber-500"
+                      : "text-rose-500"
+              )}
+              {statCell(t("upstreamProxyRequests"), String(groupTraffic.total))}
+              {statCell(t("upstreamProxySuccess"), String(groupTraffic.ok), "text-emerald-600 dark:text-emerald-400")}
+              {statCell("429", String(groupTraffic.err429), "text-amber-600 dark:text-amber-500")}
+              {statCell(t("upstreamProxyErrOther"), String(groupTraffic.errOther), "text-rose-500")}
+            </div>
+          </>
+        )}
+        {groupUrls.length === 0 ? (
+          <p className="text-xs text-zinc-400">{t("upstreamProxyGroupEmpty")}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {groupUrls.map((url) => {
+              const entry = healthMap[url];
+              const status = entry?.status ?? "none";
+              const stat = trafficStats?.[maskProxyUrl(url)];
+              return (
+                <li key={url} className="flex items-start gap-2 text-xs">
+                  <span
+                    className={`mt-1 inline-block h-2 w-2 rounded-full shrink-0 ${
+                      status === "ok"
+                        ? "bg-emerald-500"
+                        : status === "fail"
+                          ? "bg-rose-500"
+                          : "bg-zinc-300 dark:bg-zinc-600"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
+                        {maskProxyUrl(url)}
+                      </span>
+                      <span className="shrink-0 text-zinc-400 text-right">
+                        {renderHealthText(status, entry, t)}
+                      </span>
+                    </div>
+                    {isDocker && (
+                      <div className="flex items-center gap-2.5 mt-0.5 text-[10px] text-zinc-400">
+                        {stat ? (
+                          <>
+                            <span>
+                              {t("upstreamProxyRequests")} {stat.total}
+                            </span>
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              {t("upstreamProxySuccess")} {stat.ok}
+                            </span>
+                            <span className="text-amber-600 dark:text-amber-500">429 {stat.err429}</span>
+                            <span className="text-rose-500">
+                              {t("upstreamProxyErrOther")} {stat.errOther}
+                            </span>
+                            <span className="text-zinc-500">
+                              {t("upstreamProxyAvailability")} {Math.round(stat.availability * 100)}%
+                            </span>
+                          </>
+                        ) : (
+                          <span>{t("upstreamProxyNoTrafficStats")}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 
-  /** 编辑表单（基本信息 / 手动代理 / 绑定平台） */
+  /** 代理组设置区块（基本信息 / 手动代理 / 绑定平台 + 保存；删除入口在区块标题栏） */
   const editForm = (
     <div className="flex flex-col gap-4">
-      <div className={formGroupClass}>
-        <h3 className={groupTitleClass}>{t("upstreamProxyGroupBasic")}</h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                {t("upstreamProxyGroupEnabledLabel")}
-              </label>
-              <p className="text-xs text-zinc-400 mt-0.5">{t("upstreamProxyGroupEnabledHelp")}</p>
-            </div>
-            <Switch
-              checked={formGroup.enabled}
-              onChange={(checked) => setFormGroup({ ...formGroup, enabled: checked })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              {t("upstreamProxyGroupNameLabel")}
-            </label>
-            <Input
-              value={formGroup.name}
-              onChange={(e) => setFormGroup({ ...formGroup, name: e.target.value })}
-              placeholder={t("upstreamProxyGroupNamePlaceholder")}
-              allowClear
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              {t("upstreamProxySourceUrlLabel")}
-            </label>
-            <Input
-              value={formGroup.sourceUrl}
-              onChange={(e) => setFormGroup({ ...formGroup, sourceUrl: e.target.value })}
-              placeholder={t("upstreamProxySourceUrlPlaceholder")}
-              allowClear
-            />
-            <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxySourceUrlHelp")}</p>
-          </div>
+      <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+        <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("upstreamProxyGroupSettings")}</h3>
+          {!isNew && (
+            <Popconfirm
+              title={t("upstreamProxyRemoveGroup")}
+              description={t("upstreamProxyDeleteGroupConfirm")}
+              onConfirm={handleDelete}
+              okButtonProps={{ danger: true }}
+            >
+              <button type="button" disabled={deleting} className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50">
+                {t("upstreamProxyRemoveGroup")}
+              </button>
+            </Popconfirm>
+          )}
         </div>
-      </div>
+        <div className="p-4 flex flex-col gap-4">
+          <div className={formGroupClass}>
+            <h3 className={groupTitleClass}>{t("upstreamProxyGroupBasic")}</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    {t("upstreamProxyGroupEnabledLabel")}
+                  </label>
+                  <p className="text-xs text-zinc-400 mt-0.5">{t("upstreamProxyGroupEnabledHelp")}</p>
+                </div>
+                <Switch
+                  checked={formGroup.enabled}
+                  onChange={(checked) => setFormGroup({ ...formGroup, enabled: checked })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  {t("upstreamProxyGroupNameLabel")}
+                </label>
+                <Input
+                  value={formGroup.name}
+                  onChange={(e) => setFormGroup({ ...formGroup, name: e.target.value })}
+                  placeholder={t("upstreamProxyGroupNamePlaceholder")}
+                  allowClear
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  {t("upstreamProxySourceUrlLabel")}
+                </label>
+                <Input
+                  value={formGroup.sourceUrl}
+                  onChange={(e) => setFormGroup({ ...formGroup, sourceUrl: e.target.value })}
+                  placeholder={t("upstreamProxySourceUrlPlaceholder")}
+                  allowClear
+                />
+                <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxySourceUrlHelp")}</p>
+              </div>
+            </div>
+          </div>
 
-      <div className={formGroupClass}>
-        <h3 className={groupTitleClass}>{t("upstreamProxyManualUrlsLabel")}</h3>
-        <Input.TextArea
-          value={formGroup.urlsText}
-          onChange={(e) => setFormGroup({ ...formGroup, urlsText: e.target.value })}
-          placeholder={"127.0.0.1:7890\nhttp://127.0.0.1:7891"}
-          rows={4}
-          allowClear
-        />
-        <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyManualUrlsHelp")}</p>
-      </div>
+          <div className={formGroupClass}>
+            <h3 className={groupTitleClass}>{t("upstreamProxyManualUrlsLabel")}</h3>
+            <Input.TextArea
+              value={formGroup.urlsText}
+              onChange={(e) => setFormGroup({ ...formGroup, urlsText: e.target.value })}
+              placeholder={"127.0.0.1:7890\nhttp://127.0.0.1:7891"}
+              rows={4}
+              allowClear
+            />
+            <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyManualUrlsHelp")}</p>
+          </div>
 
-      <div className={formGroupClass}>
-        <h3 className={groupTitleClass}>{t("upstreamProxyGroupBoundPlatforms")}</h3>
-        <Select
-          mode="multiple"
-          value={formGroup.boundPlatformIds}
-          onChange={(v: string[]) => setFormGroup({ ...formGroup, boundPlatformIds: v })}
-          options={platformOptions}
-          placeholder={t("upstreamProxyGroupBoundPlatformsPlaceholder")}
-          allowClear
-          className="w-full"
-          maxTagCount={3}
-        />
-        <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyGroupBoundPlatformsHelp")}</p>
+          <div className={formGroupClass}>
+            <h3 className={groupTitleClass}>{t("upstreamProxyGroupBoundPlatforms")}</h3>
+            <Select
+              mode="multiple"
+              value={formGroup.boundPlatformIds}
+              onChange={(v: string[]) => setFormGroup({ ...formGroup, boundPlatformIds: v })}
+              options={platformOptions}
+              placeholder={t("upstreamProxyGroupBoundPlatformsPlaceholder")}
+              allowClear
+              className="w-full"
+              maxTagCount={3}
+            />
+            <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyGroupBoundPlatformsHelp")}</p>
+          </div>
+
+          <Button variant="primary" size="sm" onClick={handleSave} loading={submitting} icon={<Save size={14} />}>
+            {t("common:save")}
+          </Button>
+        </div>
       </div>
 
       {proxyListView}
-
-      <Button variant="primary" size="sm" onClick={handleSave} loading={submitting} icon={<Save size={14} />}>
-        {t("common:save")}
-      </Button>
-
-      {!isNew && (
-        <div className="text-center">
-          <Popconfirm
-            title={t("upstreamProxyRemoveGroup")}
-            description={t("upstreamProxyDeleteGroupConfirm")}
-            onConfirm={handleDelete}
-            okButtonProps={{ danger: true }}
-          >
-            <button type="button" disabled={deleting} className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50">
-              {t("upstreamProxyRemoveGroup")}
-            </button>
-          </Popconfirm>
-        </div>
-      )}
     </div>
   );
 

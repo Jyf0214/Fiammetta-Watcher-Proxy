@@ -21,6 +21,15 @@ export interface ProxyGroupSummary {
   failCount: number;
   /** 组启用开关（false 时行内徽标提示禁用） */
   enabled: boolean;
+  /** 组请求可用率（0-1，经代理真实请求的 2xx 占比；undefined = 无请求数据） */
+  availability?: number;
+}
+
+/** 可用率徽标颜色分级：≥90% 绿 / ≥50% 琥珀 / 其余红 */
+function availabilityClass(availability: number): string {
+  if (availability >= 0.9) return "text-emerald-600 dark:text-emerald-400";
+  if (availability >= 0.5) return "text-amber-600 dark:text-amber-500";
+  return "text-rose-500";
 }
 
 /** 组内健康状态圆点：有异常红 / 全部正常绿 / 未检查灰 */
@@ -81,6 +90,14 @@ function GroupRow({
       <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
         {group.proxyCount}
       </span>
+      {group.availability !== undefined && (
+        <span
+          className={cn("shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-zinc-50 dark:bg-zinc-800/60 font-mono", availabilityClass(group.availability))}
+          title={t("upstreamProxyAvailability")}
+        >
+          {Math.round(group.availability * 100)}%
+        </span>
+      )}
       <GroupHealthDot {...group} />
     </button>
   );

@@ -152,17 +152,18 @@ export function parseUrlsText(text: string): string[] {
 
 /** 展示用规范化：裸 host:port 补 http://，与后端 normalizeProxyLine 写入健康表的键对齐 */
 export function normalizeProxyUrl(u: string): string {
-  return /^https?:\/\//i.test(u) ? u : `http://${u}`;
+  return /^(https?|socks[45]):\/\//i.test(u) ? u : `http://${u}`;
 }
 
-/** 单行代理地址是否合法（与后端 normalizeProxyLine 语义一致）：带协议头的必须 http(s)，
- *  无协议头视为裸 host:port 自动补 http://；解析失败（无 host、端口非法等）拒绝 */
+/** 单行代理地址是否合法（与后端 normalizeProxyLine 语义一致）：带协议头的必须
+ *  http/https/socks4/socks5，无协议头视为裸 host:port 自动补 http://；
+ *  解析失败（无 host、端口非法等）拒绝 */
 export function isProxyLineValid(line: string): boolean {
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(line);
-  if (hasScheme && !/^https?:\/\//i.test(line)) return false;
+  if (hasScheme && !/^(https?|socks[45]):\/\//i.test(line)) return false;
   try {
     const parsed = new URL(hasScheme ? line : `http://${line}`);
-    return /^https?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
+    return /^(https?|socks[45]):$/.test(parsed.protocol) && parsed.hostname.length > 0;
   } catch {
     return false;
   }

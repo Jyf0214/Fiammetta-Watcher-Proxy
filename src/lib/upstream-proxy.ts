@@ -60,6 +60,12 @@ const PULL_MAX_BYTES = 512 * 1024;
 const HEALTH_CHECK_CONCURRENCY = 20;
 /** 业务请求网络层连续失败达到该次数 → 该代理临时标记不可用（跳过轮询） */
 export const PROXY_FAIL_THRESHOLD = 3;
+/** 业务请求统计降权窗口：窗口内错误率过高的代理视为出口受限，路由时跳过（窗口滑动自动恢复） */
+const STATS_DOWNGRADE_WINDOW_MS = 10 * 60_000;
+/** 统计降权最少样本数：样本不足不降权（避免零星错误误伤） */
+const STATS_DOWNGRADE_MIN_SAMPLES = 5;
+/** 统计降权错误率阈值（429 等限流 + 其他失败占请求比例） */
+const STATS_DOWNGRADE_ERROR_RATE = 0.8;
 
 /** 代理组：一源一组（sourceUrl 可空 = 纯手动组，不参与拉取） */
 export interface ProxyGroupConfig {
@@ -129,6 +135,15 @@ let roundRobinIndex = 0;
 const proxyFailCounts = new Map<string, number>();
 /** 进程内临时不可用集合（网络层连续失败达阈值，健康检查成功时清除） */
 const unhealthyUrls = new Set<string>();
+/** 业务请求实时统计（url → 计数）：路由动态择优用（真实流量出口可用性信号，进程内不落库） */
+export interface ProxyTrafficStat {
+  total: number;
+  ok: number;
+  err429: number;
+  errOther: number;
+  lastAt: number;
+}
+const proxyReqStats = new Map<string, ProxyTrafficStat>();
 /** 全部代理异常告警节流时间戳 */
 let lastAllUnhealthyWarn = 0;
 /** 健康检查进行中进度（管理页轮询展示；单进程内同一时刻仅一个检查任务） */
@@ -157,31 +172,33 @@ function isValidHttpUrl(value: string): boolean {
   }
 }
 
-/** 日志用代理地址脱敏：剥离 URL 中的 user:pass 凭据，防止凭据进入服务端日志 */
-function maskProxyUrl(url: string): string {
+/** 代理地址校验：http/https/socks4/socks5 之一且含主机名 */
+function isValidProxyUrl(value: string): boolean {
   try {
-    const parsed = new URL(url);
-    if (!parsed.username && !parsed.password) return url;
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString();
+    const parsed = new URL(value);
+    return /^(https?|socks[45]):$/.test(parsed.protocol) && parsed.hostname.length > 0;
   } catch {
-    // 非法地址（可能含畸形凭据片段）：按 `//user:pass@` 特征打码；
-    // [^@\s] 允许密码含 @，避免打码后泄漏剩余凭据片段
-    return url.replace(/\/\/[^@\s]+@/, "//***@");
+    return false;
   }
 }
 
-/** 单行代理地址规范化：兼容裸 host:port（自动补 http://）与 http(s):// 前缀；非法行返回 null */
+/** 日志用代理地址脱敏：剥离 URL 中的 user:pass 凭据，防止凭据进入服务端日志。
+ *  用正则而非 URL 序列化——URL.toString() 会给裸 host 补尾斜杠，导致脱敏键与
+ *  池/健康表键不一致；[^@\s] 允许密码含 @，避免打码后泄漏剩余凭据片段。
+ *  与前端 upstream-proxy-ui.ts 的展示脱敏同实现，保证统计键两侧一致 */
+export function maskProxyUrl(url: string): string {
+  return url.replace(/\/\/[^@\s]+@/, "//***@");
+}
+
+/** 单行代理地址规范化：兼容裸 host:port（自动补 http://）与 http(s)/socks4/socks5://
+ *  前缀；其他协议（ftp:// 等）与无 host 的行返回 null，不误补成畸形地址 */
 function normalizeProxyLine(lineRaw: string): string | null {
   const line = lineRaw.trim();
   if (!line) return null;
-  // 带协议头的行必须是 http/https：socks5:// 等不支持协议直接拒绝，
-  // 而不是误补成 http://socks5://... 这类畸形地址
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(line);
-  if (hasScheme && !/^https?:\/\//i.test(line)) return null;
+  if (hasScheme && !/^(https?|socks[45]):\/\//i.test(line)) return null;
   const url = hasScheme ? line : `http://${line}`;
-  return isValidHttpUrl(url) ? url : null;
+  return isValidProxyUrl(url) ? url : null;
 }
 
 /** 校验并规范化一组手动代理地址（与旧版 urls 字段校验一致） */
@@ -193,7 +210,7 @@ function normalizeUrls(raw: unknown): string[] {
     const u = normalizeProxyLine(item);
     if (!u) {
       console.error(
-        `[upstream-proxy] 不支持的代理地址（仅支持 http/https 且需含主机名），已忽略: ${maskProxyUrl(item).slice(0, 60)}`
+        `[upstream-proxy] 不支持的代理地址（仅支持 http/https/socks4/socks5 且需含主机名），已忽略: ${maskProxyUrl(item).slice(0, 60)}`
       );
       continue;
     }
@@ -317,7 +334,7 @@ function parsePoolMap(raw: string | null | undefined): Record<string, string[]> 
     const map: Record<string, string[]> = {};
     for (const [groupName, urls] of Object.entries(parsed)) {
       if (!Array.isArray(urls)) continue;
-      // 用 normalizeProxyLine 校验合法性：带非 http(s) 协议头的行与无 host 的行一律丢弃
+      // 用 normalizeProxyLine 校验合法性：带不支持协议头的行与无 host 的行一律丢弃
       const cleaned = [
         ...new Set(
           urls.filter((u): u is string => typeof u === "string" && normalizeProxyLine(u) !== null)
@@ -495,12 +512,43 @@ async function writeProxyHealth(
 
 // ===== ProxyAgent 池 =====
 
-/** 获取/创建 url 对应的 ProxyAgent（池化复用） */
+/**
+ * 获取/创建 url 对应的 dispatcher（池化复用）。
+ * http/https 代理用 undici ProxyAgent；socks4/socks5 代理用 fetch-socks
+ * socksDispatcher（undici Agent 子类，经 socks 连接后转发 HTTP 流量）。
+ * 两者都实现 undici Dispatcher 接口，请求路径统一传 fetch 的 dispatcher 选项
+ */
 async function getAgent(url: string): Promise<Dispatcher> {
   let agent = proxyAgents.get(url);
   if (!agent) {
-    const { ProxyAgent } = await import("undici");
-    agent = new ProxyAgent(url);
+    if (/^socks[45]:\/\//i.test(url)) {
+      const { socksDispatcher } = await import("fetch-socks");
+      const parsed = new URL(url);
+      // WHATWG URL 对 userinfo 中畸形百分号序列不报错原样保留，decodeURIComponent
+      // 会抛 URIError 使请求 500 且该代理无法被黑名单机制标记——解码失败回退原值
+      const decodeSafe = (s: string) => {
+        try {
+          return decodeURIComponent(s);
+        } catch {
+          return s;
+        }
+      };
+      // hostname 对 IPv6 字面量保留方括号（[::1]），socks 库需裸地址
+      const host = parsed.hostname.replace(/^\[|\]$/g, "");
+      const proxies = [
+        {
+          type: parsed.protocol === "socks4:" ? (4 as const) : (5 as const),
+          host,
+          port: Number(parsed.port || 1080),
+          ...(parsed.username ? { userId: decodeSafe(parsed.username) } : {}),
+          ...(parsed.password ? { password: decodeSafe(parsed.password) } : {}),
+        },
+      ];
+      agent = socksDispatcher(proxies) as unknown as Dispatcher;
+    } else {
+      const { ProxyAgent } = await import("undici");
+      agent = new ProxyAgent(url);
+    }
     // 并发创建竞态：另一请求可能已抢先注册同一 url（await import 是异步点），
     // 丢弃本实例避免孤儿代理泄漏
     const existing = proxyAgents.get(url);
@@ -525,6 +573,7 @@ async function releaseStaleAgents(keepUrls: Set<string>): Promise<void> {
       // 同步清理进程内状态，避免 URL 重新加入配置时带着旧黑名单/旧计数
       unhealthyUrls.delete(url);
       proxyFailCounts.delete(url);
+      proxyReqStats.delete(url);
       void agent.close().catch(() => {});
     }
   }
@@ -723,6 +772,7 @@ export async function pullProxyGroups(
       delete nextHealth[u];
       unhealthyUrls.delete(u);
       proxyFailCounts.delete(u);
+      proxyReqStats.delete(u);
     }
 
     if (fetched.length > 0) nextPool[group.name] = fetched;
@@ -765,9 +815,10 @@ export async function pullProxyGroups(
  *
  * 组选择：平台绑定组优先；未绑定的白名单平台走默认组（第一组）。
  * 组内代理按最近一次健康检查延迟升序选最低（clash url-test 语义）；
- * 健康度异常（表记录 fail 或进程内连续失败达阈值）的代理跳过；延迟未知
- * （从未检查）时按 round-robin 轮询；全部异常时回退组内全部代理轮询并告警。
- * 最低延迟代理故障由 markProxyFailure 黑名单机制自动切换到次优。
+ * 健康度异常（表记录 fail 或进程内连续失败达阈值）的代理跳过；业务流量
+ * 统计窗口内错误率过高（出口被上游限流）的代理降权跳过，窗口滑动自愈；
+ * 延迟未知（从未检查）时按 round-robin 轮询；全部异常时回退组内全部代理
+ * 轮询并告警。最低延迟代理故障由 markProxyFailure 黑名单机制自动切换到次优。
  * 调用方应把返回值注入上游 fetch 的 init.dispatcher（undici 扩展字段），
  * 并在网络层失败时用返回的 url 调用 markProxyFailure 回标记。
  */
@@ -818,7 +869,13 @@ export async function getUpstreamProxy(
 
   const health = await readProxyHealth(db, env);
   const candidates = groupUrls.filter(
-    (url) => health[url]?.status !== "fail" && !unhealthyUrls.has(url)
+    (url) => {
+      // 黑名单（连续网络层失败达阈值）直接排除；统计降权（窗口内错误率过高，
+      // 如出口 IP 被上游限流）跳过，窗口滑动后自动恢复
+      if (health[url]?.status === "fail" || unhealthyUrls.has(url)) return false;
+      const stat = proxyReqStats.get(url);
+      return stat ? !isProxyStatDegraded(stat) : true;
+    }
   );
   if (candidates.length === 0) {
     // 全部代理健康度异常：回退全部代理轮询（健康检查是周期性的，
@@ -850,6 +907,38 @@ export async function getUpstreamProxy(
     : candidates[roundRobinIndex % candidates.length];
   if (!useLatency) roundRobinIndex++;
   return { dispatcher: await getAgent(url), url };
+}
+
+/**
+ * 业务请求流量回记：路由按实时错误率动态降权（2xx 记 ok；429 记 err429；
+ * 其余失败（含网络层失败 status=0）记 errOther；仅统计窗口内数据参与择优）。
+ * 调用方在请求状态分派处调用，与 recordRequestLog 的 proxyUrl 透传一致
+ */
+export function recordProxyTraffic(url: string | undefined, status: number): void {
+  if (!url) return;
+  const now = Date.now();
+  const prev = proxyReqStats.get(url);
+  // 窗口滑动后旧计数不再参与择优：跨窗口直接重置，避免历史大基数
+  // 既推迟降权触发、又拖慢窗口后的恢复（isProxyStatDegraded 同时以
+  // lastAt 过期兜底）
+  const cur =
+    prev && now - prev.lastAt <= STATS_DOWNGRADE_WINDOW_MS
+      ? prev
+      : { total: 0, ok: 0, err429: 0, errOther: 0, lastAt: now };
+  cur.total += 1;
+  if (status >= 200 && status < 300) cur.ok += 1;
+  else if (status === 429) cur.err429 += 1;
+  else cur.errOther += 1;
+  cur.lastAt = now;
+  proxyReqStats.set(url, cur);
+}
+
+/** 统计窗口内是否应降权：样本足够且错误率超阈值（窗口滑动自动恢复，非永久排除） */
+export function isProxyStatDegraded(stat: ProxyTrafficStat): boolean {
+  if (stat.total < STATS_DOWNGRADE_MIN_SAMPLES) return false;
+  if (Date.now() - stat.lastAt > STATS_DOWNGRADE_WINDOW_MS) return false;
+  const errRate = (stat.err429 + stat.errOther) / stat.total;
+  return errRate > STATS_DOWNGRADE_ERROR_RATE;
 }
 
 /**

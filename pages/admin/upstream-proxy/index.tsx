@@ -69,6 +69,27 @@ export default function UpstreamProxyPage() {
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   const isDocker = deployPlatform === "docker";
 
+  /** 组请求可用率源数据（stats API 返回的按代理聚合统计，url → 分类计数） */
+  const [trafficStats, setTrafficStats] = useState<Record<string, { total: number; ok: number }> | null>(null);
+
+  // 挂载后加载一次实际可用性统计（仅 Docker；stats API 在非 Docker 部署返回 400）
+  useEffect(() => {
+    if (!isDocker) return;
+    let cancelled = false;
+    void fetch("/api/admin/upstream-proxy/stats?hours=24")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        const body = data as Record<string, any> | null;
+        if (!cancelled && body?.success) setTrafficStats(body.data?.stats ?? null);
+      })
+      .catch(() => {
+        // 静默：统计失败不影响组列表展示
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDocker]);
+
   // 服务器配置值变化时回填全局字段（渲染期 prev 值比较，避免 effect 内同步 setState；
   // 值未变时不回填，不覆盖未保存的编辑）
   const [prevConfigValue, setPrevConfigValue] = useState<string | undefined>(undefined);
@@ -83,9 +104,14 @@ export default function UpstreamProxyPage() {
   const poolMap = parsePoolMap(config?.[POOL_KEY]);
   const parsed = parseProxyConfig(config?.[CONFIG_KEY]);
 
-  /** 组列表行数据：候选代理数 + 健康摘要（拉取池 ∪ 手动代理） */
+  /** 组列表行数据：候选代理数 + 健康摘要 + 请求可用率（拉取池 ∪ 手动代理） */
   const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
+    // 组可用率 = 组内各代理真实请求的 2xx 占比（聚合 total/ok；
+    // stats 键为落库脱敏地址，查表统一 maskProxyUrl）
+    const rows = (trafficStats ?? {});
+    const groupTotal = urls.reduce((n, u) => n + (rows[maskProxyUrl(u)]?.total ?? 0), 0);
+    const groupOk = urls.reduce((n, u) => n + (rows[maskProxyUrl(u)]?.ok ?? 0), 0);
     return {
       name: g.name,
       sourceUrl: g.sourceUrl,
@@ -93,6 +119,7 @@ export default function UpstreamProxyPage() {
       okCount: urls.filter((u) => healthMap[u]?.status === "ok").length,
       failCount: urls.filter((u) => healthMap[u]?.status === "fail").length,
       enabled: g.enabled,
+      availability: groupTotal > 0 ? groupOk / groupTotal : undefined,
     };
   });
 

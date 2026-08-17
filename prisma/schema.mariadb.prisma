@@ -152,11 +152,14 @@ model requestLogs {
   ipAddress        String? @map("ip_address")
   userAgent        String? @db.Text @map("user_agent")
   errorMessage     String? @db.Text @map("error_message")
+  proxyUrl         String? @db.Text @map("proxy_url")
   createdAt        Int     @default(0) @map("created_at")
 
   @@index([createdAt])
   @@index([keyId, createdAt])
   @@index([platformId, createdAt])
+  // MariaDB 对 TEXT 列建索引必须指定前缀长度，否则 db push 报 P1012
+  @@index([proxyUrl(length: 191), createdAt])
   @@map("request_logs")
 }
 
