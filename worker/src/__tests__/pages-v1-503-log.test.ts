@@ -45,6 +45,7 @@ vi.mock("../../../worker/src/platform-keys", () => ({
   isKeyDisabled: vi.fn(() => false),
   recordKeyError: vi.fn(async () => {}),
   parseApiKeys: vi.fn(() => ["sk-key1", "sk-key2"]),
+  loadWhitelist: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../worker/src/load-balancer", () => ({

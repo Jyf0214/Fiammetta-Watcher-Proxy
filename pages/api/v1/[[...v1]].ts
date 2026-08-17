@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
@@ -130,6 +130,9 @@ function createPagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace }> {
   return pagesEnvPromise;
 }
 const dummyDb = {} as D1Database;
+
+/** 白名单是否已加载（Pages 进程内懒加载，首次请求触发，后续请求跳过） */
+let whitelistLoaded = false;
 
 // ==================== 上游超时与重试配置 ====================
 
@@ -714,6 +717,13 @@ function getApiKeyHeader(req: NextApiRequest): string | undefined {
 export default async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   let cfg: ProxyConfig | undefined;
   try {
+    // 首次请求时加载 Key 白名单：recordKeyError / banKey 的豁免判定（isKeyWhitelisted /
+    // isPlatformWhitelisted）依赖该内存集合，不加载则白名单在 Pages 部署模式下永不生效；
+    // loadWhitelist 内部已容错（失败仅记日志），重复并发加载幂等无害，与 worker 入口同模式
+    if (!whitelistLoaded) {
+      whitelistLoaded = true;
+      await loadWhitelist(dummyDb, await createPagesEnv());
+    }
     const v1 = (req.query.v1 as string[])?.join("/") || "";
     const full = `/v1/${v1}`;
     // Anthropic /v1/messages/count_tokens：不转发上游，直接估算 token 数
