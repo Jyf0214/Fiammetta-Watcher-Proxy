@@ -6,8 +6,9 @@
  */
 
 import { createDb } from "@/lib/prisma";
-import { maskProxyUrl } from "@/lib/upstream-proxy";
+import { normalizeProxyStatKey } from "@/lib/upstream-proxy";
 import { recordFailure } from "./load-balancer";
+import { banKey, recordKeyError } from "./platform-keys";
 import type { WorkerEnv } from "./config";
 
 /**
@@ -24,6 +25,14 @@ export function extractUsage(
   totalTokens: number;
 } {
   if (!usage) {
+    // 上游未返回 usage 时用请求体预估值兜底（与下方 totalTokens<=0 同一防绕过语义）
+    if (maxTokensEstimate > 0) {
+      return {
+        promptTokens: maxTokensEstimate,
+        completionTokens: 0,
+        totalTokens: maxTokensEstimate,
+      };
+    }
     return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   }
 
@@ -95,6 +104,10 @@ export async function recordRequestLog(params: {
   duration: number;
   isError: boolean;
   errorMessage?: string;
+  /** 客户端真实 IP（从下游请求头提取，日志页展示用；不传写 null） */
+  ipAddress?: string;
+  /** 客户端 User-Agent（从下游请求头提取，日志页展示用；不传写 null） */
+  userAgent?: string;
   /** 出站代理地址（仅 Docker 部署经代理的请求记录；直连/其他部署为空） */
   proxyUrl?: string;
   db: D1Database;
@@ -119,15 +132,37 @@ export async function recordRequestLog(params: {
         ttft: params.ttft,
         isError: params.isError,
         errorMessage: params.errorMessage ?? null,
-        // 落库前剥离 user:pass 凭据（日志表高容量长留存，管理 API 原样返回；
-        // 统计聚合与前端展示统一以脱敏地址为键）
-        proxyUrl: params.proxyUrl ? maskProxyUrl(params.proxyUrl) : null,
+        // 落库前归一化为去凭据的 host:port 统计键（同 host:port 不同凭据的
+        // 代理共享同一键，stats 聚合与前端查表一致；凭据不进入日志表。
+        // 历史 ***@host:port 键在 stats 聚合侧同样归一化，自动并入新键）
+        proxyUrl: params.proxyUrl ? normalizeProxyStatKey(params.proxyUrl) : null,
+        ipAddress: params.ipAddress ?? null,
+        userAgent: params.userAgent ?? null,
         createdAt: Math.floor(Date.now() / 1000),
       },
     });
   } catch (err) {
     console.error("[token] 记录请求日志失败:", err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * 从下游请求提取客户端 IP/UA（请求日志展示用）
+ *
+ * Worker 部署由 Cloudflare 注入 cf-connecting-ip；其他部署回退
+ * X-Forwarded-For 首项（取最左客户端项）。
+ */
+export function extractClientInfo(
+  request: Request
+): { ipAddress?: string; userAgent?: string } {
+  const ipAddress =
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    undefined;
+  return {
+    ipAddress,
+    userAgent: request.headers.get("user-agent") || undefined,
+  };
 }
 
 /**
@@ -164,6 +199,10 @@ export function createUsageTransformer(params: {
   platformId: string;
   model: string;
   startTime: number;
+  /** 上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */
+  key?: string;
+  /** max_tokens 预估值：上游未返回 usage 时兜底记账，防 tokenLimit 绕过 */
+  maxTokensEstimate?: number;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -222,15 +261,29 @@ export function createUsageTransformer(params: {
 
     async flush() {
       const { promptTokens, completionTokens, totalTokens } =
-        extractUsage(lastUsage);
+        extractUsage(lastUsage, params.maxTokensEstimate);
       const duration = Date.now() - params.startTime;
 
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
       // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
       const truncated = !sawDone && !streamError && chunkCount > 0;
-      if (truncated) {
+      // 流内 error 与截断同属失败：触发熔断（此前流内 error 只记日志不打分，
+      // 坏平台永远不被降级，负载均衡反复撞上它）
+      if (streamError || truncated) {
         try { await recordFailure(params.platformId, params.db, params.env); } catch {}
+      }
+
+      // 流内 error 为密钥类状态码（429/401/402/403）时与 HTTP 重试路径对齐：
+      // 封禁 Key + 累加错误计数（DB errorCount 达阈值自动禁用）。仅当调用方
+      // 传入 key 明文时执行（transformer 无 KV 绑定，封禁只写内存，持久化由
+      // recordKeyError 的 DB 写入承担）；404/503 等非密钥错误不打 Key 分
+      if (streamError && params.key &&
+          (streamError.code === 429 || streamError.code === 401 ||
+           streamError.code === 402 || streamError.code === 403)) {
+        const keyErrorCode = streamError.code;
+        try { await banKey(params.key, undefined, params.platformId); } catch {}
+        try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
       }
 
       // 复用同一个 PrismaClient 完成所有 DB 操作

@@ -72,6 +72,7 @@ describe("runArchiveTask 归档单天日志", () => {
         }),
       },
       dailyStats: {
+        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
         findFirst: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
       },
@@ -134,6 +135,7 @@ describe("runArchiveTask 归档单天日志", () => {
         }),
       },
       dailyStats: {
+        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
         findFirst: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
       },
@@ -146,5 +148,55 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(result.success).toBe(true);
     expect(result.details).toEqual({ datesArchived: 1, logsProcessed: 3, logsDeleted: 3 });
     expect(archiveDeleteCalls.map((c) => c.length)).toEqual([3]);
+  });
+
+  it("残留日志重跑时清空该天旧聚合后重算（不累加双倍计数）", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const oldestTs = now - 31 * 86400;
+    const dayStartTs = oldestTs - (oldestTs % 86400);
+
+    const { createDb } = await import("@/lib/prisma");
+    const mockCreateDb = vi.mocked(createDb);
+    const deleteManyCalls: Array<{ where: Record<string, unknown> }> = [];
+    const mockPrisma = {
+      requestLogs: {
+        deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
+          if (args.where.OR) return Promise.resolve({ count: 0 });
+          return Promise.resolve({ count: 0 });
+        }),
+        findFirst: vi.fn(() => Promise.resolve({ createdAt: oldestTs })),
+        findMany: vi.fn((args: { skip: number; where: { createdAt: { gte: number } } }) => {
+          if (args.where?.createdAt?.gte === dayStartTs && args.skip === 0) {
+            // 上次归档删除阶段部分失败：残留 2 条（上次聚合已含全部 5 条）
+            return Promise.resolve([makeLog(3, dayStartTs), makeLog(4, dayStartTs)]);
+          }
+          return Promise.resolve([]);
+        }),
+      },
+      dailyStats: {
+        deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
+          deleteManyCalls.push(args);
+          return Promise.resolve({ count: 1 });
+        }),
+        create: vi.fn(() => Promise.resolve({ id: "ds_new" })),
+      },
+    } as any;
+    mockCreateDb.mockResolvedValue(mockPrisma);
+
+    const { runArchiveTask: run } = await import("../log-archiver");
+    const result = await run({} as any);
+
+    expect(result.success).toBe(true);
+
+    // 重算语义：先按 date 清空旧聚合（含上次已聚合的 5 条），再以残留日志为准重算
+    expect(deleteManyCalls.length).toBe(1);
+    expect(deleteManyCalls[0].where).toEqual({ date: dayStartTs });
+
+    const dailyStatsCreate = vi.mocked(mockPrisma.dailyStats.create);
+    expect(dailyStatsCreate).toHaveBeenCalledTimes(1);
+    const createData = dailyStatsCreate.mock.calls[0][0].data;
+    // 只含残留日志（2 条），不是「旧 5 条 + 新 2 条 = 7 条」的双倍累加
+    expect(createData.totalRequests).toBe(2);
+    expect(createData.totalTokens).toBe(20);
   });
 });

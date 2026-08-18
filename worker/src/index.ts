@@ -38,15 +38,17 @@ export default {
     const url = new URL(request.url);
 
     try {
-      // 首次请求时加载白名单与 Key 封禁状态（懒初始化）
+      // 首次请求时加载白名单与 Key 封禁状态（懒初始化）：
+      // await 阻塞保证首请求就基于已加载的豁免/禁用集合判定（waitUntil 不阻塞，
+      // 首请求会在加载完成前进入路由，白名单豁免/禁用恢复对首个请求不生效）；
+      // loadWhitelist/loadKeyStatusFromKV 内部已容错（失败仅记日志），
+      // 重复并发加载幂等无害
       if (!whitelistLoaded) {
         whitelistLoaded = true;
-        ctx.waitUntil(
-          Promise.allSettled([
-            loadWhitelist(env.DB, env),
-            loadKeyStatusFromKV(env.DB, env.KV, env),
-          ])
-        );
+        await Promise.allSettled([
+          loadWhitelist(env.DB, env),
+          loadKeyStatusFromKV(env.DB, env.KV, env),
+        ]);
       }
 
       // 健康检查端点

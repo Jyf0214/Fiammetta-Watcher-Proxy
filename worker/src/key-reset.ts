@@ -16,6 +16,7 @@
 
 import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "./config";
+import { resetCircuitBreakerIfTripped } from "./load-balancer";
 
 /**
  * 判断指定 API Key 是否需要在当前周期重置
@@ -140,6 +141,11 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
             lastFailAt: null,
           },
         });
+        // 同步内存熔断态：DB healthy 但 breaker 仍 open/half-open 时路由继续
+        // 跳过该平台，造成"管理页显示 healthy 但请求全被熔断"的状态跳变
+        // （plan.md #24）。仅清熔断条目：closed 条目的失败计数是熔断阈值的
+        // 一部分，无条件清除会让慢速失败平台计数每小时归零、永远不熔断
+        resetCircuitBreakerIfTripped(p.id);
         restoredCount++;
         console.log(
           `[key-reset] 平台 "${p.name}" (${p.id.slice(0, 8)}...) 状态恢复为 healthy`

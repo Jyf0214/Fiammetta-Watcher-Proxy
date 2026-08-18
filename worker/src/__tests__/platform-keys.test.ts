@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getAllKeys, getNextKey, getRandomKeyExcept, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled, loadKeyStatusFromKV, getKeyStatusesFromMemory } from "../platform-keys";
+import { getAllKeys, getNextKey, getRandomKeyExcept, parseApiKeys, banKey, isKeyBanned, isKeyDeprioritized, loadWhitelist, recordKeyError, isKeyDisabled, loadKeyStatusFromKV, getKeyStatusesFromMemory, enableKey } from "../platform-keys";
 import { keyStatusKey } from "@/lib/key-status";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -427,5 +427,114 @@ describe("getKeyStatusesFromMemory", () => {
     expect(Object.keys(a).length).toBe(1);
     const b = getKeyStatusesFromMemory("platform-b", ["sk-shared"]);
     expect(b).toEqual({});
+  });
+});
+
+// ==================== enableKey 统一清理（#8：手动启用 = DB 清零 + 内存冷却清理 + KV 残留删除） ====================
+
+describe("enableKey 统一清理", () => {
+  beforeEach(() => {
+    // 重置持久化状态：platform-1 含白名单 Key w，whitelisted-platform 为白名单平台
+    prismaState.apiKeysByPlatform = {
+      "platform-1": JSON.stringify([
+        { name: "normal", key: "sk-normal" },
+        { name: "w", key: "sk-whitelisted", whitelisted: true },
+      ]),
+      "whitelisted-platform": JSON.stringify([{ name: "normal", key: "sk-normal" }]),
+    };
+  });
+
+  it("清除持久化禁用标记并清零 DB 错误计数", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    // 3 次 401（每次 +2）= 6 达阈值自动禁用
+    for (let i = 0; i < 3; i++) {
+      await recordKeyError("sk-normal", 401, "platform-1", {} as D1Database);
+    }
+    expect(isKeyDisabled("sk-normal", "platform-1")).toBe(true);
+
+    const { createDb } = await import("@/lib/prisma");
+    const db = await createDb({});
+    await enableKey("sk-normal", "platform-1", db as never);
+
+    expect(isKeyDisabled("sk-normal", "platform-1")).toBe(false);
+    expect(prismaState.apiKeysByPlatform["platform-1"]).not.toContain('"enabled":false');
+    expect(prismaState.apiKeysByPlatform["platform-1"]).not.toContain('"errorCount"');
+  });
+
+  it("清除 429 封禁冷却并删除 KV banned 残留", async () => {
+    const kv = makeMockKv();
+    await banKey("sk-normal", undefined, "platform-1", kv);
+    expect(isKeyBanned("sk-normal", "platform-1")).toBe(true);
+    expect(kv.store.size).toBe(1);
+
+    const { createDb } = await import("@/lib/prisma");
+    const db = await createDb({});
+    await enableKey("sk-normal", "platform-1", db as never, kv);
+
+    expect(isKeyBanned("sk-normal", "platform-1")).toBe(false);
+    // KV 残留一并删除，冷启动 loadKeyStatusFromKV 不会恢复封禁
+    const raw = kv.store.get(keyStatusKey("platform-1"));
+    expect(raw).toBeTruthy();
+    expect(Object.keys(JSON.parse(raw!)).length).toBe(0);
+  });
+
+  it("清除白名单 Key 的降级冷却", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    await banKey("sk-whitelisted", undefined, "platform-1");
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
+
+    const { createDb } = await import("@/lib/prisma");
+    const db = await createDb({});
+    await enableKey("sk-whitelisted", "platform-1", db as never);
+
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(false);
+  });
+
+  it("启用后可立即被 getNextKey 选中（封禁立即解除）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    // 3 次 401 达阈值自动禁用
+    for (let i = 0; i < 3; i++) {
+      await recordKeyError("sk-normal", 401, "platform-1", {} as D1Database);
+    }
+    expect(getNextKey(makePlatform({ id: "platform-1", apiKeys: ["sk-normal"] }))).toBeNull();
+
+    const { createDb } = await import("@/lib/prisma");
+    const db = await createDb({});
+    await enableKey("sk-normal", "platform-1", db as never);
+
+    expect(getNextKey(makePlatform({ id: "platform-1", apiKeys: ["sk-normal"] }))).toBe("sk-normal");
+  });
+});
+
+// ==================== 白名单平台 Key 降级路径（#11：tier2/3 门槛放开） ====================
+
+describe("白名单平台 Key 降级路径", () => {
+  it("白名单平台的普通 Key 429 降级后仍可被 getNextKey 选中（最后手段）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    await banKey("sk-normal", undefined, "whitelisted-platform");
+    expect(isKeyDeprioritized("sk-normal", "whitelisted-platform")).toBe(true);
+
+    const key = getNextKey(makePlatform({ id: "whitelisted-platform", apiKeys: ["sk-normal"] }));
+    expect(key).toBe("sk-normal");
+  });
+
+  it("白名单平台的普通 Key 429 降级后仍可被 getRandomKeyExcept 选中（重试路径）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    await banKey("sk-normal", undefined, "whitelisted-platform");
+
+    const key = getRandomKeyExcept(
+      makePlatform({ id: "whitelisted-platform", apiKeys: ["sk-normal"] }),
+      new Set()
+    );
+    expect(key).toBe("sk-normal");
+  });
+
+  it("非白名单平台的普通 Key 封禁后仍被移除（5 分钟封禁语义不变）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    await banKey("sk-normal", undefined, "platform-1");
+    expect(isKeyBanned("sk-normal", "platform-1")).toBe(true);
+
+    expect(getNextKey(makePlatform({ id: "platform-1", apiKeys: ["sk-normal"] }))).toBeNull();
+    expect(getRandomKeyExcept(makePlatform({ id: "platform-1", apiKeys: ["sk-normal"] }), new Set())).toBeNull();
   });
 });

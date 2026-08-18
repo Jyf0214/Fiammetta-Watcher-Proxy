@@ -35,6 +35,7 @@ import {
   incrementHalfOpenPending,
   releaseHalfOpenPending,
   isHalfOpenProbeFull,
+  resetCircuitBreaker,
 } from "../load-balancer";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -411,5 +412,86 @@ describe("syncCircuitBreakersFromDatabase", () => {
     ]);
     await syncCircuitBreakersFromDatabase(mockDb);
     expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+  });
+});
+
+// ==================== #9 渐进降级（degraded） ====================
+
+describe("渐进降级（#9）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanupStaleBreakers([]);
+  });
+
+  it("closed 未达阈值时写 DB degraded 并递增 failCount", async () => {
+    for (let i = 0; i < 3; i++) {
+      await recordFailure("p1", mockDb);
+    }
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "p1" },
+        data: expect.objectContaining({ status: "degraded", failCount: 3, cooldownEnd: null }),
+      })
+    );
+  });
+
+  it("首次失败也写 degraded（无熔断条目时）", async () => {
+    await recordFailure("p1", mockDb);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "degraded", failCount: 1 }),
+      })
+    );
+  });
+
+  it("达到阈值熔断时写 down（覆盖 degraded 状态转换）", async () => {
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("p1", mockDb);
+    }
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("open");
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "down", failCount: 5 }),
+      })
+    );
+  });
+
+  it("closed 失败后成功：DB degraded 同步回 healthy", async () => {
+    await recordFailure("p1", mockDb);
+    mockUpdate.mockClear();
+    await recordSuccess("p1", mockDb);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "p1" },
+        data: expect.objectContaining({ status: "healthy", failCount: 0, cooldownEnd: null }),
+      })
+    );
+  });
+
+  it("closed 无失败记录时成功不写库（健康路径零 DB 开销）", async () => {
+    await recordSuccess("p1", mockDb);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// ==================== resetCircuitBreaker（#10 解禁立即生效） ====================
+
+describe("resetCircuitBreaker（#10）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanupStaleBreakers([]);
+  });
+
+  it("清除 open 熔断条目后平台立即恢复可用", async () => {
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("p1", mockDb);
+    }
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("open");
+    expect(selectPlatform([makePlatform({ id: "p1" })])).toBeNull();
+
+    resetCircuitBreaker("p1");
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
   });
 });

@@ -101,7 +101,7 @@ export function releaseHalfOpenPending(platformId: string): void {
  * 记录请求成功 — 更新熔断器状态
  *
  * 成功时：
- * - closed → 保持 closed，清零失败计数
+ * - closed → 保持 closed，清零失败计数；若此前失败已写库 degraded，同步回 healthy
  * - half-open → 转为 closed（恢复）
  */
 export async function recordSuccess(
@@ -123,9 +123,12 @@ export async function recordSuccess(
     // 更新数据库状态
     await updatePlatformStatus(platformId, "healthy", 0, null, db, env);
   } else if (entry.state === "closed") {
-    // closed 状态成功 → 清零失败计数
+    // closed 状态成功 → 清零失败计数；
+    // 上次失败若已把 DB 写成 degraded，这里同步回 healthy（否则后台一直显示 degraded，
+    // 只能等每小时 key-reset 恢复）
     if (entry.failureCount > 0) {
       entry.failureCount = 0;
+      await updatePlatformStatus(platformId, "healthy", 0, null, db, env);
     }
   }
 }
@@ -134,7 +137,8 @@ export async function recordSuccess(
  * 记录请求失败 — 更新熔断器状态
  *
  * 失败时：
- * - closed → 失败计数递增，达到阈值则熔断（open）
+ * - closed → 失败计数递增；未达阈值时渐进降级（写 DB degraded，不熔断），
+ *   达到阈值则熔断（open）
  * - half-open → 失败则回到 open
  */
 export async function recordFailure(
@@ -148,14 +152,13 @@ export async function recordFailure(
   if (!entry) {
     entry = {
       state: "closed",
-      failureCount: 1,
+      failureCount: 0,
       lastFailureAt: now,
       cooldownEnd: 0,
       halfOpenAttempts: 0,
       halfOpenPending: 0,
     };
     breakers.set(platformId, entry);
-    return;
   }
 
   // 原子递增，防止并发竞态导致多计数
@@ -186,6 +189,11 @@ export async function recordFailure(
     );
 
     await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
+  } else if (entry.state === "closed") {
+    // closed 未达阈值 → 渐进降级：写 DB degraded（管理后台可见，不打断请求），
+    // 与 key-reset 的恢复逻辑对称（degraded 无冷却，cooldownEnd 为空，
+    // 平台恢复后由 recordSuccess 或每小时 key-reset 写回 healthy）
+    await updatePlatformStatus(platformId, "degraded", entry.failureCount, null, db, env);
   }
 }
 
@@ -300,6 +308,31 @@ export function cleanupStaleBreakers(activePlatformIds: string[]): void {
     if (!activeSet.has(platformId)) {
       breakers.delete(platformId);
     }
+  }
+}
+
+/**
+ * 清除平台的内存熔断条目（管理后台手动解禁时调用）
+ *
+ * 解禁后同步清内存态，使解禁立即生效——否则内存熔断条目还在 open 冷却中，
+ * 最长 30 秒（缓存 TTL）后才被 refreshCache 的 syncCircuitBreakersFromDatabase
+ * 看到 DB healthy 而清除，期间请求仍被 selectPlatform 拦截。
+ */
+export function resetCircuitBreaker(platformId: string): void {
+  breakers.delete(platformId);
+}
+
+/**
+ * 仅在熔断（open/half-open）时清除内存熔断条目（定时任务恢复平台时调用）
+ *
+ * 与 resetCircuitBreaker 的区别：closed 条目的 failureCount 是熔断阈值的一部分，
+ * 无条件清除会导致慢速失败（每小时 3 次、无成功穿插）的平台计数每小时归零、
+ * 永远达不到熔断阈值。degraded 平台 DB 恢复 healthy 时同样保留 closed 计数。
+ */
+export function resetCircuitBreakerIfTripped(platformId: string): void {
+  const entry = breakers.get(platformId);
+  if (entry && entry.state !== "closed") {
+    breakers.delete(platformId);
   }
 }
 

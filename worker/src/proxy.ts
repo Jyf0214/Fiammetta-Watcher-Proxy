@@ -376,7 +376,6 @@ export async function proxyV1Request(
 
   // ── 5. 上游错误自动重试（429/401/403：同平台换 Key → 换平台，最多 3 次）──
   const MAX_UPSTREAM_RETRIES = 3;
-  const isStream = config.supportsStreaming !== false && body.stream === true;
 
   let currentPlatform = route.platform;
   const currentTargetModel = route.targetModel;
@@ -514,11 +513,16 @@ export async function proxyV1Request(
       }
     }
 
+    // 流式判定以模板应用后的结果为准：模板可改写 stream 字段，若按原始请求体预判定，
+    // 模板开流而原始请求未开流时上游返回 SSE 而代理走非流式 JSON 分支，
+    // JSON.parse 失败后原样透传 SSE 文本 + application/json，客户端必解析失败
+    const effectiveIsStream = config.supportsStreaming !== false && upstreamBody.stream === true;
+
     // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游
     // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
-    if (isStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic) {
+    if (effectiveIsStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic) {
       upstreamBody.stream_options = { include_usage: true };
     }
 
@@ -623,7 +627,7 @@ export async function proxyV1Request(
         apiKey,
         requestedModel,
         config,
-        isStream,
+        effectiveIsStream,
         startTime,
         env,
         ctx,
@@ -747,24 +751,36 @@ export async function proxyV1Request(
         continue;
       }
 
-      // 策略 2：换平台（支持同一模型）——复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择
+      // 策略 2：换平台（支持同一模型）——复用 selectPlatform 过滤熔断 open 平台并按优先级/权重
+      // 选择；逐个尝试候选直到找到有可用 Key 的平台（选中平台 Key 全部封禁时若直接放弃，
+      // 会漏掉其余候选直接 500，与循环外"初始平台无 Key 遍历全部候选"的行为不一致）
       const otherPlatforms = getPlatformsForModel(
         currentTargetModel,
         triedPlatforms
       );
       if (otherPlatforms.length > 0) {
-        const nextPlatform = selectPlatform(otherPlatforms);
-        if (nextPlatform) {
-          // 消费响应体释放连接（同策略 1：仅真正重试时消费）
-          try {
-            await upstreamResponse.text();
-          } catch {
-            // 读取失败（如 signal 超时）不影响重试流程
+        const candidates = [...otherPlatforms];
+        let switched = false;
+        while (candidates.length > 0 && !switched) {
+          const nextPlatform = selectPlatform(candidates);
+          if (!nextPlatform) break;
+          const nextPlatformKey = getNextKey(nextPlatform);
+          if (nextPlatformKey) {
+            // 消费响应体释放连接（同策略 1：仅真正重试时消费）
+            try {
+              await upstreamResponse.text();
+            } catch {
+              // 读取失败（如 signal 超时）不影响重试流程
+            }
+            currentPlatform = nextPlatform;
+            currentKey = nextPlatformKey;
+            switched = true;
+          } else {
+            // 该平台无可用 Key：剔除后继续尝试下一个候选
+            candidates.splice(candidates.indexOf(nextPlatform), 1);
           }
-          currentPlatform = nextPlatform;
-          currentKey = getNextKey(currentPlatform);
-          continue;
         }
+        if (switched) continue;
       }
 
       // 无更多可切换的目标
@@ -1054,6 +1070,10 @@ async function handleUpstreamResponse(
       platformId: platform.id,
       model: requestedModel,
       startTime,
+      // 流内密钥类错误（429/401/402/403）时封禁+计数：传入当前 Key 明文
+      key: apiKey.key,
+      // 上游未返回 usage 时以请求体 max_tokens 预估值兜底记账（防 tokenLimit 绕过）
+      maxTokensEstimate,
       db: env.DB,
       env: workerEnv,
     });

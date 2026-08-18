@@ -602,8 +602,9 @@ export async function proxyV1RequestLite(
   }
   clearTimeout(upstreamTimeoutId);
 
-  // 累加密钥错误计数并持久化（仅对 429/401/403 密钥相关错误计数，达 5 次自动禁用）
-  if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 403)) {
+  // 累加密钥错误计数并持久化（429/401/402/403 密钥相关错误计数，达 5 次自动禁用；
+  // 402 = Payment Required 计数 +5 立即禁用，与全量版 RETRYABLE_UPSTREAM_STATUSES 对齐）
+  if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 402 || upstreamResponse.status === 403)) {
     ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
   }
 

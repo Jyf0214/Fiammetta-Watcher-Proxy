@@ -158,6 +158,31 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.isError).toBe(true);
   });
 
+  it("上游 402：真实透传 402，计数 +5 立即禁用密钥（与全量版对齐）", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "payment required" } }), {
+        status: 402,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(402);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.platformId).toBe("test-platform");
+    expect(logParams.status).toBe(402);
+    expect(logParams.isError).toBe(true);
+  });
+
   it("上游 503：真实透传 503，日志 status 记 503", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: { message: "upstream unavailable" } }), {

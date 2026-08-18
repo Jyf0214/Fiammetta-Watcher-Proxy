@@ -7,7 +7,7 @@
 
 import type { PlatformConfig, PlatformApiKeyObject } from "@/lib/types";
 import type { WorkerEnv } from "./config";
-import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
+import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus, removePlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 
 /** 命名密钥格式 */
 export interface NamedApiKey {
@@ -17,6 +17,17 @@ export interface NamedApiKey {
 
 /** 每个平台独立的轮询计数器（内存态，重启归零） */
 const counters = new Map<string, number>();
+
+/**
+ * 平台 apiKeys JSON 读改写互斥锁（进程内串行化「读整表 → 修改 → 写整表」）
+ *
+ * 与 src/lib/upstream-proxy.ts withHealthLock 同模式：并发 recordKeyError/
+ * enableKey 对同一平台 apiKeys JSON 整表覆盖时，后写者基于锁内重读的最新
+ * 已落库状态合并，避免 TiDB 行锁竞争（Error 1205）与并发覆盖丢失写入。
+ * 锁为进程内互斥（Docker 单实例即完备）：锁内执行体不得再等待本锁
+ * （会确定性死锁）；多实例部署需外部互斥。
+ */
+let keyWriteTail: Promise<unknown> = Promise.resolve();
 
 // ==================== Key 白名单机制 ====================
 
@@ -321,21 +332,31 @@ export function getNextKey(platform: PlatformConfig): string | null {
     }
   }
 
-  // 优先级2：白名单中未降级、未持久化禁用的 Key
+  // 优先级2：白名单（平台或 Key）中未降级、未持久化禁用的 Key
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && !isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id) && !dbDisabled.has(key)) {
+    if (
+      (isPlatformWhitelisted(platform.id) || isKeyWhitelisted(key)) &&
+      !isKeyDeprioritized(key, platform.id) &&
+      !isKeyDisabled(key, platform.id) &&
+      !dbDisabled.has(key)
+    ) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
   }
 
-  // 优先级3：白名单中已降级但未持久化禁用的 Key（最后手段）
+  // 优先级3：白名单（平台或 Key）中已降级但未持久化禁用的 Key（最后手段）
   for (let i = 0; i < allKeys.length; i++) {
     const index = (counter + i) % allKeys.length;
     const key = allKeys[index];
-    if (isKeyWhitelisted(key) && isKeyDeprioritized(key, platform.id) && !isKeyDisabled(key, platform.id) && !dbDisabled.has(key)) {
+    if (
+      (isPlatformWhitelisted(platform.id) || isKeyWhitelisted(key)) &&
+      isKeyDeprioritized(key, platform.id) &&
+      !isKeyDisabled(key, platform.id) &&
+      !dbDisabled.has(key)
+    ) {
       counters.set(platform.id, counter + i + 1);
       return key;
     }
@@ -369,15 +390,15 @@ export function getRandomKeyExcept(
   );
   if (tier1.length > 0) return tier1[Math.floor(Math.random() * tier1.length)];
 
-  // 优先级2：白名单中未降级
+  // 优先级2：白名单（平台或 Key）中未降级
   const tier2 = allKeys.filter(
-    (k) => usable(k) && isKeyWhitelisted(k) && !isKeyDeprioritized(k, platform.id)
+    (k) => usable(k) && (isPlatformWhitelisted(platform.id) || isKeyWhitelisted(k)) && !isKeyDeprioritized(k, platform.id)
   );
   if (tier2.length > 0) return tier2[Math.floor(Math.random() * tier2.length)];
 
-  // 优先级3：白名单中已降级
+  // 优先级3：白名单（平台或 Key）中已降级
   const tier3 = allKeys.filter(
-    (k) => usable(k) && isKeyWhitelisted(k) && isKeyDeprioritized(k, platform.id)
+    (k) => usable(k) && (isPlatformWhitelisted(platform.id) || isKeyWhitelisted(k)) && isKeyDeprioritized(k, platform.id)
   );
   if (tier3.length > 0) return tier3[Math.floor(Math.random() * tier3.length)];
 
@@ -475,66 +496,72 @@ export async function recordKeyError(
   env?: WorkerEnv
 ): Promise<void> {
   try {
-    const { createDb } = await import("@/lib/prisma");
-    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-    const platform = await prisma.platforms.findFirst({
-      where: { id: platformId },
-      select: { apiKeys: true },
-    });
-    if (!platform?.apiKeys) return;
+    const run = async (): Promise<void> => {
+      const { createDb } = await import("@/lib/prisma");
+      const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+      // 锁内重读：拿到最新已落库的 apiKeys，基于它合并计数（后写者不覆盖并发写入）
+      const platform = await prisma.platforms.findFirst({
+        where: { id: platformId },
+        select: { apiKeys: true },
+      });
+      if (!platform?.apiKeys) return;
 
-    const keys = parseApiKeyObjects(platform.apiKeys);
-    const target = keys.find((k) => k.key === key);
-    if (!target) return;
+      const keys = parseApiKeyObjects(platform.apiKeys);
+      const target = keys.find((k) => k.key === key);
+      if (!target) return;
 
-    // 白名单 Key 或白名单平台：不累计错误计数、不自动禁用，仅临时降级（同 banKey）
-    if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) {
-      const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
-      whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
-      console.log(
-        `[platform-keys] 白名单密钥 ${keyFingerprint(key)} 收到上游错误 ${upstreamStatus}，仅降级不计数（平台 ${platformId}）`
-      );
-      return;
-    }
+      // 白名单 Key 或白名单平台：不累计错误计数、不自动禁用，仅临时降级（同 banKey）
+      if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) {
+        const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
+        whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
+        console.log(
+          `[platform-keys] 白名单密钥 ${keyFingerprint(key)} 收到上游错误 ${upstreamStatus}，仅降级不计数（平台 ${platformId}）`
+        );
+        return;
+      }
 
-    // 已禁用的密钥不再变更错误计数
-    if (target.enabled === false) return;
+      // 已禁用的密钥不再变更错误计数
+      if (target.enabled === false) return;
 
-    const increment = errorIncrement(upstreamStatus);
-    const newCount = (target.errorCount ?? 0) + increment;
+      const increment = errorIncrement(upstreamStatus);
+      const newCount = (target.errorCount ?? 0) + increment;
 
-    if (newCount >= KEY_ERROR_THRESHOLD) {
-      target.enabled = false;
-      target.errorCount = newCount;
-    } else {
-      target.errorCount = newCount;
-    }
+      if (newCount >= KEY_ERROR_THRESHOLD) {
+        target.enabled = false;
+        target.errorCount = newCount;
+      } else {
+        target.errorCount = newCount;
+      }
 
-    // 更新整个 apiKeys JSON 字段
-    const updatedJson = JSON.stringify(keys.map((k) => {
-      const obj: Record<string, unknown> = { name: k.name, key: k.key };
-      if (k.whitelisted) obj.whitelisted = true;
-      if (k.enabled === false) obj.enabled = false;
-      if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
-      return obj;
-    }));
+      // 更新整个 apiKeys JSON 字段
+      const updatedJson = JSON.stringify(keys.map((k) => {
+        const obj: Record<string, unknown> = { name: k.name, key: k.key };
+        if (k.whitelisted) obj.whitelisted = true;
+        if (k.enabled === false) obj.enabled = false;
+        if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
+        return obj;
+      }));
 
-    await prisma.platforms.update({
-      where: { id: platformId },
-      data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
-    });
+      await prisma.platforms.update({
+        where: { id: platformId },
+        data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
+      });
 
-    // 内存层即时禁用
-    if (target.enabled === false) {
-      disabledKeys.add(banKeyId(platformId, key));
-      console.log(
-        `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数达 ${newCount}，已自动禁用（平台 ${platformId}）`
-      );
-    } else {
-      console.log(
-        `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数 ${newCount}/${KEY_ERROR_THRESHOLD}（平台 ${platformId}）`
-      );
-    }
+      // 内存层即时禁用
+      if (target.enabled === false) {
+        disabledKeys.add(banKeyId(platformId, key));
+        console.log(
+          `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数达 ${newCount}，已自动禁用（平台 ${platformId}）`
+        );
+      } else {
+        console.log(
+          `[platform-keys] 密钥 ${keyFingerprint(key)} 错误计数 ${newCount}/${KEY_ERROR_THRESHOLD}（平台 ${platformId}）`
+        );
+      }
+    };
+    const p = keyWriteTail.then(run, run);
+    keyWriteTail = p.catch(() => undefined);
+    await p;
   } catch (err) {
     console.error(
       `[platform-keys] 记录密钥错误失败:`,
@@ -544,48 +571,67 @@ export async function recordKeyError(
 }
 
 /**
- * 手动启用密钥：清零错误计数并设为 enabled
+ * 手动启用密钥：DB 清零 + 内存禁用/冷却清理 + KV 残留删除（统一实现）
  *
- * 同时清除内存禁用标记，即时生效
+ * - DB：enabled=true、errorCount=0（锁内重读，与 recordKeyError 共用 keyWriteTail 串行锁）
+ * - 内存：清除 disabledKeys 与 429 临时封禁/降级冷却（keyCooldowns/whitelistedKeyCooldowns），
+ *   立即生效，无需等冷却自然到期
+ * - KV：删除持久化残留（banned 无 TTL，冷启动 loadKeyStatusFromKV 会恢复继续封禁）
+ *
+ * db 可省略（Pages 管理端无 D1 binding 时走 createDb 自动检测）；
+ * kv 可省略（非 Cloudflare 部署无 KV binding）。
  */
 export async function enableKey(
   key: string,
   platformId: string,
-  db: D1Database,
-  env?: WorkerEnv
+  db?: D1Database,
+  kv?: KVNamespace,
+  dbType?: string
 ): Promise<void> {
   try {
-    const { createDb } = await import("@/lib/prisma");
-    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-    const platform = await prisma.platforms.findFirst({
-      where: { id: platformId },
-      select: { apiKeys: true },
-    });
-    if (!platform?.apiKeys) return;
+    const run = async (): Promise<void> => {
+      const { createDb } = await import("@/lib/prisma");
+      const prisma = await createDb(
+        db ? { DB: db, DB_TYPE: dbType ?? process.env.DB_TYPE } : undefined
+      );
+      // 锁内重读：基于最新已落库状态清零（与 recordKeyError 共用同一把锁）
+      const platform = await prisma.platforms.findFirst({
+        where: { id: platformId },
+        select: { apiKeys: true },
+      });
+      if (!platform?.apiKeys) return;
 
-    const keys = parseApiKeyObjects(platform.apiKeys);
-    const target = keys.find((k) => k.key === key);
-    if (!target) return;
+      const keys = parseApiKeyObjects(platform.apiKeys);
+      const target = keys.find((k) => k.key === key);
+      if (!target) return;
 
-    target.enabled = true;
-    target.errorCount = 0;
+      target.enabled = true;
+      target.errorCount = 0;
 
-    const updatedJson = JSON.stringify(keys.map((k) => {
-      const obj: Record<string, unknown> = { name: k.name, key: k.key };
-      if (k.whitelisted) obj.whitelisted = true;
-      if (k.enabled === false) obj.enabled = false;
-      if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
-      return obj;
-    }));
+      const updatedJson = JSON.stringify(keys.map((k) => {
+        const obj: Record<string, unknown> = { name: k.name, key: k.key };
+        if (k.whitelisted) obj.whitelisted = true;
+        if (k.enabled === false) obj.enabled = false;
+        if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
+        return obj;
+      }));
 
-    await prisma.platforms.update({
-      where: { id: platformId },
-      data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
-    });
+      await prisma.platforms.update({
+        where: { id: platformId },
+        data: { apiKeys: updatedJson, updatedAt: Math.floor(Date.now() / 1000) },
+      });
 
-    // 清除内存禁用标记
-    disabledKeys.delete(banKeyId(platformId, key));
-    console.log(`[platform-keys] 密钥 ${keyFingerprint(key)} 已手动启用，错误计数清零（平台 ${platformId}）`);
+      // 清除内存禁用标记与 429 临时封禁/降级冷却（立即生效）
+      clearKeyDisabled(key, platformId);
+      clearKeyCooldown(key, platformId);
+      // 删除 KV 持久化残留（无 TTL，冷启动会恢复继续封禁）
+      if (kv) await removePlatformKeyStatus(kv, platformId, keyFingerprint(key));
+
+      console.log(`[platform-keys] 密钥 ${keyFingerprint(key)} 已手动启用，错误计数清零（平台 ${platformId}）`);
+    };
+    const p = keyWriteTail.then(run, run);
+    keyWriteTail = p.catch(() => undefined);
+    await p;
   } catch (err) {
     console.error(
       `[platform-keys] 启用密钥失败:`,

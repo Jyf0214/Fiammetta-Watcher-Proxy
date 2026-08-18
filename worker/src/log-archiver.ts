@@ -214,6 +214,12 @@ async function archiveSingleDay(
 
   if (logs.length === 0) return { processed: 0, deleted: 0 };
 
+  // 归档幂等（重算语义）：该天日志仍存在时，先清空该天的旧聚合记录再全量重算。
+  // 归档中途失败（聚合写入后、日志删除前）次日重跑时，若不清空旧聚合而直接累加，
+  // 同一批日志会被计两次（daily_stats 纯加法无唯一约束，plan.md #27）；
+  // 完全成功归档后重跑时日志已删空，上方已提前返回，聚合记录不会被清除。
+  await prisma.dailyStats.deleteMany({ where: { date: dayStartTs } });
+
   // 按 key_id + model 分组聚合
   const groups = new Map<
     string,
@@ -306,96 +312,29 @@ async function archiveSingleDay(
     const avgDuration = group.latencyCount > 0 ? group.latencySum / group.latencyCount : 0;
     const avgTps = group.tpsCount > 0 ? group.tpsSum / group.tpsCount : 0;
 
-    // 查找已有聚合记录
-    const existing = await prisma.dailyStats.findFirst({
-      where: {
+    // 该天旧聚合已在开头清空，此处直接创建（重算语义，无累加分支）
+    await prisma.dailyStats.create({
+      data: {
+        id: `ds_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         date: dayStartTs,
         keyId: group.keyId,
+        keyName: group.keyName,
+        platformId: group.platformId,
         model: group.model,
-      },
-      select: {
-        id: true,
-        totalRequests: true,
-        errorRequests: true,
-        totalTokens: true,
-        totalPromptTokens: true,
-        totalCompletionTokens: true,
-        avgTtft: true,
-        avgDuration: true,
-        avgTps: true,
-        maxTtft: true,
-        maxDuration: true,
-        maxTps: true,
+        totalRequests: group.totalRequests,
+        errorRequests: group.errorRequests,
+        totalTokens: group.totalTokens,
+        totalPromptTokens: group.totalPromptTokens,
+        totalCompletionTokens: group.totalCompletionTokens,
+        avgTtft,
+        avgDuration,
+        avgTps,
+        maxTtft: group.maxTtft,
+        maxDuration: group.maxLatency,
+        maxTps: group.maxTps,
+        createdAt: Math.floor(Date.now() / 1000),
       },
     });
-
-    if (existing) {
-      const oldTotalRequests = existing.totalRequests;
-      const newTotalRequests = oldTotalRequests + group.totalRequests;
-      // daily_stats 未存储 ttft 样本计数，旧样本数用旧总请求数近似；
-      // avgTtft == 0 表示旧记录无 TTFT 样本（ttft > 0 才计入样本），此时权重取 0 避免被稀释
-      const existingTtftCount = existing.avgTtft > 0 ? oldTotalRequests : 0;
-
-      const newAvgTtft =
-        existingTtftCount + group.ttftCount > 0
-          ? (existing.avgTtft * existingTtftCount + group.ttftSum) /
-            (existingTtftCount + group.ttftCount)
-          : 0;
-
-      const newAvgDuration =
-        oldTotalRequests + group.latencyCount > 0
-          ? (existing.avgDuration * oldTotalRequests + group.latencySum) /
-            (oldTotalRequests + group.latencyCount)
-          : 0;
-
-      // TPS 加权平均：旧样本数用旧 TPS 样本近似（avgTps > 0 表示有 TPS 样本）
-      const existingTpsCount = existing.avgTps > 0 ? oldTotalRequests : 0;
-      const newAvgTps =
-        existingTpsCount + group.tpsCount > 0
-          ? (existing.avgTps * existingTpsCount + group.tpsSum) /
-            (existingTpsCount + group.tpsCount)
-          : 0;
-
-      await prisma.dailyStats.update({
-        where: { id: existing.id },
-        data: {
-          totalRequests: newTotalRequests,
-          errorRequests: existing.errorRequests + group.errorRequests,
-          totalTokens: existing.totalTokens + group.totalTokens,
-          totalPromptTokens: existing.totalPromptTokens + group.totalPromptTokens,
-          totalCompletionTokens: existing.totalCompletionTokens + group.totalCompletionTokens,
-          avgTtft: newAvgTtft,
-          avgDuration: newAvgDuration,
-          avgTps: newAvgTps,
-          maxTtft: Math.max(existing.maxTtft, group.maxTtft),
-          maxDuration: Math.max(existing.maxDuration, group.maxLatency),
-          maxTps: Math.max(existing.maxTps, group.maxTps),
-        },
-      });
-    } else {
-      await prisma.dailyStats.create({
-        data: {
-          id: `ds_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          date: dayStartTs,
-          keyId: group.keyId,
-          keyName: group.keyName,
-          platformId: group.platformId,
-          model: group.model,
-          totalRequests: group.totalRequests,
-          errorRequests: group.errorRequests,
-          totalTokens: group.totalTokens,
-          totalPromptTokens: group.totalPromptTokens,
-          totalCompletionTokens: group.totalCompletionTokens,
-          avgTtft,
-          avgDuration,
-          avgTps,
-          maxTtft: group.maxTtft,
-          maxDuration: group.maxLatency,
-          maxTps: group.maxTps,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      });
-    }
   }
 
   // 删除该天已归档的原始日志（按已收集的 id 分批删除，

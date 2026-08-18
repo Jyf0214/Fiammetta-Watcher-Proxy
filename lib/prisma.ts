@@ -259,6 +259,8 @@ export async function createDb(
 
 /**
  * 断开 Prisma 连接（Worker 关闭时或需要重建实例时调用）
+ *
+ * 仅测试使用，生产路径不调用（全局连接缓存设计）
  */
 export async function disconnectDb(): Promise<void> {
   if (cachedPrisma) {
