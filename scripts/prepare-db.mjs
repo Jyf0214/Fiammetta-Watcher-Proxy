@@ -17,6 +17,7 @@
  *   - prisma/schema.pg.prisma      → src/generated/pg/       （或 stub）
  *
  * 使用方式：
+ *   DB_TYPE=all node scripts/prepare-db.mjs   （Docker 镜像构建：生成全部方言，镜像与任意运行时 DB_TYPE 通用）
  *   DB_TYPE=d1 node scripts/prepare-db.mjs
  *   无 DB_TYPE/DATABASE_URL 时默认 d1（本地开发用 npm run db:dev 在 .env.local
  *   显式写入 DB_TYPE=pg + DATABASE_URL，切换到嵌入式 PostgreSQL）
@@ -66,6 +67,7 @@ loadDotEnv();
 
 function resolveDbType() {
   const dbType = process.env.DB_TYPE || "";
+  if (dbType === "all") return "all";
   if (DIALECTS[dbType]) return dbType;
 
   const url = process.env.DATABASE_URL || "";
@@ -78,6 +80,7 @@ function resolveDbType() {
 }
 
 const dbType = resolveDbType();
+const isAll = dbType === "all";
 const dialect = DIALECTS[dbType];
 
 if (
@@ -98,29 +101,37 @@ if (existsSync(GENERATED_ROOT)) {
   console.log(`已清理旧的生成目录: src/generated/`);
 }
 
-// ==================== 3. 生成 Prisma Client（仅需要的方言） ====================
+// ==================== 3. 生成 Prisma Client ====================
+// all 模式（Docker 镜像构建）生成全部四种方言，镜像与任意运行时 DB_TYPE 通用；
+// 单方言模式只生成需要的 client，其余方言写 stub（避免打包多余 WASM，Worker 体积控制）。
 
-console.log(`生成 ${dialect.name} Client (${dialect.file})`);
+const generateKeys = isAll ? ["d1", "tidb", "mariadb", "pg"] : [dbType];
 
-try {
-  execSync(
-    `npx prisma generate --schema=${dialect.file}`,
-    {
-      cwd: ROOT,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        DATABASE_URL: process.env.DATABASE_URL || "file:./placeholder.db",
-      },
-    }
-  );
-  console.log(`✓ ${dialect.name} Client 生成完成`);
-} catch (err) {
-  console.error(`✗ ${dialect.name} Client 生成失败:`, err.message);
-  process.exit(1);
+for (const key of generateKeys) {
+  const d = DIALECTS[key];
+  console.log(`生成 ${d.name} Client (${d.file})`);
+
+  try {
+    execSync(
+      `npx prisma generate --schema=${d.file}`,
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          DATABASE_URL: process.env.DATABASE_URL || "file:./placeholder.db",
+        },
+      }
+    );
+    console.log(`✓ ${d.name} Client 生成完成`);
+  } catch (err) {
+    console.error(`✗ ${d.name} Client 生成失败:`, err.message);
+    process.exit(1);
+  }
 }
 
 // ==================== 4. 为未使用的方言生成空 stub ====================
+// all 模式四种方言均为真实 client，不需要 stub。
 
 /**
  * stub 转发当前启用方言（dialect.dir）的真实 client 类型。
@@ -140,6 +151,7 @@ export type { Prisma } from "../${realDir}/client";
 }
 
 for (const [key, d] of Object.entries(DIALECTS)) {
+  if (isAll) continue;
   if (key === dbType || (dbType === "hyperdrive" && key === "pg")) continue;
   const stubDir = resolve(GENERATED_ROOT, d.dir);
   if (!existsSync(stubDir)) {
@@ -151,7 +163,9 @@ for (const [key, d] of Object.entries(DIALECTS)) {
 
 // ==================== 5. MySQL / MariaDB / PostgreSQL db push ====================
 
-if (dialect.needsPush) {
+if (isAll) {
+  console.log("all 模式：跳过 db push（表结构由容器启动时按运行时 DB_TYPE 同步）");
+} else if (dialect.needsPush) {
   // 运行时 lib/prisma.ts 的 url 取 MARIADB_URL || DATABASE_URL，建表必须保持一致
   const url = process.env.MARIADB_URL || process.env.DATABASE_URL || "";
   // 仅当 DATABASE_URL 协议与方言匹配时才 push，防止占位串（file:./placeholder.db）误推
@@ -189,4 +203,4 @@ if (dialect.needsPush) {
   console.log("D1 模式：跳过 db push（由 Python 部署脚本处理建表）");
 }
 
-console.log(`✓ Prisma Client 就绪（${dialect.name}，stub 覆盖未使用的方言）`);
+console.log(`✓ Prisma Client 就绪（${isAll ? "全方言（d1/mysql/mariadb/pg）" : `${dialect.name}，stub 覆盖未使用的方言`}）`);

@@ -8,9 +8,11 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
     chown -R nextjs:nodejs /app
 
-# 构建方言：Docker 部署仅支持 tidb / mariadb / pg（d1 只存在于 Cloudflare 运行时）。
-# 必须与运行时 DB_TYPE 一致——决定构建期生成的 Prisma Client 方言与转译内联的数据库栈。
-ARG DB_TYPE=pg
+# 构建方言：all=生成全部四种方言 client（d1/mysql/mariadb/pg），镜像与任意运行时
+# DB_TYPE 通用（Docker 无 Worker 体积限制）；指定单一方言可缩小镜像体积，
+# 但指定单一方言时构建期与运行期 DB_TYPE 必须一致，否则运行时会以错误的
+# 方言 client 加载对应 adapter（provider/adapter 不匹配报错）。
+ARG DB_TYPE=all
 ENV DB_TYPE=$DB_TYPE
 
 # 部署平台：构建期内联 NEXT_PUBLIC_DEPLOY_PLATFORM（前端展示/门控用），

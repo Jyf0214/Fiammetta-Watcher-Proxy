@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       db_type:
-        description: Prisma Client 方言（pg / mariadb / tidb）
+        description: Prisma Client 方言（all=全方言，镜像与任意运行时 DB_TYPE 通用；或指定单一方言缩小体积）
         type: choice
         options:
+          - all
           - pg
           - mariadb
           - tidb
-        default: pg
+        default: all
 
 jobs:
   build:
@@ -51,7 +52,7 @@ jobs:
           context: .
           file: ./Dockerfile
           build-args: |
-            DB_TYPE=${{ inputs.db_type || 'pg' }}
+            DB_TYPE=${{ inputs.db_type || 'all' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -64,7 +65,7 @@ jobs:
           context: .
           file: ./Dockerfile.lite
           build-args: |
-            DB_TYPE=${{ inputs.db_type || 'pg' }}
+            DB_TYPE=${{ inputs.db_type || 'all' }}
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:canary-lite
