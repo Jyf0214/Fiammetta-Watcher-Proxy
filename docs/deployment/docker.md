@@ -15,7 +15,7 @@
 | `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` | 完整版：管理后台 + V1 代理 + 定时任务 |
 | `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite` | 精简版：仅 V1 代理与定时任务 API，无管理后台 |
 
-镜像由 GitHub Actions 构建：网页手动触发 **Docker Build** 工作流（选择 `DB_TYPE`），或推送 `canary` 标签时自动构建。
+镜像由 GitHub Actions 构建：每次推送 `canary` 分支自动构建（推送 `canary` 标签时亦触发），也可在网页手动触发 **Docker Build** 工作流（选择 `DB_TYPE`）。
 
 ## 使用预构建镜像（完整版）
 

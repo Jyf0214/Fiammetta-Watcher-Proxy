@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 > [!TIP]
 > **Note: This project is under active development and unstable. Not recommended for production use.**
-> This repository (canary branch) publishes auto-built Docker images: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` (full) and `:canary-lite` (lite — V1 proxy + scheduled tasks only). Pull and run directly; images are rebuilt automatically when the `canary` tag is pushed or the Docker Build workflow is triggered manually.
+> This repository (canary branch) publishes auto-built Docker images: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` (full) and `:canary-lite` (lite — V1 proxy + scheduled tasks only). Pull and run directly; the Docker Build workflow runs automatically on every push to the `canary` branch (or when the `canary` tag is pushed or the workflow is triggered manually).
 
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployable on Cloudflare, EdgeOne, Vercel, or your own server (Docker).
 
@@ -119,7 +119,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 - Required env vars in `.env`: database password, `ADMIN_USERNAME` / `ADMIN_PASSWORD`, `JWT_SECRET`, etc.
 - The container syncs the database schema on startup; admin is authenticated via env vars (no `/setup` onboarding page)
-- Pre-built images are rebuilt automatically when the `canary` tag is pushed or the **Docker Build** workflow is triggered manually — see the deployment guide for details
+- Pre-built images are rebuilt automatically on every push to the `canary` branch by the **Docker Build** workflow (pushing the `canary` tag or triggering manually also works) — see the deployment guide for details
 
 ### Environment Variables
 
