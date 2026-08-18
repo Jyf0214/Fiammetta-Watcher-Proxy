@@ -11,6 +11,9 @@
  * - 请求格式：缺参 400、body 非对象 400、方法不允许 405
  * - DB 滑动窗口限流：5 次失败后 429 + resetAt、30 分钟窗口滑动、
  *   登录成功清除失败记录、IP 不可得 fail-open（不归入共享桶）
+ * - 进程内内存限流兜底（append-only 语义）：DB 写入故障（fail-open）时
+ *   内存计数仍限流（第 6 次 429）、DB 恢复后取 DB/内存较大者双向兜底、
+ *   登录成功只清内存不清审计记录
  * - 并发突刺（TOCTOU 回归）：并发失败请求不产生 200，事后限流仍生效
  * - GET 当前管理员：无 token / 有效 / 过期 / 篡改 / 弱配置
  * - DELETE 登出：清 Cookie + 审计 logout
@@ -35,6 +38,21 @@ vi.mock("@opennextjs/cloudflare", () => ({
   },
 }));
 
+// 数据库故障注入：failDb.enabled 时 createDb 抛错，模拟 DB 写入/查询失败。
+// 用 importOriginal 透传原实现（beforeAll 的 createTestDb 与各用例的
+// testDb 直接查询仍走真实 PGlite），仅被测 handler 的 createDb() 调用可被故障开关拦截
+const { failDb } = vi.hoisted(() => ({ failDb: { enabled: false } }));
+vi.mock("@/lib/prisma", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/prisma")>();
+  return {
+    ...mod,
+    createDb: async (env?: Record<string, unknown> | { DB: unknown }) => {
+      if (failDb.enabled) throw new Error("模拟数据库故障（进程内限流兜底测试）");
+      return mod.createDb(env);
+    },
+  };
+});
+
 const JWT_SECRET = "test-secret-0123456789abcdef0123456789abcdef"; // 48 字符，≥ 32
 const ADMIN_USERNAME = "admin";
 const ADMIN_PASSWORD = "correct-password-123";
@@ -48,6 +66,9 @@ const IP_WINDOW_OLD = "203.0.113.21";
 const IP_CLEAR_ON_SUCCESS = "203.0.113.30";
 const IP_NO_CLIENT = "203.0.113.40";
 const IP_CONCURRENT = "203.0.113.77";
+const IP_MEM_FALLBACK = "203.0.113.50"; // DB 故障期内存限流兜底
+const IP_MEM_RECOVER = "203.0.113.51"; // DB 恢复后取 DB/内存较大者
+const IP_DB_ONLY = "203.0.113.52"; // 内存为空仅 DB 有计数（重启等价场景）
 
 let testDb: TestDb;
 let savedPgUrl: string | undefined;
@@ -404,7 +425,7 @@ describe("POST /api/admin/auth — DB 滑动窗口限流", () => {
     expect(await countLoginFails(IP_WINDOW_OLD)).toBe(6); // 5 旧 + 1 新
   });
 
-  it("登录成功清除该 IP 的失败记录（限流计数归零）", async () => {
+  it("登录成功不删除失败审计记录（append-only），进程内计数归零", async () => {
     for (let i = 0; i < 3; i++) {
       await callHandler({
         socket: { remoteAddress: IP_CLEAR_ON_SUCCESS },
@@ -415,9 +436,11 @@ describe("POST /api/admin/auth — DB 滑动窗口限流", () => {
 
     const ok = await callHandler({ socket: { remoteAddress: IP_CLEAR_ON_SUCCESS } });
     expect(ok.statusCode).toBe(200);
-    expect(await countLoginFails(IP_CLEAR_ON_SUCCESS)).toBe(0);
+    // 审计 append-only：login_failed 记录不再被 deleteMany 物理删除
+    // （历史 bug：把审计表当计数表复用，成功登录后审计记录丢失）
+    expect(await countLoginFails(IP_CLEAR_ON_SUCCESS)).toBe(3);
 
-    // 成功后再次失败不触发限流（计数已归零）
+    // 进程内计数已清空，DB 窗口内 3+1=4 ≤ 5：再次失败不触发限流
     const again = await callHandler({
       socket: { remoteAddress: IP_CLEAR_ON_SUCCESS },
       body: { username: ADMIN_USERNAME, password: "wrong-password" },
@@ -438,6 +461,92 @@ describe("POST /api/admin/auth — DB 滑动窗口限流", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(log).not.toBeNull();
+  });
+});
+
+// ==================== POST — 进程内内存限流（DB 故障兜底） ====================
+
+describe("POST /api/admin/auth — 进程内内存限流（DB 故障兜底）", () => {
+  it("DB 写入失败（fail-open）时不 500：前 5 次仍 401，第 6 次起内存计数拦截 429", async () => {
+    failDb.enabled = true;
+    try {
+      for (let i = 0; i < 5; i++) {
+        const res = await callHandler({
+          socket: { remoteAddress: IP_MEM_FALLBACK },
+          body: { username: ADMIN_USERNAME, password: "wrong-password" },
+        });
+        // fail-open：DB 故障期间失败请求仍返回 401（限流是防滥用而非安全边界），
+        // 不因审计写入异常升级为 500；每次失败仍计入进程内窗口
+        expect(res.statusCode).toBe(401);
+      }
+
+      // 内存滑动窗口已积累 5 次：预检（readDbLoginFailInfo 的 DB 异常兜底分支）
+      // 直接以进程内计数拦截，无需 DB
+      const sixth = await callHandler({
+        socket: { remoteAddress: IP_MEM_FALLBACK },
+        body: { username: ADMIN_USERNAME, password: "wrong-password" },
+      });
+      expect(sixth.statusCode).toBe(429);
+      expect(sixth.body).toMatchObject({
+        success: false,
+        error: "登录尝试次数过多（5 次/30 分钟），请稍后再试",
+      });
+
+      // 故障期间审计零写入（writeAuditLog 在 createDb 处即抛错）：
+      // 计数完全由进程内窗口承担
+      expect(await countLoginFails(IP_MEM_FALLBACK)).toBe(0);
+    } finally {
+      failDb.enabled = false;
+    }
+  });
+
+  it("DB 恢复后计数取 DB 与内存较大者：内存 5 次而 DB 零记录仍拦截 429", async () => {
+    failDb.enabled = true;
+    try {
+      for (let i = 0; i < 5; i++) {
+        await callHandler({
+          socket: { remoteAddress: IP_MEM_RECOVER },
+          body: { username: ADMIN_USERNAME, password: "wrong-password" },
+        });
+      }
+    } finally {
+      failDb.enabled = false;
+    }
+    expect(await countLoginFails(IP_MEM_RECOVER)).toBe(0);
+
+    // DB 已恢复但本进程内存窗口仍记 5 次：预检取 max(DB=0, 内存=5) 拦截——
+    // 证明"进程重启后内存丢失由 DB 兜底、DB 故障时由内存兜底"的双向兜底中，
+    // 内存侧单独即可限流，且预检拦截不写库
+    const res = await callHandler({
+      socket: { remoteAddress: IP_MEM_RECOVER },
+      body: { username: ADMIN_USERNAME, password: "wrong-password" },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(await countLoginFails(IP_MEM_RECOVER)).toBe(0);
+  });
+
+  it("进程重启等价场景：DB 有 5 条窗口内记录而内存为空时，预检仍 429（DB 兜底）", async () => {
+    // 直接种入 5 条窗口内 login_failed 记录（模拟进程重启后内存丢失、仅剩
+    // DB 持久化计数；handler 未参与，进程内窗口为空）——取较大者时 DB 侧兜底
+    await testDb.db.auditLogs.createMany({
+      data: Array.from({ length: 5 }, (_, i) => ({
+        id: crypto.randomUUID(),
+        adminId: null,
+        action: "login_failed",
+        detail: JSON.stringify({ username: "legacy", reason: "重启前遗留" }),
+        ip: IP_DB_ONLY,
+        createdAt: Math.floor(Date.now() / 1000) - i,
+      })),
+    });
+
+    const res = await callHandler({
+      socket: { remoteAddress: IP_DB_ONLY },
+      body: { username: ADMIN_USERNAME, password: "wrong-password" },
+    });
+    expect(res.statusCode).toBe(429);
+    expect((res.body as { resetAt?: string }).resetAt).toBeDefined();
+    // 预检拦截不写库：仍 5 条
+    expect(await countLoginFails(IP_DB_ONLY)).toBe(5);
   });
 });
 

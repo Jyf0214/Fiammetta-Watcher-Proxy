@@ -328,6 +328,16 @@ export function sanitizeNonNegativeFloat(value: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= MAX_FLOAT_VALUE ? n : null;
 }
 
+/**
+ * BigInt 字段安全转换（如 apiKeys.usedTokens）：BigInt 不受 Int32 限制，
+ * 但 JS number 精度上限为 MAX_SAFE_INTEGER；超界返回 null（由调用方回退）
+ */
+export function sanitizeBigInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER ? Math.floor(n) : null;
+}
+
 /** 布尔值：仅接受 true/false，其余（含字符串 "false"）回退默认值 */
 export function sanitizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
@@ -591,10 +601,11 @@ async function importModelMaps(
   let skipped = 0;
   const skipReasons: Record<string, number> = {};
 
-  // 预加载已有 alias，用于去重
-  const existingAliases = await db.modelMappings.findMany({ select: { alias: true } });
-  const existingAliasSet = new Set(existingAliases.map((r) => r.alias));
-  // 批内去重：同一次导入中的重复 alias 只保留第一条
+  // 预加载已有 (alias, platformId)，用于去重（DB 唯一约束为 @@unique([alias, platformId])，
+  // 同一 alias 映射到不同平台是合法数据，不能按 alias 全局去重）
+  const existingAliases = await db.modelMappings.findMany({ select: { alias: true, platformId: true } });
+  const existingAliasSet = new Set(existingAliases.map((r) => `${r.alias}|${r.platformId ?? ""}`));
+  // 批内去重：同一次导入中的重复 (alias, platformId) 只保留第一条
   const batchSeenAliases = new Set<string>();
 
   // 外键校验：platformId 不存在时置 null，避免悬空引用导致路由 500（此模型不存在）
@@ -611,17 +622,18 @@ async function importModelMaps(
   const validMaps: Array<Record<string, unknown>> = [];
   for (const m of modelMaps) {
     const alias = sanitizeString(m.alias);
+    const rawPlatformId = sanitizeNullableString(m.platformId);
     if (!alias) {
       skipReasons["缺少 alias 字段"] = (skipReasons["缺少 alias 字段"] || 0) + 1;
       skipped++;
       continue;
     }
-    if (existingAliasSet.has(alias) || batchSeenAliases.has(alias)) {
+    if (existingAliasSet.has(`${alias}|${rawPlatformId ?? ""}`) || batchSeenAliases.has(`${alias}|${rawPlatformId ?? ""}`)) {
       skipReasons["alias 已存在"] = (skipReasons["alias 已存在"] || 0) + 1;
       skipped++;
       continue;
     }
-    batchSeenAliases.add(alias);
+    batchSeenAliases.add(`${alias}|${rawPlatformId ?? ""}`);
     validMaps.push(m);
   }
 
@@ -842,7 +854,7 @@ async function importApiKeys(
         id: keyId,
         key: k.key as string,
         name: sanitizeString(k.name) || "导入的 Key",
-        usedTokens: sanitizeNonNegativeInt(k.usedTokens) ?? 0,
+        usedTokens: sanitizeBigInt(k.usedTokens) ?? 0,
         rpmLimit: sanitizeNonNegativeInt(k.rpmLimit),
         tpmLimit: sanitizeNonNegativeInt(k.tpmLimit),
         callLimit: sanitizeNonNegativeInt(k.callLimit),
@@ -1001,8 +1013,9 @@ export function toUnixSeconds(value: unknown): number {
 /**
  * 导入审计日志
  *
- * 无外键依赖，使用 createMany 批量执行
- * adminId 不存在时置为 null（不阻塞导入）
+ * 无外键依赖（audit_logs.admin_id 无 @relation 约束），使用 createMany 批量执行；
+ * adminId 非空字符串原样保留（admins 表无写入路径，登录使用环境变量虚拟 ID "env-admin"，
+ * 此前按 admins 表校验导致所有导入记录 adminId 被置 null，备份恢复后身份信息丢失）
  */
 async function importAuditLogs(
   db: DbClient,
@@ -1011,10 +1024,6 @@ async function importAuditLogs(
   let imported = 0;
   let skipped = 0;
   const skipReasons: Record<string, number> = {};
-
-  // 预加载已有 adminId 集合，用于外键校验
-  const existingAdminRows = await db.admins.findMany({ select: { id: true } });
-  const validAdminIds = new Set(existingAdminRows.map((r) => r.id));
 
   // 分离有效和无效记录，逐条记录跳过原因
   const validLogs: Array<Record<string, unknown>> = [];
@@ -1033,7 +1042,7 @@ async function importAuditLogs(
       const rawAdminId = log.adminId as string | null | undefined;
       return {
         id: generateId(),
-        adminId: rawAdminId && validAdminIds.has(rawAdminId) ? rawAdminId : null,
+        adminId: rawAdminId && rawAdminId.length > 0 ? rawAdminId : null,
         action: truncateStr(log.action),
         detail: truncateStr(log.detail),
         ip: sanitizeNullableString(log.ip, 45),
@@ -1143,6 +1152,7 @@ export async function importRequestLogs(
       isError: sanitizeBoolean(log.isError, false),
       ipAddress: sanitizeNullableString(log.ipAddress, 45),
       userAgent: sanitizeNullableString(log.userAgent),
+      proxyUrl: sanitizeNullableString(log.proxyUrl),
       errorMessage: sanitizeNullableString(log.errorMessage),
       createdAt: toUnixSeconds(log.createdAt),
     };

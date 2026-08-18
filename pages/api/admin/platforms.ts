@@ -9,7 +9,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
-import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
+import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../worker/src/platform-keys";
 
@@ -328,10 +328,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const db = await createDb();
 
       // 写入数据库（Prisma camelCase 属性名）
+      // 注意：name 只做 trim，不做 escapeHtml——React 前端渲染会自动转义，
+      // 存库转义会导致 "AT&T" 显示为 "AT&amp;T"，再次保存再转义形成不可逆累积损坏
       await db.platforms.create({
         data: {
           id,
-          name: escapeHtml(name.trim()),
+          name: name.trim(),
           baseUrl: baseUrl.trim(),
           apiKeys: JSON.stringify(parsedApiKeys),
           type: platformType,

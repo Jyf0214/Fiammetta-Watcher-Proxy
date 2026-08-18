@@ -18,6 +18,7 @@ import {
   runProxyHealthCheck,
   pullProxyGroups,
   getHealthCheckIntervalMin,
+  isScheduledProxyHealthDisabled,
   PROXY_HEALTH_INTERVAL_MIN_RANGE,
 } from "./upstream-proxy";
 
@@ -171,7 +172,12 @@ export const DOCKER_TASKS: ScheduledTask[] = [
   {
     name: "proxy-health",
     spec: () => healthCheckSpec(getHealthCheckIntervalMin()),
-    run: () => runProxyHealthCheck(db, env),
+    // 环境变量 UPSTREAM_PROXY_DISABLED=all/health 时定时健康检查跳过
+    //（设备级禁用，不写库；管理页手动「立即检查」不受影响）
+    run: () =>
+      isScheduledProxyHealthDisabled()
+        ? Promise.resolve({})
+        : runProxyHealthCheck(db, env),
   },
   {
     name: "proxy-pull",

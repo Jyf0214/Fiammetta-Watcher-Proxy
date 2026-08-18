@@ -10,6 +10,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 
 /** 测试超时（毫秒） */
@@ -79,6 +80,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const { modelId } = req.body as { modelId?: string };

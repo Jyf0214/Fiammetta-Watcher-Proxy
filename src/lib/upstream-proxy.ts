@@ -31,6 +31,11 @@
  * 检查结果（cron proxy-health 定时 + 管理页手动触发）；业务请求网络层
  * 连续失败达阈值（markProxyFailure）的代理会被临时跳过轮询，健康检查
  * 成功时恢复。
+ *
+ * 路由选择：组内按「可用性 × 延迟」平滑加权轮询（见 getUpstreamProxy）。
+ * 可用性数据来自业务流量统计（recordProxyTraffic 每次请求回记 2xx/429/
+ * 其他失败，进程内滑动窗口），成功率接近 100% 的代理分得大部分请求，
+ * 持续 429/错误的代理仅保留极小份额，错误率超阈值的代理直接排除。
  */
 
 import { createDb, type Database } from "@/lib/prisma";
@@ -52,6 +57,32 @@ export const DEFAULT_PROXY_HEALTH_INTERVAL_MIN = 5;
 /** 健康检查间隔允许范围（分钟）：调度器按该间隔生成触发时刻 */
 export const PROXY_HEALTH_INTERVAL_MIN_RANGE = { min: 1, max: 60 } as const;
 
+/**
+ * 设备级禁用出站代理（环境变量 UPSTREAM_PROXY_DISABLED，仅影响当前部署实例，
+ * 不写数据库、不改共享配置）：
+ * - 不设置 / 空 / 其他值：正常
+ * - "all"：整体禁用——业务请求直连，拉取与健康检查全部不执行（含管理页手动）
+ * - "health"：仅禁用定时健康检查——调度器 proxy-health 与 cron 端点不执行，
+ *   管理页手动「立即检查」仍可用（拉取不受影响）
+ */
+export type UpstreamProxyDisableMode = "all" | "health";
+
+/** 读取设备级禁用模式（非法/未设置返回 null = 正常） */
+export function getProxyDisableMode(): UpstreamProxyDisableMode | null {
+  const mode = process.env.UPSTREAM_PROXY_DISABLED;
+  return mode === "all" || mode === "health" ? mode : null;
+}
+
+/** 出站代理整体禁用（all）：业务请求、拉取、健康检查（含手动）全部失效 */
+export function isUpstreamProxyDisabled(): boolean {
+  return getProxyDisableMode() === "all";
+}
+
+/** 定时健康检查禁用（all 或 health）：调度器与 cron 端点不执行，手动不受影响 */
+export function isScheduledProxyHealthDisabled(): boolean {
+  return getProxyDisableMode() !== null;
+}
+
 /** 缓存有效期：与 request-templates 的模板缓存一致（30s + updatedAt 失效检查） */
 const CACHE_TTL = 30_000;
 /** 健康检查单次超时（毫秒） */
@@ -71,6 +102,23 @@ const STATS_DOWNGRADE_WINDOW_MS = 10 * 60_000;
 const STATS_DOWNGRADE_MIN_SAMPLES = 5;
 /** 统计降权错误率阈值（429 等限流 + 其他失败占请求比例） */
 const STATS_DOWNGRADE_ERROR_RATE = 0.8;
+/** 业务流量窗口内成功率 → 可用性权重档位（路由分配用）：接近 100% 的代理
+ *  分得大部分请求，接近降权排除线（错误率 > 0.8）的代理仅保留极小份额；
+ *  成功率下限 0.2 以下与排除线衔接，档位权重跨越 40 倍，可用性主导分配 */
+const AVAILABILITY_WEIGHT_TIERS: ReadonlyArray<readonly [minSuccessRate: number, weight: number]> = [
+  [0.9, 8],
+  [0.7, 4],
+  [0.5, 2],
+  [0.3, 1],
+  [0.2, 0.5],
+  [0, 0.2],
+];
+/** 无业务流量统计/样本不足的代理：未知可用性给中性档（介于 0.5 与 0.7 档之间） */
+const AVAILABILITY_WEIGHT_UNKNOWN = 2;
+/** 延迟权重上限（最快代理）：延迟只做微调，可用性主导分配 */
+const LATENCY_WEIGHT_FASTEST = 1.25;
+/** 延迟权重下限（最慢代理）：与上限合计 1.67 倍差距，避免极端延迟值把权重拉爆 */
+const LATENCY_WEIGHT_SLOWEST = 0.75;
 
 /** 代理组：一源一组（sourceUrl 可空 = 纯手动组，不参与拉取） */
 export interface ProxyGroupConfig {
@@ -129,15 +177,23 @@ let cachedConfig: ProxyConfig | null = null;
 let cachedConfigUpdatedAt: number | null = null;
 let lastConfigRefresh = 0;
 let cachedPool: Record<string, string[]> | null = null;
-let cachedPoolUpdatedAt: number | null = null;
+/** pool 缓存失效信号：最近一次写入/读取的原始 value 字符串。秒级 updatedAt
+ *  在同秒双保存（健康检查每批写、多次拉取同秒完成）时不变化，无法区分内容
+ *  变化；以内容为信号后，同秒第二次写入（DB value 已变）必然触发重读，写失败
+ *  部分落库等「DB 与缓存不一致」场景也能自愈 */
+let cachedPoolValue: string | null = null;
 let lastPoolRefresh = 0;
 let cachedHealth: ProxyHealthMap | null = null;
-let cachedHealthUpdatedAt: number | null = null;
+/** health 缓存失效信号：同 cachedPoolValue（秒级 updatedAt 同秒双保存失效） */
+let cachedHealthValue: string | null = null;
 let lastHealthRefresh = 0;
 /** url → ProxyAgent 池：配置集合变化时释放不再使用的代理 */
 const proxyAgents = new Map<string, Dispatcher>();
-/** round-robin 轮询游标 */
+/** round-robin 轮询游标（仅全部候选异常时回退轮询使用） */
 let roundRobinIndex = 0;
+/** 平滑加权轮询状态：url → 当前累计权重（Nginx smooth weighted round-robin，
+ *  跨请求推进，保证高权重代理分得多但不连续独占、低权重代理保持均衡份额） */
+const proxyWeights = new Map<string, number>();
 /** 进程内连续失败计数（url → 次数） */
 const proxyFailCounts = new Map<string, number>();
 /** 进程内临时不可用集合（网络层连续失败达阈值，健康检查成功时清除） */
@@ -148,6 +204,8 @@ export interface ProxyTrafficStat {
   ok: number;
   err429: number;
   errOther: number;
+  /** 统计窗口起点：窗口固定 10 分钟滑动（非断流重置），持续请求也按窗口周期整体重置 */
+  firstAt: number;
   lastAt: number;
 }
 const proxyReqStats = new Map<string, ProxyTrafficStat>();
@@ -203,6 +261,26 @@ function isValidProxyUrl(value: string): boolean {
  *  与前端 upstream-proxy-ui.ts 的展示脱敏同实现，保证统计键两侧一致 */
 export function maskProxyUrl(url: string): string {
   return url.replace(/\/\/[^@\s]+@/, "//***@");
+}
+
+/** 统计聚合键：去凭据 host:port（请求日志落库与 stats 聚合统一使用）。
+ *  同 host:port 不同凭据（***@host:port vs host:port）共享同一统计键，
+ *  否则组级聚合翻倍；默认端口按协议归一化（http→80、https→443、socks→1080，
+ *  与 getAgent 的 socks 默认端口一致）。兼容历史数据：maskProxyUrl 产生的
+ *  ***@host:port 键与裸 host:port 均能解析并自动并入新键（userinfo 剥离）。
+ *  解析失败回退脱敏（不泄漏凭据、键保持稳定）。与前端 upstream-proxy-ui.ts
+ *  同实现，保证统计键两侧一致 */
+export function normalizeProxyStatKey(url: string): string {
+  try {
+    // 兼容无协议前缀的裸 host:port（历史脱敏键等），补 http:// 解析
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(url);
+    const parsed = new URL(hasScheme ? url : `http://${url}`);
+    const defaultPort =
+      parsed.protocol === "https:" ? 443 : parsed.protocol === "http:" ? 80 : 1080;
+    return `${parsed.hostname}:${parsed.port || defaultPort}`;
+  } catch {
+    return maskProxyUrl(url);
+  }
 }
 
 /** 单行代理地址规范化：兼容裸 host:port（自动补 http://）与 http(s)/socks4/socks5://
@@ -423,7 +501,9 @@ async function readProxyConfig(
   return cachedConfig;
 }
 
-/** 读取拉取结果（缓存模式与配置一致） */
+/** 读取拉取结果（缓存模式与配置一致；失效信号为 value 内容而非 updatedAt，
+ *  见 cachedPoolValue 注释——pool 由 cron/手动高频写，秒级时间戳区分不了
+ *  同秒双保存） */
 async function readProxyPool(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -435,10 +515,10 @@ async function readProxyPool(
     try {
       const meta = await prisma.configs.findFirst({
         where: { key: UPSTREAM_PROXY_POOL_KEY },
-        select: { updatedAt: true },
+        select: { value: true },
       });
-      // 行缺失时 meta?.updatedAt 为 undefined，归一到 null 再比较（同 readProxyConfig）
-      if ((meta?.updatedAt ?? null) === cachedPoolUpdatedAt) return cachedPool ?? {};
+      // 行缺失时 meta?.value 为 undefined，归一到 null 再比较（同 readProxyConfig）
+      if ((meta?.value ?? null) === cachedPoolValue) return cachedPool ?? {};
     } catch (err) {
       console.error("[upstream-proxy] 拉取结果失效检查失败，使用缓存:", err);
       return cachedPool ?? {};
@@ -448,14 +528,14 @@ async function readProxyPool(
   try {
     const row = await prisma.configs.findFirst({
       where: { key: UPSTREAM_PROXY_POOL_KEY },
-      select: { value: true, updatedAt: true },
+      select: { value: true },
     });
     cachedPool = parsePoolMap(row?.value ?? null);
-    cachedPoolUpdatedAt = row?.updatedAt ?? null;
+    cachedPoolValue = row?.value ?? null;
   } catch (err) {
     console.error("[upstream-proxy] 读取拉取结果失败:", err);
     cachedPool = null;
-    cachedPoolUpdatedAt = null;
+    cachedPoolValue = null;
   }
   lastPoolRefresh = now;
   return cachedPool ?? {};
@@ -469,21 +549,24 @@ async function writeProxyPool(
 ): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   const now = Math.floor(Date.now() / 1000);
+  const value = JSON.stringify(pool);
   await prisma.configs.upsert({
     where: { key: UPSTREAM_PROXY_POOL_KEY },
     create: {
       id: crypto.randomUUID(),
       key: UPSTREAM_PROXY_POOL_KEY,
-      value: JSON.stringify(pool),
+      value,
       updatedAt: now,
     },
-    update: { value: JSON.stringify(pool), updatedAt: now },
+    update: { value, updatedAt: now },
   });
   cachedPool = pool;
-  cachedPoolUpdatedAt = now;
+  cachedPoolValue = value;
 }
 
-/** 读取健康度记录（缓存模式与配置一致） */
+/** 读取健康度记录（缓存模式与配置一致；失效信号为 value 内容而非 updatedAt，
+ *  同 readProxyPool——健康表由健康检查每批/失败标记高频写，秒级时间戳区分
+ *  不了同秒双保存） */
 async function readProxyHealth(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -495,10 +578,10 @@ async function readProxyHealth(
     try {
       const meta = await prisma.configs.findFirst({
         where: { key: UPSTREAM_PROXY_HEALTH_KEY },
-        select: { updatedAt: true },
+        select: { value: true },
       });
-      // 行缺失时 meta?.updatedAt 为 undefined，归一到 null 再比较（同 readProxyConfig）
-      if ((meta?.updatedAt ?? null) === cachedHealthUpdatedAt) return cachedHealth ?? {};
+      // 行缺失时 meta?.value 为 undefined，归一到 null 再比较（同 readProxyConfig）
+      if ((meta?.value ?? null) === cachedHealthValue) return cachedHealth ?? {};
     } catch (err) {
       console.error("[upstream-proxy] 健康度失效检查失败，使用缓存:", err);
       return cachedHealth ?? {};
@@ -508,14 +591,14 @@ async function readProxyHealth(
   try {
     const row = await prisma.configs.findFirst({
       where: { key: UPSTREAM_PROXY_HEALTH_KEY },
-      select: { value: true, updatedAt: true },
+      select: { value: true },
     });
     cachedHealth = parseHealthMap(row?.value ?? null);
-    cachedHealthUpdatedAt = row?.updatedAt ?? null;
+    cachedHealthValue = row?.value ?? null;
   } catch (err) {
     console.error("[upstream-proxy] 读取健康度失败:", err);
     cachedHealth = null;
-    cachedHealthUpdatedAt = null;
+    cachedHealthValue = null;
   }
   lastHealthRefresh = now;
   return cachedHealth ?? {};
@@ -529,18 +612,19 @@ async function writeProxyHealth(
 ): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
   const now = Math.floor(Date.now() / 1000);
+  const value = JSON.stringify(map);
   await prisma.configs.upsert({
     where: { key: UPSTREAM_PROXY_HEALTH_KEY },
     create: {
       id: crypto.randomUUID(),
       key: UPSTREAM_PROXY_HEALTH_KEY,
-      value: JSON.stringify(map),
+      value,
       updatedAt: now,
     },
-    update: { value: JSON.stringify(map), updatedAt: now },
+    update: { value, updatedAt: now },
   });
   cachedHealth = map;
-  cachedHealthUpdatedAt = now;
+  cachedHealthValue = value;
 }
 
 /**
@@ -634,9 +718,30 @@ async function releaseStaleAgents(keepUrls: Set<string>): Promise<void> {
       unhealthyUrls.delete(url);
       proxyFailCounts.delete(url);
       proxyReqStats.delete(url);
+      proxyWeights.delete(url);
       void agent.close().catch(() => {});
     }
   }
+}
+
+/** 上次执行代理池清理时的配置/池引用：引用变化（重载/更新）才真正遍历清理 */
+let lastAgentSyncConfig: ProxyConfig | null = null;
+let lastAgentSyncPool: Record<string, string[]> | null = null;
+
+/**
+ * 仅在配置/池重载（引用变化）时执行代理池清理，热路径（每请求）上引用未变
+ * 时零开销跳过——代理集合只随配置保存/拉取变化，逐请求全量遍历纯属浪费。
+ * 引用比较依赖 readProxyPool 的模块级缓存：DB updatedAt 未变时返回同一引用，
+ * 写入路径总是赋新对象，引用变化即内容变化。
+ */
+async function syncStaleAgentsOnce(
+  config: ProxyConfig | null,
+  pool: Record<string, string[]> | null
+): Promise<void> {
+  if (config === lastAgentSyncConfig && pool === lastAgentSyncPool) return;
+  lastAgentSyncConfig = config;
+  lastAgentSyncPool = pool;
+  await releaseStaleAgents(new Set(config ? collectAllGroupUrls(config, pool ?? {}) : []));
 }
 
 /** 单个代理的健康探测（成功 = 通过代理请求探测地址得到 ok 响应） */
@@ -657,15 +762,24 @@ async function checkOneProxy(
       redirect: "follow",
     };
     const res = await fetch(healthCheckUrl, init);
+    // 延迟以响应头到达为准（TTFB）：fetch resolve 即链路连通，业务请求同样以
+    // 响应头为延迟基准；body 读取耗时不计入，避免响应体挂起把延迟顶到超时值
+    const latencyMs = Date.now() - start;
     // 必须消费响应体：未读取的 body 会使 undici 连接保持占用（keep-alive 不复用），
-    // 健康检查每轮对每个代理泄漏一个连接，fd/内存耗尽导致进程崩溃（无日志）
-    try {
-      await res.arrayBuffer();
-    } catch {
-      // 读 body 失败（含 mock/异常响应）不改变探测判定；能取消则取消，避免连接滞留
-      await res.body?.cancel().catch(() => {});
+    // 健康检查每轮对每个代理泄漏一个连接，fd/内存耗尽导致进程崩溃（无日志）。
+    // mock/异常响应可能没有 arrayBuffer（测试 stub 返回 { ok, status }），跳过读取
+    if (typeof res.arrayBuffer === "function") {
+      try {
+        await res.arrayBuffer();
+      } catch {
+        // body 未完整接收（挂满超时被 abort / 连接中断）：响应头虽到但响应不完整
+        // 是链路异常（如代理转发丢结束标记），判失败而非正常；能取消则取消，
+        // 避免连接滞留
+        await res.body?.cancel().catch(() => {});
+        return { ok: false, latencyMs };
+      }
     }
-    return { ok: res.ok, latencyMs: Date.now() - start };
+    return { ok: res.ok, latencyMs };
   } catch {
     return { ok: false, latencyMs: Date.now() - start };
   } finally {
@@ -770,8 +884,9 @@ export async function pullProxyGroups(
   db: D1Database | Database,
   env?: WorkerEnv
 ): Promise<Record<string, ProxyPullGroupResult>> {
-  // 与 getUpstreamProxy 相同的部署门控：非 Docker 部署不创建代理/写库
-  if (process.env.DEPLOY_PLATFORM !== "docker") return {};
+  // 与 getUpstreamProxy 相同的部署/禁用门控：非 Docker 部署不创建代理/写库；
+  // 环境变量整体禁用（all）时拉取同样不执行
+  if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return {};
   // 单飞：启动拉取/cron/管理页「立即拉取」并发时复用进行中的任务，避免并发
   // 拉取双写 pool 行（TiDB 行锁 1205）与互相覆盖（与 runningCheck 同模式）
   if (pullInFlight) return pullInFlight;
@@ -839,6 +954,7 @@ export async function pullProxyGroups(
           unhealthyUrls.delete(u);
           proxyFailCounts.delete(u);
           proxyReqStats.delete(u);
+          proxyWeights.delete(u);
         }
 
         if (fetched.length > 0) nextPool[group.name] = fetched;
@@ -898,26 +1014,74 @@ export async function pullProxyGroups(
  * 选择出站代理（无代理配置/非 Docker 部署/平台不在白名单时返回 null）
  *
  * 组选择：平台绑定组优先；未绑定的白名单平台走默认组（第一组）。
- * 组内代理按最近一次健康检查延迟升序选最低（clash url-test 语义）；
- * 健康度异常（表记录 fail 或进程内连续失败达阈值）的代理跳过；业务流量
- * 统计窗口内错误率过高（出口被上游限流）的代理降权跳过，窗口滑动自愈；
- * 延迟未知（从未检查）时按 round-robin 轮询；全部异常时回退组内全部代理
- * 轮询并告警。最低延迟代理故障由 markProxyFailure 黑名单机制自动切换到次优。
- * 调用方应把返回值注入上游 fetch 的 init.dispatcher（undici 扩展字段），
- * 并在网络层失败时用返回的 url 调用 markProxyFailure 回标记。
+ * 组内代理按「可用性 × 延迟」加权轮询：业务流量窗口内成功率高的代理分得
+ * 大部分请求（可用性主导，40 倍档位跨度），延迟仅微调；健康度异常
+ * （表记录 fail 或进程内连续失败达阈值）的代理跳过；业务流量统计窗口内
+ * 错误率过高（持续 429 等出口被上游限流）的代理排除，窗口滑动自愈；
+ * 延迟/统计未知时各代理权重相等退化为轮询分摊；全部异常时回退组内全部
+ * 代理轮询并告警。调用方应把返回值注入上游 fetch 的 init.dispatcher
+ * （undici 扩展字段），并在网络层失败时用返回的 url 调用 markProxyFailure
+ * 回标记、用返回状态调用 recordProxyTraffic 回记统计。
  */
+
+/** 业务流量窗口内成功率 → 可用性权重：样本不足视为未知（中性档）；档位
+ *  覆盖成功率 0.2~1.0 共 40 倍跨度，接近降权排除线（错误率 > 0.8）的代理
+ *  仅保留极小份额——可用性主导路由分配（导出供单元测试覆盖档位边界） */
+export function availabilityWeight(stat: ProxyTrafficStat | undefined): number {
+  if (!stat || stat.total < STATS_DOWNGRADE_MIN_SAMPLES) return AVAILABILITY_WEIGHT_UNKNOWN;
+  const successRate = stat.ok / stat.total;
+  for (const [minRate, weight] of AVAILABILITY_WEIGHT_TIERS) {
+    if (successRate >= minRate) return weight;
+  }
+  return AVAILABILITY_WEIGHT_TIERS[AVAILABILITY_WEIGHT_TIERS.length - 1][1];
+}
+
+/** 延迟权重：组内相对最快延迟线性微调（最快 ×1.25 / 最慢 ×0.75，未知 ×1）——
+ *  仅微调不主导；以「最快延迟/本代理延迟」的比值在上下限间插值，极端延迟
+ *  值（数十倍差距）最多压到下限，不会把权重拉爆或清零 */
+export function latencyWeight(latencyMs: number, minLatencyMs: number): number {
+  if (latencyMs <= 0 || minLatencyMs <= 0) return 1;
+  return LATENCY_WEIGHT_SLOWEST + (LATENCY_WEIGHT_FASTEST - LATENCY_WEIGHT_SLOWEST) * (minLatencyMs / latencyMs);
+}
+
+/** 平滑加权轮询（Nginx SWRR）选择：每次调用把权重累加到累计值，取累计值
+ *  最大的代理并从其累计值中扣除总权重。效果：代理被选中比例 = 权重比例，
+ *  且选择序列平滑——高权重代理不会连续独占（间隔分散），低权重代理周期性
+ *  获得份额（不饿死）；候选集合/权重随健康与统计动态变化时旧累计值自然
+ *  被新增量淹没，无需显式重置。单候选直接返回 */
+function pickWeightedProxy(urls: string[], weightOf: (url: string) => number): string {
+  if (urls.length === 1) return urls[0];
+  let total = 0;
+  let best = urls[0];
+  let bestVal = -Infinity;
+  for (const u of urls) {
+    const weight = weightOf(u);
+    const cur = (proxyWeights.get(u) ?? 0) + weight;
+    proxyWeights.set(u, cur);
+    total += weight;
+    if (cur > bestVal) {
+      bestVal = cur;
+      best = u;
+    }
+  }
+  proxyWeights.set(best, bestVal - total);
+  return best;
+}
+
 export async function getUpstreamProxy(
   db: D1Database | Database,
   env?: WorkerEnv,
   platformId?: string
 ): Promise<UpstreamProxySelection> {
   // 仅 Docker 部署：边缘运行时（workerd）没有 undici 连接池，且代理
-  // 服务器通常是容器网络内的地址，其他部署形态不适用
-  if (process.env.DEPLOY_PLATFORM !== "docker") return { dispatcher: null, url: null };
+  // 服务器通常是容器网络内的地址，其他部署形态不适用；环境变量整体禁用
+  // （all）时业务请求直连，不读配置、不建代理连接
+  if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return { dispatcher: null, url: null };
 
   const config = await readProxyConfig(db, env);
   if (!config) {
-    await releaseStaleAgents(new Set());
+    // 配置清空：回收全部连接（仅首次/重载时执行，热路径跳过）
+    await syncStaleAgentsOnce(null, null);
     return { dispatcher: null, url: null };
   }
 
@@ -936,7 +1100,7 @@ export async function getUpstreamProxy(
   const group = resolveTargetGroup(config, platformId);
   if (!group) {
     // 目标组被禁用：返回直连，同时回收该组代理连接（keepUrls 不含禁用组）
-    await releaseStaleAgents(new Set(collectAllGroupUrls(config, await readProxyPool(db, env))));
+    await syncStaleAgentsOnce(config, await readProxyPool(db, env));
     return { dispatcher: null, url: null };
   }
   const pool = await readProxyPool(db, env);
@@ -944,12 +1108,12 @@ export async function getUpstreamProxy(
   const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
   if (groupUrls.length === 0) {
     // 组内无代理（如拉取尚未成功）：返回直连，同时保持代理池与其他组同步
-    await releaseStaleAgents(new Set(allUrls));
+    await syncStaleAgentsOnce(config, pool);
     return { dispatcher: null, url: null };
   }
 
   // 保持代理池与全部组配置集合同步（跨组复用连接）
-  await releaseStaleAgents(new Set(allUrls));
+  await syncStaleAgentsOnce(config, pool);
 
   const health = await readProxyHealth(db, env);
   const candidates = groupUrls.filter(
@@ -977,19 +1141,22 @@ export async function getUpstreamProxy(
     return { dispatcher: await getAgent(fallbackUrl), url: fallbackUrl };
   }
 
-  // 按最近一次健康检查延迟选最优：已知延迟（>0）的代理按 latencyMs 升序
-  // 取最低（clash url-test 语义）；延迟未知（从未检查）时保持原顺序轮询，
-  // 避免健康检查未运行时流量固定打向第一个代理。最低延迟代理连续失败由
-  // markProxyFailure 黑名单自动切换到次优
-  const knownLatency: string[] = [];
+  // 组内加权轮询：权重 = 可用性档位 × 延迟系数。可用性（业务流量窗口内
+  // 成功率，recordProxyTraffic 记录）主导分配——接近 100% 成功的代理分得
+  // 大部分请求，持续 429/错误的代理（未达降权排除线）仅保留极小份额，
+  // 且持续异常代理已被上方候选过滤排除；延迟只做 ±25% 微调，不再无脑
+  // 固定打向最低延迟代理。平滑加权轮询保证高权重代理分得多但不连续独占、
+  // 低权重代理保持均衡份额，无统计样本时各代理权重相等退化为轮询分摊。
+  // 最低延迟代理连续失败仍由 markProxyFailure 黑名单自动隔离
+  let minLatency = 0;
   for (const u of candidates) {
-    if ((health[u]?.latencyMs ?? 0) > 0) knownLatency.push(u);
+    const l = health[u]?.latencyMs ?? 0;
+    if (l > 0 && (minLatency === 0 || l < minLatency)) minLatency = l;
   }
-  const useLatency = knownLatency.length > 0;
-  const url = useLatency
-    ? knownLatency.sort((a, b) => (health[a]?.latencyMs ?? 0) - (health[b]?.latencyMs ?? 0))[0]
-    : candidates[roundRobinIndex % candidates.length];
-  if (!useLatency) roundRobinIndex++;
+  const url = pickWeightedProxy(candidates, (u) => {
+    const latency = health[u]?.latencyMs ?? 0;
+    return availabilityWeight(proxyReqStats.get(u)) * latencyWeight(latency, minLatency);
+  });
   return { dispatcher: await getAgent(url), url };
 }
 
@@ -1002,13 +1169,13 @@ export function recordProxyTraffic(url: string | undefined, status: number): voi
   if (!url) return;
   const now = Date.now();
   const prev = proxyReqStats.get(url);
-  // 窗口滑动后旧计数不再参与择优：跨窗口直接重置，避免历史大基数
-  // 既推迟降权触发、又拖慢窗口后的恢复（isProxyStatDegraded 同时以
-  // lastAt 过期兜底）
+  // 窗口起点固定：窗口滑过（firstAt + 10 分钟）后整体重置，持续请求下同样
+  // 周期性清零——错误率始终反映最近一个窗口，旧错误基数不无限累积；
+  // （此前按请求间隙断流重置：请求持续不断时计数永不重置，与文档滑窗语义不符）
   const cur =
-    prev && now - prev.lastAt <= STATS_DOWNGRADE_WINDOW_MS
+    prev && now - prev.firstAt <= STATS_DOWNGRADE_WINDOW_MS
       ? prev
-      : { total: 0, ok: 0, err429: 0, errOther: 0, lastAt: now };
+      : { total: 0, ok: 0, err429: 0, errOther: 0, firstAt: now, lastAt: now };
   cur.total += 1;
   if (status >= 200 && status < 300) cur.ok += 1;
   else if (status === 429) cur.err429 += 1;
@@ -1023,6 +1190,18 @@ export function isProxyStatDegraded(stat: ProxyTrafficStat): boolean {
   if (Date.now() - stat.lastAt > STATS_DOWNGRADE_WINDOW_MS) return false;
   const errRate = (stat.err429 + stat.errOther) / stat.total;
   return errRate > STATS_DOWNGRADE_ERROR_RATE;
+}
+
+/**
+ * 当前处于统计降权（路由已跳过）的代理 URL 列表：供管理 stats API 暴露给前端
+ * 展示降权徽标——健康点仍显示 ok 但路由已跳过，此前完全不可见
+ */
+export function getDegradedProxyUrls(): string[] {
+  const degraded: string[] = [];
+  for (const [url, stat] of proxyReqStats) {
+    if (isProxyStatDegraded(stat)) degraded.push(url);
+  }
+  return degraded;
 }
 
 /**
@@ -1070,9 +1249,10 @@ export async function runProxyHealthCheck(
   db: D1Database | Database,
   env?: WorkerEnv
 ): Promise<ProxyHealthMap> {
-  // 与 getUpstreamProxy/getProxyHealth 相同的部署门控：cron 在非 Docker
-  // 部署下可能残留代理配置，不应创建 ProxyAgent 或写入健康表
-  if (process.env.DEPLOY_PLATFORM !== "docker") return {};
+  // 与 getUpstreamProxy/getProxyHealth 相同的部署/禁用门控：cron 在非 Docker
+  // 部署下可能残留代理配置，不应创建 ProxyAgent 或写入健康表；环境变量整体
+  // 禁用（all）时手动触发同样不执行（health 模式仅定时禁用，手动仍可用）
+  if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return {};
   if (runningCheck) return runningCheck;
 
   healthCheckProgress = { running: true, total: 0, checked: 0, startedAt: Date.now() };
@@ -1142,12 +1322,12 @@ export async function runProxyHealthCheck(
   return runningCheck;
 }
 
-/** 读取最近一次健康度结果与当前检查进度（管理页展示，非 Docker 部署返回空） */
+/** 读取最近一次健康度结果与当前检查进度（管理页展示，非 Docker 部署或整体禁用返回空） */
 export async function getProxyHealth(
   db: D1Database | Database,
   env?: WorkerEnv
 ): Promise<{ results: ProxyHealthMap; progress: HealthCheckProgress }> {
-  if (process.env.DEPLOY_PLATFORM !== "docker") {
+  if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) {
     return { results: {}, progress: { running: false, total: 0, checked: 0, startedAt: 0 } };
   }
   return { results: await readProxyHealth(db, env), progress: getHealthCheckProgress() };

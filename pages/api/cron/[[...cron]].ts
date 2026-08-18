@@ -16,14 +16,22 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { fetchAllPlatformModels } from "../../../worker/src/model-fetcher";
 import { handleScheduledReset } from "../../../worker/src/key-reset";
 import { runArchiveTask } from "../../../worker/src/log-archiver";
-import { runProxyHealthCheck, pullProxyGroups } from "@/lib/upstream-proxy";
+import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 
 const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) => Promise<unknown>> = {
   "model-fetch": fetchAllPlatformModels,
   "key-reset": handleScheduledReset,
   "log-archive": runArchiveTask,
-  "proxy-health": runProxyHealthCheck,
-  "proxy-pull": pullProxyGroups,
+  // 设备级禁用（UPSTREAM_PROXY_DISABLED）：proxy-health 在 all/health 下跳过、
+  // proxy-pull 在 all 下跳过——返回 disabled 标记而非失败，外部调度器不会误判重试
+  "proxy-health": (db, env) =>
+    isScheduledProxyHealthDisabled()
+      ? Promise.resolve({ success: true, disabled: true })
+      : runProxyHealthCheck(db, env),
+  "proxy-pull": (db, env) =>
+    isUpstreamProxyDisabled()
+      ? Promise.resolve({ success: true, disabled: true })
+      : pullProxyGroups(db, env),
 };
 
 /** 常量时间字符串比较，防止通过响应时差枚举 CRON_SECRET（与 auth.ts 实现一致） */
@@ -74,7 +82,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const result = await CRON_ROUTES[task](dummyDb, env);
     const elapsed = Date.now() - start;
     console.log(`[cron] ${task} 完成 (${elapsed}ms)`);
-    if (result && typeof result === "object" && "success" in result) return res.status(200).json({ task, elapsed, ...result });
+    if (result && typeof result === "object" && "success" in result) {
+      // 任务函数（如 runArchiveTask）内部捕获异常后返回 { success: false } 而非抛错，
+      // 此前无条件 200 会把失败伪装成成功（外部调度器无法感知失败重试）；
+      // 失败同样不向调用方回显内部错误细节（message 含 err.message，可能泄露 DB 信息）
+      if (result.success === false) {
+        return res.status(500).json({ success: false, task, elapsed, error: "任务执行失败" });
+      }
+      return res.status(200).json({ task, elapsed, ...result });
+    }
     return res.status(200).json({ success: true, task, elapsed, message: `${task} 完成` });
   } catch (err) {
     const elapsed = Date.now() - start;

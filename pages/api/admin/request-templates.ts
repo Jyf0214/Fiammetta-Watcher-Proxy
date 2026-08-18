@@ -15,6 +15,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -110,6 +111,7 @@ export default async function handler(
     // ==================== POST — 创建新模板 ====================
     if (req.method === "POST") {
       if (!checkCsrfOrigin(req, res)) return;
+      if (!(await checkAdminRateLimit(admin.adminId, res))) return;
       const body: {
         name?: string;
         description?: string;
@@ -170,6 +172,7 @@ export default async function handler(
     // ==================== PUT — 更新已有模板 ====================
     if (req.method === "PUT") {
       if (!checkCsrfOrigin(req, res)) return;
+      if (!(await checkAdminRateLimit(admin.adminId, res))) return;
       const body: {
         id?: string;
         name?: string;
@@ -215,9 +218,23 @@ export default async function handler(
         }
         templates[idx].description = description.trim();
       }
-      if (models !== undefined) templates[idx].models = models;
+      // models/enabled 与 name/description 同样做类型校验：非数组/非布尔
+      // 直接赋值会把脏数据写入 configs，运行时通配符匹配/开关判断出错
+      if (models !== undefined) {
+        if (!Array.isArray(models) || !models.every((m) => typeof m === "string")) {
+          res.status(400).json({ success: false, error: "模板模型列表必须为字符串数组" });
+          return;
+        }
+        templates[idx].models = models;
+      }
       if (mergeBody !== undefined) templates[idx].mergeBody = sanitizeMergeBody(mergeBody as Record<string, unknown>);
-      if (enabled !== undefined) templates[idx].enabled = enabled;
+      if (enabled !== undefined) {
+        if (typeof enabled !== "boolean") {
+          res.status(400).json({ success: false, error: "模板启用状态必须为布尔值" });
+          return;
+        }
+        templates[idx].enabled = enabled;
+      }
 
       await saveTemplates(db, templates);
 
@@ -232,6 +249,7 @@ export default async function handler(
     // ==================== DELETE — 删除模板 ====================
     if (req.method === "DELETE") {
       if (!checkCsrfOrigin(req, res)) return;
+      if (!(await checkAdminRateLimit(admin.adminId, res))) return;
       // 兼容两种传参：query（?id=xxx）与 body（{ id }），前端使用 query 方式
       const body: { id?: string } = req.body ?? {};
       const id = (req.query.id as string) || body.id;

@@ -87,6 +87,21 @@ export default async function handler(
       _max: { createdAt: true },
     });
 
+    // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求，
+    // 错误请求（ttft/latency 恒为 0）不稀释均值；请求总数/Token 仍取上方全量
+    // 口径（与仪表盘 stats.ts 的 perfAgg/detailAgg 双聚合一致）
+    const perfGrouped = await orm.requestLogs.groupBy({
+      by: ["keyId"],
+      where: { ...where, isError: false },
+      _count: { id: true },
+      _sum: { ttft: true, latency: true },
+    });
+    const perfMap = new Map<string, typeof perfGrouped[number]>(
+      perfGrouped
+        .filter((g: typeof perfGrouped[number]) => g.keyId != null)
+        .map((g: typeof perfGrouped[number]) => [g.keyId as string, g])
+    );
+
     // 按 keyId 建索引
     const statsMap = new Map<string, typeof grouped[number]>(
       grouped
@@ -94,13 +109,90 @@ export default async function handler(
         .map((g: typeof grouped[number]) => [g.keyId as string, g])
     );
 
+    // ── period=all 历史部分（daily_stats 归档产物）──
+    // 归档把 30 天前的明细从 request_logs 聚合进 daily_stats 后删除，
+    // period=all 只查 request_logs 会永久缩水 30 天；daily_stats 未存 TTFT/
+    // 耗时的样本总和，用"平均 × 非错误请求数"近似（与仪表盘 stats.ts 的
+    // 历史累加口径一致），首末请求时间取 daily_stats 的日期范围并入。
+    // 仅 period=all 需要：其他 period 的窗口内数据未归档，全部在 request_logs。
+    const histByKey = new Map<
+      string,
+      {
+        totalRequests: number;
+        totalTokens: number;
+        promptTokens: number;
+        completionTokens: number;
+        ttftSum: number;
+        latencySum: number;
+        perfCount: number;
+        firstDate: number | null;
+        lastDate: number | null;
+      }
+    >();
+    if (startTimestamp === undefined) {
+      const histRows = await orm.dailyStats.findMany({
+        where: keyId ? { keyId } : {},
+        select: {
+          keyId: true,
+          date: true,
+          totalRequests: true,
+          errorRequests: true,
+          totalTokens: true,
+          totalPromptTokens: true,
+          totalCompletionTokens: true,
+          avgTtft: true,
+          avgDuration: true,
+        },
+      });
+      for (const row of histRows) {
+        // 与明细口径一致：keyId 为 null 的日志不归属任何 Key，跳过
+        if (!row.keyId) continue;
+        const h = histByKey.get(row.keyId) ?? {
+          totalRequests: 0,
+          totalTokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttftSum: 0,
+          latencySum: 0,
+          perfCount: 0,
+          firstDate: null,
+          lastDate: null,
+        };
+        const perfCount = row.totalRequests - row.errorRequests;
+        h.totalRequests += row.totalRequests;
+        h.totalTokens += row.totalTokens;
+        h.promptTokens += row.totalPromptTokens;
+        h.completionTokens += row.totalCompletionTokens;
+        h.perfCount += perfCount;
+        // avg 为 0 表示该组无样本（ttft/latency > 0 才计入），权重取 0 避免稀释
+        if (row.avgTtft > 0) h.ttftSum += row.avgTtft * perfCount;
+        if (row.avgDuration > 0) h.latencySum += row.avgDuration * perfCount;
+        if (h.firstDate === null || row.date < h.firstDate) h.firstDate = row.date;
+        if (h.lastDate === null || row.date > h.lastDate) h.lastDate = row.date;
+        histByKey.set(row.keyId, h);
+      }
+    }
+
     // 合并 Key 信息和统计数据
     const result = keys.map((k: { id: string; name: string; key: string; status: string; tokenLimit: number | null; usedTokens: bigint; createdAt: number }) => {
       const g = statsMap.get(k.id);
-      const totalTokens = g?._sum.tokens ?? 0;
-      const totalRequests = g?._count.id ?? 0;
-      const firstRequestAt = g?._min.createdAt ?? null;
-      const lastRequestAt = g?._max.createdAt ?? null;
+      const h = histByKey.get(k.id);
+      const pg = perfMap.get(k.id);
+      const totalTokens = (g?._sum.tokens ?? 0) + (h?.totalTokens ?? 0);
+      const totalRequests = (g?._count.id ?? 0) + (h?.totalRequests ?? 0);
+      // 平均分母：仅非错误请求（明细 perfGrouped 计数 + 历史非错误请求数近似）
+      const perfCount = (pg?._count.id ?? 0) + (h?.perfCount ?? 0);
+      const ttftSum = (pg?._sum.ttft ?? 0) + (h?.ttftSum ?? 0);
+      const latencySum = (pg?._sum.latency ?? 0) + (h?.latencySum ?? 0);
+      // 首末请求时间：明细与历史（daily_stats 日期）取更早/更晚者
+      const firstRequestAt = (() => {
+        const candidates = [g?._min.createdAt ?? null, h?.firstDate ?? null].filter((v): v is number => v != null);
+        return candidates.length > 0 ? Math.min(...candidates) : null;
+      })();
+      const lastRequestAt = (() => {
+        const candidates = [g?._max.createdAt ?? null, h?.lastDate ?? null].filter((v): v is number => v != null);
+        return candidates.length > 0 ? Math.max(...candidates) : null;
+      })();
 
       // 计算实际活动时间跨度
       let timeSpanSeconds = 0;
@@ -121,10 +213,10 @@ export default async function handler(
         stats: {
           totalRequests,
           totalTokens,
-          promptTokens: g?._sum.promptTokens ?? 0,
-          completionTokens: g?._sum.completionTokens ?? 0,
-          avgTtft: totalRequests > 0 ? Math.round((g?._sum.ttft ?? 0) / totalRequests) : 0,
-          avgDuration: totalRequests > 0 ? Math.round((g?._sum.latency ?? 0) / totalRequests) : 0,
+          promptTokens: (g?._sum.promptTokens ?? 0) + (h?.promptTokens ?? 0),
+          completionTokens: (g?._sum.completionTokens ?? 0) + (h?.completionTokens ?? 0),
+          avgTtft: perfCount > 0 ? Math.round(ttftSum / perfCount) : 0,
+          avgDuration: perfCount > 0 ? Math.round(latencySum / perfCount) : 0,
           avgTokensPerSecond: timeSpanSeconds > 0
             ? Math.round((totalTokens / timeSpanSeconds) * 100) / 100
             : 0,

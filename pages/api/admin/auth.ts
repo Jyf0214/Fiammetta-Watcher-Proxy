@@ -22,6 +22,38 @@ const COOKIE_NAME = "admin_token";
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 30 * 60 * 1000;
 
+/**
+ * 进程内登录失败滑动窗口（ip → 失败时间戳数组）
+ *
+ * 与 DB 持久化计数并行的独立计数结构：审计日志不再承担计数职责，
+ * login_failed 记录保持 append-only（登录成功不再 deleteMany 物理删除，
+ * 否则审计记录丢失——历史 bug：把审计表当计数表复用）。
+ * 内存窗口保证：DB 写入失败（fail-open 放行）时本进程仍可限流；
+ * 登录成功时清空本进程计数（DB 记录保留，靠 30 分钟窗口自然过期）。
+ */
+const loginFailMemory = new Map<string, number[]>();
+
+/** 记录一次登录失败（时间戳入窗，先记录后判定——与"先写后查"同序） */
+function recordMemoryFail(ip: string): void {
+  const ts = loginFailMemory.get(ip) ?? [];
+  ts.push(Math.floor(Date.now() / 1000));
+  loginFailMemory.set(ip, ts);
+}
+
+/** 统计窗口内失败数并清理窗口外时间戳（避免 Map 无限增长） */
+function countMemoryFails(ip: string): number {
+  const since = Math.floor(Date.now() / 1000) - LOGIN_WINDOW_MS / 1000;
+  const ts = (loginFailMemory.get(ip) ?? []).filter((t) => t >= since);
+  if (ts.length === 0) loginFailMemory.delete(ip);
+  else loginFailMemory.set(ip, ts);
+  return ts.length;
+}
+
+/** 登录成功清空该 IP 的进程内计数（DB 失败记录保留，append-only） */
+function clearMemoryFails(ip: string): void {
+  loginFailMemory.delete(ip);
+}
+
 // ==================== 工具函数 ====================
 
 /** JWT_SECRET 最小长度（防止弱密钥被暴力破解） */
@@ -178,32 +210,36 @@ async function writeAuditLog(
 }
 
 /**
- * 登录限流"先写后查"：每次失败先插入一条 login_failed 占位记录（即审计日志），
+ * 登录限流"先写后查"：每次失败先插入一条 login_failed 记录（审计，append-only），
  * 再统计最近 30 分钟的失败数。并发请求各自插入后再计数，读取到的计数必然
  * 包含本次及之前的尝试——消除了"先查后写"下 count 与 insert 之间的
  * TOCTOU 竞态窗口（此前并发突刺可让全部请求同时读到低计数而绕过上限）。
- * 计数超过上限（第 6 条起）即拒绝；登录成功时调用方会清除该 IP 的
- * 全部失败记录（占位随成功一并清除）。
+ * 计数超过上限（第 6 条起）即拒绝；登录成功时调用方会清空该 IP 的
+ * 进程内计数（clearMemoryFails），DB 记录不再删除、靠窗口自然过期。
  * 正确性前提：单库强一致（读自己的写）。TiDB serverless 单端点 / 单库部署
  * 成立；若未来引入从库读/多区域读，此方案需重新评估。
  * DB 故障时放行（fail-open，限流是防滥用而非安全边界），但记录错误日志，
- * 避免限流静默失效（历史教训：审计写入失败曾被静默吞掉）。
+ * 避免限流静默失效（历史教训：审计写入失败曾被静默吞掉）；
+ * DB 故障时进程内计数（loginFailMemory）仍生效，限流不因 DB 故障完全失效。
  */
 async function registerDbLoginAttempt(
   ip: string,
   username: string,
   reason = "登录尝试"
 ): Promise<{ limited: boolean; resetAt?: string }> {
+  // 先记录进程内计数（独立于 DB 结果，DB 写失败也计入）
+  recordMemoryFail(ip);
   try {
     const now = Math.floor(Date.now() / 1000);
-    // 先写入本次尝试的占位记录（即审计日志）；未登录无管理员身份，adminId 置 null
+    // 先写入本次尝试的审计记录（append-only，不再被删除）；未登录无管理员身份，adminId 置 null
     await writeAuditLog("login_failed", { username, reason }, ip, null);
     const db = await createDb();
     const since = now - LOGIN_WINDOW_MS / 1000;
     const fails = await db.auditLogs.count({
       where: { action: "login_failed", ip, createdAt: { gte: since } },
     });
-    if (fails > LOGIN_MAX_ATTEMPTS) {
+    const memFails = countMemoryFails(ip);
+    if (fails > LOGIN_MAX_ATTEMPTS || memFails > LOGIN_MAX_ATTEMPTS) {
       // resetAt 用最近一次失败的窗口到期时间近似
       const last = await db.auditLogs.findFirst({
         where: { action: "login_failed", ip, createdAt: { gte: since } },
@@ -220,6 +256,10 @@ async function registerDbLoginAttempt(
       "[auth] 登录失败计数写入异常（本次限流放行）:",
       err instanceof Error ? err.message : String(err)
     );
+    // DB 不可用时退回进程内计数：仍超限则拒绝
+    if (countMemoryFails(ip) > LOGIN_MAX_ATTEMPTS) {
+      return { limited: true };
+    }
     return { limited: false };
   }
 }
@@ -228,6 +268,7 @@ async function registerDbLoginAttempt(
  * 只读查询某 IP 最近 30 分钟的登录失败计数（预检用）。
  * 不写入任何记录；并发安全由失败分支的"先写后查"（registerDbLoginAttempt）
  * 保证，预检只是让已超限的 IP 快速被拒、避免持续写库。
+ * 计数取 DB 与进程内窗口的较大者（重启后内存丢失，DB 兜底；DB 故障时内存兜底）。
  */
 async function readDbLoginFailInfo(ip: string): Promise<{ count: number; resetAt?: string }> {
   try {
@@ -236,7 +277,9 @@ async function readDbLoginFailInfo(ip: string): Promise<{ count: number; resetAt
     const count = await db.auditLogs.count({
       where: { action: "login_failed", ip, createdAt: { gte: since } },
     });
-    if (count === 0) return { count };
+    const memFails = countMemoryFails(ip);
+    const total = Math.max(count, memFails);
+    if (total === 0) return { count: 0 };
     const last = await db.auditLogs.findFirst({
       where: { action: "login_failed", ip, createdAt: { gte: since } },
       orderBy: { createdAt: "desc" },
@@ -244,13 +287,13 @@ async function readDbLoginFailInfo(ip: string): Promise<{ count: number; resetAt
     const resetAt = last
       ? new Date((last.createdAt + LOGIN_WINDOW_MS / 1000) * 1000).toISOString()
       : undefined;
-    return { count, resetAt };
+    return { count: total, resetAt };
   } catch (err) {
     console.error(
       "[auth] 登录失败计数查询异常（预检放行）:",
       err instanceof Error ? err.message : String(err)
     );
-    return { count: 0 };
+    return { count: countMemoryFails(ip) };
   }
 }
 
@@ -371,14 +414,11 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
 
-    // 登录成功 → 清除该 IP 的 login_failed 审计记录（DB 限流计数归零）+ 审计
+    // 登录成功 → 清空该 IP 的进程内失败计数（审计失败记录保持 append-only，
+    // 不再 deleteMany 物理删除——审计表承担展示职责，不被当作计数表复用；
+    // DB 记录靠 30 分钟滑动窗口自然过期）+ 审计
     if (clientIp) {
-      try {
-        const db = await createDb();
-        await db.auditLogs.deleteMany({
-          where: { action: "login_failed", ip: clientIp },
-        });
-      } catch { /* 清除失败不阻塞主流程，下次登录仍可用 */ }
+      clearMemoryFails(clientIp);
     }
     await writeAuditLog("login_success", { username: env.ADMIN_USERNAME }, clientIp, "env-admin").catch(() => {});
 

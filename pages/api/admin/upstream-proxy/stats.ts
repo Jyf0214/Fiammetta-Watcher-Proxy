@@ -11,7 +11,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
-import { getProxyHealth, UPSTREAM_PROXY_POOL_KEY } from "@/lib/upstream-proxy";
+import {
+  getProxyHealth,
+  getDegradedProxyUrls,
+  normalizeProxyStatKey,
+  getProxyDisableMode,
+  UPSTREAM_PROXY_POOL_KEY,
+} from "@/lib/upstream-proxy";
 
 /** 单代理统计：按状态码分类的请求分布与可用率（可用率 = 2xx 请求占比） */
 export interface ProxyTrafficStats {
@@ -60,8 +66,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const stats: Record<string, ProxyTrafficStats> = {};
     for (const row of grouped) {
-      const url = row.proxyUrl;
-      if (!url) continue;
+      if (!row.proxyUrl) continue;
+      // 聚合键归一化为去凭据 host:port：新落库键已归一化（幂等）；历史
+      // maskProxyUrl 键（***@host:port）与旧版原样落库键在此并入新键，
+      // 同 host:port 不同凭据不再分成两个键
+      const url = normalizeProxyStatKey(row.proxyUrl);
       const cur = stats[url] ?? {
         total: 0,
         ok: 0,
@@ -105,13 +114,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("[API /api/admin/upstream-proxy/stats] 读取健康检查时间失败:", err instanceof Error ? err.message : String(err));
     }
 
+    // 当前统计降权（路由已跳过）的代理：进程内实时状态（与 v1 路由同进程，
+    // 直接读内存 Map；键为原始 URL，转归一化键与前端查表一致）
+    const degradedUrls = getDegradedProxyUrls().map(normalizeProxyStatKey);
+
     return res.status(200).json({
       success: true,
       data: {
         hours,
         stats,
+        degradedUrls,
         poolUpdatedAt,
         lastHealthAt,
+        // 设备级禁用状态（环境变量 UPSTREAM_PROXY_DISABLED）：all=整体禁用、
+        // health=仅定时健康检查禁用；null=正常。前端据此展示提示条与禁用手动按钮
+        proxyDisabled: getProxyDisableMode(),
       },
     });
   } catch (err) {

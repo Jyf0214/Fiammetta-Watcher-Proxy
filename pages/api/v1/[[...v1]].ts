@@ -387,10 +387,31 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游请求超时", proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
         sendV1Error(res, config, 504, "上游请求超时", "timeout_error"); return;
       }
-      // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过
+      // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过；
+      // 补落请求日志（status=0），否则真实失败不出现在 request_logs——
+      // 统计可用率高估且与降权统计（recordProxyTraffic 记 errOther）口径矛盾
       if (proxy?.url) {
         recordProxyTraffic(proxy.url, 0);
         void markProxyFailure(dummyDb, env, proxy.url).catch(() => {});
+        void recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: cur.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: 0,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: e instanceof Error ? e.message : String(e),
+          proxyUrl: proxy.url,
+          db: dummyDb,
+          env,
+        }).catch(() => {});
       }
       throw e;
     }
@@ -437,6 +458,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);
+      // 消费本次失败的响应体，避免 undici keep-alive 连接泄漏（空响应分支 body 已
+      // 被 handleUpstreamResponsePages 消费过，此处 arrayBuffer 会 reject 被吞，安全）
+      void upRes.arrayBuffer().catch(() => {});
       const nk = getRandomKeyExcept(cur, tried);
       if (nk) { curKey = nk; continue; }
       const ops = getPlatformsForModel(tgt, triedP);

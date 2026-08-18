@@ -14,8 +14,9 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
-import { keyFingerprint, removePlatformKeyStatus } from "@/lib/key-status";
-import { clearKeyDisabled, clearKeyCooldown, markKeyDisabled } from "../../../../../worker/src/platform-keys";
+import { keyFingerprint } from "@/lib/key-status";
+import { enableKey, markKeyDisabled } from "../../../../../worker/src/platform-keys";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -43,6 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ success: false, error: "未授权" });
   }
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   const id = String(req.query.id || "");
   const { key: targetKey, enabled } = req.body as { key?: string; enabled?: boolean };
@@ -67,36 +69,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ success: false, error: "密钥不存在" });
     }
 
-    // 启用：清零错误计数
-    if (enabled) {
-      target.enabled = true;
-      delete target.errorCount;
-    } else {
-      // 禁用：保留错误计数
-      target.enabled = false;
-    }
-
-    const updatedJson = JSON.stringify(keys);
+    // 启用：统一走 worker enableKey（锁内重读 DB 清零 + 内存禁用/冷却清理 + KV 残留删除）；
+    // 禁用：保留错误计数，DB 更新 + 内存标记
     const now = Math.floor(Date.now() / 1000);
-    await db.platforms.update({
-      where: { id },
-      data: { apiKeys: updatedJson, updatedAt: now },
-    });
-
-    // 启用时同步清理内存层的 disabledKeys 与 429 临时封禁/降级冷却（即时生效），
-    // 并删除 KV 中残留的 banned 记录（无 TTL，冷启动时会被恢复继续封禁）；
-    // 禁用时同步标记（即时生效）
     if (enabled) {
-      clearKeyDisabled(targetKey, id);
-      clearKeyCooldown(targetKey, id);
+      let kv: KVNamespace | undefined;
       try {
         const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-        const kv = getCloudflareContext().env.KV as KVNamespace | undefined;
-        if (kv) await removePlatformKeyStatus(kv, id, keyFingerprint(targetKey));
+        kv = getCloudflareContext().env.KV as KVNamespace | undefined;
       } catch {
         // 本地开发或非 Cloudflare 环境没有 KV binding
       }
+      await enableKey(targetKey, id, undefined, kv);
     } else {
+      target.enabled = false;
+      const updatedJson = JSON.stringify(keys);
+      await db.platforms.update({
+        where: { id },
+        data: { apiKeys: updatedJson, updatedAt: now },
+      });
       markKeyDisabled(targetKey, id);
     }
 

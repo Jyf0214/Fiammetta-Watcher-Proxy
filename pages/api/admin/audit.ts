@@ -40,20 +40,15 @@ export default async function handler(
       db.auditLogs.count(),
     ]);
 
-    // 批量查询关联的管理员用户名
-    const adminIds = Array.from(new Set(items.map((log) => log.adminId).filter((id): id is string => id !== null)));
-    const admins = adminIds.length > 0
-      ? await db.admins.findMany({ where: { id: { in: adminIds } } })
-      : [];
-    const adminMap = new Map(admins.map((a) => [a.id, a.username]));
-
+    // admins 表全项目无写入路径（登录用环境变量比对，JWT 的 adminId 为虚拟 "env-admin"），
+    // 不再查询 admins 表，直接以 adminId 本身作为展示名；adminId 为 null（system-key 认证写入）时保持 null
     res.status(200).json({
       success: true,
       data: {
         items: items.map((log) => ({
           id: log.id,
           adminId: log.adminId,
-          username: log.adminId ? adminMap.get(log.adminId) ?? null : null,
+          username: log.adminId ?? null,
           action: log.action,
           detail: log.detail,
           ip: log.ip,

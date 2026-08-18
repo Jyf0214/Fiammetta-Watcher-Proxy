@@ -11,7 +11,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
-import { getProxyHealth, runProxyHealthCheck, getHealthCheckProgress } from "@/lib/upstream-proxy";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { getProxyHealth, runProxyHealthCheck, getHealthCheckProgress, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 
 export default async function handler(
   req: NextApiRequest,
@@ -27,6 +28,11 @@ export default async function handler(
     return res.status(400).json({ success: false, error: "出站代理仅 Docker 部署可用" });
   }
 
+  // 环境变量整体禁用（all）：手动触发同样不执行（health 模式仅定时禁用，手动仍可用）
+  if (isUpstreamProxyDisabled() && req.method === "POST") {
+    return res.status(400).json({ success: false, error: "出站代理已通过环境变量 UPSTREAM_PROXY_DISABLED=all 禁用" });
+  }
+
   try {
     const db = await createDb();
 
@@ -37,6 +43,7 @@ export default async function handler(
 
     if (req.method === "POST") {
       if (!checkCsrfOrigin(req, res)) return;
+      if (!(await checkAdminRateLimit(admin.adminId, res))) return;
       // 已在检查中：直接返回当前进度，不重复启动
       if (getHealthCheckProgress().running) {
         const { results, progress } = await getProxyHealth(db);

@@ -6,6 +6,8 @@
  * - 配置解析：旧版纯 URL 字符串 / JSON（urls + platformIds + healthCheckUrl）
  * - 平台白名单：空列表=全部平台；非空时仅勾选平台走代理
  * - 多代理 round-robin 轮询（交替选择，health fail / 连续失败跳过）
+ * - 可用性×延迟加权选择：成功率档位权重主导分配、延迟微调、持续 429
+ *   的代理即使延迟最低也不选中、按权重比例平滑分配不连续独占
  * - markProxyFailure：网络层失败达阈值后写入健康表并跳过轮询
  * - runProxyHealthCheck：探测结果写入健康表（cron 与管理页共用）
  * - 缓存：TTL 内复用；configs.updatedAt 变化强制重载
@@ -79,10 +81,17 @@ const HEALTH_KEY = "system:upstream_proxy_health";
 
 let originalPlatform: string | undefined;
 let originalDbType: string | undefined;
+let originalProxyDisabled: string | undefined;
 
 function setPlatform(value: string | undefined) {
   if (value === undefined) delete process.env.DEPLOY_PLATFORM;
   else process.env.DEPLOY_PLATFORM = value;
+}
+
+/** 设置设备级禁用环境变量（undefined = 清除） */
+function setProxyDisabled(value: string | undefined) {
+  if (value === undefined) delete process.env.UPSTREAM_PROXY_DISABLED;
+  else process.env.UPSTREAM_PROXY_DISABLED = value;
 }
 
 /** 按查询 key 返回配置行（失效检查与全量读取共用同一 mock 实现）；
@@ -110,13 +119,16 @@ beforeEach(() => {
   createdSocksDispatchers.length = 0;
   originalPlatform = process.env.DEPLOY_PLATFORM;
   originalDbType = process.env.DB_TYPE;
+  originalProxyDisabled = process.env.UPSTREAM_PROXY_DISABLED;
   setPlatform("docker");
+  setProxyDisabled(undefined);
 });
 
 afterEach(() => {
   setPlatform(originalPlatform);
   if (originalDbType === undefined) delete process.env.DB_TYPE;
   else process.env.DB_TYPE = originalDbType;
+  setProxyDisabled(originalProxyDisabled);
   vi.unstubAllGlobals();
 });
 
@@ -458,7 +470,7 @@ describe("多代理轮询", () => {
     expect([first.url, second.url]).toContain("http://127.0.0.1:7891");
   });
 
-  it("已知延迟：按 latencyMs 升序选最低（clash url-test 语义），不轮询", async () => {
+  it("已知延迟：可用性×延迟加权轮询，低延迟代理占多数但不固定独占", async () => {
     const { getUpstreamProxy } = await loadModule();
     setConfigRows({
       [CONFIG_KEY]: {
@@ -474,15 +486,21 @@ describe("多代理轮询", () => {
       },
     });
 
+    // 无业务流量统计 → 可用性中性（2）；延迟微调：7891（45ms）权重 2.5 >
+    // 7890（120ms）权重 1.875，比例 57:43。平滑加权轮询不连续独占：
+    // 序列 7891/7890/7891（此前的 clash url-test 语义固定每次选 7891）
     const first = await getUpstreamProxy(mockDb, mockEnv);
     const second = await getUpstreamProxy(mockDb, mockEnv);
+    const third = await getUpstreamProxy(mockDb, mockEnv);
 
-    // 连续多次都选最低延迟的 7891
-    expect(first.url).toBe("http://127.0.0.1:7891");
-    expect(second.url).toBe("http://127.0.0.1:7891");
+    expect([first.url, second.url, third.url]).toEqual([
+      "http://127.0.0.1:7891",
+      "http://127.0.0.1:7890",
+      "http://127.0.0.1:7891",
+    ]);
   });
 
-  it("延迟已知 + fail 混排：fail 代理被跳过，仍在 ok 中选最低", async () => {
+  it("延迟已知 + fail 混排：fail 代理被跳过，ok 中低延迟代理权重更高", async () => {
     const { getUpstreamProxy } = await loadModule();
     setConfigRows({
       [CONFIG_KEY]: {
@@ -499,10 +517,17 @@ describe("多代理轮询", () => {
       },
     });
 
+    // 首轮：7891（延迟最低但 fail）被跳过，ok 中 7890 权重最高 → 选中
     const result = await getUpstreamProxy(mockDb, mockEnv);
-
-    // 7891 延迟最低但已 fail，选 ok 中最低的 7890
     expect(result.url).toBe("http://127.0.0.1:7890");
+
+    // 连续多次不固定同一代理：7892（权重 2.0）周期性获得份额
+    const picks = new Set<string>();
+    for (let i = 0; i < 6; i++) {
+      picks.add((await getUpstreamProxy(mockDb, mockEnv)).url as string);
+    }
+    expect(picks.has("http://127.0.0.1:7892")).toBe(true);
+    expect(picks.has("http://127.0.0.1:7891")).toBe(false);
   });
 });
 
@@ -616,6 +641,55 @@ describe("runProxyHealthCheck 健康检查", () => {
     expect(results[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
     const written = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
     expect(written[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
+  });
+
+  it("响应头到达但 body 读取失败（挂满超时被 abort）→ 判失败而非正常", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([URL_A]);
+    // 模拟坏代理：响应头正常返回但响应体永不结束，10s 超时被 abort 中断
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => {
+          throw new Error("This operation was aborted");
+        },
+      }))
+    );
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    // 响应不完整 = 链路异常，不得显示"正常 · 10000ms"
+    expect(results[URL_A]).toMatchObject({ status: "fail", failCount: 1 });
+    // 延迟记录的是响应头到达耗时（TTFB），不是被 abort 顶满的超时值
+    expect(results[URL_A]!.latencyMs).toBeLessThan(10000);
+    const written = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
+    expect(written[URL_A]).toMatchObject({ status: "fail", failCount: 1 });
+  });
+
+  it("延迟按响应头到达计时（TTFB）：body 读取耗时不计入", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([URL_A]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        // 响应头立即返回；body 需 300ms 才读完——延迟不得包含这段耗时
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => {
+            await new Promise((r) => setTimeout(r, 300));
+            return new ArrayBuffer(0);
+          },
+        };
+      })
+    );
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    expect(results[URL_A]).toMatchObject({ status: "ok" });
+    expect(results[URL_A]!.latencyMs).toBeLessThan(300);
   });
 
   it("探测成功 → 清除进程内失败标记并清零 failCount", async () => {
@@ -888,6 +962,40 @@ describe("缓存与更新", () => {
 
     expect(result.dispatcher).toBeNull();
     expect(result.url).toBeNull();
+  });
+
+  it("同秒双保存：pool/health 的 value 变化而 updatedAt 不变 → 失效检查以内容为信号强制重载", async () => {
+    const POOL_KEY = "system:upstream_proxy_pool";
+    const URL_A = "http://127.0.0.1:7890";
+    const URL_B = "http://127.0.0.1:7891";
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", urls: [URL_A, URL_B] }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    // 首次全量读取建立缓存
+    expect((await getUpstreamProxy(mockDb, mockEnv)).url).toBe(URL_A);
+
+    // 模拟同秒双保存（cron 拉取/健康检查每批与上一次写入同秒完成）：
+    // value 已变化但 updatedAt 保持同秒不变（秒级时间戳无法区分内容变化）
+    dbRows[POOL_KEY] = { value: JSON.stringify({ g1: [URL_A, URL_B] }), updatedAt: 1000 };
+    dbRows[HEALTH_KEY] = {
+      value: JSON.stringify({ [URL_B]: { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 1 } }),
+      updatedAt: 1000,
+    };
+
+    // TTL 内读取：必须以 value 为失效信号重读——pool 新增了 URL_B（否则路由
+    // 永远看不到新代理），health 标记 URL_B fail（否则 fail 代理仍参与轮询）
+    const seen = new Set<string>();
+    for (let i = 0; i < 4; i++) {
+      const r = await getUpstreamProxy(mockDb, mockEnv);
+      if (r.url) seen.add(r.url);
+    }
+    expect(seen).toEqual(new Set([URL_A]));
   });
 });
 
@@ -1481,17 +1589,17 @@ describe("业务流量统计与路由降权", () => {
     const { isProxyStatDegraded } = await loadModule();
     const now = Date.now();
     // 样本不足（即使全错）不降权
-    expect(isProxyStatDegraded({ total: 4, ok: 0, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    expect(isProxyStatDegraded({ total: 4, ok: 0, err429: 4, errOther: 0, firstAt: now, lastAt: now })).toBe(false);
     // 错误率 5/6 > 0.8 → 降权（429 计入错误）
-    expect(isProxyStatDegraded({ total: 6, ok: 1, err429: 5, errOther: 0, lastAt: now })).toBe(true);
+    expect(isProxyStatDegraded({ total: 6, ok: 1, err429: 5, errOther: 0, firstAt: now, lastAt: now })).toBe(true);
     // errOther（网络层失败 status=0 / 非 429 错误）同样计入错误
-    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 0, errOther: 5, lastAt: now })).toBe(true);
+    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 0, errOther: 5, firstAt: now, lastAt: now })).toBe(true);
     // 错误率 4/6 ≈ 0.667 ≤ 0.8 → 不降权
-    expect(isProxyStatDegraded({ total: 6, ok: 2, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    expect(isProxyStatDegraded({ total: 6, ok: 2, err429: 4, errOther: 0, firstAt: now, lastAt: now })).toBe(false);
     // 边界：恰好 0.8（4/5）不降权（严格大于才降权）
-    expect(isProxyStatDegraded({ total: 5, ok: 1, err429: 4, errOther: 0, lastAt: now })).toBe(false);
+    expect(isProxyStatDegraded({ total: 5, ok: 1, err429: 4, errOther: 0, firstAt: now, lastAt: now })).toBe(false);
     // 窗口滑动（lastAt 超过 10 分钟）→ 自动恢复
-    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 5, errOther: 0, lastAt: now - 11 * 60_000 })).toBe(false);
+    expect(isProxyStatDegraded({ total: 5, ok: 0, err429: 5, errOther: 0, firstAt: now - 11 * 60_000, lastAt: now - 11 * 60_000 })).toBe(false);
   });
 
   it("recordProxyTraffic 分类：429 计入错误 / 200 计入成功，错误率超阈值的代理被路由跳过", async () => {
@@ -1527,13 +1635,62 @@ describe("业务流量统计与路由降权", () => {
       vi.setSystemTime(Date.now() + 11 * 60_000);
       recordProxyTraffic(URL_A, 200);
       for (let i = 0; i < 4; i++) recordProxyTraffic(URL_A, 429);
-      const r1 = await getUpstreamProxy(mockDb, mockEnv);
-      const r2 = await getUpstreamProxy(mockDb, mockEnv);
-      // A 恢复为候选（轮询游标已推进，连续两轮覆盖 A/B）
-      expect([r1.url, r2.url]).toEqual([URL_B, URL_A]);
+      // A 恢复为候选但成功率仅 0.2 → 可用性档位 0.5（B 无统计中性 2），
+      // 平滑加权轮询按权重比例 1:4 分配：5 次序列 B B A B B（A 占 1/5
+      // = 20%，仅分少量请求而非与健康代理均分——此前的轮询平均分配）
+      const picks: Array<string | null> = [];
+      for (let i = 0; i < 5; i++) {
+        picks.push((await getUpstreamProxy(mockDb, mockEnv)).url);
+      }
+      expect(picks).toEqual([URL_B, URL_B, URL_A, URL_B, URL_B]);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("recordProxyTraffic 真滑窗：持续请求下窗口起点固定，滑过即整体重置（断流重置实现不重置）", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWithTwoHealthy();
+    vi.useFakeTimers();
+    try {
+      const t0 = Date.now();
+      // 窗口内 A 达降权阈值（5/5 全错）→ 路由只选 B
+      for (let i = 0; i < 5; i++) recordProxyTraffic(URL_A, 429);
+      expect((await getUpstreamProxy(mockDb, mockEnv)).url).toBe(URL_B);
+
+      // 持续请求不断流：第 1~9 分钟各 1 次 429（错误基数持续累积，lastAt 始终新鲜）
+      for (let m = 1; m <= 9; m++) {
+        vi.setSystemTime(t0 + m * 60_000);
+        recordProxyTraffic(URL_A, 429);
+      }
+      // 第 11 分钟（窗口滑过 firstAt + 10 分钟）1 次成功：真滑窗整体重置后
+      // 错误率只反映本次成功（样本不足不降权、可用性未知中性 → A 恢复候选
+      // 且与 B 均等权重）；断流重置实现下 lastAt 持续新鲜 → 计数不重置仍
+      // 14/14 全错（降权）——该用例可区分两种实现。均等权重下平滑加权轮询
+      // 退化为轮询：先 A（tie 取先出现）后 B
+      vi.setSystemTime(t0 + 11 * 60_000);
+      recordProxyTraffic(URL_A, 200);
+      const r1 = await getUpstreamProxy(mockDb, mockEnv);
+      const r2 = await getUpstreamProxy(mockDb, mockEnv);
+      expect([r1.url, r2.url]).toEqual([URL_A, URL_B]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("getDegradedProxyUrls：仅返回窗口内错误率超阈值的代理（样本不足/正常/跨窗口恢复均排除）", async () => {
+    const { getDegradedProxyUrls, recordProxyTraffic } = await loadModule();
+    // 无统计 → 空
+    expect(getDegradedProxyUrls()).toEqual([]);
+    // 样本不足（4 次全错）→ 不降权
+    for (let i = 0; i < 4; i++) recordProxyTraffic(URL_A, 429);
+    expect(getDegradedProxyUrls()).toEqual([]);
+    // 达阈值（5/5 全错）→ 降权
+    recordProxyTraffic(URL_A, 429);
+    expect(getDegradedProxyUrls()).toEqual([URL_A]);
+    // 正常代理（200 为主）不计入
+    for (let i = 0; i < 4; i++) recordProxyTraffic(URL_B, 200);
+    expect(getDegradedProxyUrls()).toEqual([URL_A]);
   });
 
   it("recordProxyTraffic 忽略空地址（直连请求不产生统计条目）", async () => {
@@ -1563,6 +1720,113 @@ describe("业务流量统计与路由降权", () => {
 
     expect(first.url).toBe(URL_A);
     expect(second.url).toBe(URL_B);
+  });
+});
+
+describe("可用性×延迟加权选择", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const URL_B = "http://127.0.0.1:7891";
+
+  function configWith(urls: string[], health: Record<string, unknown>) {
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls, platformIds: [] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify(health), updatedAt: 1000 },
+    });
+  }
+
+  it("availabilityWeight 档位：成功率越高权重越大，样本不足中性，接近排除线仅极小份额", async () => {
+    const { availabilityWeight } = await loadModule();
+    const now = Date.now();
+    const stat = (ok: number, err: number) => ({
+      total: ok + err,
+      ok,
+      err429: err,
+      errOther: 0,
+      firstAt: now,
+      lastAt: now,
+    });
+    // 无统计 / 样本不足（total < 5）→ 中性档 2
+    expect(availabilityWeight(undefined)).toBe(2);
+    expect(availabilityWeight(stat(4, 0))).toBe(2);
+    // 成功率档位边界（0.9/0.7/0.5/0.3/0.2 含边界值）
+    expect(availabilityWeight(stat(5, 0))).toBe(8); // 1.0
+    expect(availabilityWeight(stat(9, 1))).toBe(8); // 0.9
+    expect(availabilityWeight(stat(8, 2))).toBe(4); // 0.8
+    expect(availabilityWeight(stat(7, 3))).toBe(4); // 0.7
+    expect(availabilityWeight(stat(6, 4))).toBe(2); // 0.6
+    expect(availabilityWeight(stat(5, 5))).toBe(2); // 0.5
+    expect(availabilityWeight(stat(4, 6))).toBe(1); // 0.4
+    expect(availabilityWeight(stat(3, 7))).toBe(1); // 0.3
+    expect(availabilityWeight(stat(2, 8))).toBe(0.5); // 0.2
+    expect(availabilityWeight(stat(1, 9))).toBe(0.2); // 0.1
+    expect(availabilityWeight(stat(0, 5))).toBe(0.2); // 0（降权排除线边缘）
+  });
+
+  it("latencyWeight：最快 ×1.25 / 最慢下探 0.75 / 未知或组内无已知延迟 ×1", async () => {
+    const { latencyWeight } = await loadModule();
+    expect(latencyWeight(100, 100)).toBe(1.25); // 最快（= 组内最小延迟）
+    expect(latencyWeight(200, 100)).toBe(1); // 2 倍延迟
+    expect(latencyWeight(400, 100)).toBe(0.875); // 4 倍延迟
+    expect(latencyWeight(1000, 100)).toBe(0.8); // 10 倍延迟（极端值压向 0.75 下限）
+    expect(latencyWeight(0, 100)).toBe(1); // 延迟未知
+    expect(latencyWeight(100, 0)).toBe(1); // 组内无已知延迟
+  });
+
+  it("可用性主导：持续 429（错误率超阈值）的代理即使延迟最低也完全不被选中", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    // A 延迟 10ms（组内最低）但 5/5 全 429 → 降权排除；B 延迟 500ms 正常
+    configWith([URL_A, URL_B], {
+      [URL_A]: { status: "ok", latencyMs: 10, checkedAt: 1000, failCount: 0 },
+      [URL_B]: { status: "ok", latencyMs: 500, checkedAt: 1000, failCount: 0 },
+    });
+    for (let i = 0; i < 5; i++) recordProxyTraffic(URL_A, 429);
+
+    // 6 次连续选择全部落在 B（此前的延迟最优选择会固定打向 10ms 的 A）
+    for (let i = 0; i < 6; i++) {
+      expect((await getUpstreamProxy(mockDb, mockEnv)).url).toBe(URL_B);
+    }
+  });
+
+  it("按权重比例分配：成功率 100% 的代理拿 4/5 请求，50% 的代理分得 1/5", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    configWith([URL_A, URL_B], {
+      [URL_A]: { status: "ok", latencyMs: 50, checkedAt: 1000, failCount: 0 },
+      [URL_B]: { status: "ok", latencyMs: 50, checkedAt: 1000, failCount: 0 },
+    });
+    // A 全成功（权重 8×1.25 = 10）；B 一半成功（权重 2×1.25 = 2.5）→ 4:1
+    for (let i = 0; i < 5; i++) recordProxyTraffic(URL_A, 200);
+    for (let i = 0; i < 3; i++) recordProxyTraffic(URL_B, 200);
+    for (let i = 0; i < 3; i++) recordProxyTraffic(URL_B, 429);
+
+    // 平滑加权轮询 5 次序列 A A B A A：B 占 1/5 = 20% 与权重比例一致；
+    // 高权重代理分得多但不连续独占（无 AAA 连击）
+    const picks: Array<string | null> = [];
+    for (let i = 0; i < 5; i++) {
+      picks.push((await getUpstreamProxy(mockDb, mockEnv)).url);
+    }
+    expect(picks).toEqual([URL_A, URL_A, URL_B, URL_A, URL_A]);
+  });
+
+  it("接近排除线的代理（错误率 0.8 不排除）仅分少量请求，健康代理占绝对多数", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    // A 成功率 0.2（权重 0.5×1.25 = 0.625，错误率恰 0.8 不降权）；
+    // B 成功率 1.0 但延迟 4 倍（权重 8×0.875 = 7）——可用性主导仍占多数
+    configWith([URL_A, URL_B], {
+      [URL_A]: { status: "ok", latencyMs: 50, checkedAt: 1000, failCount: 0 },
+      [URL_B]: { status: "ok", latencyMs: 200, checkedAt: 1000, failCount: 0 },
+    });
+    recordProxyTraffic(URL_A, 200);
+    for (let i = 0; i < 4; i++) recordProxyTraffic(URL_A, 429);
+    for (let i = 0; i < 5; i++) recordProxyTraffic(URL_B, 200);
+
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < 10; i++) {
+      const url = (await getUpstreamProxy(mockDb, mockEnv)).url as string;
+      counts[url] = (counts[url] ?? 0) + 1;
+    }
+    // 权重比 0.625:7 ≈ 1:11.2：10 次中 A 恰 1 次（约 10%，保持少量份额不饿死）
+    expect(counts[URL_A]).toBe(1);
+    expect(counts[URL_B]).toBe(9);
   });
 });
 
@@ -1608,5 +1872,110 @@ describe("健康检查间隔配置（healthCheckIntervalMin）", () => {
   it("无代理配置（{} / 纯 URL 旧格式）→ 默认 5，不抛错", async () => {
     expect(await intervalAfterLoad(undefined, "{}")).toBe(5);
     expect(await intervalAfterLoad(undefined, "http://127.0.0.1:7890")).toBe(5);
+  });
+});
+
+describe("环境变量设备级禁用（UPSTREAM_PROXY_DISABLED）", () => {
+  const URL_A = "http://127.0.0.1:7890";
+
+  it("getProxyDisableMode：未设置/非法 → null，all/health → 对应值", async () => {
+    const { getProxyDisableMode, isUpstreamProxyDisabled, isScheduledProxyHealthDisabled } = await loadModule();
+    setProxyDisabled(undefined);
+    expect(getProxyDisableMode()).toBeNull();
+    expect(isUpstreamProxyDisabled()).toBe(false);
+    expect(isScheduledProxyHealthDisabled()).toBe(false);
+    setProxyDisabled("all");
+    expect(getProxyDisableMode()).toBe("all");
+    expect(isUpstreamProxyDisabled()).toBe(true);
+    expect(isScheduledProxyHealthDisabled()).toBe(true);
+    setProxyDisabled("health");
+    expect(getProxyDisableMode()).toBe("health");
+    expect(isUpstreamProxyDisabled()).toBe(false);
+    expect(isScheduledProxyHealthDisabled()).toBe(true);
+    setProxyDisabled("yes");
+    expect(getProxyDisableMode()).toBeNull();
+    expect(isScheduledProxyHealthDisabled()).toBe(false);
+  });
+
+  it("all：业务请求直连——不读配置、不建代理连接", async () => {
+    setProxyDisabled("all");
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({ [CONFIG_KEY]: { value: URL_A, updatedAt: 1000 } });
+    const result = await getUpstreamProxy(mockDb, mockEnv, "p1");
+    expect(result).toEqual({ dispatcher: null, url: null });
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(createdAgents.length).toBe(0);
+  });
+
+  it("all：拉取与健康检查（含手动）均不执行，不查库不写库", async () => {
+    setProxyDisabled("all");
+    const { pullProxyGroups, runProxyHealthCheck, getProxyHealth, getHealthCheckProgress } = await loadModule();
+    setConfigRows({ [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A] }), updatedAt: 1000 } });
+    expect(await pullProxyGroups(mockDb, mockEnv)).toEqual({});
+    expect(await runProxyHealthCheck(mockDb, mockEnv)).toEqual({});
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(getHealthCheckProgress().running).toBe(false);
+    const health = await getProxyHealth(mockDb, mockEnv);
+    expect(health).toEqual({
+      results: {},
+      progress: { running: false, total: 0, checked: 0, startedAt: 0 },
+    });
+  });
+
+  it("health：仅定时健康检查禁用；业务请求与手动检查仍正常", async () => {
+    setProxyDisabled("health");
+    const { isUpstreamProxyDisabled, isScheduledProxyHealthDisabled, getUpstreamProxy, runProxyHealthCheck } =
+      await loadModule();
+    expect(isUpstreamProxyDisabled()).toBe(false);
+    expect(isScheduledProxyHealthDisabled()).toBe(true);
+    // 业务请求仍走代理（与未禁用时一致）
+    setConfigRows({ [CONFIG_KEY]: { value: URL_A, updatedAt: 1000 } });
+    const sel = await getUpstreamProxy(mockDb, mockEnv, "p1");
+    expect(sel.url).toBe(URL_A);
+    // 手动触发健康检查仍执行：探测并写健康表
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A], platformIds: [] }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+    expect(results[URL_A]).toMatchObject({ status: "ok", latencyMs: expect.any(Number) });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("normalizeProxyStatKey 统计键归一化（#28）", () => {
+  it("去凭据：user:pass 与无凭据的同 host:port 归并为同一键", async () => {
+    const { normalizeProxyStatKey } = await loadModule();
+    expect(normalizeProxyStatKey("http://127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    expect(normalizeProxyStatKey("http://user:pass@127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    expect(normalizeProxyStatKey("socks5://user:pass@127.0.0.1:1080")).toBe("127.0.0.1:1080");
+  });
+
+  it("兼容历史脱敏键与裸 host:port（maskProxyUrl 产物自动并入新键）", async () => {
+    const { normalizeProxyStatKey } = await loadModule();
+    // 历史落库键：maskProxyUrl 脱敏后的 ***@host:port（带/不带协议前缀）
+    expect(normalizeProxyStatKey("http://***@127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    expect(normalizeProxyStatKey("***@127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    // 裸 host:port 幂等
+    expect(normalizeProxyStatKey("127.0.0.1:7890")).toBe("127.0.0.1:7890");
+  });
+
+  it("默认端口按协议归一化：http→80、https→443、socks→1080", async () => {
+    const { normalizeProxyStatKey } = await loadModule();
+    expect(normalizeProxyStatKey("http://host")).toBe("host:80");
+    expect(normalizeProxyStatKey("http://host:80")).toBe("host:80");
+    expect(normalizeProxyStatKey("https://host")).toBe("host:443");
+    expect(normalizeProxyStatKey("socks5://host")).toBe("host:1080");
+    expect(normalizeProxyStatKey("socks4://host")).toBe("host:1080");
+  });
+
+  it("IPv6 字面量保留方括号；解析失败回退脱敏（不泄漏凭据）", async () => {
+    const { normalizeProxyStatKey } = await loadModule();
+    expect(normalizeProxyStatKey("http://[::1]:7890")).toBe("[::1]:7890");
+    // 无法解析的畸形地址回退 maskProxyUrl（键稳定且不含凭据）
+    expect(normalizeProxyStatKey("not a url with user:pass@")).toBe("not a url with user:pass@");
   });
 });

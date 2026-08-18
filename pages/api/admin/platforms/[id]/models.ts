@@ -11,6 +11,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { detectModelType } from "@/lib/detect-model-type";
 import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 
@@ -144,6 +145,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const body: { modelId?: string; modelName?: string } = req.body;
@@ -177,14 +179,17 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
 
     const now = Math.floor(Date.now() / 1000);
     const newModelId = generateId();
+    const trimmedModelId = modelId.trim();
 
+    // 手动添加路径与刷新路径（PUT，detectModelType(upstream.id)）保持一致：
+    // 按模型 ID 推断类型，避免 embedding/image 等模型被硬编码归为 chat
     const newModel = await db.platformModels.create({
       data: {
         id: newModelId,
         platformId: id,
-        modelId: modelId.trim(),
-        modelName: modelName?.trim() || modelId.trim(),
-        type: "chat",
+        modelId: trimmedModelId,
+        modelName: modelName?.trim() || trimmedModelId,
+        type: detectModelType(trimmedModelId),
         source: "manual",
         fetchedAt: now,
       },
@@ -214,6 +219,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const modelId = req.query.modelId as string | undefined;
@@ -261,6 +267,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const db = await createDb();
@@ -470,6 +477,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const body: { modelId?: string; enabled?: boolean } = req.body;
@@ -481,10 +489,14 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
 
     if (body.modelId) {
       // 单个模型切换
-      await db.platformModels.updateMany({
+      const result = await db.platformModels.updateMany({
         where: { platformId: id, modelId: body.modelId },
         data: { enabled: body.enabled },
       });
+      // count 为 0 说明该模型不存在：此前不检查会返回假成功，这里显式 404
+      if (result.count === 0) {
+        return res.status(404).json({ success: false, error: "模型不存在" });
+      }
       return res.status(200).json({
         success: true,
         message: body.enabled ? "模型已启用" : "模型已禁用",

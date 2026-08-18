@@ -12,6 +12,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 // ==================== 工具函数 ====================
 
@@ -84,6 +85,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const body = req.body as { name?: string };

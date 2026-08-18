@@ -46,9 +46,15 @@ export default async function handler(
 
     if (status) {
       const n = parseInt(status, 10);
-      if (!isNaN(n)) {
-        where.status = n;
+      if (isNaN(n)) {
+        return res.status(400).json({ success: false, error: "无效的 status，必须为整数" });
       }
+      // createdAt 为 Int（Int32）：status 同为 Int 列，超界值会触发 Prisma Int
+      // 校验失败 → 500，这里与日期参数相同的显式范围校验
+      if (n < 0 || n > 2147483647) {
+        return res.status(400).json({ success: false, error: "status 超出支持范围" });
+      }
+      where.status = n;
     }
 
     if (isError === "true") {
@@ -64,10 +70,16 @@ export default async function handler(
     // 日期范围筛选（Unix 时间戳）
     // 先校验可解析性：非法字符串 new Date().getTime() 为 NaN，落入 Prisma Int
     // 过滤器会触发校验失败返回 500，这里显式 400
+    // 时区口径统一为显式 UTC：YYYY-MM-DD 拼接 T00:00:00Z / T23:59:59.999Z 解析
+    // （此前 endDate 用 setHours(23,59,59,999) 走服务器本地时区，非 UTC 服务器
+    // 当天 16:00 后的日志会被排除），与 logs/archive.ts 的显式 UTC 写法一致；
+    // 完整 ISO 时间字符串（含 T）直接解析，保持原有 ISO 格式支持
     if (startDateStr || endDateStr) {
       const createdAt: Prisma.IntFilter = {};
       if (startDateStr) {
-        const ts = new Date(startDateStr).getTime();
+        const ts = new Date(
+          startDateStr.includes("T") ? startDateStr : startDateStr + "T00:00:00Z"
+        ).getTime();
         if (isNaN(ts)) {
           return res.status(400).json({ success: false, error: "无效的 startDate，请使用 YYYY-MM-DD 或 ISO 格式" });
         }
@@ -79,11 +91,12 @@ export default async function handler(
         createdAt.gte = sec;
       }
       if (endDateStr) {
-        const end = new Date(endDateStr);
+        const end = new Date(
+          endDateStr.includes("T") ? endDateStr : endDateStr + "T23:59:59.999Z"
+        );
         if (isNaN(end.getTime())) {
           return res.status(400).json({ success: false, error: "无效的 endDate，请使用 YYYY-MM-DD 或 ISO 格式" });
         }
-        end.setHours(23, 59, 59, 999);
         const sec = Math.floor(end.getTime() / 1000);
         if (sec < 0 || sec > 2147483647) {
           return res.status(400).json({ success: false, error: "endDate 超出支持范围" });

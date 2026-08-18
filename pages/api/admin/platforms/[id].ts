@@ -9,9 +9,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
-import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
+import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../../worker/src/platform-keys";
+import { resetCircuitBreaker } from "../../../../worker/src/load-balancer";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
@@ -97,6 +99,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     return res.status(401).json({ success: false, error: "未授权" });
   }
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const body: any = req.body;
@@ -175,8 +178,10 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     }
 
     // 构建更新数据（仅包含传入的字段）
+    // name 只做 trim，不做 escapeHtml（React 前端渲染会自动转义，
+    // 存库转义会对已转义文本二次转义 → &amp;amp; 不可逆累积损坏）
     const updateData: Record<string, unknown> = {};
-    if (body.name !== undefined) updateData.name = escapeHtml(body.name);
+    if (body.name !== undefined) updateData.name = body.name.trim();
     if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
     if (body.enabled !== undefined) updateData.enabled = !!body.enabled;
@@ -373,6 +378,14 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     // 更新时间戳
     updateData.updatedAt = Math.floor(Date.now() / 1000);
 
+    // 解禁（status=healthy）时强制清零失败计数并同步清内存熔断条目，
+    // 使解禁立即生效——否则内存 breaker 仍 open，最长 30s（缓存 TTL）后
+    // 才被 syncCircuitBreakersFromDatabase 清除，期间请求仍被 selectPlatform 拦截
+    if (updateData.status === "healthy") {
+      updateData.failCount = 0;
+      resetCircuitBreaker(id);
+    }
+
     await db.platforms.update({ where: { id }, data: updateData });
 
     // 审计日志（脱敏处理：密钥只记录数量，绝不记录任何内容）
@@ -433,6 +446,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     return res.status(401).json({ success: false, error: "未授权" });
   }
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const db = await createDb();

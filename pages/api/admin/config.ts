@@ -9,6 +9,22 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+
+/**
+ * configs.updatedAt 为 Int 秒级列（毫秒写入会溢出），同一秒内两次保存会得到
+ * 相同 updatedAt；出站代理等模块以「updatedAt 等值比较」做缓存失效检查，
+ * 同秒双保存会被判定为无变化、继续返回旧缓存（最长 30s 不生效）。
+ * 进程内记录上次写入值，同秒时 +1 单调递增补偿（Docker 单实例部署即完备，
+ * 与 upstream-proxy 的进程内写锁/单飞假设一致）。
+ */
+let lastConfigSaveAt = 0;
+
+function nextConfigUpdatedAt(): number {
+  const now = Math.floor(Date.now() / 1000);
+  lastConfigSaveAt = Math.max(now, lastConfigSaveAt + 1);
+  return lastConfigSaveAt;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -40,6 +56,8 @@ export default async function handler(
 
     if (req.method === "PUT") {
       if (!checkCsrfOrigin(req, res)) return;
+      // 写操作限流：与其它管理写端点一致按 adminId 计数（#38）
+      if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
       const body = req.body as { key?: string; value?: string };
 
@@ -55,7 +73,8 @@ export default async function handler(
         return;
       }
 
-      const now = Math.floor(Date.now() / 1000);
+      // 单调递增补偿：同秒双保存不产生相同 updatedAt（见 nextConfigUpdatedAt 说明）
+      const now = nextConfigUpdatedAt();
 
       // 使用 Prisma upsert 实现 upsert（configs.key 是唯一约束）
       await db.configs.upsert({

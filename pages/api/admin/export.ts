@@ -139,43 +139,42 @@ export default async function handler(
         createdAt: k.createdAt,
       }));
 
-      // 请求日志（最近 30 天）：where 先过滤再分页循环拉取，
-      // 避免 take 10000 截断后 filter 导致 30 天内数据丢失
+      // 请求日志（最近 30 天，最多 10000 条）：与导入上限（import.ts MAX_PER_TYPE.requestLogs）
+      // 对齐，保证"导出 → 导入"闭环可行；超出部分截断并告警
       const thirtyDaysAgo = now - 30 * 24 * 60 * 60;
       const requestLogsExport: Array<Record<string, unknown>> = [];
       {
-        let skip = 0;
-        for (;;) {
-          const batch = await db.requestLogs.findMany({
-            where: { createdAt: { gte: thirtyDaysAgo } },
-            orderBy: { createdAt: "desc" },
-            take: 10000,
-            skip,
+        const batch = await db.requestLogs.findMany({
+          where: { createdAt: { gte: thirtyDaysAgo } },
+          orderBy: { createdAt: "desc" },
+          take: 10000,
+        });
+        if (batch.length >= 10000) {
+          console.warn("[GET /api/admin/export] 30 天内请求日志达到 10000 条上限，仅导出前 10000 条（与导入上限对齐）");
+        }
+        for (const r of batch) {
+          requestLogsExport.push({
+            id: r.id,
+            keyId: r.keyId,
+            keyName: r.keyName,
+            platformId: r.platformId,
+            model: r.model,
+            endpoint: r.endpoint,
+            method: r.method,
+            status: r.status,
+            latency: r.latency,
+            tokens: r.tokens,
+            promptTokens: r.promptTokens,
+            completionTokens: r.completionTokens,
+            ttft: r.ttft,
+            cost: r.cost,
+            isError: r.isError,
+            ipAddress: r.ipAddress,
+            userAgent: r.userAgent,
+            proxyUrl: r.proxyUrl,
+            errorMessage: r.errorMessage,
+            createdAt: r.createdAt,
           });
-          for (const r of batch) {
-            requestLogsExport.push({
-              id: r.id,
-              keyId: r.keyId,
-              keyName: r.keyName,
-              platformId: r.platformId,
-              model: r.model,
-              endpoint: r.endpoint,
-              method: r.method,
-              status: r.status,
-              latency: r.latency,
-              tokens: r.tokens,
-              promptTokens: r.promptTokens,
-              completionTokens: r.completionTokens,
-              ttft: r.ttft,
-              cost: r.cost,
-              isError: r.isError,
-              ipAddress: r.ipAddress,
-              errorMessage: r.errorMessage,
-              createdAt: r.createdAt,
-            });
-          }
-          if (batch.length < 10000) break;
-          skip += 10000;
         }
       }
       exportData.requestLogs = requestLogsExport;

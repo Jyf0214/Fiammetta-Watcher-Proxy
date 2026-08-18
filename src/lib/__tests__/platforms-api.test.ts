@@ -56,7 +56,6 @@ vi.mock("@/lib/admin-rate-limit", () => ({
 vi.mock("@/lib/admin-security", () => ({
   isSafeUrl: mocks.isSafeUrl,
   checkCsrfOrigin: mocks.checkCsrfOrigin,
-  escapeHtml: vi.fn((s: string) => s),
 }));
 
 vi.mock("@/lib/key-status", () => ({
@@ -222,6 +221,32 @@ describe("POST /api/admin/platforms", () => {
         }),
       })
     );
+  });
+
+  it("平台名含 HTML 特殊字符时原样存库（不做 escapeHtml 双重转义）", async () => {
+    // 回归：此前 escapeHtml(name.trim()) 存库，React 渲染自动转义后显示
+    // "AT&amp;T"，再次保存对已转义文本再转义 → &amp;amp; 不可逆累积损坏
+    const name = 'AT&T <Partner> "Quote" & Co';
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, name },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ name }),
+      })
+    );
+    expect(res.body.data.name).toBe(name);
+  });
+
+  it("平台名超过 100 字符返回 400", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, name: "x".repeat(101) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toContain("100");
   });
 
   it("创建时写入审计日志", async () => {

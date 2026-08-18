@@ -1,14 +1,17 @@
 /**
  * 单个系统 API Key 操作
  *
- * DELETE  /api/admin/system-keys/[id] — 删除系统 Key
- * PATCH   /api/admin/system-keys/[id] — 启用/禁用系统 Key
+ * GET    /api/admin/system-keys/[id] — 获取单个系统 Key 的完整密钥（列表接口只返回掩码，
+ *        复制功能需要先经此端点取明文；管理员认证即可，读操作无 CSRF 风险）
+ * DELETE /api/admin/system-keys/[id] — 删除系统 Key
+ * PATCH  /api/admin/system-keys/[id] — 启用/禁用系统 Key
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -25,13 +28,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   switch (req.method) {
+    case "GET":
+      return handleGetSecret(req, res, id);
     case "DELETE":
       return handleDelete(req, res, id);
     case "PATCH":
       return handlePatch(req, res, id);
     default:
-      res.setHeader("Allow", ["DELETE", "PATCH"]);
+      res.setHeader("Allow", ["GET", "DELETE", "PATCH"]);
       return res.status(405).json({ success: false, error: "Method not allowed" });
+  }
+}
+
+/** 获取单个系统 Key 的完整密钥（列表接口只返回掩码，复制功能需先经此端点取明文） */
+async function handleGetSecret(req: NextApiRequest, res: NextApiResponse, id: string) {
+  const admin = await getAdminFromRequest(req);
+  if (!admin) {
+    return res.status(401).json({ success: false, error: "未授权" });
+  }
+
+  try {
+    const db = await createDb();
+    const existing = await db.systemApiKeys.findFirst({
+      where: { id },
+      select: { id: true, key: true, name: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "系统 Key 不存在" });
+    }
+
+    // 明文系统级凭据不可被任何中间缓存留存
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ success: true, key: existing.key });
+  } catch (err) {
+    console.error("[GET /api/admin/system-keys/[id]] 获取系统 Key 失败:", err instanceof Error ? err.message : String(err));
+    return res.status(500).json({ success: false, error: "获取系统 Key 失败" });
   }
 }
 
@@ -42,6 +74,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const db = await createDb();
@@ -86,6 +119,7 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const body = req.body as { enabled?: boolean };

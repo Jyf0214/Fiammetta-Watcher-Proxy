@@ -181,6 +181,22 @@ export function maskProxyUrl(url: string): string {
   return url.replace(/\/\/[^@\s]+@/, "//***@");
 }
 
+/** 统计聚合键：去凭据 host:port（与后端落库/聚合键 normalizeProxyStatKey 同实现，
+ *  保证查表一致）。同 host:port 不同凭据共享同一键；默认端口按协议归一化
+ *  （http→80、https→443、socks→1080）；解析失败回退脱敏 */
+export function normalizeProxyStatKey(url: string): string {
+  try {
+    // 兼容无协议前缀的裸 host:port（历史脱敏键等），补 http:// 解析
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(url);
+    const parsed = new URL(hasScheme ? url : `http://${url}`);
+    const defaultPort =
+      parsed.protocol === "https:" ? 443 : parsed.protocol === "http:" ? 80 : 1080;
+    return `${parsed.hostname}:${parsed.port || defaultPort}`;
+  } catch {
+    return maskProxyUrl(url);
+  }
+}
+
 /** 健康检查时间展示：unix 秒 → 「MM-DD HH:mm」（本地时区） */
 export function formatChecked(unixSec: number): string {
   const d = new Date(unixSec * 1000);
@@ -286,4 +302,25 @@ export function buildConfigJson(
       ...(interval !== undefined ? { healthCheckIntervalMin: interval } : {}),
     }),
   };
+}
+
+/**
+ * 组内代理按归一化统计键去重求和：同 host:port 不同凭据的代理在日志聚合中共享
+ * 同一统计键（落库统一 normalizeProxyStatKey），逐代理累加会把同一条统计重复计入，
+ * 组级聚合翻倍——每个统计键只计一次
+ */
+export function sumMaskedStats<T>(
+  urls: string[],
+  rows: Record<string, T> | null | undefined,
+  pick: (entry: T | undefined) => number
+): number {
+  const seen = new Set<string>();
+  let total = 0;
+  for (const u of urls) {
+    const key = normalizeProxyStatKey(u);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    total += pick(rows?.[key]);
+  }
+  return total;
 }

@@ -10,7 +10,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
-import { pullProxyGroups } from "@/lib/upstream-proxy";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { pullProxyGroups, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 
 export default async function handler(
   req: NextApiRequest,
@@ -27,12 +28,19 @@ export default async function handler(
     return res.status(400).json({ success: false, error: "出站代理仅 Docker 部署可用" });
   }
 
+  // 环境变量整体禁用（all）：手动拉取同样不执行
+  if (isUpstreamProxyDisabled()) {
+    return res.status(400).json({ success: false, error: "出站代理已通过环境变量 UPSTREAM_PROXY_DISABLED=all 禁用" });
+  }
+
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ success: false, error: "方法不允许" });
   }
 
   if (!checkCsrfOrigin(req, res)) return;
+  // 限流置于 CSRF 与方法检查之后：跨站/非法请求不得在 CSRF 拒绝前消耗管理员配额
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const db = await createDb();

@@ -13,8 +13,8 @@
  * - 历史数据（已归档）从 daily_stats 聚合表读取，不再分页拉取全表日志。
  *   界限与 pages/api/admin/stats.ts 一致：明细下界 = 今日 UTC 零点 -
  *   RETENTION_DAYS × 86400，该界限前的数据读 daily_stats、之后读 request_logs。
- * - daily_stats.totalTokens 可近似非错误请求 tokens：错误日志 tokens 恒为 0，
- *   而 trend 只统计 isError:false 的请求。
+ * - 请求数口径为全量（含错误请求），与仪表盘 stats.ts / 用量页 usage.ts 一致；
+ *   TPS 用整体除法（片内输出 Token 总和 / 片内耗时秒数总和）。
  * - 未归档明细（最近 RETENTION_DAYS 天）只做 createdAt 范围过滤，
  *   走 @@index([createdAt]) 索引。
  */
@@ -30,8 +30,8 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
-  tpsSum: number;
-  tpsCount: number;
+  /** 累计耗时（毫秒）：请求数/TPS 口径统一后的 TPS 用整体除法（输出Token/耗时秒） */
+  latencyMs: number;
 }
 
 export default async function handler(
@@ -104,8 +104,7 @@ export default async function handler(
         existing.tokens += point.tokens;
         existing.promptTokens += point.promptTokens;
         existing.completionTokens += point.completionTokens;
-        existing.tpsSum += point.tpsSum;
-        existing.tpsCount += point.tpsCount;
+        existing.latencyMs += point.latencyMs;
       } else {
         groups.set(dateKey, { ...point });
       }
@@ -138,19 +137,21 @@ export default async function handler(
           totalTokens: true,
           totalPromptTokens: true,
           totalCompletionTokens: true,
-          avgTps: true,
+          avgDuration: true,
         },
       });
       for (const row of histRows) {
-        // 错误请求 tokens 恒为 0，totalTokens 可近似非错误请求 tokens
+        // 请求数含错误请求（与明细部分、仪表盘 stats.ts 口径一致）；
+        // 错误请求 tokens 恒为 0，totalTokens 可近似非错误请求 tokens。
+        // daily_stats 未存耗时总和，用 avgDuration × 非错误请求数近似
+        // （与 stats.ts 历史 latencySum 累加口径一致），供片内整体除法 TPS
         const perfCount = row.totalRequests - row.errorRequests;
         addToGroup(dateKeyOf(row.date), {
-          requests: row.totalRequests - row.errorRequests,
+          requests: row.totalRequests,
           tokens: row.totalTokens,
           promptTokens: row.totalPromptTokens,
           completionTokens: row.totalCompletionTokens,
-          tpsSum: row.avgTps * perfCount,
-          tpsCount: row.avgTps > 0 ? perfCount : 0,
+          latencyMs: row.avgDuration > 0 ? row.avgDuration * perfCount : 0,
         });
       }
     }
@@ -167,7 +168,6 @@ export default async function handler(
         const batch = await orm.requestLogs.findMany({
           where: {
             createdAt: { gte: detailStart },
-            isError: false,
             ...(keyId ? { keyId } : {}),
           },
           select: {
@@ -175,6 +175,7 @@ export default async function handler(
             promptTokens: true,
             completionTokens: true,
             latency: true,
+            isError: true,
             createdAt: true,
           },
           orderBy: { createdAt: "asc" },
@@ -182,16 +183,14 @@ export default async function handler(
           skip,
         });
         for (const log of batch) {
-          // 单请求 TPS = completionTokens / (latency / 1000)
-          const hasTps = log.latency > 0 && log.completionTokens > 0;
-          const tps = hasTps ? log.completionTokens / (log.latency / 1000) : 0;
           addToGroup(dateKeyOf(log.createdAt), {
             requests: 1,
             tokens: log.tokens ?? 0,
             promptTokens: log.promptTokens ?? 0,
             completionTokens: log.completionTokens ?? 0,
-            tpsSum: tps,
-            tpsCount: hasTps ? 1 : 0,
+            // 错误请求不计耗时：tokens 恒 0 但 latency 是真实耗时，计入会
+            // 拉大 TPS 分母稀释均值（与 stats.ts perfAgg / 历史部分口径一致）
+            latencyMs: log.isError ? 0 : log.latency,
           });
         }
         if (batch.length < PAGE_SIZE) break;
@@ -208,7 +207,9 @@ export default async function handler(
         tokens: data.tokens,
         promptTokens: data.promptTokens,
         completionTokens: data.completionTokens,
-        tps: data.tpsCount > 0 ? Math.round((data.tpsSum / data.tpsCount) * 100) / 100 : 0,
+        // TPS 整体除法口径（与仪表盘 stats.ts 明细部分一致）：
+        // 片内输出 Token 总和 / 片内耗时秒数总和，而非每请求 TPS 的算术平均
+        tps: data.latencyMs > 0 ? Math.round((data.completionTokens / (data.latencyMs / 1000)) * 100) / 100 : 0,
       }));
 
     res.status(200).json({ success: true, data: trend });

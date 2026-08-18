@@ -304,3 +304,28 @@ describe("DOCKER_TASKS 任务表与文档频率一致", () => {
     expect([...minutes].sort((a, b) => a - b)).toEqual(expected);
   });
 });
+
+describe("环境变量禁用定时健康检查（UPSTREAM_PROXY_DISABLED）", () => {
+  const original = process.env.UPSTREAM_PROXY_DISABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UPSTREAM_PROXY_DISABLED;
+    else process.env.UPSTREAM_PROXY_DISABLED = original;
+  });
+
+  /** 取 proxy-health 任务并执行 run（禁用分支直接返回，不触库） */
+  async function runHealthTask(): Promise<unknown> {
+    const health = DOCKER_TASKS.find((t) => t.name === "proxy-health");
+    expect(health).toBeDefined();
+    return health!.run();
+  }
+
+  it("health：定时健康检查跳过（返回空，不执行探测）", async () => {
+    process.env.UPSTREAM_PROXY_DISABLED = "health";
+    expect(await runHealthTask()).toEqual({});
+  });
+
+  it("all：定时健康检查同样跳过", async () => {
+    process.env.UPSTREAM_PROXY_DISABLED = "all";
+    expect(await runHealthTask()).toEqual({});
+  });
+});
