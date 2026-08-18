@@ -11,6 +11,9 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
     chown -R nextjs:nodejs /app
 
+# lite 构建门控脚本（lite-gate.sh / lite-gate-restore.sh）用 bash 编写，Alpine 基础镜像默认无
+RUN apk add --no-cache bash
+
 # 构建方言：all=生成全部四种方言 client（d1/mysql/mariadb/pg），镜像与任意运行时
 # DB_TYPE 通用（Docker 无 Worker 体积限制）；指定单一方言可缩小镜像体积，
 # 但指定单一方言时构建期与运行期 DB_TYPE 必须一致，否则运行时会以错误的
