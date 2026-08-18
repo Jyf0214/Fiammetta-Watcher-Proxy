@@ -39,6 +39,17 @@ describe("matchesSchedule 调度匹配", () => {
     expect(matchesSchedule({}, new Date(2026, 7, 16, 0, 0))).toBe(true);
     expect(matchesSchedule({}, new Date(2026, 7, 16, 23, 59))).toBe(true);
   });
+
+  it("minIntervalMs：距上次完成未满间隔 → false（无完成记录时不受限）", () => {
+    const spec = { minutes: new Set([17, 22, 27]), minIntervalMs: 10 * 60_000 };
+    const at = (minute: number) => new Date(2026, 7, 16, 10, minute);
+    // 无上次完成时间：首轮不受间隔门控
+    expect(matchesSchedule(spec, at(17))).toBe(true);
+    // 10:17 完成 → 10:22（差 5 分钟 < 10 分钟）不命中
+    expect(matchesSchedule(spec, at(22), at(17).getTime())).toBe(false);
+    // 10:27（差 10 分钟，未小于间隔）命中
+    expect(matchesSchedule(spec, at(27), at(17).getTime())).toBe(true);
+  });
 });
 
 describe("createScheduler 调度执行", () => {
@@ -168,6 +179,27 @@ describe("createScheduler 调度执行", () => {
     s.stop();
     await vi.advanceTimersByTimeAsync(60_000 * 60);
     expect(runA).toHaveBeenCalledTimes(1);
+  });
+
+  it("minIntervalMs：上次完成后未满间隔的命中分钟跳过，满间隔恢复（大代理池自适应）", async () => {
+    const runA = vi.fn().mockResolvedValue(undefined);
+    const s = createScheduler(
+      // 10:07/10:12/10:17 命中分钟；间隔 10 分钟
+      [{ name: "a", spec: { minutes: new Set([7, 12, 17]), minIntervalMs: 10 * 60_000 }, run: runA }],
+      { tickMs: 60_000, firstTickDelayMs: 0 }
+    );
+    // 10:07 首轮触发（无上次完成记录，不受间隔门控）
+    vi.setSystemTime(new Date(2026, 7, 16, 10, 7, 0));
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runA).toHaveBeenCalledTimes(1);
+    // 10:12 命中分钟，但距 10:07 完成仅 5 分钟 < 10 分钟 → 跳过
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(runA).toHaveBeenCalledTimes(1);
+    // 10:17 命中分钟，距完成 10 分钟（未小于间隔）→ 恢复触发
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(runA).toHaveBeenCalledTimes(2);
+    s.stop();
   });
 });
 
@@ -302,6 +334,13 @@ describe("DOCKER_TASKS 任务表与文档频率一致", () => {
     const minutes = resolveSpec(health!.spec).minutes ?? [];
     const expected = Array.from({ length: 12 }, (_, i) => i * 5 + 2);
     expect([...minutes].sort((a, b) => a - b)).toEqual(expected);
+  });
+
+  it("proxy-health spec 含 minIntervalMs = 间隔 × 60s（上一轮完成后满间隔才再触发）", () => {
+    const health = DOCKER_TASKS.find((t) => t.name === "proxy-health");
+    expect(health).toBeDefined();
+    const spec = resolveSpec(health!.spec);
+    expect(spec.minIntervalMs).toBe(5 * 60_000);
   });
 });
 

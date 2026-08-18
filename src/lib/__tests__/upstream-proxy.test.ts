@@ -508,6 +508,91 @@ describe("多代理轮询", () => {
     expect([first.url, second.url]).toContain("http://127.0.0.1:7891");
   });
 
+  it("全部候选异常 + 部分黑名单 → 回退排除黑名单代理（坏代理被禁用）", async () => {
+    const { getUpstreamProxy, markProxyFailure } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+          "http://127.0.0.1:7891": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+    // 7890 业务请求网络层连续失败达阈值进黑名单：回退分支同样排除，
+    // 不再无差别轮询全部代理（原实现绕过黑名单，坏代理永远被选中）
+    for (let i = 0; i < 3; i++) {
+      await markProxyFailure(mockDb, mockEnv, "http://127.0.0.1:7890");
+    }
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe("http://127.0.0.1:7891");
+    expect(second.url).toBe("http://127.0.0.1:7891");
+  });
+
+  it("全部候选异常 + 部分统计降权 → 回退排除降权代理（出口受限代理不参与）", async () => {
+    const { getUpstreamProxy, recordProxyTraffic } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+          "http://127.0.0.1:7891": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+    // 7890 业务窗口内 5 次全失败 → 错误率 1.0 > 0.8 触发统计降权
+    for (let i = 0; i < 5; i++) {
+      recordProxyTraffic("http://127.0.0.1:7890", 0);
+    }
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe("http://127.0.0.1:7891");
+    expect(second.url).toBe("http://127.0.0.1:7891");
+  });
+
+  it("全部候选异常且全部黑名单 → 兜底全量轮询（不放弃走代理语义）", async () => {
+    const { getUpstreamProxy, markProxyFailure } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: ["http://127.0.0.1:7890", "http://127.0.0.1:7891"], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({
+          "http://127.0.0.1:7890": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+          "http://127.0.0.1:7891": { status: "fail", latencyMs: 0, checkedAt: 1000, failCount: 5 },
+        }),
+        updatedAt: 1000,
+      },
+    });
+    // 两代理均达黑名单阈值：回退池空 → 兜底全量轮询（黑名单随健康检查
+    // 成功自动清除，全黑名单是暂时状态）
+    for (const url of ["http://127.0.0.1:7890", "http://127.0.0.1:7891"]) {
+      for (let i = 0; i < 3; i++) {
+        await markProxyFailure(mockDb, mockEnv, url);
+      }
+    }
+
+    const first = await getUpstreamProxy(mockDb, mockEnv);
+    const second = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(first.url).toBe("http://127.0.0.1:7890");
+    expect(second.url).toBe("http://127.0.0.1:7891");
+  });
+
   it("已知延迟：可用性×延迟加权轮询，低延迟代理占多数但不固定独占", async () => {
     const { getUpstreamProxy } = await loadModule();
     setConfigRows({

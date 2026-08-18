@@ -1137,17 +1137,30 @@ export async function getUpstreamProxy(
     }
   );
   if (candidates.length === 0) {
-    // 全部代理健康度异常：回退全部代理轮询（健康检查是周期性的，
-    // 期间的临时故障不应使配置了代理的请求直接改走直连）。
+    // 全部候选异常（fail/黑名单/统计降权）：回退轮询保持走代理语义
+    // （健康检查是周期性的，期间的临时故障不应使配置了代理的请求直接
+    // 改走直连）。但回退不得无差别轮询全部代理——原实现绕过黑名单
+    // （网络层连续失败达阈值）与统计降权（出口受限），坏代理永远不被
+    // 排除，请求在大代理池内均匀轮转，好代理只占 1/N 概率被选中
+    // （数千代理场景实测全量 fetch failed）。回退池先排除黑名单与
+    // 降权两个实时业务强信号，仅保留 fail 状态（周期性探测结果可能
+    // 因探测地址/时机陈旧而误伤）；全部被排除时才兜底全量轮询
+    // （黑名单随健康检查成功自动清除，全黑名单是暂时状态）。
     // 告警节流到每分钟一次，避免代理持续故障期间每个请求刷日志。
     // 注意：fail 条目的 latencyMs 也是实测值（>0），延迟最优选择会
     // 固定打向最低延迟的 fail 代理，故此处强制轮询分摊
     const now = Date.now();
     if (now - lastAllUnhealthyWarn > 60_000) {
-      console.warn("[upstream-proxy] 所有代理健康度异常，回退全部代理轮询");
+      console.warn("[upstream-proxy] 所有代理健康度异常，回退可用代理轮询");
       lastAllUnhealthyWarn = now;
     }
-    const fallbackUrl = groupUrls[roundRobinIndex % groupUrls.length];
+    const usable = groupUrls.filter((u) => {
+      if (unhealthyUrls.has(u)) return false;
+      const stat = proxyReqStats.get(u);
+      return stat ? !isProxyStatDegraded(stat) : true;
+    });
+    const fallbackPool = usable.length > 0 ? usable : groupUrls;
+    const fallbackUrl = fallbackPool[roundRobinIndex % fallbackPool.length];
     roundRobinIndex++;
     return { dispatcher: await getAgent(fallbackUrl), url: fallbackUrl };
   }
