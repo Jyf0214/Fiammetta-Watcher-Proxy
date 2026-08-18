@@ -90,6 +90,8 @@ No external scheduler is needed for `/api/cron/*`, and `CRON_SECRET` is **not re
 
 > Scheduled tasks run in the container's local timezone (UTC by default; adjust with the `TZ` environment variable). Log archival is set to 3:10 to offset from the hourly key usage reset at the top of the hour, avoiding concurrent database writes.
 
+> `UPSTREAM_PROXY_DISABLED` disables the outbound proxy at the device level: `all` = disable entirely (requests go direct; pull and health checks stop); `health` = stop only the scheduled health checks (the manual "Check now" button in the admin UI still works). It affects only the current container and never writes to the database. See [Environment Variables](/en/deployment/env).
+
 ## Lite Image (:canary-lite)
 
 The lite image provides only the V1 proxy and scheduled task APIs — no admin panel. It suits gateways that already have an admin frontend elsewhere. Environment-variable requirements are the same as the full image.

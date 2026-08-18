@@ -58,13 +58,13 @@ interface ErrorEvent {
 
 // ==================== 导入步骤定义（用于显示名称） ====================
 
-const STEP_LABELS: Record<string, { labelKey: string; detailKey?: string }> = {
+const STEP_LABELS: Record<string, { labelKey: string }> = {
   platforms: { labelKey: "dmStepPlatforms" },
   modelMaps: { labelKey: "dmStepModelMaps" },
   configs: { labelKey: "dmStepConfigs" },
   apiKeys: { labelKey: "dmStepApiKeys" },
   auditLogs: { labelKey: "dmStepAuditLogs" },
-  requestLogs: { labelKey: "dmStepRequestLogs", detailKey: "dmStepRequestLogsDetail" },
+  requestLogs: { labelKey: "dmStepRequestLogs" },
   dailyStats: { labelKey: "dmStepDailyStats" },
   platformModels: { labelKey: "dmStepPlatformModels" },
 };
@@ -94,6 +94,7 @@ const PREVIEW_RULES: Record<
   auditLogs: { required: ["action"] },
   requestLogs: { required: ["model"] },
   dailyStats: { required: ["date", "model"] },
+  platformModels: { required: ["platformId", "modelId"] },
 };
 
 /** 解析导入文件，统计各类型条数与可疑记录（缺必填字段/重复/脱敏） */
@@ -142,7 +143,6 @@ function analyzeImportData(data: Record<string, unknown>): ImportPreview {
 
 interface StepProgress {
   labelKey: string;
-  detailKey?: string;
   stepTotal: number;
   imported: number;
   skipped: number;
@@ -260,7 +260,7 @@ export default function DataManagerPage() {
           setImportPreview(preview);
         })
         .catch((err) => {
-          message.error(err instanceof Error ? err.message : t("dmErrExport"));
+          message.error(err instanceof Error ? err.message : t("dmErrImport"));
         });
     },
     [t]
@@ -290,7 +290,7 @@ export default function DataManagerPage() {
 
         if (!res.ok) {
           const err: Record<string, any> = await res.json();
-          throw new Error(err.error || t("dmErrExport"));
+          throw new Error(err.error || t("dmErrImport"));
         }
 
         // 读取 NDJSON 流
@@ -325,7 +325,6 @@ export default function DataManagerPage() {
                   const hasError = !!ev.error;
                   const newEntry: StepProgress = {
                     labelKey: STEP_LABELS[ev.step]?.labelKey || ev.step,
-                    detailKey: STEP_LABELS[ev.step]?.detailKey,
                     stepTotal: ev.stepTotal,
                     imported: ev.imported,
                     skipped: ev.skipped,
@@ -388,10 +387,10 @@ export default function DataManagerPage() {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
-        message.error(err instanceof Error ? err.message : t("dmErrExport"));
+        message.error(err instanceof Error ? err.message : t("dmErrImport"));
         setImportResult({
           success: false,
-          message: err instanceof Error ? err.message : t("dmErrExport"),
+          message: err instanceof Error ? err.message : t("dmErrImport"),
         });
       } finally {
         importAbortRef.current = null;

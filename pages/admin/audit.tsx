@@ -16,6 +16,7 @@ import AdminLayout from "@/components/AdminLayout";
 
 interface AuditEntry {
   id: string;
+  adminId: string | null;
   action: string;
   detail: string | null;
   ip: string | null;
@@ -110,7 +111,9 @@ function AuditContent() {
       dataIndex: "username",
       key: "username",
       width: 120,
-      render: (v: string | null) => v || "-",
+      // env-admin 是 JWT 登录的虚拟 ID（无 admins 表行），映射为系统管理员
+      render: (_v: string | null, record: AuditEntry) =>
+        record.adminId === "env-admin" ? t("systemAdmin") : record.username || "-",
     },
     {
       title: t("common:detail"),

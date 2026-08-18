@@ -68,7 +68,8 @@
     "inputPassword": "输入密码以登录",
     "adminOnly": "仅限管理员登录",
     "logoutFailed": "登出失败",
-    "copyError": "复制错误信息"
+    "copyError": "复制错误信息",
+    "loginLocked": "尝试次数过多，请 {seconds} 秒后重试"
   },
   "admin": {
     "dashboard": "仪表盘",
@@ -122,6 +123,7 @@
     "dmTipCheckStatus": "• 导入后建议检查平台状态是否正常",
     "dmSkip": "跳过",
     "dmErrExport": "导出失败",
+    "dmErrImport": "导入失败",
     "dmErrInvalidFormat": "无效的导入文件格式",
     "dmErrJsonOnly": "只能导入 JSON 文件",
     "dmErrFileTooLarge": "文件大小不能超过 10MB",
@@ -131,7 +133,6 @@
     "dmStepApiKeys": "API Keys",
     "dmStepAuditLogs": "审计日志",
     "dmStepRequestLogs": "请求日志",
-    "dmStepRequestLogsDetail": "大量数据，可能需要较长时间",
     "dmStepDailyStats": "每日统计",
     "dmStepPlatformModels": "平台模型",
     "dmPreviewTitle": "导入预览",
@@ -184,7 +185,7 @@
     "keyStatusBanned": "封禁中",
     "keyStatusDeprioritized": "降级中",
     "keyStatusTip": "部分 API Key 处于 429 临时封禁/降级状态，到期自动恢复",
-    "keyStatusSummary": "{{count}} 个 API Key 处于 429 临时封禁/降级状态（封禁 {{banned}}、降级 {{deprioritized}}），到期自动恢复",
+    "keyStatusSummary": "{count} 个 API Key 处于 429 临时封禁/降级状态（封禁 {banned}、降级 {deprioritized}），到期自动恢复",
     "back": "返回",
     "groupBasic": "基本信息",
     "groupParams": "参数设置",
@@ -278,7 +279,6 @@
     "resetPeriod": "重置周期",
     "statusActive": "正常",
     "statusDisabled": "已禁用",
-    "statusExpired": "已过期",
     "createKey": "创建 Key",
     "editKey": "编辑 Key",
     "resetMonthly": "每月",
@@ -377,6 +377,7 @@
   },
   "audit": {
     "admin": "管理员",
+    "systemAdmin": "系统管理员",
     "ip": "IP",
     "actionLogin": "管理员登录",
     "actionLoginFailed": "登录失败",
@@ -491,6 +492,10 @@
     "upstreamProxyHealthIntervalHelp": "Docker 部署定时任务按此间隔自动检查代理连通性，范围 1~60；保存后于下一次定时检查生效。",
     "upstreamProxyHealthIntervalDefault": "默认",
     "upstreamProxyInvalidInterval": "健康检查间隔需为 1~60 的整数",
+    "upstreamProxyNoActivePullGroups": "没有可拉取的代理组（全部禁用或无订阅地址）",
+    "upstreamProxyNoHealthCandidates": "没有可检查的代理（全部组禁用或无代理）",
+    "upstreamProxyDegraded": "降权中",
+    "upstreamProxyDegradedTip": "窗口内错误率过高，路由已临时跳过此代理，窗口滑动后自动恢复",
     "upstreamProxySaveFirst": "配置尚未保存，请先保存再执行操作",
     "upstreamProxyHealthTitle": "代理健康度",
     "upstreamProxyHealthChecking": "正在检查 {checked}/{total}",
@@ -526,6 +531,8 @@
     "upstreamProxyLastCheck": "最近检查",
     "upstreamProxyRefreshStats": "刷新统计",
     "upstreamProxyStatsUpdated": "统计已刷新",
+    "upstreamProxyDisabledAll": "出站代理已通过环境变量禁用（UPSTREAM_PROXY_DISABLED=all）：业务请求直连，拉取与健康检查（含手动）均不执行",
+    "upstreamProxyDisabledHealth": "定时健康检查已通过环境变量禁用（UPSTREAM_PROXY_DISABLED=health）：调度器与 cron 端点不执行，手动「立即检查」仍可用",
     "upstreamProxyCronHint": "拉取与健康检查由定时任务（cron proxy-pull / proxy-health）触发，也可在上方手动执行；统计按代理聚合真实请求的 200 / 429 等错误数与可用率"
   },
   "home": {

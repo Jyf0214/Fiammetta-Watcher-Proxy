@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Input, InputNumber, Select, message } from "antd";
+import { Input, InputNumber, Select, Alert, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
@@ -22,10 +22,19 @@ import {
   parsePoolMap,
   collectGroupUrls,
   maskProxyUrl,
+  normalizeProxyStatKey,
   buildConfigJson,
+  sumMaskedStats,
   errMsg,
   type GroupFormState,
 } from "@/lib/upstream-proxy-ui";
+
+/** 安全上下文（HTTPS/localhost）外 crypto.randomUUID 不存在——HTTP 局域网访问
+ * Docker 后台时渲染期调用直接 TypeError 白屏；组身份是 name，id 纯装饰，用兜底生成 */
+const genId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /**
  * 出站代理列表页 — 代理组列表 + 全局设置 + 健康面板
@@ -73,6 +82,10 @@ export default function UpstreamProxyPage() {
 
   /** 组请求可用率源数据（stats API 返回的按代理聚合统计，url → 分类计数） */
   const [trafficStats, setTrafficStats] = useState<Record<string, { total: number; ok: number }> | null>(null);
+  /** 当前统计降权（路由已跳过）的代理（脱敏键列表，stats API 同进程读取） */
+  const [degradedUrls, setDegradedUrls] = useState<string[]>([]);
+  /** 设备级禁用状态（stats API 下发）：all=整体禁用、health=仅定时健康检查禁用、null=正常 */
+  const [proxyDisabled, setProxyDisabled] = useState<"all" | "health" | null>(null);
 
   // 挂载后加载一次实际可用性统计（仅 Docker；stats API 在非 Docker 部署返回 400）
   useEffect(() => {
@@ -82,7 +95,11 @@ export default function UpstreamProxyPage() {
       .then((r) => r.json())
       .then((data: unknown) => {
         const body = data as Record<string, any> | null;
-        if (!cancelled && body?.success) setTrafficStats(body.data?.stats ?? null);
+        if (!cancelled && body?.success) {
+          setTrafficStats(body.data?.stats ?? null);
+          setDegradedUrls((body.data?.degradedUrls as string[] | undefined) ?? []);
+          setProxyDisabled((body.data?.proxyDisabled as "all" | "health" | null | undefined) ?? null);
+        }
       })
       .catch(() => {
         // 静默：统计失败不影响组列表展示
@@ -91,6 +108,24 @@ export default function UpstreamProxyPage() {
       cancelled = true;
     };
   }, [isDocker]);
+
+  /** 重拉可用率统计：拉取/健康检查动作成功后调用（stats 仅挂载时拉取一次，
+   *  不刷新则新拉回的代理在 trafficStats 查表 miss，行内可用率徽标消失需整页刷新） */
+  const refreshTrafficStats = (): void => {
+    void fetch("/api/admin/upstream-proxy/stats?hours=24")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        const body = data as Record<string, any> | null;
+        if (body?.success) {
+          setTrafficStats(body.data?.stats ?? null);
+          setDegradedUrls((body.data?.degradedUrls as string[] | undefined) ?? []);
+          setProxyDisabled((body.data?.proxyDisabled as "all" | "health" | null | undefined) ?? null);
+        }
+      })
+      .catch(() => {
+        // 静默：统计失败不影响组列表展示
+      });
+  };
 
   // 服务器配置值变化时回填全局字段（渲染期 prev 值比较，避免 effect 内同步 setState；
   // 值未变时不回填，不覆盖未保存的编辑）
@@ -111,10 +146,10 @@ export default function UpstreamProxyPage() {
   const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
     // 组可用率 = 组内各代理真实请求的 2xx 占比（聚合 total/ok；
-    // stats 键为落库脱敏地址，查表统一 maskProxyUrl）
+    // stats 键为落库脱敏地址，同 host:port 不同凭据共享同一统计键只计一次）
     const rows = (trafficStats ?? {});
-    const groupTotal = urls.reduce((n, u) => n + (rows[maskProxyUrl(u)]?.total ?? 0), 0);
-    const groupOk = urls.reduce((n, u) => n + (rows[maskProxyUrl(u)]?.ok ?? 0), 0);
+    const groupTotal = sumMaskedStats(urls, rows, (s) => s?.total ?? 0);
+    const groupOk = sumMaskedStats(urls, rows, (s) => s?.ok ?? 0);
     return {
       name: g.name,
       sourceUrl: g.sourceUrl,
@@ -129,7 +164,7 @@ export default function UpstreamProxyPage() {
   /** 当前表单（组数据来自已保存配置，仅全局字段可编辑）→ 配置 JSON */
   const currentFormGroups = (): GroupFormState[] =>
     parsed.groups.map((g) => ({
-      id: crypto.randomUUID(),
+      id: genId(),
       name: g.name,
       sourceUrl: g.sourceUrl,
       urlsText: g.urls.join("\n"),
@@ -187,14 +222,21 @@ export default function UpstreamProxyPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         mutate();
+        // 拉取动作成功后同步刷新可用率统计，否则新拉回的代理在统计查表 miss
+        refreshTrafficStats();
         const results = (data.data?.results ?? {}) as Record<string, { error?: string }>;
-        const failed = Object.values(results).filter((r) => r?.error);
-        if (Object.keys(results).length > 0 && failed.length === Object.keys(results).length) {
-          message.error(t("upstreamProxyPullFailed"));
-        } else if (failed.length > 0) {
-          message.warning(t("upstreamProxyPullPartial"));
+        if (Object.keys(results).length === 0) {
+          // 全部组禁用或无订阅地址：拉取无可执行目标，此前误报「拉取完成」假成功
+          message.warning(t("upstreamProxyNoActivePullGroups"));
         } else {
-          message.success(t("upstreamProxyPulled"));
+          const failed = Object.values(results).filter((r) => r?.error);
+          if (failed.length === Object.keys(results).length) {
+            message.error(t("upstreamProxyPullFailed"));
+          } else if (failed.length > 0) {
+            message.warning(t("upstreamProxyPullPartial"));
+          } else {
+            message.success(t("upstreamProxyPulled"));
+          }
         }
       } else {
         message.error(errMsg(data, t("common:error")));
@@ -215,7 +257,7 @@ export default function UpstreamProxyPage() {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        void startPolling();
+        void startPolling(true);
       } else {
         message.error(errMsg(data, t("common:error")));
       }
@@ -231,7 +273,7 @@ export default function UpstreamProxyPage() {
    *  无候选（无配置/全部组禁用，total=0）静默停止；progress 元组 60s 无变化
    *  （后端任务停滞/丢失）时停止轮询并清指示器，防死循环。
    *  所有终止路径复位 pollChainActive，使后续启动入口可再开新链 */
-  const pollHealthProgress = async (lastKey = "", stalled = 0): Promise<void> => {
+  const pollHealthProgress = async (lastKey = "", stalled = 0, manual = false): Promise<void> => {
     if (!mountedRef.current) {
       pollChainActive.current = false;
       return;
@@ -247,7 +289,7 @@ export default function UpstreamProxyPage() {
           setCheckProgress(null);
           return;
         }
-        checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1, manual), 2000);
         return;
       }
       mutate();
@@ -264,13 +306,18 @@ export default function UpstreamProxyPage() {
           pollChainActive.current = false;
           return;
         }
-        checkPollTimer.current = setTimeout(() => void pollHealthProgress(key, nextStalled), 2000);
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(key, nextStalled, manual), 2000);
         return;
       }
-      // running=false：total>0 = 检查完成；total=0 = 无候选可检查（合法状态，不提示）
+      // running=false：total>0 = 检查完成；total=0 = 无候选可检查
+      // （全部组禁用/无代理）——手动发起时如实提示，此前零反馈
       setCheckProgress(null);
       pollChainActive.current = false;
-      if (progress.total > 0) message.success(t("upstreamProxyHealthDone"));
+      if (progress.total > 0) {
+        // 检查完成后同步刷新可用率统计（统计按真实请求聚合，动作后重拉保持一致）
+        refreshTrafficStats();
+        message.success(t("upstreamProxyHealthDone"));
+      } else if (manual) message.warning(t("upstreamProxyNoHealthCandidates"));
     } catch {
       // 轮询失败按停滞累计（检查仍在后台继续，多等一轮）
       if (stalled + 1 >= 30) {
@@ -283,11 +330,12 @@ export default function UpstreamProxyPage() {
   };
 
   /** 轮询链单飞入口：挂载同步/手动检查统一走此启动，已有活动链时不再重复启动
-   *  （检查期间 config 每批变化会重跑挂载 effect，无此守卫将叠加多条并行链） */
-  const startPolling = (): void => {
+   *  （检查期间 config 每批变化会重跑挂载 effect，无此守卫将叠加多条并行链）。
+   *  manual=true 表示由「立即检查」按钮发起，无候选时如实提示（挂载同步静默） */
+  const startPolling = (manual = false): void => {
     if (pollChainActive.current) return;
     pollChainActive.current = true;
-    void pollHealthProgress();
+    void pollHealthProgress("", 0, manual);
   };
 
   // 挂载/配置就绪后同步进行中的健康检查：页面刷新后立即恢复「检查中 X/Y」，
@@ -340,8 +388,10 @@ export default function UpstreamProxyPage() {
 
   const platformOptions = (platforms ?? []).map((p) => ({ label: p.name, value: p.id }));
 
-  /** 健康面板统计：全部组候选代理的 ok/fail/未检查计数 */
-  const allHealthUrls = parsed.groups.flatMap((g) => collectGroupUrls(poolMap[g.name] ?? [], g.urls));
+  /** 健康面板统计与展示：仅启用组（禁用组不参与健康检查与路由，统计与展示
+   *  一并过滤，避免误导；组列表行的禁用徽标由 ProxyGroupList 保留展示） */
+  const enabledGroups = parsed.groups.filter((g) => g.enabled);
+  const allHealthUrls = enabledGroups.flatMap((g) => collectGroupUrls(poolMap[g.name] ?? [], g.urls));
   const healthStats = {
     total: allHealthUrls.length,
     ok: allHealthUrls.filter((u) => healthMap[u]?.status === "ok").length,
@@ -362,6 +412,18 @@ export default function UpstreamProxyPage() {
           {t("upstreamProxyPlatform")}：{deployPlatform || "—"}。
           {isDocker ? t("upstreamProxyActive") : t("upstreamProxyNotActive")}
         </div>
+
+        {/* 设备级禁用提示（环境变量 UPSTREAM_PROXY_DISABLED 仅影响当前部署实例） */}
+        {proxyDisabled && (
+          <Alert
+            type={proxyDisabled === "all" ? "error" : "warning"}
+            showIcon
+            message={t(
+              proxyDisabled === "all" ? "upstreamProxyDisabledAll" : "upstreamProxyDisabledHealth"
+            )}
+            className="mb-3"
+          />
+        )}
 
         <ProxyGroupList
           groups={summaries}
@@ -438,7 +500,7 @@ export default function UpstreamProxyPage() {
                   onClick={pullNow}
                   loading={pulling}
                   icon={<RefreshCw size={14} />}
-                  disabled={parsed.groups.length === 0}
+                  disabled={parsed.groups.length === 0 || proxyDisabled === "all"}
                 >
                   {t("upstreamProxyPullNow")}
                 </Button>
@@ -448,13 +510,13 @@ export default function UpstreamProxyPage() {
                   onClick={checkNow}
                   loading={checking}
                   icon={<RefreshCw size={14} />}
-                  disabled={parsed.groups.length === 0}
+                  disabled={parsed.groups.length === 0 || proxyDisabled === "all"}
                 >
                   {t("upstreamProxyCheckNow")}
                 </Button>
               </div>
             </div>
-            {parsed.groups.length === 0 ? (
+            {parsed.groups.length === 0 || enabledGroups.length === 0 ? (
               <p className="text-xs text-zinc-400">{t("upstreamProxyHealthEmpty")}</p>
             ) : (
               <>
@@ -467,7 +529,7 @@ export default function UpstreamProxyPage() {
                   )}
                 </p>
                 <ul className="space-y-3">
-                  {parsed.groups.map((g) => {
+                  {enabledGroups.map((g) => {
                     const groupUrls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
                     if (groupUrls.length === 0) return null;
                     const okCount = groupUrls.filter((u) => healthMap[u]?.status === "ok").length;
@@ -497,6 +559,9 @@ export default function UpstreamProxyPage() {
                           {groupUrls.map((url) => {
                             const entry = healthMap[url];
                             const status = entry?.status ?? "none";
+                            // 统计降权：健康点仍显示 ok 但路由已跳过（窗口内错误率过高，
+                            // 窗口滑动自动恢复）——此前完全不可见
+                            const degraded = degradedUrls.includes(normalizeProxyStatKey(url));
                             return (
                               <li key={url} className="flex items-center gap-2 text-xs">
                                 <span
@@ -511,7 +576,15 @@ export default function UpstreamProxyPage() {
                                 <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
                                   {maskProxyUrl(url)}
                                 </span>
-                                <span className="ml-auto shrink-0 text-zinc-400 text-right">
+                                {degraded && (
+                                  <span
+                                    className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400"
+                                    title={t("upstreamProxyDegradedTip")}
+                                  >
+                                    {t("upstreamProxyDegraded")}
+                                  </span>
+                                )}
+                                <span className="shrink-0 text-zinc-400 text-right">
                                   {renderHealthText(status, entry, t)}
                                 </span>
                               </li>

@@ -68,7 +68,8 @@
     "inputPassword": "Enter your password to login",
     "adminOnly": "Admin access only",
     "logoutFailed": "Logout failed",
-    "copyError": "Copy error message"
+    "copyError": "Copy error message",
+    "loginLocked": "Too many attempts, please retry in {seconds} seconds"
   },
   "admin": {
     "dashboard": "Dashboard",
@@ -122,6 +123,7 @@
     "dmTipCheckStatus": "• Check platform status after import",
     "dmSkip": "Skipped",
     "dmErrExport": "Export failed",
+    "dmErrImport": "Import failed",
     "dmErrInvalidFormat": "Invalid import file format",
     "dmErrJsonOnly": "Only JSON files can be imported",
     "dmErrFileTooLarge": "File size cannot exceed 10MB",
@@ -131,7 +133,6 @@
     "dmStepApiKeys": "API Keys",
     "dmStepAuditLogs": "Audit logs",
     "dmStepRequestLogs": "Request logs",
-    "dmStepRequestLogsDetail": "Large dataset, may take a while",
     "dmStepDailyStats": "Daily stats",
     "dmStepPlatformModels": "Platform models",
     "dmPreviewTitle": "Import Preview",
@@ -184,7 +185,7 @@
     "keyStatusBanned": "Banned",
     "keyStatusDeprioritized": "Deprioritized",
     "keyStatusTip": "Some API keys are temporarily banned/deprioritized after 429, auto-recovered on expiry",
-    "keyStatusSummary": "{{count}} API key(s) temporarily banned/deprioritized after 429 (banned {{banned}}, deprioritized {{deprioritized}}), auto-recovered on expiry",
+    "keyStatusSummary": "{count} API key(s) temporarily banned/deprioritized after 429 (banned {banned}, deprioritized {deprioritized}), auto-recovered on expiry",
     "back": "Back",
     "groupBasic": "Basic Info",
     "groupParams": "Parameters",
@@ -278,7 +279,6 @@
     "resetPeriod": "Reset Period",
     "statusActive": "Active",
     "statusDisabled": "Disabled",
-    "statusExpired": "Expired",
     "createKey": "Create Key",
     "editKey": "Edit Key",
     "resetMonthly": "Monthly",
@@ -377,6 +377,7 @@
   },
   "audit": {
     "admin": "Admin",
+    "systemAdmin": "System Admin",
     "ip": "IP",
     "actionLogin": "Admin Login",
     "actionLoginFailed": "Login Failed",
@@ -491,6 +492,10 @@
     "upstreamProxyHealthIntervalHelp": "On Docker deployments the scheduled task checks proxy connectivity at this interval (1–60). Takes effect from the next scheduled check after saving.",
     "upstreamProxyHealthIntervalDefault": "default",
     "upstreamProxyInvalidInterval": "Health check interval must be an integer between 1 and 60",
+    "upstreamProxyNoActivePullGroups": "No proxy groups to pull (all disabled or no subscription URLs)",
+    "upstreamProxyNoHealthCandidates": "No proxies to check (all groups disabled or empty)",
+    "upstreamProxyDegraded": "degraded",
+    "upstreamProxyDegradedTip": "Error rate too high in the window; routing temporarily skips this proxy until the window slides",
     "upstreamProxySaveFirst": "Save the configuration before pulling or checking",
     "upstreamProxyHealthTitle": "Proxy health",
     "upstreamProxyHealthChecking": "Checking {checked}/{total}",
@@ -526,6 +531,8 @@
     "upstreamProxyLastCheck": "Last check",
     "upstreamProxyRefreshStats": "Refresh stats",
     "upstreamProxyStatsUpdated": "Stats refreshed",
+    "upstreamProxyDisabledAll": "Outbound proxy disabled via environment variable (UPSTREAM_PROXY_DISABLED=all): requests go direct; pull and health checks (including manual) are skipped",
+    "upstreamProxyDisabledHealth": "Scheduled health checks disabled via environment variable (UPSTREAM_PROXY_DISABLED=health): the scheduler and cron endpoint skip them; manual \"Check now\" still works",
     "upstreamProxyCronHint": "Pull and health check run on schedule (cron proxy-pull / proxy-health) or manually above; stats aggregate real requests per proxy (200, 429 and other errors) with availability"
   },
   "home": {

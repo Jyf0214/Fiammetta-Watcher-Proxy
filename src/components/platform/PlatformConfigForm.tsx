@@ -69,13 +69,6 @@ export function PlatformConfigForm({
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
 
-  // 响应式读取表单字段值，供 Modal 中展示。
-  // 必须 preserve: true：编辑模式下 name/baseUrl/type 无对应 Form.Item 注册
-  // （basic 面板仅在新建模式渲染），antd 6 useWatch 默认走 getFieldsValue()
-  // 只返回已注册字段，未注册字段恒读不到 → 弹窗全空（antd 5→6 行为回归）
-  const formName = Form.useWatch("name", { form, preserve: true });
-  const formBaseUrl = Form.useWatch("baseUrl", { form, preserve: true });
-  const formType = Form.useWatch("type", { form, preserve: true });
   // 响应式读取：条件渲染 customUserAgent 必须用 useWatch——
   // getFieldValue 是快照读取，不会触发重渲染（开关切换后输入框不出现/不消失）
   const formReuseUserAgent = Form.useWatch("reuseUserAgent", form);
@@ -436,50 +429,58 @@ export function PlatformConfigForm({
         title={t("groupBasic")}
         open={infoModalOpen}
         onCancel={() => onInfoModalOpenChange(false)}
-        onOk={() => onInfoModalOpenChange(false)}
+        onOk={async () => {
+          // 校验通过才关闭：name/baseUrl 必填，错误由 Modal 内 Form.Item 内联展示
+          try {
+            await form.validateFields(["name", "baseUrl"]);
+            onInfoModalOpenChange(false);
+          } catch {
+            // 校验失败：保持弹窗打开
+          }
+        }}
         okText={t("common:save")}
         cancelText={t("common:cancel")}
         width="min(90vw, 640px)"
       >
-        <div className="pt-2 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              {t("name")} <span className="text-red-500">*</span>
-            </label>
-            <Input
-              value={formName ?? ""}
-              onChange={(e) => form.setFieldsValue({ name: e.target.value })}
-            />
-            <p className="text-xs text-zinc-400 mt-1">{t("nameDesc")}</p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              {t("baseUrl")} <span className="text-red-500">*</span>
-            </label>
-            <Input
-              value={formBaseUrl ?? ""}
-              onChange={(e) => form.setFieldsValue({ baseUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1"
-            />
-            <p className="text-xs text-zinc-400 mt-1">{t("baseUrlDesc")}</p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              {t("type")}
-            </label>
+        {/* 用 Form.Item 挂载三个字段：编辑模式下 basic 面板不渲染，
+            若只 setFieldsValue 写 store，字段未注册 → validateFields() 返回值里
+            没有 name/baseUrl/type → PUT 部分更新静默丢弃（rc-field-form 只返回
+            已挂载字段的值）。Modal 在 <Form> 树内，portal 保留 context，
+            Form.Item 可正常注册并参与提交校验 */}
+        <div className="pt-2">
+          <Form.Item
+            name="name"
+            label={t("name")}
+            rules={[{ required: true }]}
+            extra={<span className={itemDesc}>{t("nameDesc")}</span>}
+            className="!mb-5"
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="baseUrl"
+            label={t("baseUrl")}
+            rules={[{ required: true }]}
+            extra={<span className={itemDesc}>{t("baseUrlDesc")}</span>}
+            className="!mb-5"
+          >
+            <Input placeholder="https://api.openai.com/v1" />
+          </Form.Item>
+          <Form.Item
+            name="type"
+            label={t("type")}
+            extra={<span className={itemDesc}>{t("typeDesc")}</span>}
+            className="!mb-0"
+          >
             <Select
-              value={formType}
-              onChange={(v) => form.setFieldsValue({ type: v })}
               options={[
                 { value: "openai", label: t("typeOpenai") },
                 { value: "anthropic", label: t("typeAnthropic") },
                 { value: "azure", label: t("typeAzure") },
                 { value: "custom", label: t("typeCustom") },
               ]}
-              className="w-full"
             />
-            <p className="text-xs text-zinc-400 mt-1">{t("typeDesc")}</p>
-          </div>
+          </Form.Item>
         </div>
       </Modal>
 

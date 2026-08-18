@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
@@ -18,6 +18,34 @@ export default function AdminLoginPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copied, setCopied] = useState(false);
+  /** 登录限流解锁时间戳（429 响应 resetAt），倒计时归零自动清除提示 */
+  const [lockUntil, setLockUntil] = useState<number | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  /** 登录成功后的跳转定时器（卸载时清理，防止组件卸载后仍触发路由跳转） */
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 卸载时清理跳转定时器
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
+
+  // 登录限流倒计时：每秒刷新剩余秒数，到期自动清除锁定提示
+  useEffect(() => {
+    if (lockUntil === null) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((lockUntil - Date.now()) / 1000));
+      setRetryIn(remaining);
+      if (remaining <= 0) {
+        setLockUntil(null);
+        setError("");
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [lockUntil]);
 
   // 复制错误信息到剪贴板
   const handleCopyError = async (text: string) => {
@@ -88,10 +116,21 @@ export default function AdminLoginPage() {
       if (data.success) {
         setSuccess(data.message || t("loginSuccess"));
         const hide = message.loading(t("redirecting"), 1.5);
-        setTimeout(() => {
+        // 401 踢出前的深链恢复：仅接受 /admin 开头的站内路径（防开放重定向，// 开头视为外链）
+        const rawRedirect = router.query.redirect;
+        const target =
+          typeof rawRedirect === "string" && rawRedirect.startsWith("/admin") && !rawRedirect.startsWith("//")
+            ? rawRedirect
+            : "/admin";
+        redirectTimerRef.current = setTimeout(() => {
           hide();
-          router.push("/admin");
+          router.push(target);
         }, 800);
+      } else if (res.status === 429 && data.resetAt) {
+        // 限流锁定：解析解锁时间戳启动倒计时（非法时间戳不启用，避免 NaN 挂死）
+        const ts = new Date(data.resetAt).getTime();
+        setLockUntil(Number.isFinite(ts) ? ts : null);
+        setError(data.error || t("loginFailed"));
       } else {
         setError(data.error || t("loginFailed"));
       }
@@ -110,6 +149,8 @@ export default function AdminLoginPage() {
     setPassword("");
     setError("");
     setSuccess("");
+    setLockUntil(null);
+    setRetryIn(0);
   };
 
   const inputStyle =
@@ -223,7 +264,7 @@ export default function AdminLoginPage() {
 
         {error && (
           <div role="alert" className="flex items-start justify-between gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
-            <span className="break-all">{error}</span>
+            <span className="break-all">{retryIn > 0 ? t("loginLocked", { seconds: retryIn }) : error}</span>
             <button
               type="button"
               onClick={() => handleCopyError(error)}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, message } from "antd";
+import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, Pagination, message } from "antd";
 import { Plus, Trash2, Copy, Key, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -47,9 +47,10 @@ function ApiKeyCard({
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation("apikey");
-  const statusColor = apiKey.status === "active" ? "green" : apiKey.status === "disabled" ? "red" : "orange";
+  // 状态仅 active/disabled 两态（全项目无 expired 写入方），非 active 一律按禁用态展示
+  const statusColor = apiKey.status === "active" ? "green" : "red";
   const isActive = apiKey.status === "active";
-  const statusText = apiKey.status === "active" ? t("statusActive") : apiKey.status === "disabled" ? t("statusDisabled") : t("statusExpired");
+  const statusText = apiKey.status === "active" ? t("statusActive") : t("statusDisabled");
 
   const createdDate = formatDate(apiKey.createdAt);
 
@@ -104,7 +105,19 @@ export default function KeysPage() {
   /** 构建期内联的部署平台（Cloudflare / EdgeOne / Vercel / 空=自托管或本地） */
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
-  const { data: keys, isLoading, isValidating, mutate } = useApi<ApiKeyItem[]>("/api/admin/keys");
+  // 服务端分页：带 limit/offset 时后端返回 { total, items }（接口约定 A12）
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+  const {
+    data: keysData,
+    isLoading,
+    isValidating,
+    mutate,
+  } = useApi<{ total: number; items: ApiKeyItem[] }>(
+    `/api/admin/keys?limit=${PAGE_SIZE}&offset=${(page - 1) * PAGE_SIZE}`
+  );
+  const keys = keysData?.items ?? [];
+  const total = keysData?.total ?? 0;
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<ApiKeyItem | null>(null);
   const [form] = Form.useForm();
@@ -295,11 +308,11 @@ export default function KeysPage() {
       width: 100,
       align: "center" as const,
       render: (v: string) => {
-        const colorMap: Record<string, string> = { active: "green", disabled: "red", expired: "orange" };
+        // 状态仅 active/disabled 两态（全项目无 expired 写入方），未知值回退 default 标签
+        const colorMap: Record<string, string> = { active: "green", disabled: "red" };
         const textMap: Record<string, string> = {
           active: t("statusActive"),
           disabled: t("statusDisabled"),
-          expired: t("statusExpired"),
         };
         return <Tag color={colorMap[v] || "default"}>{textMap[v] || v}</Tag>;
       },
@@ -350,7 +363,7 @@ export default function KeysPage() {
     },
   ];
 
-  if (isLoading && !keys) {
+  if (isLoading && !keysData) {
     return (
       <AdminLayout>
         <PageContainer>
@@ -403,6 +416,17 @@ export default function KeysPage() {
               />
             ))
           )}
+          {total > PAGE_SIZE && (
+            <Pagination
+              current={page}
+              pageSize={PAGE_SIZE}
+              total={total}
+              onChange={setPage}
+              size="small"
+              showSizeChanger={false}
+              className="flex justify-center"
+            />
+          )}
         </div>
 
         {/* 桌面端：表格 */}
@@ -414,7 +438,10 @@ export default function KeysPage() {
               rowKey="id"
               loading={isValidating}
               pagination={{
-                pageSize: 20,
+                current: page,
+                pageSize: PAGE_SIZE,
+                total,
+                onChange: setPage,
                 showTotal: (total) => t("common:pagination", { count: total }),
               }}
               scroll={{ x: 700 }}

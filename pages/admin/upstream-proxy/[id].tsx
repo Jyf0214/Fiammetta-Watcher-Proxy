@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { Input, Select, message, Popconfirm, Switch } from "antd";
+import { Input, Select, Alert, message, Popconfirm, Switch } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
@@ -23,11 +23,20 @@ import {
   collectGroupUrls,
   parseUrlsText,
   maskProxyUrl,
+  normalizeProxyStatKey,
   buildConfigJson,
+  sumMaskedStats,
   formatChecked,
   errMsg,
   type GroupFormState,
 } from "@/lib/upstream-proxy-ui";
+
+/** 安全上下文（HTTPS/localhost）外 crypto.randomUUID 不存在——HTTP 局域网访问
+ * Docker 后台时渲染期调用直接 TypeError 白屏；组身份是 name，id 纯装饰，用兜底生成 */
+const genId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /** 统计 API 返回的单代理分类计数（前端展示侧简化聚合） */
 interface ProxyTrafficStatUI {
@@ -78,6 +87,8 @@ export default function UpstreamProxyGroupPage() {
   const [checkProgress, setCheckProgress] = useState<{ checked: number; total: number } | null>(null);
   /** 按代理聚合的真实请求统计（stats API；url → 分类计数） */
   const [trafficStats, setTrafficStats] = useState<Record<string, ProxyTrafficStatUI> | null>(null);
+  /** 当前统计降权（路由已跳过）的代理（脱敏键列表，stats API 同进程读取） */
+  const [degradedUrls, setDegradedUrls] = useState<string[]>([]);
   /** 统计元信息：窗口小时数 + 最近拉取/检查时间（秒级 unix） */
   const [statsMeta, setStatsMeta] = useState<{
     hours: number;
@@ -85,6 +96,8 @@ export default function UpstreamProxyGroupPage() {
     lastHealthAt: number | null;
   }>({ hours: 24, poolUpdatedAt: null, lastHealthAt: null });
   const [statsLoading, setStatsLoading] = useState(false);
+  /** 设备级禁用状态（stats API 下发）：all=整体禁用、health=仅定时健康检查禁用、null=正常 */
+  const [proxyDisabled, setProxyDisabled] = useState<"all" | "health" | null>(null);
   const checkPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 组件存活标记：轮询 fetch 挂起期间卸载后不再续排（防定时器泄漏） */
   const mountedRef = useRef(true);
@@ -124,7 +137,9 @@ export default function UpstreamProxyGroupPage() {
             hours?: number;
             poolUpdatedAt?: number | null;
             lastHealthAt?: number | null;
+            proxyDisabled?: "all" | "health" | null;
             stats?: Record<string, ProxyTrafficStatsApi>;
+            degradedUrls?: string[];
           };
         }
       | null;
@@ -140,6 +155,8 @@ export default function UpstreamProxyGroupPage() {
       };
     }
     setTrafficStats(converted);
+    setDegradedUrls((body.data?.degradedUrls as string[] | undefined) ?? []);
+    setProxyDisabled(body.data?.proxyDisabled ?? null);
     setStatsMeta({
       hours: body.data?.hours ?? 24,
       poolUpdatedAt: body.data?.poolUpdatedAt ?? null,
@@ -192,7 +209,7 @@ export default function UpstreamProxyGroupPage() {
     const g = isNew ? undefined : parsed.groups.find((x) => x.name === id);
     if (g) {
       setFormGroup({
-        id: crypto.randomUUID(),
+        id: genId(),
         name: g.name,
         sourceUrl: g.sourceUrl,
         urlsText: g.urls.join("\n"),
@@ -202,14 +219,14 @@ export default function UpstreamProxyGroupPage() {
         enabled: g.enabled,
       });
     } else if (isNew) {
-      setFormGroup({ id: crypto.randomUUID(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [], enabled: true });
+      setFormGroup({ id: genId(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [], enabled: true });
     }
   }
 
   /** 全部组 → 表单态（保存/删除时与当前组合并；组顺序保持配置原序） */
   const allGroupsForm = (): GroupFormState[] =>
     parsed.groups.map((g) => ({
-      id: crypto.randomUUID(),
+      id: genId(),
       name: g.name,
       sourceUrl: g.sourceUrl,
       urlsText: g.urls.join("\n"),
@@ -262,9 +279,10 @@ export default function UpstreamProxyGroupPage() {
     const ok = await saveConfig(merged, "upstreamProxyGroupSaved");
     if (ok && name) {
       router.replace(`/admin/upstream-proxy/${encodeURIComponent(name)}`);
-      // 保存后立即拉取订阅源并验证代理连通性（仅 Docker），
+      // 保存后立即拉取订阅源并验证代理连通性（仅 Docker，整体禁用时跳过——
+      // 本设备经环境变量关闭代理，自动验证无意义），
       // 不等 cron 周期；失败不阻断保存成功的提示
-      if (isDocker) {
+      if (isDocker && proxyDisabled !== "all") {
         void autoVerifyAfterSave(merged);
       }
     }
@@ -277,7 +295,8 @@ export default function UpstreamProxyGroupPage() {
     const hasSourceUrl = merged.some((g) => g.sourceUrl.trim().length > 0);
     const hasCandidate = hasSourceUrl || merged.some((g) => g.urlsText.trim().length > 0);
     if (hasSourceUrl) await pullProxyGroupsNow(true);
-    if (hasCandidate) await checkProxyHealthNow(true);
+    // 自动验证静默（manual=false）：无候选时不弹 warning，不打断保存成功提示
+    if (hasCandidate) await checkProxyHealthNow(true, false);
   };
 
   /** 手动触发拉取/检查前确认表单与已保存配置一致，避免结果与页面显示对不上。
@@ -312,13 +331,18 @@ export default function UpstreamProxyGroupPage() {
       if (data.success) {
         mutate();
         const results = (data.data?.results ?? {}) as Record<string, { error?: string }>;
-        const failed = Object.values(results).filter((r) => r?.error);
-        if (Object.keys(results).length > 0 && failed.length === Object.keys(results).length) {
-          message.error(t("upstreamProxyPullFailed"));
-        } else if (failed.length > 0) {
-          message.warning(t("upstreamProxyPullPartial"));
+        if (Object.keys(results).length === 0) {
+          // 全部组禁用或无订阅地址：拉取无可执行目标，此前误报「拉取完成」假成功
+          message.warning(t("upstreamProxyNoActivePullGroups"));
         } else {
-          message.success(t("upstreamProxyPulled"));
+          const failed = Object.values(results).filter((r) => r?.error);
+          if (failed.length === Object.keys(results).length) {
+            message.error(t("upstreamProxyPullFailed"));
+          } else if (failed.length > 0) {
+            message.warning(t("upstreamProxyPullPartial"));
+          } else {
+            message.success(t("upstreamProxyPulled"));
+          }
         }
       } else {
         message.error(errMsg(data, t("common:error")));
@@ -331,15 +355,17 @@ export default function UpstreamProxyGroupPage() {
   };
 
   /** 立即健康检查（手动按钮与「保存后自动验证」共用）：POST 后台启动后轮询
-   *  GET 渐进刷新「检查中 X/Y」（每批写库后 mutate 同步健康数据） */
-  const checkProxyHealthNow = async (skipEnsure = false) => {
+   *  GET 渐进刷新「检查中 X/Y」（每批写库后 mutate 同步健康数据）。
+   *  manual=true（按钮发起）时无候选（total=0）如实 warning；自动验证（保存后
+   *  触发）保持静默，不打断保存成功提示 */
+  const checkProxyHealthNow = async (skipEnsure = false, manual = true) => {
     if (!skipEnsure && !ensureSaved()) return;
     setChecking(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
       const data: Record<string, any> = await res.json();
       if (data.success) {
-        void startPolling();
+        void startPolling(manual);
       } else {
         message.error(errMsg(data, t("common:error")));
       }
@@ -352,10 +378,10 @@ export default function UpstreamProxyGroupPage() {
 
   /** 轮询健康检查进度（与列表页 pollHealthProgress 同逻辑）：
    *  running=true 继续轮询并显示「检查中 X/Y」；running=false 且 total>0 完成；
-   *  无候选（无配置/全部组禁用，total=0）静默停止；progress 元组 60s 无变化
-   *  （后端任务停滞/丢失）时停止轮询并清指示器，防死循环。
+   *  total=0 无候选（全部组禁用/组内无代理）——手动发起时如实提示，此前零反馈；
+   *  progress 元组 60s 无变化（后端任务停滞/丢失）时停止轮询并清指示器，防死循环。
    *  所有终止路径复位 pollChainActive，使后续启动入口可再开新链 */
-  const pollHealthProgress = async (lastKey = "", stalled = 0): Promise<void> => {
+  const pollHealthProgress = async (lastKey = "", stalled = 0, manual = false): Promise<void> => {
     if (!mountedRef.current) {
       pollChainActive.current = false;
       return;
@@ -371,7 +397,7 @@ export default function UpstreamProxyGroupPage() {
           setCheckProgress(null);
           return;
         }
-        checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1, manual), 2000);
         return;
       }
       mutate();
@@ -388,13 +414,16 @@ export default function UpstreamProxyGroupPage() {
           pollChainActive.current = false;
           return;
         }
-        checkPollTimer.current = setTimeout(() => void pollHealthProgress(key, nextStalled), 2000);
+        checkPollTimer.current = setTimeout(() => void pollHealthProgress(key, nextStalled, manual), 2000);
         return;
       }
-      // running=false：total>0 = 检查完成；total=0 = 无候选可检查（合法状态，不提示）
+      // running=false：total>0 = 检查完成；total=0 = 无候选（全部组禁用/组内
+      // 无代理）——手动发起时如实提示，此前零反馈
       setCheckProgress(null);
       pollChainActive.current = false;
-      if (progress.total > 0) message.success(t("upstreamProxyHealthDone"));
+      if (progress.total > 0) {
+        message.success(t("upstreamProxyHealthDone"));
+      } else if (manual) message.warning(t("upstreamProxyNoHealthCandidates"));
     } catch {
       // 轮询失败按停滞累计（检查仍在后台继续，多等一轮）
       if (stalled + 1 >= 30) {
@@ -402,16 +431,17 @@ export default function UpstreamProxyGroupPage() {
         pollChainActive.current = false;
         return;
       }
-      checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
+      checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1, manual), 2000);
     }
   };
 
   /** 轮询链单飞入口：挂载同步/手动检查/保存后自动验证统一走此启动，已有活动链时
-   *  不再重复启动（检查期间 config 每批变化会重跑挂载 effect，无此守卫将叠加多条并行链） */
-  const startPolling = (): void => {
+   *  不再重复启动（检查期间 config 每批变化会重跑挂载 effect，无此守卫将叠加多条并行链）。
+   *  manual=true 表示由「立即检查」按钮发起，无候选时如实提示（挂载同步/自动验证静默） */
+  const startPolling = (manual = false): void => {
     if (pollChainActive.current) return;
     pollChainActive.current = true;
-    void pollHealthProgress();
+    void pollHealthProgress("", 0, manual);
   };
 
   // 挂载/配置就绪后同步进行中的健康检查：页面刷新后立即恢复「检查中 X/Y」，
@@ -461,8 +491,8 @@ export default function UpstreamProxyGroupPage() {
   );
 
   /** 组级请求统计聚合（组内各代理分类计数求和；无请求数据时 availability 为 undefined）。
-   *  trafficStats 键为落库的脱敏地址（requestLogs.proxyUrl 写入前剥离凭据），
-    查表统一用 maskProxyUrl(u) */
+   *  trafficStats 键为落库的归一化统计键（requestLogs.proxyUrl 写入前归一化为
+   *  去凭据 host:port），同 host:port 不同凭据共享同一统计键只计一次（防组级聚合翻倍） */
   const groupTraffic: {
     total: number;
     ok: number;
@@ -470,10 +500,10 @@ export default function UpstreamProxyGroupPage() {
     errOther: number;
     availability: number | undefined;
   } = {
-    total: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.total ?? 0), 0),
-    ok: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.ok ?? 0), 0),
-    err429: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.err429 ?? 0), 0),
-    errOther: groupUrls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.errOther ?? 0), 0),
+    total: sumMaskedStats(groupUrls, trafficStats, (s) => s?.total ?? 0),
+    ok: sumMaskedStats(groupUrls, trafficStats, (s) => s?.ok ?? 0),
+    err429: sumMaskedStats(groupUrls, trafficStats, (s) => s?.err429 ?? 0),
+    errOther: sumMaskedStats(groupUrls, trafficStats, (s) => s?.errOther ?? 0),
     availability: undefined,
   };
   if (groupTraffic.total > 0) groupTraffic.availability = groupTraffic.ok / groupTraffic.total;
@@ -491,8 +521,8 @@ export default function UpstreamProxyGroupPage() {
   /** 组列表行数据（侧栏与返回条摘要共用） */
   const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
-    const gTotal = urls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.total ?? 0), 0);
-    const gOk = urls.reduce((n, u) => n + (trafficStats?.[maskProxyUrl(u)]?.ok ?? 0), 0);
+    const gTotal = sumMaskedStats(urls, trafficStats, (s) => s?.total ?? 0);
+    const gOk = sumMaskedStats(urls, trafficStats, (s) => s?.ok ?? 0);
     return {
       name: g.name,
       sourceUrl: g.sourceUrl,
@@ -568,7 +598,7 @@ export default function UpstreamProxyGroupPage() {
               onClick={() => void pullProxyGroupsNow()}
               loading={pulling}
               icon={<RefreshCw size={14} />}
-              disabled={!currentGroup?.sourceUrl}
+              disabled={!currentGroup?.sourceUrl || proxyDisabled === "all"}
             >
               {t("upstreamProxyPullNow")}
             </Button>
@@ -578,7 +608,7 @@ export default function UpstreamProxyGroupPage() {
               onClick={() => void checkProxyHealthNow()}
               loading={checking}
               icon={<RefreshCw size={14} />}
-              disabled={groupUrls.length === 0}
+              disabled={groupUrls.length === 0 || proxyDisabled === "all"}
             >
               {t("upstreamProxyCheckNow")}
             </Button>
@@ -630,7 +660,10 @@ export default function UpstreamProxyGroupPage() {
             {groupUrls.map((url) => {
               const entry = healthMap[url];
               const status = entry?.status ?? "none";
-              const stat = trafficStats?.[maskProxyUrl(url)];
+              const stat = trafficStats?.[normalizeProxyStatKey(url)];
+              // 统计降权：健康点仍显示 ok 但路由已跳过（窗口内错误率过高，
+              // 窗口滑动自动恢复）——此前完全不可见
+              const degraded = degradedUrls.includes(normalizeProxyStatKey(url));
               return (
                 <li key={url} className="flex items-start gap-2 text-xs">
                   <span
@@ -647,6 +680,14 @@ export default function UpstreamProxyGroupPage() {
                       <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
                         {maskProxyUrl(url)}
                       </span>
+                      {degraded && (
+                        <span
+                          className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400"
+                          title={t("upstreamProxyDegradedTip")}
+                        >
+                          {t("upstreamProxyDegraded")}
+                        </span>
+                      )}
                       <span className="shrink-0 text-zinc-400 text-right">
                         {renderHealthText(status, entry, t)}
                       </span>
@@ -687,6 +728,16 @@ export default function UpstreamProxyGroupPage() {
   /** 代理组设置区块（基本信息 / 手动代理 / 绑定平台 + 保存；删除入口在区块标题栏） */
   const editForm = (
     <div className="flex flex-col gap-4">
+      {/* 设备级禁用提示（环境变量 UPSTREAM_PROXY_DISABLED 仅影响当前部署实例） */}
+      {proxyDisabled && (
+        <Alert
+          type={proxyDisabled === "all" ? "error" : "warning"}
+          showIcon
+          message={t(
+            proxyDisabled === "all" ? "upstreamProxyDisabledAll" : "upstreamProxyDisabledHealth"
+          )}
+        />
+      )}
       <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("upstreamProxyGroupSettings")}</h3>

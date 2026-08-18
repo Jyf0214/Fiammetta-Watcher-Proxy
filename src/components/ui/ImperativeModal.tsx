@@ -8,7 +8,8 @@ export interface ModalConfig {
   content: ReactNode;
   footer?: ReactNode;
   width?: number | string;
-  onOk?: () => void | Promise<void>;
+  // 返回 false 表示阻止关闭；其余返回值（含 undefined）在触发后关闭弹窗
+  onOk?: () => void | boolean | Promise<void | boolean>;
   onCancel?: () => void;
   okText?: string;
   cancelText?: string;
@@ -86,12 +87,30 @@ export function ImperativeModal({ instance }: { instance: ModalInstance }) {
   };
   const { isOpen, config } = inst._getState();
 
+  // 确定按钮语义：先触发调用方 onOk；未传 onOk 或 onOk 返回非 false 时关闭弹窗。
+  // （antd 受控 Modal 的 handleOk 只调 onOk?.() 后调 onClose?.()，而 onClose 仅在
+  // closable 为非布尔对象时定义，因此不传 onOk 时点「确定」什么都不发生）
+  const handleOk = async () => {
+    const result = config.onOk?.();
+    let shouldClose = true;
+    if (result instanceof Promise) {
+      shouldClose = (await result) !== false;
+    } else if (result === false) {
+      shouldClose = false;
+    }
+    if (shouldClose) instance.close();
+  };
+
   return (
     <Modal
       open={isOpen}
       title={config.title}
       footer={config.footer ?? undefined}
       width={config.width ?? 520}
+      onOk={handleOk}
+      okText={config.okText}
+      cancelText={config.cancelText}
+      loading={config.loading}
       onCancel={() => {
         config.onCancel?.();
         instance.close();

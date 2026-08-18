@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Popconfirm, Modal, Form, Input, Switch, Alert, message, type TableColumnsType } from "antd";
+import { Popconfirm, Modal, Form, Input, Switch, Spin, Alert, message, type TableColumnsType } from "antd";
 import { Plus, Trash2, Copy, Shield, Key } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -46,6 +46,7 @@ export default function SystemKeysPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [keyModal] = useState(() =>
     createModal({
       title: t("sysKeyCreatedTitle"),
@@ -144,6 +145,24 @@ export default function SystemKeysPage() {
     );
   };
 
+  // 列表接口只返回脱敏掩码，复制前先经 GET /api/admin/system-keys/[id] 取完整密钥
+  const copySystemKey = async (item: SystemKeyItem) => {
+    setCopyingId(item.id);
+    try {
+      const res = await fetch(`/api/admin/system-keys/${item.id}`);
+      const data: Record<string, any> = await res.json();
+      if (data.success && typeof data.key === "string") {
+        copyToClipboard(data.key);
+      } else {
+        message.error(t("sysKeyCopyFailed"));
+      }
+    } catch {
+      message.error(t("sysKeyCopyFailed"));
+    } finally {
+      setCopyingId(null);
+    }
+  };
+
   const formatTime = (ts: number | null) => {
     if (!ts) return "—";
     return formatDateTime(ts);
@@ -156,17 +175,18 @@ export default function SystemKeysPage() {
       dataIndex: "key",
       key: "key",
       width: 220,
-      render: (key: string) => (
+      render: (key: string, record: SystemKeyItem) => (
         <div className="flex items-center gap-1 min-w-0">
           <code className="flex-1 min-w-0 truncate text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
             {key}
           </code>
           <button
-            onClick={() => copyToClipboard(key)}
-            className="p-1 rounded text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors shrink-0"
+            onClick={() => copySystemKey(record)}
+            disabled={copyingId === record.id}
+            className="p-1 rounded text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             title={t("common:copy")}
           >
-            <Copy size={13} />
+            {copyingId === record.id ? <Spin size="small" /> : <Copy size={13} />}
           </button>
         </div>
       ),

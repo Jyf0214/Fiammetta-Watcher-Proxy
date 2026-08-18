@@ -13,6 +13,7 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 | `JWT_SECRET` | 登录签名密钥，至少 32 字符 | 是 | 无（Cloudflare CI 自动生成，其他平台需手动设置） |
 | `TRUSTED_PROXY_IPS` | 可信反向代理/网关 IP 列表（逗号分隔，**仅精确 IP，含 IPv6，不支持 CIDR/通配符**）。**部署在 CDN 或反向代理之后时必须配置**：登录限流依赖它识别真实客户端 IP——仅当 TCP 对端在此列表内时才采信 `X-Forwarded-For`（从右向左取第一个非可信条目），否则一律按对端地址计，防止伪造 XFF 绕过限流。**未配置时**：直连部署按客户端地址计；CDN/反代回源部署按网关节点地址计，所有用户共享同一限流桶——攻击者连续 5 次失败即可让全站登录锁定 30 分钟 | 否 | 空（直连部署） |
 | `DEPLOY_PLATFORM` | 部署平台标识：`edgeone` / `vercel` / `docker` / `cf`。EdgeOne、Vercel 部署时在平台控制台的环境变量中填入对应值（用于识别客户端真实 IP）；Docker 镜像已内置 `docker`，Cloudflare 构建脚本自动注入 `cf`，均无需手动设置。**切勿在非对应平台上填写 `edgeone` / `vercel`，否则登录限流可被伪造请求头绕过** | 否 | 空（直连部署；Docker 内置 `docker`） |
+| `UPSTREAM_PROXY_DISABLED` | 设备级禁用出站代理（**仅影响当前部署实例**，不写数据库、不改共享配置，多设备共用同一数据库时可单独关闭某台设备）：`all` = 整体禁用——业务请求直连，拉取与健康检查（含管理页手动）均不执行；`health` = 仅禁用定时健康检查——调度器与 `/api/cron/proxy-health` 端点不执行，管理页手动「立即检查」仍可用。未设置 = 正常 | 否 | 空 |
 
 ::: tip
 部署在无 TCP 对端概念的边缘运行时（如 Cloudflare Pages/Workers）时无需配置 `TRUSTED_PROXY_IPS` —— 自动采信边缘注入的 `CF-Connecting-IP`；有 TCP 对端的部署（Node 直连 / 自建反代 / CDN 回源）按上表配置

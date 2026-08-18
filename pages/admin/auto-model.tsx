@@ -48,9 +48,22 @@ export default function AutoModelPage() {
   // 最新启用集合镜像：防抖回调读取 ref 而非过期闭包，避免最后一次切换丢失
   const enabledModelIdsRef = useRef<Set<string>>(new Set());
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 卸载 flush 引用最新 persistEnabledModels（React Compiler 项目禁手动 useCallback，
+  // 用 ref 承载最新闭包，卸载 effect 保持空依赖）
+  const persistEnabledModelsRef = useRef(persistEnabledModels);
+  useEffect(() => {
+    persistEnabledModelsRef.current = persistEnabledModels;
+  });
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      // 卸载时若 500ms 防抖窗口内还有未落盘的切换，立即 flush 保存，
+      // 避免「切换后立刻离开页面」丢失最后一次修改
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void persistEnabledModelsRef.current(enabledModelIdsRef.current);
+      }
     };
   }, []);
 
@@ -154,8 +167,9 @@ export default function AutoModelPage() {
     }
   };
 
-  /** 保存当前启用集合到 config */
-  const persistEnabledModels = async (ids: Set<string>) => {
+  /** 保存当前启用集合到 config（函数声明：卸载 effect 在渲染期之后执行，
+   *  需提升声明消除 no-use-before-define，闭包捕获与 const 版一致） */
+  async function persistEnabledModels(ids: Set<string>) {
     setSaving(true);
     try {
       const visibleIds = new Set(
@@ -182,9 +196,16 @@ export default function AutoModelPage() {
         mutateConfig();
       } else {
         message.error(data.error || t("common:error"));
+        // 失败回滚：UI 恢复为服务器已保存集合，开关不得停留在未保存状态
+        const rollback = new Set(savedModelIds);
+        enabledModelIdsRef.current = rollback;
+        setEnabledModelIds(rollback);
       }
     } catch {
       message.error(t("common:error"));
+      const rollback = new Set(savedModelIds);
+      enabledModelIdsRef.current = rollback;
+      setEnabledModelIds(rollback);
     } finally {
       setSaving(false);
     }

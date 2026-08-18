@@ -51,18 +51,6 @@ export const collapseTransition: Transition = {
   ease: EASE_MATERIAL,
 };
 
-// ===== Toast / notification =====
-export const toastVariants: Variants = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: 16 },
-};
-
-export const toastTransition: Transition = {
-  duration: 0.18,
-  ease: "easeOut",
-};
-
 // ===== Scale fade (HUD / overlay) =====
 export const scaleFadeVariants: Variants = {
   initial: { opacity: 0, scale: 0.92 },
@@ -86,19 +74,3 @@ export const slideTransition: Transition = {
   duration: 0.28,
   ease: EASE_MATERIAL,
 };
-
-// ===== Spring configs =====
-export const SPRING_NOTIFICATION = {
-  damping: 30,
-  stiffness: 320,
-  type: "spring",
-} as const;
-
-export const SPRING_LAYOUT = {
-  damping: 26,
-  mass: 0.4,
-  stiffness: 380,
-  restDelta: 0.5,
-  restSpeed: 2,
-  type: "spring",
-} as const;

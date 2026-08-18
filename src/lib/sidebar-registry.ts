@@ -28,21 +28,6 @@ function getSnapshot() {
   return items;
 }
 
-/** 注册侧边栏菜单项 */
-export function registerSidebarItem(item: SidebarItem) {
-  const filtered = items.filter((i) => i.key !== item.key);
-  filtered.push(item);
-  filtered.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-  items = filtered;
-  emit();
-}
-
-/** 移除侧边栏菜单项 */
-export function unregisterSidebarItem(key: string) {
-  items = items.filter((i) => i.key !== key);
-  emit();
-}
-
 /**
  * 侧边栏菜单项 hook — 基于外部 store 订阅，组件卸载时自动清理
  */
