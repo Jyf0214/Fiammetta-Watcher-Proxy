@@ -158,9 +158,19 @@ jobs:
               for dep in deps:
                   stage = dep.get("latest_stage", {})
                   print(f"deployment {dep['id']} stage={stage.get('name')} status={stage.get('status')}")
+                  dep_err = dep.get("error")
+                  stage_err = stage.get("error")
+                  if dep_err:
+                      print("  ! deployment error:", json.dumps(dep_err)[:400])
+                  if stage_err:
+                      print("  ! stage error:", json.dumps(stage_err)[:400])
                   try:
-                      logs = api(f"/pages/projects/fiammetta-watcher/deployments/{dep['id']}/history/logs?size=200")["result"]
-                      for item in logs["data"][-15:]:
+                      resp = api(f"/pages/projects/fiammetta-watcher/deployments/{dep['id']}/history/logs?size=200")
+                      logs = resp.get("result") or {}
+                      data = logs.get("data") or []
+                      if not data:
+                          print("  ! history/logs 无日志，响应:", json.dumps(resp)[:400])
+                      for item in data[-15:]:
                           line = (item.get("line") or "").strip()
                           if line:
                               print("  |", line[:400])
