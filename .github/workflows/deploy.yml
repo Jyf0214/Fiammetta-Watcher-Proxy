@@ -162,6 +162,9 @@ jobs:
               for dep in deps:
                   stage = dep.get("latest_stage", {})
                   print(f"deployment {dep['id']} stage={stage.get('name')} status={stage.get('status')}")
+                  # 完整 dump（移除 url 字段，否则含 https:// 的整行会被脱敏管道过滤）
+                  dep_no_url = {k: v for k, v in dep.items() if k != "url"}
+                  print("  dep full:", json.dumps(dep_no_url, default=str)[:1500])
                   dep_err = dep.get("error")
                   stage_err = stage.get("error")
                   if dep_err:
