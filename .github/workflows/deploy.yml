@@ -137,9 +137,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          # 让 wrangler 在本地日志输出脱敏后的 API 响应体（含 deployment 失败详情，token 自动打码）
+          WRANGLER_LOG_SANITIZE: "false"
         run: |
           set -o pipefail
           npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -v "https://" || {
+            echo "✗ wrangler pages deploy 失败，wrangler 本地日志尾部（脱敏）："
+            ls -t ~/.config/.wrangler/logs/wrangler-*.log 2>/dev/null | head -1 | xargs -I{} sh -c 'tail -120 "{}" | grep -vE "^Uploading|https://" | tail -50'
             echo "✗ wrangler pages deploy 失败，最近部署的 Cloudflare 构建日志："
             python3 - "$CLOUDFLARE_ACCOUNT_ID" "$CLOUDFLARE_API_TOKEN" <<'PYEOF' | grep -v "https://" | tail -60
           import json, sys, urllib.request
