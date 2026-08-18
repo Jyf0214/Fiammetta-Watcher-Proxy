@@ -14,6 +14,7 @@ export interface WorkerEnv {
   DB_TYPE?: string;
   DATABASE_URL?: string;
   TIDB_URL?: string;
+  MYSQL_URL?: string;
   PG_URL?: string;
   MARIADB_URL?: string;
   HYPERDRIVE?: { connectionString: string };

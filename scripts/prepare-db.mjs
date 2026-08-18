@@ -12,7 +12,7 @@
  *
  * 生成目录：
  *   - prisma/schema.d1.prisma      → src/generated/d1/       （或 stub）
- *   - prisma/schema.mysql.prisma   → src/generated/mysql/    （或 stub，TiDB）
+ *   - prisma/schema.mysql.prisma   → src/generated/mysql/    （或 stub，TiDB / 纯 MySQL）
  *   - prisma/schema.mariadb.prisma → src/generated/mariadb/  （或 stub）
  *   - prisma/schema.pg.prisma      → src/generated/pg/       （或 stub）
  *
@@ -35,7 +35,9 @@ const GENERATED_ROOT = resolve(ROOT, "src", "generated");
 /** 方言配置：schema 文件 + 输出目录 + db push 标记 */
 const DIALECTS = {
   d1: { name: "D1", file: "prisma/schema.d1.prisma", dir: "d1", needsPush: false },
+  // tidb（TiDB Cloud，HTTP）与 mysql（纯 MySQL，TCP）共用 MySQL 方言 schema 与产物目录
   tidb: { name: "MySQL", file: "prisma/schema.mysql.prisma", dir: "mysql", needsPush: true },
+  mysql: { name: "MySQL", file: "prisma/schema.mysql.prisma", dir: "mysql", needsPush: true },
   mariadb: { name: "MariaDB", file: "prisma/schema.mariadb.prisma", dir: "mariadb", needsPush: true },
   pg: { name: "PostgreSQL", file: "prisma/schema.pg.prisma", dir: "pg", needsPush: true },
   hyperdrive: { name: "PostgreSQL", file: "prisma/schema.pg.prisma", dir: "pg", needsPush: true },
@@ -71,9 +73,12 @@ function resolveDbType() {
   if (DIALECTS[dbType]) return dbType;
 
   const url = process.env.DATABASE_URL || "";
-  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  // mysqls:// 是 TiDB Cloud 的 TLS 连接串格式，仍按 tidb；mariadb 驱动不识别 mysqls://
+  if (url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("mysql://")) return "mysql";
   if (url.startsWith("mariadb://")) return "mariadb";
   if ((process.env.MARIADB_URL || "").startsWith("mariadb://")) return "mariadb";
+  if ((process.env.MYSQL_URL || "").startsWith("mysql://")) return "mysql";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
 
   return "d1";
@@ -166,11 +171,15 @@ for (const [key, d] of Object.entries(DIALECTS)) {
 if (isAll) {
   console.log("all 模式：跳过 db push（表结构由容器启动时按运行时 DB_TYPE 同步）");
 } else if (dialect.needsPush) {
-  // 运行时 lib/prisma.ts 的 url 取 MARIADB_URL || DATABASE_URL，建表必须保持一致
-  const url = process.env.MARIADB_URL || process.env.DATABASE_URL || "";
+  // 运行时 lib/prisma.ts 的 url 取 <方言>_URL || DATABASE_URL，建表必须保持一致
+  let url = process.env.DATABASE_URL || "";
+  if (dbType === "tidb") url = process.env.TIDB_URL || url;
+  if (dbType === "mariadb") url = process.env.MARIADB_URL || url;
+  if (dbType === "mysql") url = process.env.MYSQL_URL || url;
   // 仅当 DATABASE_URL 协议与方言匹配时才 push，防止占位串（file:./placeholder.db）误推
   let schemes = [];
   if (dbType === "tidb") schemes = ["mysql://", "mysqls://"];
+  else if (dbType === "mysql") schemes = ["mysql://"];
   else if (dbType === "mariadb") schemes = ["mariadb://"];
   else schemes = ["postgresql://", "postgres://"];
   const isRemote = schemes.some((scheme) => url.startsWith(scheme));

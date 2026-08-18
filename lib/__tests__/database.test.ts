@@ -77,11 +77,11 @@ describe("getDbKind 推断", () => {
     expect(await getDbKind()).toBe("mariadb");
   });
 
-  it("DB_TYPE=mysql 别名时返回 tidb", async () => {
+  it("DB_TYPE=mysql 时返回 mysql", async () => {
     const { getDbKind } = await import("../prisma");
     process.env.DB_TYPE = "mysql";
     delete process.env.DATABASE_URL;
-    expect(await getDbKind()).toBe("tidb");
+    expect(await getDbKind()).toBe("mysql");
   });
 
   it("无 DB_TYPE 时按 DATABASE_URL 协议推断", async () => {
@@ -89,8 +89,9 @@ describe("getDbKind 推断", () => {
     delete process.env.DB_TYPE;
 
     process.env.DATABASE_URL = "mysql://user:pass@host/db";
-    expect(await getDbKind()).toBe("tidb");
+    expect(await getDbKind()).toBe("mysql");
 
+    // mysqls:// 是 TiDB Cloud 的 TLS 连接串格式，走 HTTP 适配器（tidb）
     process.env.DATABASE_URL = "mysqls://user:pass@host/db";
     expect(await getDbKind()).toBe("tidb");
 

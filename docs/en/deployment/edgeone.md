@@ -1,6 +1,6 @@
 # EdgeOne Deployment
 
-EdgeOne (Tencent Cloud EdgeOne Makers): the proxy and scheduled tasks are handled by serverless functions, with a remote TiDB / MariaDB / PostgreSQL database.
+EdgeOne (Tencent Cloud EdgeOne Makers): the proxy and scheduled tasks are handled by serverless functions, with a remote TiDB / MySQL / MariaDB / PostgreSQL database.
 
 ::: warning New platform — verify the first deployment manually
 EdgeOne Makers is relatively new. This guide is based on the current deployment flow. After the first deployment, manually verify the proxy, admin panel, and database connectivity.
@@ -10,7 +10,7 @@ EdgeOne Makers is relatively new. This guide is based on the current deployment 
 
 1. [EdgeOne Makers](https://console.cloud.tencent.com/edgeone) account and project (note the project name)
 2. EdgeOne API Token (generated in the Makers console)
-3. Remote database: TiDB Cloud, MariaDB or PostgreSQL (**required** — EdgeOne has no built-in database)
+3. Remote database: TiDB Cloud, MySQL, MariaDB or PostgreSQL (**required** — EdgeOne has no built-in database)
 4. A GitHub account
 
 ## 1. Configure GitHub Secrets
@@ -30,7 +30,7 @@ Fork the project to your GitHub account, then run the workflow manually from the
 
 Actions tab → Deploy workflow → Run workflow → **branch `canary`** (the fork's default branch is not `canary` — select it explicitly) → platform `edgeone` or `both` → Run workflow.
 
-The CLI builds and uploads automatically — nothing else to do. During the build, the CLI runs dependency installation and `prisma generate`; for non-D1 databases (tidb/mariadb/pg) it also runs `prisma db push` to sync the schema (triggered automatically in CI).
+The CLI builds and uploads automatically — nothing else to do. During the build, the CLI runs dependency installation and `prisma generate`; for non-D1 databases (tidb/mysql/mariadb/pg) it also runs `prisma db push` to sync the schema (triggered automatically in CI).
 
 ## 3. Configure Runtime Environment Variables
 

@@ -49,11 +49,14 @@ loadDotEnv();
 
 function resolveDbType() {
   const dbType = process.env.DB_TYPE || "";
-  if (["tidb", "mariadb", "pg", "hyperdrive"].includes(dbType)) return dbType;
+  if (["tidb", "mysql", "mariadb", "pg", "hyperdrive"].includes(dbType)) return dbType;
   const url = process.env.DATABASE_URL || "";
-  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  // mysqls:// 是 TiDB Cloud 的 TLS 连接串格式，仍按 tidb（HTTP 协议）；mariadb 驱动不识别 mysqls://
+  if (url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("mysql://")) return "mysql";
   if (url.startsWith("mariadb://")) return "mariadb";
   if ((process.env.MARIADB_URL || "").startsWith("mariadb://")) return "mariadb";
+  if ((process.env.MYSQL_URL || "").startsWith("mysql://")) return "mysql";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
   return "d1";
 }
@@ -62,9 +65,11 @@ const dbType = resolveDbType();
 const url =
   (dbType === "mariadb"
     ? process.env.MARIADB_URL
-    : dbType === "pg" || dbType === "hyperdrive"
-      ? process.env.PG_URL
-      : process.env.TIDB_URL) ||
+    : dbType === "mysql"
+      ? process.env.MYSQL_URL
+      : dbType === "pg" || dbType === "hyperdrive"
+        ? process.env.PG_URL
+        : process.env.TIDB_URL) ||
   process.env.DATABASE_URL ||
   "";
 
@@ -150,7 +155,7 @@ async function main() {
     await migrateRows(rows, async (id, apiKeys) => {
       await conn.execute("UPDATE platforms SET api_keys = ? WHERE id = ?", [apiKeys, id]);
     });
-  } else if (dbType === "mariadb") {
+  } else if (dbType === "mysql" || dbType === "mariadb") {
     const mariadb = await import("mariadb");
     const pool = await mariadb.createPool({ uri: url, connectionLimit: 1 });
     try {
@@ -178,6 +183,11 @@ async function main() {
   }
 }
 
+/** 脱敏连接串中的凭据，防止数据库密码进入日志（驱动/适配器错误可能包含完整 URL） */
+function redactUrlCredentials(msg) {
+  return msg.replace(/([a-z]+):\/\/[^@\s]+@/g, "$1://***@");
+}
+
 main().catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
   // api_key 列已不存在（全新库或已迁移过）：正常跳过
@@ -194,6 +204,6 @@ main().catch((err) => {
     console.log("[migrate-platform-keys] platforms 表不存在，跳过迁移（全新库）");
     process.exit(0);
   }
-  console.error("[migrate-platform-keys] 迁移失败:", msg);
+  console.error("[migrate-platform-keys] 迁移失败:", redactUrlCredentials(msg));
   process.exit(1);
 });

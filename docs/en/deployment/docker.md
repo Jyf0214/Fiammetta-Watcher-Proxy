@@ -33,7 +33,7 @@ docker run -d \
   ghcr.io/jyf0214/fiammetta-watcher-proxy:canary
 ```
 
-- The database type is detected from the connection string (`postgresql://`, `mariadb://` or `mysql://`), or set explicitly via `DB_TYPE`; `tidb` / `mariadb` / `pg` are supported (D1 exists only in the Cloudflare runtime)
+- The database type is detected from the connection string (`postgresql://`, `mariadb://` or `mysql://`), or set explicitly via `DB_TYPE`; `tidb` / `mysql` / `mariadb` / `pg` are supported (D1 exists only in the Cloudflare runtime)
 - Tables are synced automatically on startup (idempotent) — no manual setup
 - The admin account is configured via `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables
 - `JWT_SECRET` is required, at least 32 chars (see [Environment Variables](/en/deployment/env)) — login fails without it
@@ -105,7 +105,7 @@ docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
 The repository ships two compose files — clone it and use them directly:
 
 - `docker-compose.yml` — app + PostgreSQL in one deployment (bundled database, with security hardening and health checks), ready to use out of the box
-- `docker-compose.standalone.yml` — app + external database (bring your own PostgreSQL / TiDB / MariaDB)
+- `docker-compose.standalone.yml` — app + external database (bring your own PostgreSQL / TiDB / MySQL / MariaDB)
 
 Create a `.env` file in the repo root and fill in the required values (see the comments in the compose file — `POSTGRES_PASSWORD` / `DATABASE_URL` / `ADMIN_PASSWORD` / `JWT_SECRET`, etc.; compose refuses to start if they are missing), then:
 

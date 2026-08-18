@@ -3,7 +3,7 @@
 ## 前置条件
 
 1. [Vercel 账号](https://vercel.com/signup)
-2. 远程数据库：[TiDB Cloud](https://tidbcloud.com/)（免费）、MariaDB 或 PostgreSQL
+2. 远程数据库：[TiDB Cloud](https://tidbcloud.com/)（免费）、MySQL、MariaDB 或 PostgreSQL
 3. GitHub 仓库
 
 ## 1. 导入项目

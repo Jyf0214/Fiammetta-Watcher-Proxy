@@ -5,9 +5,9 @@ FWP 支持 5 种部署方式（Cloudflare / Vercel / EdgeOne / Node.js / Docker�
 | 方式 | 架构 | 数据库 | 定时任务 |
 |------|------|--------|----------|
 | **Cloudflare Pages + Worker** | Worker 处理代理与定时任务，Pages 托管前台与管理后台 | D1（免费，零配置）或 TiDB/PostgreSQL | Cloudflare 内置（免费） |
-| **Vercel / EdgeOne** | 服务端函数处理一切 | TiDB / MariaDB / PostgreSQL（远程） | HTTP 端点 + 外部调度（Vercel Cron 需 Pro 计划） |
-| **Node.js 直接部署** | 自有服务器跑完整服务 | TiDB / MariaDB / PostgreSQL | HTTP 端点 + 系统 cron |
-| **Docker** | 容器化部署 | TiDB / PostgreSQL / MySQL（含 MariaDB） | 容器内部定时器自动执行 |
+| **Vercel / EdgeOne** | 服务端函数处理一切 | TiDB / MySQL / MariaDB / PostgreSQL（远程） | HTTP 端点 + 外部调度（Vercel Cron 需 Pro 计划） |
+| **Node.js 直接部署** | 自有服务器跑完整服务 | TiDB / MySQL / MariaDB / PostgreSQL | HTTP 端点 + 系统 cron |
+| **Docker** | 容器化部署 | TiDB / MySQL / MariaDB / PostgreSQL | 容器内部定时器自动执行 |
 
 ## 平台对比
 
@@ -15,7 +15,7 @@ FWP 支持 5 种部署方式（Cloudflare / Vercel / EdgeOne / Node.js / Docker�
 |------|-----------|--------|---------|------------------|
 | 免费额度 | Worker CPU 10ms/请求（代理流式请求容易超限） | 100GB 流量/月 | 见官方定价 | 无（自备资源） |
 | 定时任务 | 内置（免费） | **仅 Pro 计划** | 外部调度 | 系统 cron（Node.js）/ Docker 内置自动 |
-| 数据库 | D1（默认，零配置） | TiDB/MariaDB/PostgreSQL（远程） | TiDB/MariaDB/PostgreSQL（远程） | TiDB/MariaDB/PostgreSQL |
+| 数据库 | D1（默认，零配置） | TiDB/MySQL/MariaDB/PostgreSQL（远程） | TiDB/MySQL/MariaDB/PostgreSQL（远程） | TiDB/MySQL/MariaDB/PostgreSQL |
 | 部署触发 | 网页手动触发，或推 `canary` 分支 | 控制台关联 Git 仓库 | 网页手动触发 | 手动 |
 | 适合 | 零成本 Serverless | 已有 Vercel / TiDB 账号 | 腾讯云生态 | 完全掌控 |
 
@@ -37,7 +37,8 @@ FWP 支持 5 种部署方式（Cloudflare / Vercel / EdgeOne / Node.js / Docker�
 |--------|----------|----------|
 | Cloudflare D1 | 无需配置（`DB_TYPE=d1`） | 仅 Cloudflare |
 | TiDB Cloud | `DB_TYPE=tidb` + `DATABASE_URL`（MySQL 协议） | 所有平台 |
-| MariaDB / 纯 MySQL | `DB_TYPE=mariadb` + `DATABASE_URL`（mariadb 协议） | 非 Cloudflare 平台（Vercel / EdgeOne / Node.js / Docker） |
+| 纯 MySQL | `DB_TYPE=mysql` + `DATABASE_URL`（`mysql://`） | 非 Cloudflare 平台（Vercel / EdgeOne / Node.js / Docker） |
+| MariaDB | `DB_TYPE=mariadb` + `DATABASE_URL`（mariadb 协议） | 非 Cloudflare 平台（Vercel / EdgeOne / Node.js / Docker） |
 | PostgreSQL | `DB_TYPE=pg` + `DATABASE_URL` | 所有平台 |
 
 ## 相关文档

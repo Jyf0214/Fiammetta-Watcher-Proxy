@@ -27,11 +27,11 @@ Requests → Next.js service
      ├── admin panel
      └── frontend pages
               ↓
-         TiDB / MariaDB / PostgreSQL (remote database)
+         TiDB / MySQL / MariaDB / PostgreSQL (remote database)
 ```
 
 - The whole application runs in one service (serverless functions on Vercel / EdgeOne, or your own server)
-- You provide the database yourself: TiDB Cloud (free tier), MariaDB or PostgreSQL, connected via a connection string
+- You provide the database yourself: TiDB Cloud (free tier), MySQL, MariaDB or PostgreSQL, connected via a connection string
 - Scheduled tasks: on Docker deployments an in-container timer runs them automatically; other deployments need an external service to call the endpoints on schedule (see each platform's guide)
 - On non-Cloudflare platforms the admin API rate limit (in-process sliding window) resets on service restarts (cold start) — expected, and it does not affect functionality; the login rate limit is stored in the database and survives restarts
 
@@ -39,7 +39,7 @@ Requests → Next.js service
 
 | Item | Cloudflare | Vercel / EdgeOne | Own server |
 |------|-----------|------------------|-----------|
-| Database | built-in D1 (free) | self-provided TiDB / MariaDB / PostgreSQL | self-provided |
+| Database | built-in D1 (free) | self-provided TiDB / MySQL / MariaDB / PostgreSQL | self-provided |
 | Scheduled tasks | built-in, free | external scheduler (Vercel Cron needs Pro) | system cron (Node.js) / Docker in-container |
 | Login rate limit | survives restarts (stored in DB) | survives restarts (stored in DB) | survives restarts (stored in DB) |
 | Admin API rate limit | persisted in KV, survives restarts | in-memory, resets on restart | in-memory, resets on restart |

@@ -27,11 +27,11 @@ FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对�
      ├── 管理后台
      └── 前端页面
               ↓
-         TiDB / MariaDB / PostgreSQL（远程数据库）
+         TiDB / MySQL / MariaDB / PostgreSQL（远程数据库）
 ```
 
 - 整个应用运行在一个服务里（Vercel / EdgeOne 的 Serverless 函数，或你自己的服务器）
-- 数据库需要自己准备：TiDB Cloud（免费档）、MariaDB 或 PostgreSQL，通过连接串连接
+- 数据库需要自己准备：TiDB Cloud（免费档）、MySQL、MariaDB 或 PostgreSQL，通过连接串连接
 - 定时任务：Docker 部署由容器内部定时器自动执行；其他部署需用外部服务定时调用各端点（见各平台文档）
 - 非 Cloudflare 平台的管理 API 限流（进程内滑动窗口）在服务重启（冷启动）后会清零，属正常现象，不影响功能；登录限流基于数据库记录，重启后依然生效
 
@@ -39,7 +39,7 @@ FWP 是一套 AI 网关服务：对外提供 OpenAI 兼容的代理接口，对�
 
 | 项目 | Cloudflare | Vercel / EdgeOne | 自有服务器 |
 |------|-----------|------------------|-----------|
-| 数据库 | D1 内置（免费） | 自备 TiDB / MariaDB / PostgreSQL | 自备 |
+| 数据库 | D1 内置（免费） | 自备 TiDB / MySQL / MariaDB / PostgreSQL | 自备 |
 | 定时任务 | 内置免费 | 外部调度（Vercel Cron 需付费版） | 系统 cron（Node.js 直部署）/ Docker 内置自动 |
 | 登录限流 | 重启后依然生效（存数据库） | 重启后依然生效（存数据库） | 重启后依然生效（存数据库） |
 | 管理 API 限流 | KV 持久化，重启后依然生效 | 进程内存，重启后清零 | 进程内存，重启后清零 |

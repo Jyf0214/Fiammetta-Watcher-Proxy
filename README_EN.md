@@ -24,7 +24,7 @@ LLM API proxy with multi-platform load balancing, circuit breaker recovery, and 
 ```
 User request → Proxy entry (Cloudflare deployment: Worker proxies v1/* + Cron tasks; other platforms: Next.js routes)
              → Admin dashboard (Next.js 16 + API routes)
-             → D1 / TiDB / MariaDB / PostgreSQL (lib/prisma.ts unified factory, switched by DB_TYPE)
+             → D1 / TiDB / MySQL / MariaDB / PostgreSQL (lib/prisma.ts unified factory, switched by DB_TYPE)
              → Rate limiting & key ban state (KV on Cloudflare, in-process storage elsewhere)
 ```
 
@@ -36,10 +36,11 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 |---------|----------|---------|----------|-----------|
 | `d1` (default) | Cloudflare D1 | `@prisma/adapter-d1` | D1 Binding | Cloudflare |
 | `tidb` | TiDB Cloud Serverless | `@tidbcloud/prisma-adapter` | HTTP | All |
-| `mariadb` | MariaDB / pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
+| `mysql` | Pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
+| `mariadb` | MariaDB | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
 | `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
 
-> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and only works on **non-Cloudflare platforms** (Cloudflare builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
+> **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and works with MariaDB / pure MySQL direct connections (use `DB_TYPE=mariadb` / `DB_TYPE=mysql` respectively), on **non-Cloudflare platforms only** (Cloudflare builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 
 ## Deployment
 
@@ -112,7 +113,7 @@ This repository (canary branch) publishes pre-built images you can pull and run 
 # Built-in PostgreSQL, quick start
 docker compose up -d --build
 
-# External database (bring your own PostgreSQL / TiDB / MariaDB)
+# External database (bring your own PostgreSQL / TiDB / MySQL / MariaDB)
 docker compose -f docker-compose.standalone.yml up -d --build
 ```
 
@@ -127,8 +128,8 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
 | `JWT_SECRET` | JWT signing secret (min 32 chars; auto-generated on Cloudflare CI deployments, must be set manually elsewhere) |
-| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` (Cloudflare deployments); `mariadb` for non-Cloudflare platforms only |
-| `DATABASE_URL` | External database URL (required for TiDB/MariaDB/PostgreSQL, D1 connects via binding) |
+| `DB_TYPE` | Database type: `d1` (default) / `tidb` / `pg` (Cloudflare deployments); `mysql` / `mariadb` for non-Cloudflare platforms only |
+| `DATABASE_URL` | External database URL (required for TiDB/MySQL/MariaDB/PostgreSQL, D1 connects via binding) |
 
 ## Development
 

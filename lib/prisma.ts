@@ -4,10 +4,11 @@
 // 本文件是整个项目中唯一知道 generated client 的文件。
 // 所有业务代码只从此处导入 createDb / disconnectDb / 类型。
 //
-// 支持四种数据库方言（通过 DB_TYPE 环境变量选择）：
+// 支持多种数据库方言（通过 DB_TYPE 环境变量选择）：
 //   - d1：Cloudflare D1（SQLite 方言）
-//   - tidb：TiDB Cloud（MySQL 方言）
-//   - mariadb：MariaDB / 纯 MySQL（mariadb 驱动，仅非 Cloudflare 平台）
+//   - tidb：TiDB Cloud（MySQL 方言，HTTP 协议）
+//   - mysql：纯 MySQL（mariadb 驱动，TCP；仅非 Cloudflare 平台）
+//   - mariadb：MariaDB（mariadb 驱动，TCP；仅非 Cloudflare 平台）
 //   - pg / hyperdrive：PostgreSQL（直连或 Hyperdrive 加速）
 //
 // 运行环境自动检测：
@@ -21,7 +22,7 @@
 // ================================================================
 
 /** 数据库类型 */
-export type DbKind = "d1" | "tidb" | "mariadb" | "pg" | "hyperdrive";
+export type DbKind = "d1" | "tidb" | "mysql" | "mariadb" | "pg" | "hyperdrive";
 
 /** 全局 PrismaClient 实例缓存（Worker 生命周期内复用） */
 let cachedPrisma: any = null;
@@ -37,7 +38,8 @@ let cachedDbKind: DbKind | null = null;
 function resolveDbKind(env?: Record<string, unknown>): DbKind {
   // 优先读 DB_TYPE
   const dbType = (env?.DB_TYPE as string) || process.env.DB_TYPE;
-  if (dbType === "tidb" || dbType === "mysql") return "tidb";
+  if (dbType === "tidb") return "tidb";
+  if (dbType === "mysql") return "mysql";
   if (dbType === "mariadb") return "mariadb";
   if (dbType === "pg") return "pg";
   if (dbType === "hyperdrive") return "hyperdrive";
@@ -45,7 +47,10 @@ function resolveDbKind(env?: Record<string, unknown>): DbKind {
 
   // 回退到 DATABASE_URL 推断（Pages 环境中 DATABASE_URL 在 env 对象中而非 process.env）
   const url = (env?.DATABASE_URL as string) || process.env.DATABASE_URL || "";
-  if (url.startsWith("mysql://") || url.startsWith("mysqls://")) return "tidb";
+  // mysqls:// 是 TiDB Cloud 的 TLS 连接串格式，仍按 tidb（HTTP 适配器）处理；
+  // mariadb 驱动不识别 mysqls:// scheme，纯 MySQL 用 mysql://
+  if (url.startsWith("mysqls://")) return "tidb";
+  if (url.startsWith("mysql://")) return "mysql";
   if (url.startsWith("mariadb://")) return "mariadb";
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) return "pg";
   return "d1";
@@ -110,13 +115,25 @@ async function createPrismaInstance(
       return new PrismaClient({ adapter });
     }
 
-    // ── MariaDB / 纯 MySQL（mariadb 驱动，TCP；仅非 Cloudflare 平台）──
+    // ── MariaDB（mariadb 驱动，TCP；仅非 Cloudflare 平台）──
     case "mariadb": {
       const { PrismaClient } = await import("../src/generated/mariadb/client");
       const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
 
       const url = (env?.MARIADB_URL as string) || process.env.MARIADB_URL || process.env.DATABASE_URL;
       if (!url) throw new Error("MARIADB_URL 或 DATABASE_URL 未配置");
+
+      const adapter = new PrismaMariaDb(url);
+      return new PrismaClient({ adapter });
+    }
+
+    // ── 纯 MySQL（mariadb 驱动，TCP；仅非 Cloudflare 平台）──
+    case "mysql": {
+      const { PrismaClient } = await import("../src/generated/mysql/client");
+      const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
+
+      const url = (env?.MYSQL_URL as string) || process.env.MYSQL_URL || process.env.DATABASE_URL;
+      if (!url) throw new Error("MYSQL_URL 或 DATABASE_URL 未配置");
 
       const adapter = new PrismaMariaDb(url);
       return new PrismaClient({ adapter });
@@ -218,7 +235,7 @@ async function resolveEffectiveEnv(
 /**
  * 获取当前数据库类型（与 createDb 使用完全相同的解析逻辑）
  *
- * @returns d1 / tidb / pg / hyperdrive
+ * @returns d1 / tidb / mysql / mariadb / pg / hyperdrive
  */
 export async function getDbKind(
   env?: Record<string, unknown> | { DB: unknown }

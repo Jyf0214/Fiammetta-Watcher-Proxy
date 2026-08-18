@@ -1,6 +1,6 @@
 # EdgeOne 部署
 
-EdgeOne（腾讯云 EdgeOne Makers）：代理与定时任务由服务端函数处理，数据库用远程 TiDB / MariaDB / PostgreSQL。
+EdgeOne（腾讯云 EdgeOne Makers）：代理与定时任务由服务端函数处理，数据库用远程 TiDB / MySQL / MariaDB / PostgreSQL。
 
 ::: warning 新平台，首次部署请人工验证
 EdgeOne Makers 较新，本文基于当前部署流程编写。首次部署后请人工验证代理、管理后台与数据库连接是否正常。
@@ -10,7 +10,7 @@ EdgeOne Makers 较新，本文基于当前部署流程编写。首次部署后�
 
 1. [EdgeOne Makers](https://console.cloud.tencent.com/edgeone) 账号与项目（记下项目名）
 2. EdgeOne API Token（Makers 控制台生成）
-3. 远程数据库：TiDB Cloud、MariaDB 或 PostgreSQL（**必须**，EdgeOne 没有内置数据库）
+3. 远程数据库：TiDB Cloud、MySQL、MariaDB 或 PostgreSQL（**必须**，EdgeOne 没有内置数据库）
 4. GitHub 账号
 
 ## 1. 配置 GitHub Secrets
@@ -30,7 +30,7 @@ Fork 项目到你的 GitHub 账号后，在 Actions 页面手动运行工作流�
 
 Actions → Deploy 工作流 → Run workflow → **分支选择 `canary`**（Fork 后的默认分支不是 `canary`，务必手动选择）→ 平台选择 `edgeone` 或 `both` → 点击 Run workflow。
 
-运行后自动构建并上传，无需其他操作。构建期间 CLI 自动执行依赖安装与 `prisma generate`；非 D1 数据库（tidb/mariadb/pg）时自动执行 `prisma db push` 同步表结构（CI 环境自动触发）。
+运行后自动构建并上传，无需其他操作。构建期间 CLI 自动执行依赖安装与 `prisma generate`；非 D1 数据库（tidb/mysql/mariadb/pg）时自动执行 `prisma db push` 同步表结构（CI 环境自动触发）。
 
 ## 3. 配置运行时环境变量
 

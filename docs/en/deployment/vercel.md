@@ -3,7 +3,7 @@
 ## Prerequisites
 
 1. [Vercel account](https://vercel.com/signup)
-2. Remote database: [TiDB Cloud](https://tidbcloud.com/) (free), MariaDB or PostgreSQL
+2. Remote database: [TiDB Cloud](https://tidbcloud.com/) (free), MySQL, MariaDB or PostgreSQL
 3. GitHub repository
 
 ## 1. Import the Project

@@ -11,7 +11,7 @@
 | 依赖 | 说明 |
 |------|------|
 | Node.js | 22.x |
-| 数据库 | TiDB（`tidb`）、MariaDB / 纯 MySQL（`mariadb`）或 PostgreSQL（`pg`），需可远程连接 |
+| 数据库 | TiDB（`tidb`）、纯 MySQL（`mysql`）、MariaDB（`mariadb`）或 PostgreSQL（`pg`），需可远程连接 |
 
 > 自托管**不支持** `DB_TYPE=d1`（D1 仅存在于 Cloudflare 运行时）。
 
@@ -57,7 +57,7 @@ EOF
 ```
 
 ::: warning 关键点
-- `DB_TYPE` 不填时会根据 `DATABASE_URL` 自动推断（`mysql://` → `tidb`，`mariadb://` → `mariadb`，`postgresql://` → `pg`），但建议显式设置
+- `DB_TYPE` 不填时会根据 `DATABASE_URL` 自动推断（`mysql://` → `mysql`，`mariadb://` → `mariadb`，`postgresql://` → `pg`），但建议显式设置
 - `JWT_SECRET` 必须显式设置且不少于 32 字符（规则见 [环境变量](/deployment/env)），未设置则无法登录
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` 就是登录账号密码本身
 :::

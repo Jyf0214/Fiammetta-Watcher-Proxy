@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         # 构建期生成对应方言的 Prisma Client，必须与运行时 DB_TYPE 一致
-        DB_TYPE: ${DB_TYPE:?请在 .env 文件中设置 DB_TYPE（pg / mariadb / tidb）}
+        DB_TYPE: ${DB_TYPE:?请在 .env 文件中设置 DB_TYPE（pg / mariadb / tidb / mysql）}
     container_name: fiammetta-watcher-proxy-standalone
     restart: unless-stopped
     ports:
@@ -18,9 +18,9 @@ services:
       # 登录限流等 IP 解析只信任 TCP 对端，忽略所有前置头
       - DEPLOY_PLATFORM=docker
       - PORT=${PORT:?请在 .env 文件中设置 PORT}
-      # 数据库类型：与构建参数一致（tidb / mariadb / pg），按 DATABASE_URL 协议匹配
-      - DB_TYPE=${DB_TYPE:?请在 .env 文件中设置 DB_TYPE（pg / mariadb / tidb）}
-      # 外部数据库连接串（自备 PostgreSQL / TiDB / MariaDB，不内置数据库）
+      # 数据库类型：与构建参数一致（tidb / mysql / mariadb / pg），按 DATABASE_URL 协议匹配
+      - DB_TYPE=${DB_TYPE:?请在 .env 文件中设置 DB_TYPE（pg / mariadb / tidb / mysql）}
+      # 外部数据库连接串（自备 PostgreSQL / TiDB / MySQL / MariaDB，不内置数据库）
       - DATABASE_URL=${DATABASE_URL:?请在 .env 文件中设置 DATABASE_URL}
       # 管理后台登录账号（环境变量认证，无需初始化）
       - ADMIN_USERNAME=${ADMIN_USERNAME:?请在 .env 文件中设置管理后台用户名}

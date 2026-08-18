@@ -33,7 +33,7 @@ docker run -d \
   ghcr.io/jyf0214/fiammetta-watcher-proxy:canary
 ```
 
-- 数据库类型按连接串自动识别（`postgresql://` → PostgreSQL、`mariadb://` → MariaDB、`mysql://` → TiDB），也可用 `DB_TYPE` 显式指定；支持 `tidb` / `mariadb` / `pg`（D1 仅存在于 Cloudflare 运行时，不支持）
+- 数据库类型按连接串自动识别（`postgresql://` → PostgreSQL、`mariadb://` → MariaDB、`mysql://` → MySQL），也可用 `DB_TYPE` 显式指定；支持 `tidb` / `mysql` / `mariadb` / `pg`（D1 仅存在于 Cloudflare 运行时，不支持）
 - 启动时自动同步表结构（幂等），无需手动建表
 - 管理员账号由 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 环境变量配置
 - `JWT_SECRET` 必填且至少 32 字符（见[环境变量](/deployment/env)）— 缺失会导致登录失败
@@ -105,7 +105,7 @@ docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
 仓库自带两个 compose 文件，克隆后即可使用：
 
 - `docker-compose.yml` — 应用 + PostgreSQL 一体式部署（内置数据库，含安全加固与健康检查），适合开箱即用
-- `docker-compose.standalone.yml` — 应用 + 外部数据库（自备 PostgreSQL / TiDB / MariaDB）
+- `docker-compose.standalone.yml` — 应用 + 外部数据库（自备 PostgreSQL / TiDB / MySQL / MariaDB）
 
 在仓库根目录创建 `.env` 文件，按 compose 内注释填写必填项（`POSTGRES_PASSWORD` / `DATABASE_URL` / `ADMIN_PASSWORD` / `JWT_SECRET` 等，缺失时 compose 会报错提示），然后：
 

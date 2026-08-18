@@ -15,17 +15,19 @@ if [ -z "$DB_TYPE" ]; then
     export DB_TYPE=pg
   elif echo "$DATABASE_URL" | grep -qE '^mariadb://'; then
     export DB_TYPE=mariadb
-  elif echo "$DATABASE_URL" | grep -qE '^mysql://' || echo "$DATABASE_URL" | grep -qE '^mysqls://'; then
+  elif echo "$DATABASE_URL" | grep -qE '^mysqls://'; then
     export DB_TYPE=tidb
+  elif echo "$DATABASE_URL" | grep -qE '^mysql://'; then
+    export DB_TYPE=mysql
   else
-    echo "[lite] 错误：无法从 DATABASE_URL 推断 DB_TYPE，请显式设置 DB_TYPE（tidb / mariadb / pg）"
+    echo "[lite] 错误：无法从 DATABASE_URL 推断 DB_TYPE，请显式设置 DB_TYPE（tidb / mysql / mariadb / pg）"
     exit 1
   fi
   echo "[lite] 未设置 DB_TYPE，已按 DATABASE_URL 推断为 $DB_TYPE"
 fi
 
 if [ "$DB_TYPE" = "d1" ]; then
-  echo "[lite] 错误：D1 仅存在于 Cloudflare 运行时，Docker 部署请使用 DB_TYPE=tidb / mariadb / pg"
+  echo "[lite] 错误：D1 仅存在于 Cloudflare 运行时，Docker 部署请使用 DB_TYPE=tidb / mysql / mariadb / pg"
   exit 1
 fi
 
