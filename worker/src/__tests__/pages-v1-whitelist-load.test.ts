@@ -46,8 +46,10 @@ vi.mock("../../../worker/src/platform-keys", () => ({
   isKeyDisabled: vi.fn(() => false),
   recordKeyError: vi.fn(async () => {}),
   parseApiKeys: vi.fn(() => ["sk-key1", "sk-key2"]),
-  loadWhitelist: vi.fn(async () => {}),
-  loadKeyStatusFromKV: vi.fn(async () => {}),
+  // W10 契约：loadWhitelist/loadKeyStatusFromKV 返回 Promise<boolean>（失败 false 不抛异常），
+  // v1.ts 以 === true 判定置位——mock 必须返回 true 才能模拟成功路径
+  loadWhitelist: vi.fn(async () => true),
+  loadKeyStatusFromKV: vi.fn(async () => true),
 }));
 
 vi.mock("../../../worker/src/load-balancer", () => ({
@@ -182,7 +184,7 @@ describe("Pages 版 v1 白名单懒加载", () => {
     vi.unstubAllGlobals();
   });
 
-  it("首次请求加载白名单一次，后续请求不再重复加载", async () => {
+  it("加载失败不置位、下次请求重试；成功后置位不再重复加载（W10 回归）", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -196,12 +198,19 @@ describe("Pages 版 v1 白名单懒加载", () => {
     const req = makeReq({ model: "m", messages: [{ role: "user", content: "hi" }] });
     const res = makeRes();
 
+    // 失败（false）：不置位 → 每次请求都重新加载
+    vi.mocked(loadWhitelist).mockResolvedValue(false);
     await handler(req, res);
-    expect(loadWhitelist).toHaveBeenCalledTimes(1);
-    expect(loadWhitelist).toHaveBeenCalledWith(expect.anything(), expect.anything());
+    await handler(req, res);
+    expect(loadWhitelist).toHaveBeenCalledTimes(2);
 
-    // 第二次请求：懒加载标志已置位，不重复加载
+    // 恢复成功：本次请求加载后置位
+    vi.mocked(loadWhitelist).mockResolvedValue(true);
     await handler(req, res);
-    expect(loadWhitelist).toHaveBeenCalledTimes(1);
+    expect(loadWhitelist).toHaveBeenCalledTimes(3);
+
+    // 已置位：后续请求不再加载
+    await handler(req, res);
+    expect(loadWhitelist).toHaveBeenCalledTimes(3);
   });
 });

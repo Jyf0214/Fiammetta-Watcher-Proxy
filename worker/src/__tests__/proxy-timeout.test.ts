@@ -565,6 +565,260 @@ describe("proxyV1Request 流式挂起空闲超时", () => {
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
     expect(logParams.errorMessage).toContain("空闲超时");
+    // 挂起超时同样触发平台熔断（W4 修复：此前只补记日志不打分）
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
+  });
+});
+
+// ==================== 网络层失败记录与熔断（W3） ====================
+
+describe("proxyV1Request 网络层失败（W3）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform(),
+      targetModel: "target-model",
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetch 抛出 AbortError（总超时中止）：返回 504，补记 504 日志并触发熔断", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      })
+    );
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(504);
+    // 网络层失败不重试：只发一次上游请求
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // 补记失败日志（此前零记录）
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(504);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.tokens).toBe(0);
+    expect(logParams.errorMessage).toContain("超时");
+    expect(logParams.platformId).toBe("test-platform");
+    // 触发平台熔断（此前零熔断）
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
+  });
+
+  it("fetch 抛出网络错误（DNS 失败/连接拒绝）：返回 502，补记 502 日志（含失败原因）并触发熔断", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      })
+    );
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(502);
+    // 网络层失败不重试：只发一次上游请求
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // 补记失败日志（此前直接 throw 冒泡到入口 500，零记录零熔断）
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(502);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.tokens).toBe(0);
+    // errorMessage 含失败原因
+    expect(logParams.errorMessage).toContain("fetch failed");
+    // 触发平台熔断
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
+    // 响应体非空且语义明确
+    const bodyText = await res.text();
+    expect(bodyText).toContain("网络错误");
+  });
+
+  it("流式请求同样覆盖：fetch 网络错误 → 502 记录 + 熔断", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      })
+    );
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(502);
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(recordRequestLog).mock.calls[0][0].status).toBe(502);
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
+  });
+});
+
+// ==================== 透传头白名单过滤（W7） ====================
+
+describe("proxyV1Request 透传头白名单过滤（W7）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform({
+        forwardHeaders: JSON.stringify([
+          "Authorization",
+          "X-Api-Key",
+          "X-Auth-Token",
+          "Content-Type",
+          "X-Custom-Header",
+        ]),
+      }),
+      targetModel: "target-model",
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("认证类头/请求语义关键头在白名单内也被丢弃，平台密钥与自定义头不受覆盖", async () => {
+    const sentHeaders: Record<string, string> = {};
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      const h = new Headers(init.headers as HeadersInit);
+      h.forEach((v, k) => {
+        sentHeaders[k] = v;
+      });
+      return new Response(
+        JSON.stringify({ id: "ok", usage: { total_tokens: 5 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = new Request("https://proxy.test/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        // 与平台构造值不同：若过滤失效，下游值会覆盖平台值
+        "Content-Type": "application/x-ndjson",
+        Authorization: "Bearer evil-client-token",
+        "X-Api-Key": "evil-client-key",
+        "X-Auth-Token": "evil-token",
+        "X-Custom-Header": "custom-value",
+      },
+      body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+    });
+
+    const res = await proxyV1Request(
+      request,
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    // 认证类头被丢弃：上游仍是平台密钥，未被下游覆盖
+    expect(sentHeaders["authorization"]).toBe("Bearer sk-key1");
+    expect(sentHeaders["x-api-key"]).toBeUndefined();
+    expect(sentHeaders["x-auth-token"]).toBeUndefined();
+    // 请求语义关键头被丢弃：仍是平台构造的 Content-Type
+    expect(sentHeaders["content-type"]).toBe("application/json");
+    // 非认证类白名单头正常透传
+    expect(sentHeaders["x-custom-header"]).toBe("custom-value");
+  });
+});
+
+// ==================== multipart 挂起空闲超时（W8） ====================
+
+describe("proxyV1Request multipart 挂起空闲超时（W8）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(routeRequest).mockResolvedValue({
+      platform: makePlatform(),
+      targetModel: "target-model",
+    });
+    vi.mocked(getNextKey).mockReturnValue("sk-key1");
+    vi.mocked(getRandomKeyExcept).mockReturnValue("sk-key2");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("multipart 上游挂起 120 秒无数据：流切断，补记 504 日志并触发熔断", async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const hangingMultipart = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("--boundary\r\n"));
+        // 之后不再产出数据，模拟上游挂起
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(hangingMultipart, {
+          status: 200,
+          headers: { "Content-Type": "multipart/mixed; boundary=boundary" },
+        })
+      )
+    );
+
+    const waitUntilCtx = {
+      waitUntil: vi.fn((p: Promise<unknown>) => {
+        void p.catch(() => {});
+      }),
+    } as unknown as ExecutionContext;
+
+    const res = await proxyV1Request(
+      buildRequest({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      waitUntilCtx
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("multipart/");
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+
+    // 推进 120s：无数据到达 → 空闲超时切断流
+    const errPromise = reader.read().catch((e) => e);
+    await vi.advanceTimersByTimeAsync(120_000);
+    const err = await errPromise;
+    expect(err.name).toBe("TimeoutError");
+
+    // onTimeout 补记 504 + isError=true（此前无任何补记）
+    const logCalls = vi.mocked(recordRequestLog).mock.calls.map((c) => c[0]);
+    const timeoutLog = logCalls.find((p) => p.status === 504);
+    expect(timeoutLog).toBeDefined();
+    expect(timeoutLog?.isError).toBe(true);
+    expect(timeoutLog?.tokens).toBe(0);
+    expect(timeoutLog?.errorMessage).toContain("空闲超时");
+    // 挂起超时同样触发平台熔断
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", env.DB, env);
   });
 });
 

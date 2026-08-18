@@ -34,7 +34,19 @@ export default function SystemKeysPage() {
   const { t } = useTranslation("system");
 
   // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
-  const { data: keys, error, isLoading, mutate } = useApi<SystemKeyItem[]>("/api/admin/system-keys");
+  // 服务端分页：带 limit/offset 时后端返回 { total, items }（接口约定 A12）
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+  const {
+    data: keysData,
+    error,
+    isLoading,
+    mutate,
+  } = useApi<{ total: number; items: SystemKeyItem[] }>(
+    `/api/admin/system-keys?limit=${PAGE_SIZE}&offset=${(page - 1) * PAGE_SIZE}`
+  );
+  const keys = keysData?.items ?? [];
+  const total = keysData?.total ?? 0;
 
   // 请求失败提示
   useEffect(() => {
@@ -97,8 +109,10 @@ export default function SystemKeysPage() {
       } else {
         message.error(data.error || t("sysKeyCreateFailed"));
       }
-    } catch {
-      /* validation error */
+    } catch (err) {
+      // 表单校验失败（errorFields）静默：字段红框已提示；网络等真实错误必须可见，
+      // 否则用户以为没点中反复提交（与 keys.tsx handleSubmit 同模式）
+      if (!("errorFields" in (err as Record<string, unknown>))) message.error(t("common:error"));
     } finally {
       setSubmitting(false);
     }
@@ -110,6 +124,8 @@ export default function SystemKeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("sysKeyDeleteSuccess"));
+        // 删除当前页最后一条时回退一页，避免停留在空页
+        if (keys.length === 1 && page > 1) setPage(page - 1);
         mutate();
       } else {
         message.error(data.error || t("sysKeyDeleteFailed"));
@@ -225,7 +241,7 @@ export default function SystemKeysPage() {
     },
   ];
 
-  if (isLoading) {
+  if (isLoading && !keysData) {
     return (
       <AdminLayout>
         <PageContainer>
@@ -263,7 +279,13 @@ export default function SystemKeysPage() {
             columns={columns}
             dataSource={keys ?? []}
             rowKey="id"
-            pagination={false}
+            pagination={{
+              current: page,
+              pageSize: PAGE_SIZE,
+              total,
+              onChange: setPage,
+              showTotal: (total) => t("common:pagination", { count: total }),
+            }}
           />
         </ProCard>
 

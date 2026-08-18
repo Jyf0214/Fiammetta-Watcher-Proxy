@@ -61,12 +61,28 @@ async function loadTemplates(
   return config && config.value ? JSON.parse(config.value) : [];
 }
 
+/**
+ * configs.updatedAt 为 Int 秒级列（毫秒写入会溢出），同一秒内连续两次保存会
+ * 得到相同 updatedAt；运行时模板缓存失效基于 updatedAt 等值比较，同秒双保存
+ * 会被判定为无变化、继续返回旧缓存（最长 30s 不生效）。
+ * 进程内记录上次写入值，同秒时 +1 单调递增补偿（与 config.ts 的
+ * nextConfigUpdatedAt 模式一致）。saveTemplates 是模板全部写操作的唯一入口
+ * （POST/PUT/DELETE 均经此写入），无其他遗漏写入点。
+ */
+let lastTemplatesSaveAt = 0;
+
+function nextTemplatesUpdatedAt(): number {
+  const now = Math.floor(Date.now() / 1000);
+  lastTemplatesSaveAt = Math.max(now, lastTemplatesSaveAt + 1);
+  return lastTemplatesSaveAt;
+}
+
 /** 将模板列表写回 configs 表 */
 async function saveTemplates(
   db: Awaited<ReturnType<typeof createDb>>,
   templates: RequestTemplate[]
 ): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
+  const now = nextTemplatesUpdatedAt();
   const existing = await db.configs.findFirst({
     where: { key: CONFIG_KEY },
   });

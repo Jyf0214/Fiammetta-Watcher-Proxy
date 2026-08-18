@@ -7,9 +7,25 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "@/lib/admin-auth";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import {
+  UPSTREAM_PROXY_HEALTH_KEY,
+  UPSTREAM_PROXY_POOL_KEY,
+} from "@/lib/upstream-proxy";
+
+/**
+ * 内部派生键黑名单：pool（拉取结果）与 health（健康度）由 upstream-proxy
+ * 模块内部写入（cron 拉取/健康检查/失败标记），前端保存代理配置走
+ * system:upstream_proxy 主键。若允许 PUT 直写这两个键，可注入任意代理
+ * （引流）或伪造/清空健康表（操纵路由），且绕过前端全部格式校验
+ * （组名唯一/保留名/interval/URL 合法性）——API 层必须同步拒绝。
+ */
+const PROTECTED_CONFIG_KEYS = new Set<string>([
+  UPSTREAM_PROXY_POOL_KEY,
+  UPSTREAM_PROXY_HEALTH_KEY,
+]);
 
 /**
  * configs.updatedAt 为 Int 秒级列（毫秒写入会溢出），同一秒内两次保存会得到
@@ -67,6 +83,12 @@ export default async function handler(
         return;
       }
 
+      // 内部派生键禁止直写（见 PROTECTED_CONFIG_KEYS 说明）
+      if (PROTECTED_CONFIG_KEYS.has(body.key)) {
+        res.status(400).json({ success: false, error: { message: "该配置键受保护，禁止直接修改", type: "invalid_request_error" } });
+        return;
+      }
+
       // 验证配置值不能为空
       if (body.value === undefined || body.value === null || typeof body.value !== "string") {
         res.status(400).json({ success: false, error: { message: "配置值不能为空", type: "invalid_request_error" } });
@@ -88,6 +110,24 @@ export default async function handler(
         update: {
           value: body.value,
           updatedAt: now,
+        },
+      });
+
+      // 审计日志：配置修改属安全敏感操作（可含代理地址等），记录变更内容；
+      // 值内嵌的 user:pass 凭据按 maskProxyUrl 同规则脱敏，防止凭据在审计表
+      // 长期可读（写失败随主流程返回 500，与 keys/[id].ts 审计写法一致）
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: getAuditAdminId(admin),
+          action: "update_config",
+          detail: JSON.stringify({
+            key: body.key,
+            value: body.value.replace(/\/\/[^@\s]+@/g, "//***@"),
+          }),
+          ip,
+          createdAt: now,
         },
       });
 

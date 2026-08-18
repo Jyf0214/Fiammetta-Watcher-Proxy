@@ -109,6 +109,13 @@ export default function PlatformUsageTab({
     down: "red",
   };
 
+  // 状态文案走 i18n（与平台列表页/详情页同口径），未知状态回退原文
+  const statusLabelMap: Record<string, string> = {
+    healthy: t("platform:statusHealthy"),
+    degraded: t("platform:statusDegraded"),
+    down: t("platform:statusDown"),
+  };
+
   const columns: TableColumnsType<PlatformUsage> = [
     {
       title: t("platform:name"),
@@ -135,7 +142,7 @@ export default function PlatformUsageTab({
       width: 90,
       align: "center",
       render: (v: string) => (
-        <Tag color={statusColorMap[v] || "default"}>{v}</Tag>
+        <Tag color={statusColorMap[v] || "default"}>{statusLabelMap[v] || v}</Tag>
       ),
     },
     {

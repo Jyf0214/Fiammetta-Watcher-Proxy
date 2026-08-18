@@ -103,12 +103,27 @@ export async function validateApiKey(
       const resetPeriod = apiKey.resetPeriod ?? "never";
       const periodStart = getPeriodStart(resetPeriod);
 
-      const callCount = await prisma.requestLogs.count({
-        where: {
-          keyId: apiKey.id,
-          createdAt: { gte: periodStart },
-        },
-      });
+      // 调用次数 = 未归档明细（request_logs，保留期内）+ 已归档历史（daily_stats，
+      // 超过保留期被 log-archiver 聚合后从 request_logs 删除，只剩 daily_stats，
+      // 两处时间窗不重叠）。此前只 count request_logs：never 周期 Key 的计数
+      // 随归档"回血"（30 天前明细被删后计数下降，已达上限的 Key 被重新放行）。
+      // daily_stats 同样按 periodStart 过滤（daily/monthly 周期不把周期外历史计入）
+      const [recentCount, archivedAgg] = await Promise.all([
+        prisma.requestLogs.count({
+          where: {
+            keyId: apiKey.id,
+            createdAt: { gte: periodStart },
+          },
+        }),
+        prisma.dailyStats.aggregate({
+          where: {
+            keyId: apiKey.id,
+            date: { gte: periodStart },
+          },
+          _sum: { totalRequests: true },
+        }),
+      ]);
+      const callCount = recentCount + Number(archivedAgg._sum.totalRequests ?? 0);
 
       if (callCount >= effectiveCallLimit) {
         return {

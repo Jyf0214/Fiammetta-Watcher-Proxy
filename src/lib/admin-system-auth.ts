@@ -42,12 +42,22 @@ export async function validateSystemApiKey(
 
     if (!row || !row.enabled) return null;
 
-    // 更新 last_used_at（异步，不阻塞请求）
+    // 更新 last_used_at：必须 await——CF Pages 边缘运行时在响应返回后不保证
+    // 未完成的异步 promise 继续执行（fire-and-forget 可能被直接丢弃，
+    // system-keys 列表「最近使用」在 Cloudflare 部署下恒不更新）。
+    // 更新失败仅记录日志，不阻断认证主流程
     const now = Math.floor(Date.now() / 1000);
-    db.systemApiKeys.update({
-      where: { id: row.id },
-      data: { lastUsedAt: now },
-    }).catch(() => {});
+    try {
+      await db.systemApiKeys.update({
+        where: { id: row.id },
+        data: { lastUsedAt: now },
+      });
+    } catch (err) {
+      console.error(
+        "[admin-system-auth] lastUsedAt 更新失败:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
 
     return { systemKeyId: row.id, name: row.name };
   } catch {

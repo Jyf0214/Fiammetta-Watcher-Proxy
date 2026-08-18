@@ -42,10 +42,34 @@ const WHITELISTED_KEY_COOLDOWN_MS = 2 * 60 * 1000; // 白名单 Key 降级 2 分
 /** 白名单平台（永不封禁，密钥仍正常封禁） */
 const whitelistedPlatforms = new Set<string>();
 
+// ==================== 白名单 TTL 自动刷新（A2） ====================
+
+/**
+ * 白名单自动刷新间隔：管理后台勾选/取消「白名单」后最多 60s 在运行期生效，
+ * 无需重启进程。刷新为后台触发（isKeyWhitelisted/isPlatformWhitelisted 是
+ * 同步函数，无法阻塞等待），本次调用继续用旧集合，刷新完成后后续调用生效。
+ */
+const WHITELIST_REFRESH_MS = 60 * 1000;
+
+/** 白名单上次成功加载时间（0 = 从未成功加载，首载由入口懒加载负责） */
+let whitelistLastLoadedAt = 0;
+
+/** 白名单后台刷新单飞 promise（进行中复用，防并发请求重复加载） */
+let whitelistReloadPromise: Promise<boolean> | null = null;
+
+/** 最近一次 loadWhitelist 的调用参数（TTL 到期后复用同一数据源重新加载） */
+let whitelistLoader: { db: D1Database; env?: WorkerEnv } | null = null;
+
 /**
  * 加载白名单（从所有平台的 apiKeys JSON 中读取 whitelisted 标记）
+ *
+ * 返回是否加载成功：失败时保留旧集合继续用（调用方据此决定是否重试，
+ * 如入口懒加载标志只在成功后置位）。幂等：重复并发加载清空重建，无害。
  */
-export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<void> {
+export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<boolean> {
+  // 记住加载参数：TTL 到期后的后台刷新复用同一数据源（dummyDb 等引用
+  // 由调用方模块级变量维护，此处缓存的是最新引用）
+  whitelistLoader = { db, env };
   try {
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
@@ -76,16 +100,39 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<vo
         }
       } catch { /* ignore */ }
     }
+    whitelistLastLoadedAt = Date.now();
     console.log(`[platform-keys] 已加载 ${whitelistedPlatforms.size} 个白名单平台，${whitelistedKeys.size} 个白名单 Key`);
+    return true;
   } catch (err) {
     console.error("[platform-keys] 加载白名单失败:", err instanceof Error ? err.message : String(err));
+    return false;
   }
 }
 
 /**
- * 检查 Key 是否在白名单中
+ * 白名单 TTL 自动刷新（A2）：集合上次成功加载超过 60s 后，下一次
+ * isKeyWhitelisted/isPlatformWhitelisted 调用触发后台重新加载，
+ * 使管理后台修改「白名单」在运行期生效。
+ *
+ * - 单飞：进行中复用同一 promise，避免并发请求重复加载
+ * - 失败保留旧集合继续用（loadWhitelist 内部 catch 返回 false，不抛错），
+ *   且不更新 lastLoadedAt，下次调用会再次尝试
+ * - 从未成功加载（lastLoadedAt === 0）时不触发：首载由各入口懒加载负责
+ */
+function maybeRefreshWhitelist(): void {
+  if (whitelistLastLoadedAt === 0) return;
+  if (Date.now() - whitelistLastLoadedAt <= WHITELIST_REFRESH_MS) return;
+  if (whitelistReloadPromise || !whitelistLoader) return;
+  whitelistReloadPromise = loadWhitelist(whitelistLoader.db, whitelistLoader.env).finally(() => {
+    whitelistReloadPromise = null;
+  });
+}
+
+/**
+ * 检查 Key 是否在白名单中（调用前先触发 TTL 过期检查，后台刷新）
  */
 export function isKeyWhitelisted(key: string): boolean {
+  maybeRefreshWhitelist();
   return whitelistedKeys.has(key);
 }
 
@@ -186,6 +233,7 @@ export function isKeyDeprioritized(key: string, platformId?: string): boolean {
  * 检查平台是否为白名单平台（永不封禁，密钥仍正常封禁）
  */
 export function isPlatformWhitelisted(platformId?: string): boolean {
+  maybeRefreshWhitelist();
   if (!platformId) return false;
   return whitelistedPlatforms.has(platformId);
 }
@@ -196,12 +244,15 @@ export function isPlatformWhitelisted(platformId?: string): boolean {
  * KV 中只存密钥指纹，需要结合平台密钥明文计算指纹后才能映射回内存 Map。
  * 无 KV（非 Cloudflare 部署）时仍恢复持久化禁用集合（DB enabled=false），
  * 否则进程重启后自动禁用的密钥会复活且不再累计错误。
+ *
+ * 返回是否加载成功：失败时保留已有内存状态（入口懒加载标志只在成功后
+ * 置位，下次请求重试）。
  */
 export async function loadKeyStatusFromKV(
   db: D1Database,
   kv: KVNamespace | undefined,
   env?: WorkerEnv
-): Promise<void> {
+): Promise<boolean> {
   try {
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
@@ -223,7 +274,7 @@ export async function loadKeyStatusFromKV(
       if (loaded > 0) {
         console.log(`[platform-keys] 已从数据库恢复 ${loaded} 个持久化禁用 Key（无 KV）`);
       }
-      return;
+      return true;
     }
 
     let loaded = 0;
@@ -269,8 +320,10 @@ export async function loadKeyStatusFromKV(
     if (loaded > 0) {
       console.log(`[platform-keys] 已从 KV 恢复 ${loaded} 个 Key 状态`);
     }
+    return true;
   } catch (err) {
     console.error("[platform-keys] 从 KV 加载 Key 状态失败:", err instanceof Error ? err.message : String(err));
+    return false;
   }
 }
 

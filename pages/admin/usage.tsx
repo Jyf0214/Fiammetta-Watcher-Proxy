@@ -9,7 +9,8 @@ import { HeatmapCard } from "@/components/usage/HeatmapCard";
 import { RefreshCw, BarChart3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
-import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
+import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE, type ApiResponse } from "@/hooks/use-api";
+import useSWR from "swr";
 import dynamic from "next/dynamic";
 import KeyUsageTab from "@/components/usage/KeyUsageTab";
 import PlatformUsageTab from "@/components/usage/PlatformUsageTab";
@@ -59,8 +60,32 @@ export default function UsagePage() {
     `/api/admin/usage/platform?period=${period}`
   );
 
-  // 刷新按钮（refreshKey 计数）触发趋势与子 Tab（各自内部监听）重新验证
-  useRefreshKey(refreshKey, mutateTrend);
+  // 峰值耗时（秒）：/api/admin/usage 顶层 peakDuration 字段。
+  // apiFetcher 只解包 data，顶层字段需此处直接请求读取；401 处理与 apiFetcher 对齐
+  const { data: peakDuration, mutate: mutatePeakDuration } = useSWR<number | null>(
+    `/api/admin/usage?period=${period}`,
+    async (url: string) => {
+      const res = await fetch(url);
+      const body = (await res.json().catch(() => null)) as
+        | (ApiResponse<unknown> & { peakDuration?: number | null })
+        | null;
+      if (res.status === 401) {
+        message.warning(t("auth:unauthorized"));
+        if (typeof window !== "undefined") {
+          window.location.replace("/admin/login");
+        }
+        throw new Error(UNAUTHORIZED_MESSAGE);
+      }
+      if (!body || body.success !== true) return null;
+      return body.peakDuration ?? null;
+    }
+  );
+
+  // 刷新按钮（refreshKey 计数）触发趋势、峰值耗时与子 Tab（各自内部监听）重新验证
+  useRefreshKey(refreshKey, () => {
+    void mutateTrend();
+    void mutatePeakDuration();
+  });
 
   // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
@@ -234,6 +259,7 @@ export default function UsagePage() {
         <HeatmapCard
           stats={{
             peakTokens: trendSummary?.peakTokens,
+            peakDuration: peakDuration ?? undefined,
             currentStreak: trendSummary?.currentStreak,
             longestStreak: trendSummary?.longestStreak,
           }}

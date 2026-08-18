@@ -203,6 +203,13 @@ export function createUsageTransformer(params: {
   key?: string;
   /** max_tokens 预估值：上游未返回 usage 时兜底记账，防 tokenLimit 绕过 */
   maxTokensEstimate?: number;
+  /**
+   * CF 部署的 KV binding：流内密钥类错误封禁时同时写 KV 持久化
+   * （管理后台 keyStatuses CF 模式读 KV 展示、Worker 冷启动 loadKeyStatusFromKV
+   * 恢复封禁），与 proxy.ts HTTP 429 路径 banKey(..., kv) 的 KV 键结构一致；
+   * 非 Cloudflare 部署（无 KV）可不传，封禁只写内存 + DB 错误计数。
+   */
+  kv?: KVNamespace;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -276,13 +283,14 @@ export function createUsageTransformer(params: {
 
       // 流内 error 为密钥类状态码（429/401/402/403）时与 HTTP 重试路径对齐：
       // 封禁 Key + 累加错误计数（DB errorCount 达阈值自动禁用）。仅当调用方
-      // 传入 key 明文时执行（transformer 无 KV 绑定，封禁只写内存，持久化由
-      // recordKeyError 的 DB 写入承担）；404/503 等非密钥错误不打 Key 分
+      // 传入 key 明文时执行；kv 由调用方在 CF 部署下传入（env.KV），封禁同时
+      // 写 KV 持久化（与 proxy.ts HTTP 429 路径 banKey(..., kv) 一致，管理后台
+      // 可见、冷启动可恢复），无 KV 时只写内存；404/503 等非密钥错误不打 Key 分
       if (streamError && params.key &&
           (streamError.code === 429 || streamError.code === 401 ||
            streamError.code === 402 || streamError.code === 403)) {
         const keyErrorCode = streamError.code;
-        try { await banKey(params.key, undefined, params.platformId); } catch {}
+        try { await banKey(params.key, undefined, params.platformId, params.kv); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
       }
 

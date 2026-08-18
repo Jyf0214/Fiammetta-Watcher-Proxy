@@ -107,67 +107,52 @@ export default function RequestTemplatesPage() {
   };
 
   const handleSave = async () => {
+    let values: { name: string; description?: string; models: string[]; enabled: boolean; mergeBody: string };
     try {
-      const values = await form.validateFields();
-      let mergeBody: Record<string, unknown>;
-      try {
-        mergeBody = JSON.parse(values.mergeBody);
-      } catch {
-        setBodyJsonError(true);
-        return;
-      }
+      values = await form.validateFields();
+    } catch {
+      // 表单校验失败：antd 已在对应字段下方显示错误，无需额外提示
+      return;
+    }
 
-      if (typeof mergeBody !== "object" || mergeBody === null || Array.isArray(mergeBody)) {
-        setBodyJsonError(true);
-        return;
-      }
+    let mergeBody: Record<string, unknown>;
+    try {
+      mergeBody = JSON.parse(values.mergeBody);
+    } catch {
+      setBodyJsonError(true);
+      return;
+    }
 
-      setSaving(true);
+    if (typeof mergeBody !== "object" || mergeBody === null || Array.isArray(mergeBody)) {
+      setBodyJsonError(true);
+      return;
+    }
 
-      if (editingTemplate) {
-        const res = await fetch("/api/admin/request-templates", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: editingTemplate.id,
-            name: values.name,
-            description: values.description,
-            models: values.models,
-            mergeBody,
-            enabled: values.enabled,
-          }),
-        });
-        const data = await res.json() as Record<string, any>;
-        if (data.success) {
-          message.success(t("rtUpdateSuccess"));
-          setModalOpen(false);
-          mutate();
-        } else {
-          message.error(data.error);
-        }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/request-templates", {
+        method: editingTemplate ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(editingTemplate ? { id: editingTemplate.id } : {}),
+          name: values.name,
+          description: values.description,
+          models: values.models,
+          mergeBody,
+          enabled: values.enabled,
+        }),
+      });
+      const data = await res.json() as Record<string, any>;
+      if (data.success) {
+        message.success(editingTemplate ? t("rtUpdateSuccess") : t("rtCreateSuccess"));
+        setModalOpen(false);
+        mutate();
       } else {
-        const res = await fetch("/api/admin/request-templates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: values.name,
-            description: values.description,
-            models: values.models,
-            enabled: values.enabled,
-            mergeBody,
-          }),
-        });
-        const data = await res.json() as Record<string, any>;
-        if (data.success) {
-          message.success(t("rtCreateSuccess"));
-          setModalOpen(false);
-          mutate();
-        } else {
-          message.error(data.error);
-        }
+        message.error(typeof data.error === "string" ? data.error : t("common:error"));
       }
     } catch {
-      // 表单校验失败
+      // 网络异常与表单校验失败分离：此处是真实请求失败，必须提示
+      message.error(t("common:networkError"));
     } finally {
       setSaving(false);
     }
@@ -184,9 +169,11 @@ export default function RequestTemplatesPage() {
       const data = await res.json() as Record<string, any>;
       if (data.success) {
         mutate();
+      } else {
+        message.error(typeof data.error === "string" ? data.error : t("common:error"));
       }
     } catch {
-      // 静默失败
+      message.error(t("common:networkError"));
     } finally {
       setTogglingId(null);
     }

@@ -69,6 +69,38 @@ export function PlatformConfigForm({
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
 
+  // 认证类/协议管控头禁止透传（与代理层 FORBIDDEN_FORWARD_HEADERS 双端一致，W7）：
+  // 透传白名单可覆盖平台密钥，导致 401 封禁循环或 BYOK 绕过计费
+  const FORBIDDEN_FORWARD_HEADERS = [
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "cookie",
+    "content-type",
+    "content-length",
+    "host",
+    "connection",
+    "transfer-encoding",
+    "upgrade",
+    "expect",
+  ];
+
+  const validateForwardHeaders = (_: unknown, value: string | undefined): Promise<void> => {
+    if (!value || value.trim() === "") return Promise.resolve();
+    const forbidden = value
+      .split("\n")
+      .map((l) => l.trim().toLowerCase())
+      .filter(Boolean)
+      .filter((h) => FORBIDDEN_FORWARD_HEADERS.includes(h));
+    if (forbidden.length > 0) {
+      return Promise.reject(
+        new Error(t("forwardHeadersForbidden", { names: forbidden.join(", ") }))
+      );
+    }
+    return Promise.resolve();
+  };
+
   // 响应式读取：条件渲染 customUserAgent 必须用 useWatch——
   // getFieldValue 是快照读取，不会触发重渲染（开关切换后输入框不出现/不消失）
   const formReuseUserAgent = Form.useWatch("reuseUserAgent", form);
@@ -332,6 +364,7 @@ export function PlatformConfigForm({
                     name="forwardHeaders"
                     label={t("forwardHeaders")}
                     extra={<span className={itemDesc}>{t("forwardHeadersDesc")}</span>}
+                    rules={[{ validator: validateForwardHeaders }]}
                     className="!mb-0"
                   >
                     <Input.TextArea

@@ -300,7 +300,9 @@ const MIN_VALID_TS = 1704067200;
 
 /** 枚举白名单：与运行期代码实际读取的值一致 */
 const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom", "anthropic"]);
-const VALID_KEY_STATUSES = new Set(["active", "disabled"]);
+// 含 expired：手动标记过期的 Key 导入后不得落白名单外回退 "active" 复活
+// （与 keys/[id].ts PUT 允许值 ["active", "disabled", "expired"] 保持一致）
+const VALID_KEY_STATUSES = new Set(["active", "disabled", "expired"]);
 const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
 
 /** Prisma Int 字段为 32 位有符号（TiDB/MySQL INT），超出会整批失败 */

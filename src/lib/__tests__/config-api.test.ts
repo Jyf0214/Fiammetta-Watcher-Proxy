@@ -8,6 +8,8 @@
  * - PUT 跨秒保存：updatedAt 取自然秒值（不叠加补偿）
  * - PUT 触发写操作限流（checkAdminRateLimit 按 adminId 计数）
  * - PUT 配置键必须以 system: 前缀（400）
+ * - PUT 内部派生键保护：system:upstream_proxy_pool / _health 禁止直写（400）
+ * - PUT 成功后写审计日志（action=update_config，值内嵌凭据脱敏）
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security、
  * @/lib/admin-rate-limit。模块级 lastConfigSaveAt 跨测试共享，每个用例用
@@ -22,6 +24,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
   upsert: vi.fn(),
+  auditCreate: vi.fn(),
   getAdmin: vi.fn(),
   csrf: vi.fn(),
   rateLimit: vi.fn(),
@@ -33,11 +36,19 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mocks.findMany,
       upsert: mocks.upsert,
     },
+    auditLogs: {
+      create: mocks.auditCreate,
+    },
   })),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
   getAdminFromRequest: mocks.getAdmin,
+  // 与真实实现一致：system-key / env-admin 虚拟 ID 返回 null（不落管理员外键）
+  getAuditAdminId: (admin: any) =>
+    admin?.authMethod === "system-key" || admin?.adminId === "env-admin"
+      ? null
+      : admin?.adminId ?? null,
 }));
 
 vi.mock("@/lib/admin-security", () => ({
@@ -98,6 +109,7 @@ beforeEach(() => {
   mocks.rateLimit.mockResolvedValue(true);
   mocks.findMany.mockResolvedValue([]);
   mocks.upsert.mockResolvedValue({});
+  mocks.auditCreate.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -175,5 +187,61 @@ describe("PUT /api/admin/config updatedAt 单调递增补偿", () => {
     const { res } = await call(putBody("other_key"));
     expect(res.statusCode).toBe(400);
     expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("PUT /api/admin/config 内部派生键保护（L1）", () => {
+  function putBody(key = "system:test_key", value = "v1") {
+    return { method: "PUT", body: { key, value } };
+  }
+
+  it("拒绝直写 system:upstream_proxy_pool（400，不写库不审计）", async () => {
+    const { res } = await call(putBody("system:upstream_proxy_pool", "{}"));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("该配置键受保护，禁止直接修改");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("拒绝直写 system:upstream_proxy_health（400，不写库）", async () => {
+    const { res } = await call(putBody("system:upstream_proxy_health", "{}"));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("该配置键受保护，禁止直接修改");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("正常代理配置主键 system:upstream_proxy 不受保护（200 正常保存）", async () => {
+    const { res } = await call(putBody("system:upstream_proxy", "{}"));
+    expect(res.statusCode).toBe(200);
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PUT /api/admin/config 审计日志（A9）", () => {
+  it("成功后写审计：action=update_config、目标键、值内嵌凭据脱敏", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const value = JSON.stringify({
+      urls: ["http://user:pass@127.0.0.1:7890", "http://127.0.0.1:7891"],
+    });
+    const { res } = await call({ method: "PUT", body: { key: "system:upstream_proxy", value } });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.auditCreate).toHaveBeenCalledTimes(1);
+    const data = mocks.auditCreate.mock.calls[0][0].data;
+    expect(data.action).toBe("update_config");
+    // env-admin 为 JWT 登录虚拟 ID，不落管理员外键（getAuditAdminId 返回 null）
+    expect(data.adminId).toBeNull();
+    expect(data.createdAt).toBe(1_784_000_000);
+    // 请求无 x-forwarded-for → ip 为 null
+    expect(data.ip).toBeNull();
+    const detail = JSON.parse(data.detail);
+    expect(detail.key).toBe("system:upstream_proxy");
+    // user:pass 凭据脱敏（maskProxyUrl 同规则），无凭据地址原样保留
+    expect(detail.value).toContain("http://***@127.0.0.1:7890");
+    expect(detail.value).toContain("http://127.0.0.1:7891");
+    expect(detail.value).not.toContain("user:pass");
   });
 });

@@ -27,8 +27,10 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 const mocks = vi.hoisted(() => ({
   apiKeysFindMany: vi.fn(),
+  platformsFindMany: vi.fn(),
   requestLogsGroupBy: vi.fn(),
   requestLogsFindMany: vi.fn(),
+  requestLogsAggregate: vi.fn(),
   dailyStatsFindMany: vi.fn(),
   getAdmin: vi.fn(),
 }));
@@ -36,9 +38,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     apiKeys: { findMany: mocks.apiKeysFindMany },
+    platforms: { findMany: mocks.platformsFindMany },
     requestLogs: {
       groupBy: mocks.requestLogsGroupBy,
       findMany: mocks.requestLogsFindMany,
+      aggregate: mocks.requestLogsAggregate,
     },
     dailyStats: { findMany: mocks.dailyStatsFindMany },
   })),
@@ -52,6 +56,7 @@ vi.mock("@/lib/admin-auth", () => ({
 
 import usageHandler from "../../../pages/api/admin/usage";
 import trendHandler from "../../../pages/api/admin/usage/trend";
+import platformUsageHandler from "../../../pages/api/admin/usage/platform";
 
 function makeReq(overrides: any = {}): NextApiRequest {
   return {
@@ -136,7 +141,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAdmin.mockResolvedValue(ADMIN);
   mocks.apiKeysFindMany.mockResolvedValue([makeKey()]);
+  mocks.platformsFindMany.mockResolvedValue([]);
   mocks.requestLogsFindMany.mockResolvedValue([]);
+  mocks.requestLogsAggregate.mockResolvedValue({ _max: { latency: null } });
   mocks.dailyStatsFindMany.mockResolvedValue([]);
 });
 
@@ -254,6 +261,131 @@ describe("GET /api/admin/usage", () => {
     // avgDuration = round((1200 + 300×180 + 250×100) / 288) = round(278.47) = 278
     expect(stats.avgTtft).toBe(64);
     expect(stats.avgDuration).toBe(278);
+  });
+
+  it("peakDuration：取窗口内最大 latency（毫秒换算秒），两种响应形态均含顶层字段", async () => {
+    mockUsageGroupBy(
+      [
+        {
+          keyId: "key-1",
+          _count: { id: 2 },
+          _sum: { tokens: 100, promptTokens: 40, completionTokens: 60, ttft: 100, latency: 12000 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 2000 },
+        },
+      ],
+      [
+        {
+          keyId: "key-1",
+          _count: { id: 2 },
+          _sum: { ttft: 100, latency: 12000 },
+        },
+      ]
+    );
+    // 窗口内最大 latency = 9000ms → 9s（F5 接口约定：秒）
+    mocks.requestLogsAggregate.mockResolvedValue({ _max: { latency: 9000 } });
+
+    const { res } = await callUsage({ query: { period: "week" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.peakDuration).toBe(9);
+    expect(res.body.data[0].id).toBe("key-1");
+
+    // keyId 形态同样携带顶层 peakDuration
+    const { res: resById } = await callUsage({ query: { period: "week", keyId: "key-1" } });
+    expect(resById.statusCode).toBe(200);
+    expect(resById.body.peakDuration).toBe(9);
+    // keyId 过滤传入了 aggregate where（与 groupBy 相同下界）
+    expect(mocks.requestLogsAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ keyId: "key-1" }) })
+    );
+  });
+
+  it("peakDuration：窗口内无有效耗时（无日志/全为错误请求）返回 null", async () => {
+    mockUsageGroupBy([], []);
+    mocks.requestLogsAggregate.mockResolvedValue({ _max: { latency: null } });
+    const { res } = await callUsage({ query: { period: "week" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.peakDuration).toBeNull();
+  });
+
+  it("peakDuration：aggregate 仅统计非错误请求（isError: false），错误请求真实耗时（最高 120s）不污染峰值", async () => {
+    mockUsageGroupBy(
+      [
+        {
+          keyId: "key-1",
+          _count: { id: 2 },
+          _sum: { tokens: 100, promptTokens: 40, completionTokens: 60, ttft: 100, latency: 12000 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 2000 },
+        },
+      ],
+      [
+        {
+          keyId: "key-1",
+          _count: { id: 1 },
+          _sum: { ttft: 100, latency: 12000 },
+        },
+      ]
+    );
+    // 若未过滤，错误请求（如 120000ms 超时）会覆盖非错误峰值 9000ms；
+    // 过滤后 aggregate 只见非错误请求 → 9000ms → 9s
+    mocks.requestLogsAggregate.mockResolvedValue({ _max: { latency: 9000 } });
+
+    const { res } = await callUsage({ query: { period: "week" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.peakDuration).toBe(9);
+    // 核心断言：peakAgg 的 where 与 perfGrouped 同款 isError: false（错误请求不参与峰值）
+    expect(mocks.requestLogsAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isError: false }),
+      })
+    );
+  });
+
+  it("peakDuration：period=all 时并入 daily_stats.maxDuration（已归档历史峰值不缩水）", async () => {
+    mockUsageGroupBy([], []);
+    // 明细最大 3000ms，历史归档最大 120000ms → 峰值取 120s
+    mocks.requestLogsAggregate.mockResolvedValue({ _max: { latency: 3000 } });
+    mocks.dailyStatsFindMany.mockResolvedValue([
+      {
+        keyId: "key-1",
+        date: 1700000000,
+        totalRequests: 200,
+        errorRequests: 20,
+        totalTokens: 100000,
+        totalPromptTokens: 40000,
+        totalCompletionTokens: 60000,
+        avgTtft: 100,
+        avgDuration: 300,
+        maxDuration: 120000,
+      },
+    ]);
+    const { res } = await callUsage(); // 默认 period=all
+    expect(res.statusCode).toBe(200);
+    expect(res.body.peakDuration).toBe(120);
+  });
+
+  it("period=today 使用 UTC 零点作为过滤下界（与归档 UTC 天口径一致，A11）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T10:30:00Z"));
+    mockUsageGroupBy([], []);
+    try {
+      const { res } = await callUsage({ query: { period: "today" } });
+      expect(res.statusCode).toBe(200);
+      // 2026-08-18T00:00:00Z（UTC 零点，86400 整数倍）；若误用本地零点，
+      // 非 UTC 时区下将取到错误下界
+      const fullWhere = mocks.requestLogsGroupBy.mock.calls
+        .map((c) => c[0] as any)
+        .find((a) => !(a?.where?.isError === false))!.where;
+      expect(fullWhere.createdAt.gte).toBe(1787011200);
+      expect(fullWhere.createdAt.gte % 86400).toBe(0);
+      // peakDuration 的 aggregate 使用同一 UTC 零点下界
+      expect(mocks.requestLogsAggregate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ createdAt: { gte: 1787011200 } }) })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("数据库错误返回 500", async () => {
@@ -378,10 +510,65 @@ describe("GET /api/admin/usage/trend", () => {
     expect(totalRequests).toBe(251);
   });
 
+  it("日期分组按 UTC 天而非本地时区（dateKeyOf 与归档/统计口径一致，A5）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T10:30:00Z"));
+    try {
+      // UTC 日边界两侧各一条：2026-08-17T23:00Z 与 2026-08-18T01:00Z。
+      // 本地时区（东八区等正偏移）下前者是 8-18 上午，旧实现会错误并入同日
+      const utcMidnight = 1787011200; // 2026-08-18T00:00:00Z
+      mockTrendLogs([], [
+        { tokens: 100, promptTokens: 40, completionTokens: 60, latency: 1000, createdAt: utcMidnight - 3600 },
+        { tokens: 200, promptTokens: 80, completionTokens: 120, latency: 2000, createdAt: utcMidnight + 3600 },
+      ]);
+      const { res } = await callTrend({ query: { period: "month" } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      const dates = (res.body.data as Array<{ date: string }>).map((p) => p.date).sort();
+      expect(dates).toEqual(["2026-08-17", "2026-08-18"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("数据库错误返回 500", async () => {
     mocks.requestLogsFindMany.mockRejectedValue(new Error("DB error"));
     const { res } = await callTrend();
     expect(res.statusCode).toBe(500);
     expect(res.body.success).toBe(false);
+  });
+});
+
+// ==================== usage/platform.ts ====================
+
+describe("GET /api/admin/usage/platform", () => {
+  it("未认证返回 401", async () => {
+    mocks.getAdmin.mockResolvedValue(null);
+    const req = makeReq();
+    const res = makeRes() as any;
+    await platformUsageHandler(req, res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it("period=today 使用 UTC 零点作为过滤下界（与归档 UTC 天口径一致，A11）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T10:30:00Z"));
+    mocks.requestLogsGroupBy.mockResolvedValue([]);
+    try {
+      const req = makeReq({ query: { period: "today" } });
+      const res = makeRes() as any;
+      await platformUsageHandler(req, res);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      // 2026-08-18T00:00:00Z（UTC 零点，86400 整数倍）
+      const fullWhere = mocks.requestLogsGroupBy.mock.calls
+        .map((c) => c[0] as any)
+        .find((a) => !(a?.where?.isError === true))!.where;
+      expect(fullWhere.createdAt.gte).toBe(1787011200);
+      expect(fullWhere.createdAt.gte % 86400).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -117,6 +117,29 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
 const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
 
 /**
+ * 透传白名单禁透传头名（大小写不敏感）
+ *
+ * 认证类头（authorization/x-api-key 等）与请求语义关键头（content-type/host 等）
+ * 一律不允许通过 forwardHeaders 白名单透传覆盖：白名单展开在认证头之后，
+ * 若允许覆盖，任意下游客户端头可替换平台密钥（401 封禁循环或 BYOK 绕过计费），
+ * content-type/host 等被覆盖则破坏请求语义甚至引发 SSRF 类错误路由。
+ */
+const FORBIDDEN_FORWARD_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "x-auth-token",
+  "cookie",
+  "content-type",
+  "content-length",
+  "host",
+  "connection",
+  "transfer-encoding",
+  "upgrade",
+  "expect",
+]);
+
+/**
  * 空响应哨兵：上游返回 2xx 但响应体为空（空 JSON / 空 SSE 流 / 空 multipart）。
  * handleUpstreamResponse 检测到后返回此哨兵，调用方将其判定为无效并纳入重试
  * （封禁当前 Key → 换 Key → 换平台），耗尽后返回 502 明确错误，绝不透传空响应。
@@ -533,9 +556,13 @@ export async function proxyV1Request(
     );
     const forwardHeaders: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawForwardHeaders)) {
-      if (/^[a-zA-Z0-9-]+$/.test(k)) {
-        forwardHeaders[k] = v;
-      }
+      // 只保留合法 header 名
+      if (!/^[a-zA-Z0-9-]+$/.test(k)) continue;
+      // 丢弃认证类/请求语义关键头（大小写不敏感）：白名单展开在认证头与
+      // extraHeaders 之前，若允许 authorization/x-api-key/content-type/host 等
+      // 透传覆盖，下游客户端可替换平台密钥或破坏请求语义
+      if (FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) continue;
+      forwardHeaders[k] = v;
     }
 
     const upstreamUrl = upstreamIsAnthropic
@@ -606,13 +633,53 @@ export async function proxyV1Request(
       });
     } catch (fetchError) {
       clearTimeout(upstreamTimeoutId);
-      if (
-        fetchError instanceof DOMException &&
-        fetchError.name === "AbortError"
-      ) {
+      // 网络层失败（总超时中止 / DNS 解析失败 / 连接拒绝等）统一补记请求日志并
+      // 触发平台熔断，再返回明确错误——此前零记录零熔断（非 AbortError 直接 throw
+      // 冒泡到入口 500），坏平台永远不会被降级，可用率高估、负载均衡反复撞上它
+      const isAbort =
+        (fetchError instanceof DOMException ||
+          fetchError instanceof Error) &&
+        fetchError.name === "AbortError";
+      const status = isAbort ? 504 : 502;
+      const errorMessage = isAbort
+        ? `上游请求超时（${UPSTREAM_TIMEOUT_MS / 1000} 秒无响应头）`
+        : `上游请求失败: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`;
+
+      try {
+        await recordFailure(currentPlatform.id, env.DB, env);
+      } catch (recordError) {
+        console.error(
+          `${logTag} 熔断器记录失败:`,
+          recordError instanceof Error ? recordError.message : String(recordError)
+        );
+      }
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: currentPlatform.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage,
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error(`${logTag} 日志写入失败:`, logError);
+      }
+
+      if (isAbort) {
         return v1ErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
       }
-      throw fetchError;
+      return v1ErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
     }
 
     // ── 2xx 成功响应：正常处理（流式/非流式）──
@@ -1074,6 +1141,9 @@ async function handleUpstreamResponse(
       key: apiKey.key,
       // 上游未返回 usage 时以请求体 max_tokens 预估值兜底记账（防 tokenLimit 绕过）
       maxTokensEstimate,
+      // 流内密钥类错误封禁时同步写 KV 持久化（CF 部署管理后台可见、冷启动恢复），
+      // 与 HTTP 429 路径 banKey(..., env.KV) 键结构一致
+      kv: env.KV,
       db: env.DB,
       env: workerEnv,
     });
@@ -1085,8 +1155,15 @@ async function handleUpstreamResponse(
       paddedStream,
       UPSTREAM_IDLE_TIMEOUT_MS,
       () => {
-        // 用 ctx.waitUntil 保护补记日志：超时路径下请求随即终结，
+        // 用 ctx.waitUntil 保护补记日志/熔断：超时路径下请求随即终结，
         // 在途 DB 写入会被 isolate 冻结截断
+        ctx.waitUntil(
+          // 挂起超时同样触发平台熔断（与 createUsageTransformer 截断分支一致）：
+          // 只补记日志不打分的话，坏平台永远不会被降级，负载均衡反复撞上它
+          recordFailure(platform.id, env.DB, env).catch((recordError) => {
+            console.error(`${logTag} 空闲超时熔断器记录失败:`, recordError);
+          })
+        );
         ctx.waitUntil(
           recordRequestLog({
             keyId: apiKey.id,
@@ -1212,7 +1289,41 @@ async function handleUpstreamResponse(
       },
     });
     return new Response(
-      withIdleTimeout(multipartPadded, UPSTREAM_IDLE_TIMEOUT_MS),
+      withIdleTimeout(
+        multipartPadded,
+        UPSTREAM_IDLE_TIMEOUT_MS,
+        () => {
+          // 挂起超时补记 504 日志 + 触发熔断（与 SSE 分支一致）：此前无 onTimeout，
+          // 音频/图片类 multipart 上游挂起 120s 被静默切断——无日志、无熔断、无计数
+          ctx.waitUntil(
+            recordFailure(platform.id, env.DB, env).catch((recordError) => {
+              console.error(`${logTag} 空闲超时熔断器记录失败:`, recordError);
+            })
+          );
+          ctx.waitUntil(
+            recordRequestLog({
+              keyId: apiKey.id,
+              keyName: apiKey.name,
+              platformId: platform.id,
+              model: requestedModel,
+              endpoint: config.upstreamPath,
+              method: "POST",
+              status: 504,
+              tokens: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              ttft: 0,
+              duration: Date.now() - startTime,
+              isError: true,
+              errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+              db: env.DB,
+              env: workerEnv,
+            }).catch((logError) => {
+              console.error(`${logTag} 空闲超时日志写入失败:`, logError);
+            })
+          );
+        }
+      ),
       {
         status: upstreamResponse.status,
         headers: { "Content-Type": responseContentType },

@@ -74,7 +74,7 @@ export default function PresetPlatformsPage() {
             className="max-w-xs"
           />
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
-            {t("presetModelCount", { count: filtered.length })}
+            {t("presetModelCount", { count: filtered.reduce((sum, p) => sum + p.models.length, 0) })}
           </span>
         </div>
 

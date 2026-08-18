@@ -43,7 +43,12 @@ export interface ScheduledTask {
 
 /**
  * 生成代理健康检查触发时刻：以固定偏移 2 分为锚点、按间隔步进（interval=5 时
- * 为 2/7/12/.../57，与历史默认行为一致）。间隔钳制到 1~60
+ * 为 2/7/12/.../57，与历史默认行为一致）。间隔钳制到 1~60。
+ *
+ * 间隔不整除 60 时（如 25、7），整数步进会在整点前后留下短尾间隙
+ * （interval=25 时 2/27/52，:52 后仅 10 分钟即到下一小时 :02，触发间隔变为
+ * 25/25/10 交替）。此时改用 60/k 浮点均匀步进取整：每小时触发次数 =
+ * floor(60/interval)，相邻触发间隙误差 ≤1 分钟。整除间隔行为保持不变。
  */
 export function healthCheckSpec(intervalMin: number): ScheduleSpec {
   const interval = Math.min(
@@ -51,7 +56,15 @@ export function healthCheckSpec(intervalMin: number): ScheduleSpec {
     PROXY_HEALTH_INTERVAL_MIN_RANGE.max
   );
   const minutes = new Set<number>();
-  for (let m = 2; m < 60; m += interval) minutes.add(m);
+  if (60 % interval === 0) {
+    // 整除间隔：保持历史步进行为（测试断言 5 → 2/7/12/.../57）
+    for (let m = 2; m < 60; m += interval) minutes.add(m);
+  } else {
+    // 非整除间隔：60/k 均匀步进取整，避免尾部间隙缩短
+    const count = Math.floor(60 / interval);
+    const step = 60 / count;
+    for (let i = 0; i < count; i++) minutes.add(Math.round(2 + i * step));
+  }
   return { minutes };
 }
 

@@ -15,14 +15,21 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 const mocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
+  update: vi.fn(),
+  auditCreate: vi.fn(),
   getAdmin: vi.fn(),
   getAuditAdminId: vi.fn(),
+  checkRateLimit: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     systemApiKeys: {
       findFirst: mocks.findFirst,
+      update: mocks.update,
+    },
+    auditLogs: {
+      create: mocks.auditCreate,
     },
   })),
 }));
@@ -34,6 +41,10 @@ vi.mock("@/lib/admin-auth", () => ({
 
 vi.mock("@/lib/admin-security", () => ({
   checkCsrfOrigin: vi.fn(() => true),
+}));
+
+vi.mock("@/lib/admin-rate-limit", () => ({
+  checkAdminRateLimit: mocks.checkRateLimit,
 }));
 
 // ==================== Helpers ====================
@@ -79,7 +90,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAdmin.mockResolvedValue(ADMIN);
   mocks.getAuditAdminId.mockReturnValue("env-admin");
+  mocks.checkRateLimit.mockResolvedValue(true);
   mocks.findFirst.mockResolvedValue(null);
+  mocks.update.mockResolvedValue({});
+  mocks.auditCreate.mockResolvedValue({});
 });
 
 // ==================== GET — 单个 Key 明文 ====================
@@ -117,6 +131,90 @@ describe("GET /api/admin/system-keys/[id]", () => {
   it("数据库错误返回 500", async () => {
     mocks.findFirst.mockRejectedValue(new Error("DB error"));
     const { res } = await call();
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+});
+
+// ==================== PATCH — 启用/禁用 ====================
+
+describe("PATCH /api/admin/system-keys/[id]", () => {
+  const EXISTING = { id: "sys-001", name: "开发 Key" };
+
+  it("未认证返回 401", async () => {
+    mocks.getAdmin.mockResolvedValue(null);
+    const { res } = await call({ method: "PATCH", body: { enabled: false } });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it("enabled 非布尔返回 400", async () => {
+    const { res } = await call({ method: "PATCH", body: { enabled: "yes" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("Key 不存在返回 404", async () => {
+    mocks.findFirst.mockResolvedValue(null);
+    const { res } = await call({ method: "PATCH", body: { enabled: true } });
+    expect(res.statusCode).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("成功更新 enabled 并写入审计日志（update_system_key）", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+
+    const { res } = await call({ method: "PATCH", body: { enabled: false } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain("禁用");
+
+    expect(mocks.update).toHaveBeenCalledWith({
+      where: { id: "sys-001" },
+      data: expect.objectContaining({ enabled: false }),
+    });
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "update_system_key",
+          adminId: "env-admin",
+          detail: expect.stringContaining("sys-001"),
+        }),
+      })
+    );
+  });
+
+  it("启用成功时消息含「启用」且审计 detail 含 enabled 状态", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+
+    const { res } = await call({ method: "PATCH", body: { enabled: true } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toContain("启用");
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "update_system_key",
+          detail: JSON.stringify({ target: "sys-001", name: "开发 Key", enabled: true }),
+        }),
+      })
+    );
+  });
+
+  it("审计日志写入失败不阻塞主流程", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+    mocks.auditCreate.mockRejectedValue(new Error("audit db down"));
+
+    const { res } = await call({ method: "PATCH", body: { enabled: true } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it("数据库错误返回 500", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+    mocks.update.mockRejectedValue(new Error("DB error"));
+    const { res } = await call({ method: "PATCH", body: { enabled: true } });
     expect(res.statusCode).toBe(500);
     expect(res.body.success).toBe(false);
   });

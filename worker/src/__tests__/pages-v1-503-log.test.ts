@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import handler from "../../../pages/api/v1/[[...v1]]";
 import { validateApiKey } from "../../../worker/src/auth";
 import { routeRequest } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
 import { getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { recordFailure } from "../../../worker/src/load-balancer";
 import { recordRequestLog } from "../../../worker/src/token";
@@ -45,8 +45,9 @@ vi.mock("../../../worker/src/platform-keys", () => ({
   isKeyDisabled: vi.fn(() => false),
   recordKeyError: vi.fn(async () => {}),
   parseApiKeys: vi.fn(() => ["sk-key1", "sk-key2"]),
-  loadWhitelist: vi.fn(async () => {}),
-  loadKeyStatusFromKV: vi.fn(async () => {}),
+  // W10 契约：loadWhitelist/loadKeyStatusFromKV 返回 Promise<boolean>，v1.ts 以 === true 判定置位
+  loadWhitelist: vi.fn(async () => true),
+  loadKeyStatusFromKV: vi.fn(async () => true),
 }));
 
 vi.mock("../../../worker/src/load-balancer", () => ({
@@ -268,6 +269,44 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(logParams.tokens).toBe(0);
     expect(logParams.errorMessage).toBe("upstream down");
     expect(logParams.endpoint).toBe("/chat/completions");
+    // 非密钥类码（503）不触发 Key 级处理，仅平台熔断
+    expect(banKey).not.toHaveBeenCalled();
+    expect(recordKeyError).not.toHaveBeenCalled();
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
+  });
+
+  it("修复验证：流内 error 429 → 封禁当前平台 Key + 累计错误计数（W1 回归）", async () => {
+    const encoder = new TextEncoder();
+    const errStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"error":{"message":"rate limited","code":429}}\n\n')
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(errStream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      )
+    );
+
+    const req = makeReq({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    // 日志按流内错误码记录（修复前记录 200）
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(429);
+    expect(logParams.isError).toBe(true);
+    // W1 核心：流内密钥类状态码与 HTTP 重试路径对齐——封禁当前平台 Key + 错误计数
+    // （此前只记日志，密钥自动禁用机制在流式场景完全失效）
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", undefined);
+    expect(recordKeyError).toHaveBeenCalledWith("sk-key1", 429, "test-platform", expect.anything(), expect.anything());
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
   });
 
   it("修复验证：流式上游挂起（看门狗 120s 无数据）→ 日志记 504 + isError=true", async () => {
@@ -305,6 +344,8 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
     expect(logParams.errorMessage).toContain("空闲超时");
+    // W4：空闲超时与 EOF 截断同属上游失败，触发平台熔断（此前只补日志不打分）
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
   });
 });
 

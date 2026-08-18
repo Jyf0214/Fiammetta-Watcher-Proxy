@@ -14,7 +14,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, getDbKind } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
-import { isSafeUrl, checkCsrfOrigin, escapeHtml } from "@/lib/admin-security";
+import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { getPresetPlatform } from "@/lib/presets";
 import { detectModelType } from "@/lib/detect-model-type";
 
@@ -130,7 +130,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await tx.platforms.create({
         data: {
           id: platformId,
-          name: escapeHtml(finalName),
+          // name 原样存库，不做 escapeHtml：与 platforms.ts POST / [id].ts PUT 一致
+          // （React 前端渲染自动转义，存库转义会使含 & < > 的名称显示为 HTML 实体且不可逆固化）
+          name: finalName,
           baseUrl: finalBaseUrl,
           apiKeys: JSON.stringify(parsedApiKeys),
           type: preset.type,

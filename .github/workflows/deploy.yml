@@ -142,33 +142,33 @@ jobs:
           npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -v "https://" || {
             echo "✗ wrangler pages deploy 失败，最近部署的 Cloudflare 构建日志："
             python3 - "$CLOUDFLARE_ACCOUNT_ID" "$CLOUDFLARE_API_TOKEN" <<'PYEOF' | grep -v "https://" | tail -60
-import json, sys, urllib.request
+          import json, sys, urllib.request
 
-account_id, token = sys.argv[1], sys.argv[2]
+          account_id, token = sys.argv[1], sys.argv[2]
 
-def api(path):
-    req = urllib.request.Request(
-        f"https://api.cloudflare.com/client/v4/accounts/{account_id}{path}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    return json.load(urllib.request.urlopen(req))
+          def api(path):
+              req = urllib.request.Request(
+                  f"https://api.cloudflare.com/client/v4/accounts/{account_id}{path}",
+                  headers={"Authorization": f"Bearer {token}"},
+              )
+              return json.load(urllib.request.urlopen(req))
 
-try:
-    deps = api("/pages/projects/fiammetta-watcher/deployments?per_page=3")["result"]
-    for dep in deps:
-        stage = dep.get("latest_stage", {})
-        print(f"deployment {dep['id']} stage={stage.get('name')} status={stage.get('status')}")
-        try:
-            logs = api(f"/pages/projects/fiammetta-watcher/deployments/{dep['id']}/history/logs?size=200")["result"]
-            for item in logs["data"][-15:]:
-                line = (item.get("line") or "").strip()
-                if line:
-                    print("  |", line[:400])
-        except Exception as err:
-            print("  ! 构建日志获取失败:", err)
-except Exception as err:
-    print("! 部署列表获取失败:", err)
-PYEOF
+          try:
+              deps = api("/pages/projects/fiammetta-watcher/deployments?per_page=3")["result"]
+              for dep in deps:
+                  stage = dep.get("latest_stage", {})
+                  print(f"deployment {dep['id']} stage={stage.get('name')} status={stage.get('status')}")
+                  try:
+                      logs = api(f"/pages/projects/fiammetta-watcher/deployments/{dep['id']}/history/logs?size=200")["result"]
+                      for item in logs["data"][-15:]:
+                          line = (item.get("line") or "").strip()
+                          if line:
+                              print("  |", line[:400])
+                  except Exception as err:
+                      print("  ! 构建日志获取失败:", err)
+          except Exception as err:
+              print("! 部署列表获取失败:", err)
+          PYEOF
             exit 1
           }
           echo "✓ Pages 部署完成"

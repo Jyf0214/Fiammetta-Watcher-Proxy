@@ -55,8 +55,9 @@ export default async function handler(
     let startTimestamp: number;
     switch (period) {
       case "today": {
+        // UTC 零点（归档按 UTC 天切分，统计界限必须同用 UTC 天，见 stats.ts 同口径注释）
         const d = new Date();
-        d.setHours(0, 0, 0, 0);
+        d.setUTCHours(0, 0, 0, 0);
         startTimestamp = Math.floor(d.getTime() / 1000);
         break;
       }
@@ -94,7 +95,9 @@ export default async function handler(
     const todayStart = now - (now % 86400);
     const detailSince = todayStart - RETENTION_DAYS * 86400;
 
-    // JS 按日期分组（键格式：today 用 'YYYY-MM-DD HH:00'，其他用 'YYYY-MM-DD'，本地时区）
+    // JS 按日期分组（键格式：today 用 'YYYY-MM-DD HH:00'，其他用 'YYYY-MM-DD'，UTC 时区）。
+    // 必须用 UTC：日志归档（log-archiver.ts）与仪表盘（stats.ts）均按 UTC 天切分，
+    // 本地时区分组会导致历史天数据桶偏移、明细下界附近同日重复或整日遗漏（A5）
     const groups = new Map<string, TrendPoint>();
 
     function addToGroup(dateKey: string, point: TrendPoint) {
@@ -113,10 +116,10 @@ export default async function handler(
     function dateKeyOf(tsSec: number) {
       const d = new Date(tsSec * 1000);
       if (isHourly) {
-        const hour = String(d.getHours()).padStart(2, "0");
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hour}:00`;
+        const hour = String(d.getUTCHours()).padStart(2, "0");
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")} ${hour}:00`;
       }
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
     }
 
     // ---- 历史部分（daily_stats，仅 period=all 且存在早于明细下界的数据时触发）----

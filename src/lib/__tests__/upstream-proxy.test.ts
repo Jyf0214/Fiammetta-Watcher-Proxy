@@ -324,6 +324,44 @@ describe("配置解析与代理创建", () => {
       expect(getHealthCheckIntervalMin()).toBe(5);
     }
   });
+
+  it("组名 \"new\" 为保留名：跳过该组不参与路由（前端新建页路由 id===\"new\"，服务端同步拒绝，API 直连无法创建）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({
+          groups: [
+            { name: "new", urls: ["http://127.0.0.1:7890"] },
+            { name: "g1", urls: ["http://127.0.0.1:7891"] },
+          ],
+          platformIds: [],
+        }),
+        updatedAt: 1000,
+      },
+    });
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    // "new" 组被丢弃，剩余组正常路由（不抛错）
+    expect(result.url).toBe("http://127.0.0.1:7891");
+    expect(result.dispatcher).not.toBeNull();
+    expect(createdAgents).toHaveLength(1);
+  });
+
+  it("仅含保留名 \"new\" 组 → 无有效代理（直连，不抛错）", async () => {
+    const { getUpstreamProxy } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "new", urls: ["http://127.0.0.1:7890"] }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+    });
+
+    const result = await getUpstreamProxy(mockDb, mockEnv);
+
+    expect(result.dispatcher).toBeNull();
+    expect(result.url).toBeNull();
+  });
 });
 
 describe("平台白名单", () => {

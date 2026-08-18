@@ -29,8 +29,9 @@ export default async function handler(
     let startTimestamp: number | undefined;
     switch (period) {
       case "today": {
+        // UTC 零点（归档按 UTC 天切分，统计界限必须同用 UTC 天，见 stats.ts 同口径注释）
         const d = new Date();
-        d.setHours(0, 0, 0, 0);
+        d.setUTCHours(0, 0, 0, 0);
         startTimestamp = Math.floor(d.getTime() / 1000);
         break;
       }

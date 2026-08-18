@@ -1,7 +1,7 @@
 /**
  * 平台模型可用性测试 API
  *
- * POST /api/admin/platforms/:id/test-model — 对指定模型用平台所有密钥逐个发送真实流式 chat 请求
+ * POST /api/admin/platforms/:id/test-model — 对指定模型用平台可用密钥（不含 enabled=false 的已禁用密钥）逐个发送真实流式 chat 请求
  *
  * body: { modelId: string }
  */
@@ -25,7 +25,7 @@ interface TestResult {
   error?: string;
 }
 
-/** 解析平台 apiKeys JSON 为命名密钥列表 */
+/** 解析平台 apiKeys JSON 为命名密钥列表（跳过已禁用密钥） */
 function parseNamedKeyList(raw: string | null | undefined): { name: string; key: string }[] {
   if (!raw) return [];
   try {
@@ -36,6 +36,10 @@ function parseNamedKeyList(raw: string | null | undefined): { name: string; key:
         if (typeof item === "string") return { name: `Key${idx + 1}`, key: item };
         if (typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).key === "string") {
           const obj = item as Record<string, unknown>;
+          // 跳过禁用密钥（enabled === false）：测试请求对上游产生真实调用，
+          // 禁用密钥可能已被吊销，失败项混入会误导平台可用性判断（与运行期
+          // selectUsableKey / parseApiKeyObjects 的 enabled 过滤语义一致）
+          if (obj.enabled === false) return null;
           return { name: (typeof obj.name === "string" && obj.name) ? obj.name : `Key${idx + 1}`, key: obj.key as string };
         }
         return null;
@@ -98,7 +102,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
 
     const keys = parseNamedKeyList(platform.apiKeys);
     if (keys.length === 0) {
-      return res.status(400).json({ success: false, error: "平台未配置密钥" });
+      // 未配置密钥或全部已禁用（enabled=false）时无可用测试对象
+      return res.status(400).json({ success: false, error: "平台未配置可用密钥" });
     }
 
     const urlCheck = await isSafeUrl(platform.baseUrl);

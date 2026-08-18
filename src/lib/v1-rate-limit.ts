@@ -53,7 +53,7 @@ export async function checkPlatformTpm(platformId: string, tpmLimit: number | nu
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(tpmCounters, TPM_PREFIX, platformId, ws);
-  if (c + est > tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(tpmCounters, TPM_PREFIX, platformId, ws, est);
   return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS };
 }
@@ -73,7 +73,7 @@ export async function checkApiKeyTpm(apiKeyId: string, tpmLimit: number | null, 
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(tpmCounters, TPM_PREFIX, `key:${apiKeyId}`, ws);
-  if (c + est > tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(tpmCounters, TPM_PREFIX, `key:${apiKeyId}`, ws, est);
   return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS };
 }

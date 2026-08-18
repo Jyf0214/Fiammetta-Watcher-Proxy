@@ -89,8 +89,10 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(findManyArgs[0]).toEqual({ take: 10000, skip: 0 });
     expect(findManyArgs[1]).toEqual({ take: 10000, skip: 10000 });
 
-    // 删除按 id 分批（DELETE_BATCH=5000）：5000 / 5000 / 1
-    expect(archiveDeleteCalls.map((c) => c.length)).toEqual([5000, 5000, 1]);
+    // 删除按 id 分批（DELETE_BATCH=100，D1 绑定参数上限 100）：100×100 / 1
+    const expectedBatchLengths = Array.from({ length: 100 }, () => 100);
+    expectedBatchLengths.push(1);
+    expect(archiveDeleteCalls.map((c) => c.length)).toEqual(expectedBatchLengths);
     const allDeletedIds = archiveDeleteCalls.flat();
     expect(allDeletedIds).toHaveLength(10001);
     expect(allDeletedIds[0]).toBe("log-0");

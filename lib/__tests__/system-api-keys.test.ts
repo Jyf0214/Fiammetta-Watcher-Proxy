@@ -12,7 +12,7 @@
  * 将 PG_URL 写入 process.env，被测代码的无参 createDb() 命中同一实例。
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import type { NextApiRequest } from "next";
 import { validateSystemApiKey } from "../../src/lib/admin-system-auth";
 import { generateSystemKey } from "../../pages/api/admin/system-keys";
@@ -122,11 +122,10 @@ describe("system_api_keys：Bearer 认证逻辑", () => {
     const result = await validateSystemApiKey(authReq("Bearer sk-sys-track"));
     expect(result).not.toBeNull();
 
-    // last_used_at 更新为异步（fire-and-forget），等待其落库
-    await vi.waitFor(async () => {
-      const row = await db.systemApiKeys.findUnique({ where: { id: "sys-001" }, select: { lastUsedAt: true } });
-      expect(row?.lastUsedAt).toBeGreaterThan(0);
-    });
+    // last_used_at 更新已 await（L2 修复：CF Pages 边缘运行时响应返回后不保证
+    // fire-and-forget promise 继续执行），认证返回时更新必然已落库
+    const row = await db.systemApiKeys.findUnique({ where: { id: "sys-001" }, select: { lastUsedAt: true } });
+    expect(row?.lastUsedAt).toBeGreaterThan(0);
   });
 });
 

@@ -16,6 +16,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
+  count: vi.fn(),
   create: vi.fn(),
   auditCreate: vi.fn(),
   getAdmin: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     systemApiKeys: {
       findMany: mocks.findMany,
+      count: mocks.count,
       create: mocks.create,
     },
     auditLogs: {
@@ -135,6 +137,69 @@ describe("GET /api/admin/system-keys", () => {
     const { res } = await call();
     expect(res.statusCode).toBe(500);
     expect(res.body.success).toBe(false);
+  });
+
+  it("带 limit/offset 参数时返回分页形态 { data: { total, items } }", async () => {
+    mocks.count.mockResolvedValue(3);
+    mocks.findMany.mockResolvedValue([
+      {
+        id: "sys-001",
+        name: "开发 Key",
+        key: "sk-sys-abcdef1234567890abcdef1234",
+        enabled: true,
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ]);
+
+    const { res } = await call({ query: { limit: "10", offset: "2" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(false);
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.items).toHaveLength(1);
+    // 分页模式同样掩码
+    expect(res.body.data.items[0].key).toBe("sk-sys-a...1234");
+    expect(JSON.stringify(res.body)).not.toContain("sk-sys-abcdef1234567890abcdef1234");
+    // findMany 携带 take/skip
+    expect(mocks.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 10, skip: 2, orderBy: { createdAt: "desc" } })
+    );
+  });
+
+  it("limit 钳制到 1~500，非法 limit 取默认 50", async () => {
+    mocks.count.mockResolvedValue(0);
+    mocks.findMany.mockResolvedValue([]);
+
+    await call({ query: { limit: "99999" } });
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+
+    await call({ query: { limit: "0" } });
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
+
+    await call({ query: { limit: "abc", offset: "-5" } });
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50, skip: 0 }));
+  });
+
+  it("不带分页参数时保持原数组形态（向后兼容）", async () => {
+    mocks.findMany.mockResolvedValue([
+      {
+        id: "sys-001",
+        name: "开发 Key",
+        key: "sk-sys-abcdef1234567890abcdef1234",
+        enabled: true,
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ]);
+
+    const { res } = await call();
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.total).toBe(1);
+    // 分页模式下不会调用 count
+    expect(mocks.count).not.toHaveBeenCalled();
   });
 });
 

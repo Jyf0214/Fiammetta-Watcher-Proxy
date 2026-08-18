@@ -16,6 +16,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
+  count: vi.fn(),
   create: vi.fn(),
   auditCreate: vi.fn(),
   getAdmin: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
     apiKeys: {
       findMany: mocks.findMany,
+      count: mocks.count,
       create: mocks.create,
     },
     auditLogs: {
@@ -129,6 +131,61 @@ describe("GET /api/admin/keys", () => {
     const { res } = await call();
     expect(res.statusCode).toBe(500);
     expect(res.body.success).toBe(false);
+  });
+
+  it("带 limit/offset 参数时返回分页形态 { data: { total, items } }", async () => {
+    mocks.count.mockResolvedValue(3);
+    mocks.findMany.mockResolvedValue([
+      { id: "k1", name: "Key1", key: "sk-1234567890abcdef1234", status: "active", usedTokens: 10 },
+    ]);
+
+    const { res } = await call({ query: { limit: "10", offset: "2" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(false);
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.items).toHaveLength(1);
+    // 分页模式同样掩码
+    expect(res.body.data.items[0].key).toContain("...");
+    // usedTokens 转 number
+    expect(res.body.data.items[0].usedTokens).toBe(10);
+    // findMany 携带 take/skip
+    expect(mocks.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 10, skip: 2, orderBy: { createdAt: "desc" } })
+    );
+  });
+
+  it("limit 钳制到 1~500（超上限取 500，低于下限取 1）", async () => {
+    mocks.count.mockResolvedValue(0);
+    mocks.findMany.mockResolvedValue([]);
+
+    await call({ query: { limit: "99999" } });
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+
+    await call({ query: { limit: "0" } });
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
+  });
+
+  it("limit 非法（非数字）时取默认 50，offset 非法取 0", async () => {
+    mocks.count.mockResolvedValue(0);
+    mocks.findMany.mockResolvedValue([]);
+
+    const { res } = await call({ query: { limit: "abc", offset: "-5" } });
+    expect(res.statusCode).toBe(200);
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50, skip: 0 }));
+    expect(res.body.data.total).toBe(0);
+    expect(res.body.data.items).toEqual([]);
+  });
+
+  it("仅传 offset 也进入分页形态", async () => {
+    mocks.count.mockResolvedValue(1);
+    mocks.findMany.mockResolvedValue([{ id: "k1", name: "Key1", key: "sk-1234567890abcdef1234", status: "active" }]);
+
+    const { res } = await call({ query: { offset: "5" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data).toHaveProperty("total");
+    expect(res.body.data).toHaveProperty("items");
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50, skip: 5 }));
   });
 });
 

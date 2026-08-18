@@ -321,7 +321,18 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
       if (!item || typeof item !== "object") continue;
       const g = item as Record<string, unknown>;
       const name = typeof g.name === "string" ? g.name.trim() : "";
-      if (!name || seen.has(name)) continue;
+      // "new" 是新建页路由保留组名（前端 pages/admin/upstream-proxy/[id].tsx 以
+      // id==="new" 判断新建分支），仅前端校验可被 API 直连绕过：名为 "new" 的组
+      // 列表可见但详情页永远命中新建分支无法编辑。服务端同步拒绝（跳过该组），
+      // 与空名/重名同规则，不抛错不阻断其余组
+      if (!name || name === "new" || seen.has(name)) {
+        if (name === "new") {
+          console.error(
+            `[upstream-proxy] 组名 "new" 为保留名（新建页路由），已忽略: ${maskProxyUrl(JSON.stringify(g)).slice(0, 120)}`
+          );
+        }
+        continue;
+      }
       seen.add(name);
       const sourceUrl = typeof g.sourceUrl === "string" ? g.sourceUrl.trim() : "";
       groups.push({

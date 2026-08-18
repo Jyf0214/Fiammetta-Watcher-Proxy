@@ -4,6 +4,11 @@
  * 查询参数：
  * - keyId: 可选，指定单个 Key ID
  * - period: 可选，时间范围（today/week/month/all），默认 all
+ *
+ * 响应（两种形态均含顶层 peakDuration，接口约定 F5）：
+ * - peakDuration: 窗口内最大单请求耗时（秒，number|null；无有效耗时返回 null）。
+ *   数据源 request_logs 最大 latency（毫秒，换算秒，仅非错误请求）+ period=all 时
+ *   并入 daily_stats.maxDuration（已归档历史，归档时已排除错误请求）。
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -41,8 +46,9 @@ export default async function handler(
     let startTimestamp: number | undefined;
     switch (period) {
       case "today": {
+        // UTC 零点（归档按 UTC 天切分，统计界限必须同用 UTC 天，见 stats.ts 同口径注释）
         const d = new Date();
-        d.setHours(0, 0, 0, 0);
+        d.setUTCHours(0, 0, 0, 0);
         startTimestamp = Math.floor(d.getTime() / 1000);
         break;
       }
@@ -129,6 +135,9 @@ export default async function handler(
         lastDate: number | null;
       }
     >();
+    // 已归档历史的最大单请求耗时（毫秒，daily_stats.maxDuration），
+    // 仅 period=all 并入 peakDuration——与其余历史统计并入口径一致
+    let histMaxDurationMs = 0;
     if (startTimestamp === undefined) {
       const histRows = await orm.dailyStats.findMany({
         where: keyId ? { keyId } : {},
@@ -142,6 +151,7 @@ export default async function handler(
           totalCompletionTokens: true,
           avgTtft: true,
           avgDuration: true,
+          maxDuration: true,
         },
       });
       for (const row of histRows) {
@@ -170,8 +180,22 @@ export default async function handler(
         if (h.firstDate === null || row.date < h.firstDate) h.firstDate = row.date;
         if (h.lastDate === null || row.date > h.lastDate) h.lastDate = row.date;
         histByKey.set(row.keyId, h);
+        if (row.maxDuration > histMaxDurationMs) histMaxDurationMs = row.maxDuration;
       }
     }
+
+    // 峰值耗时（peakDuration，接口约定 F5）：窗口内非错误请求的最大 latency（毫秒）。
+    // 错误请求（超时/失败）写真实耗时且可能高达 120s，必须与 perfGrouped 同口径
+    // 排除，否则峰值被错误请求污染、且与历史段 maxDuration（归档排除错误）口径分裂；
+    // period=all 时历史部分（daily_stats.maxDuration）一并取最大，避免归档缩水。
+    const peakAgg = await orm.requestLogs.aggregate({
+      where: { ...where, isError: false },
+      _max: { latency: true },
+    });
+    const peakLatencyMs = peakAgg._max.latency ?? 0;
+    const peakDurationMs = Math.max(peakLatencyMs, histMaxDurationMs);
+    // 换算为秒（number|null）：窗口内无任何有效耗时（无日志或全为错误请求）→ null
+    const peakDuration = peakDurationMs > 0 ? Math.round(peakDurationMs / 1000) : null;
 
     // 合并 Key 信息和统计数据
     const result = keys.map((k: { id: string; name: string; key: string; status: string; tokenLimit: number | null; usedTokens: bigint; createdAt: number }) => {
@@ -234,6 +258,7 @@ export default async function handler(
       res.status(200).json({
         success: true,
         data: filtered.length > 0 ? filtered[0] : null,
+        peakDuration,
       });
       return;
     }
@@ -242,6 +267,7 @@ export default async function handler(
       success: true,
       data: result,
       total: result.length,
+      peakDuration,
     });
   } catch (err) {
     console.error("[GET /api/admin/usage] 获取用量统计失败:", err);

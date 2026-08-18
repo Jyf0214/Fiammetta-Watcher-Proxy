@@ -24,8 +24,11 @@ export interface Env extends WorkerEnv {
   KV: KVNamespace;
 }
 
-/** 白名单是否已加载（内存态，Worker 冷启动后首次请求时加载） */
+/** 白名单与 Key 状态是否已加载（内存态，Worker 冷启动后首次请求时加载） */
 let whitelistLoaded = false;
+
+/** 首次加载单飞 promise：并发首个请求共享同一加载，避免重复加载 */
+let whitelistLoadPromise: Promise<boolean> | null = null;
 
 export default {
   /**
@@ -41,14 +44,22 @@ export default {
       // 首次请求时加载白名单与 Key 封禁状态（懒初始化）：
       // await 阻塞保证首请求就基于已加载的豁免/禁用集合判定（waitUntil 不阻塞，
       // 首请求会在加载完成前进入路由，白名单豁免/禁用恢复对首个请求不生效）；
-      // loadWhitelist/loadKeyStatusFromKV 内部已容错（失败仅记日志），
-      // 重复并发加载幂等无害
+      // 成功全部加载后才置位 loaded 标志——任一失败（DB 瞬时故障）时保持 false，
+      // 下次请求自动重试（此前先置位，失败后进程生命周期内永不重试，白名单豁免
+      // 与持久化禁用恢复永久失效）；loadWhitelist/loadKeyStatusFromKV 内部已容错
+      // （失败仅记日志并返回 false），whitelistLoadPromise 单飞保证并发首请求
+      // 只加载一次
       if (!whitelistLoaded) {
-        whitelistLoaded = true;
-        await Promise.allSettled([
-          loadWhitelist(env.DB, env),
-          loadKeyStatusFromKV(env.DB, env.KV, env),
-        ]);
+        if (!whitelistLoadPromise) {
+          whitelistLoadPromise = Promise.all([
+            loadWhitelist(env.DB, env),
+            loadKeyStatusFromKV(env.DB, env.KV, env),
+          ])
+            .then((results) => results.every(Boolean))
+            .catch(() => false);
+        }
+        whitelistLoaded = await whitelistLoadPromise;
+        whitelistLoadPromise = null;
       }
 
       // 健康检查端点

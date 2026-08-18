@@ -6,6 +6,8 @@
  *   embedding/image 等模型被归错分类），与刷新路径一致
  * - PATCH 单模型启停：模型不存在时 updateMany count 为 0 → 404
  *   （此前不检查 count 返回假成功）
+ * - DELETE 删除模型：模型不存在时 deleteMany count 为 0 → 404
+ *   （2026-08-18 审计 A8 回归，此前假成功）
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security、
  * @/lib/upstream-proxy（detectModelType 使用真实实现）
@@ -21,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   modelFindFirst: vi.fn(),
   modelCreate: vi.fn(),
   modelUpdateMany: vi.fn(),
+  modelDeleteMany: vi.fn(),
   getDbKind: vi.fn(),
   getAdmin: vi.fn(),
   checkCsrfOrigin: vi.fn(),
@@ -35,6 +38,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mocks.modelFindFirst,
       create: mocks.modelCreate,
       updateMany: mocks.modelUpdateMany,
+      deleteMany: mocks.modelDeleteMany,
     },
   })),
   getDbKind: mocks.getDbKind,
@@ -103,6 +107,7 @@ beforeEach(() => {
   mocks.modelFindFirst.mockResolvedValue(null);
   mocks.modelCreate.mockResolvedValue({ id: "m1" });
   mocks.modelUpdateMany.mockResolvedValue({ count: 1 });
+  mocks.modelDeleteMany.mockResolvedValue({ count: 1 });
 });
 
 // ==================== POST — 手动添加模型 ====================
@@ -213,5 +218,42 @@ describe("PATCH /api/admin/platforms/:id/models", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.message).toContain("3");
     expect(res.body.data.affected).toBe(3);
+  });
+});
+
+// ==================== DELETE — 删除模型 ====================
+
+describe("DELETE /api/admin/platforms/:id/models", () => {
+  it("未认证返回 401", async () => {
+    mocks.getAdmin.mockResolvedValue(null);
+    const { res } = await call("DELETE", {}, { id: "p1", modelId: "gpt-4o" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("缺少 modelId 返回 400", async () => {
+    const { res } = await call("DELETE", {}, { id: "p1" });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toContain("modelId");
+    expect(mocks.modelDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("模型不存在时 deleteMany count=0 返回 404（此前假成功）", async () => {
+    mocks.modelDeleteMany.mockResolvedValue({ count: 0 });
+    const { res } = await call("DELETE", {}, { id: "p1", modelId: "no-such-model" });
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toContain("模型不存在");
+    expect(res.body.success).toBe(false);
+  });
+
+  it("模型存在时删除成功并返回 200", async () => {
+    const { res } = await call("DELETE", {}, { id: "p1", modelId: "gpt-4o" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain("已删除");
+    expect(mocks.modelDeleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { platformId: "p1", modelId: "gpt-4o" },
+      })
+    );
   });
 });

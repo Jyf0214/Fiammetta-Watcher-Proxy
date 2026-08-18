@@ -4,7 +4,7 @@
  * GET    /api/admin/keys/[id] — 获取单个 Key 的完整密钥（列表接口只返回掩码，
  *        复制功能需要先经此端点取明文；管理员认证即可，读操作无 CSRF 风险）
  * PUT    /api/admin/keys/[id] — 更新 API Key 属性
- * DELETE /api/admin/keys/[id] — 删除 API Key（级联删除关联日志）
+ * DELETE /api/admin/keys/[id] — 删除 API Key（级联删除关联日志与每日统计）
  *
  * 主分支对应文件：src/app/api/admin/keys/[id]/route.ts
  * Pages Router 格式转换
@@ -161,6 +161,8 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
     const deletedLogsResult = await db.requestLogs.deleteMany({ where: { keyId: id } });
+    // 级联清理每日统计：否则日志已删而 daily_stats 残留，仪表盘历史统计与日志页数据矛盾
+    await db.dailyStats.deleteMany({ where: { keyId: id } });
     await db.apiKeys.delete({ where: { id } });
 
     const currentTime = now();

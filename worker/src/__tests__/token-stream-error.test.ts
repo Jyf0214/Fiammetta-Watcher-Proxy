@@ -9,9 +9,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createUsageTransformer } from "../token";
 import { createDb } from "@/lib/prisma";
+import { banKey, recordKeyError } from "../platform-keys";
 
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(),
+}));
+
+vi.mock("../platform-keys", () => ({
+  banKey: vi.fn(async () => {}),
+  recordKeyError: vi.fn(async () => {}),
 }));
 
 function makePrisma() {
@@ -161,5 +167,62 @@ describe("createUsageTransformer 流内 error", () => {
     expect(log.status).toBe(200);
     expect(log.isError).toBe(false);
     expect(log.tokens).toBe(10);
+  });
+
+  it("流内 429 密钥类错误：传入 kv 时 banKey 同时持久化到 KV（与 HTTP 429 路径对齐）", async () => {
+    const prisma = makePrisma();
+    const kv = {
+      get: vi.fn(async () => null),
+      put: vi.fn(async () => {}),
+    } as unknown as KVNamespace;
+
+    await runTransformer(prisma, [
+      'data: {"error":{"message":"rate limited","code":429}}\n\n',
+      "data: [DONE]\n\n",
+    ], {
+      key: "sk-key1",
+      kv,
+    });
+
+    // banKey 收到 kv：写 KV 持久化（此前只写内存，CF 部署下管理后台不可见、冷启动封禁丢失）
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", kv);
+    expect(recordKeyError).toHaveBeenCalledWith("sk-key1", 429, "test-platform", expect.anything(), undefined);
+    // 日志仍按 error.code 记失败
+    const log = prisma.requestLogs.create.mock.calls[0][0].data;
+    expect(log.status).toBe(429);
+    expect(log.isError).toBe(true);
+  });
+
+  it("流内 429 但不传 kv：banKey 仅内存封禁（非 CF 部署兼容，kv 参数为 undefined）", async () => {
+    const prisma = makePrisma();
+
+    await runTransformer(prisma, [
+      'data: {"error":{"message":"rate limited","code":429}}\n\n',
+      "data: [DONE]\n\n",
+    ], {
+      key: "sk-key1",
+    });
+
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", undefined);
+    expect(recordKeyError).toHaveBeenCalled();
+  });
+
+  it("流内非密钥类错误（503）：不触发 banKey/recordKeyError", async () => {
+    const prisma = makePrisma();
+    const kv = {
+      get: vi.fn(async () => null),
+      put: vi.fn(async () => {}),
+    } as unknown as KVNamespace;
+
+    await runTransformer(prisma, [
+      'data: {"error":{"message":"upstream down","code":503}}\n\n',
+      "data: [DONE]\n\n",
+    ], {
+      key: "sk-key1",
+      kv,
+    });
+
+    expect(banKey).not.toHaveBeenCalled();
+    expect(recordKeyError).not.toHaveBeenCalled();
   });
 });

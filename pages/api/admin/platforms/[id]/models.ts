@@ -231,9 +231,13 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     const db = await createDb();
 
     // 删除匹配的记录
-    await db.platformModels.deleteMany({
+    const result = await db.platformModels.deleteMany({
       where: { platformId: id, modelId: modelId },
     });
+    // count 为 0 说明该模型不存在：此前不检查会返回假成功，这里显式 404（与 PATCH 行为一致）
+    if (result.count === 0) {
+      return res.status(404).json({ success: false, error: "模型不存在" });
+    }
 
     return res.status(200).json({ success: true, message: "模型已删除" });
   } catch (err) {

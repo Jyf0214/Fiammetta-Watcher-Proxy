@@ -136,6 +136,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         injectStreamOptions,
         whitelisted,
         extraHeaders,
+        reuseUserAgent,
+        customUserAgent,
       } = body;
 
       // 输入校验
@@ -315,12 +317,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
+      // customUserAgent 校验：非空字符串且不超过 500 字符（空串视为清除，与 PUT 一致）
+      if (customUserAgent !== undefined && customUserAgent !== null) {
+        if (typeof customUserAgent !== "string") {
+          errors.push("自定义 User-Agent 必须为字符串");
+        } else if (customUserAgent.trim().length > 0 && customUserAgent.length > 500) {
+          errors.push("自定义 User-Agent 不能超过 500 个字符");
+        }
+      }
+
       if (errors.length > 0) {
         return res.status(400).json({ success: false, error: errors.join("; ") });
       }
 
       const platformType = VALID_PLATFORM_TYPES.includes(type) ? type : "openai";
       const now = Math.floor(Date.now() / 1000);
+      // 与 PUT 消费一致：reuseUserAgent 布尔化，customUserAgent 空串归一为 null
+      const normalizedReuseUserAgent = reuseUserAgent === true;
+      const normalizedCustomUserAgent =
+        typeof customUserAgent === "string" && customUserAgent.trim().length > 0
+          ? customUserAgent.trim()
+          : null;
 
       // 生成唯一 ID（cuid 格式）
       const id = newId();
@@ -348,6 +365,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           injectStreamOptions: injectStreamOptions !== false,
           whitelisted: whitelisted === true,
           extraHeaders: normalizedExtraHeaders,
+          reuseUserAgent: normalizedReuseUserAgent,
+          customUserAgent: normalizedCustomUserAgent,
           createdAt: now,
           updatedAt: now,
         },
@@ -383,6 +402,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           forwardHeaders: normalizedForwardHeaders,
           injectStreamOptions: injectStreamOptions !== false,
           extraHeaders: normalizedExtraHeaders,
+          reuseUserAgent: normalizedReuseUserAgent,
+          customUserAgent: normalizedCustomUserAgent,
           createdAt: now,
           updatedAt: now,
         },

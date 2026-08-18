@@ -85,3 +85,59 @@ describe("validateApiKey tokenLimit 检查", () => {
     }
   });
 });
+
+// ==================== callLimit（W2：归档不回血） ====================
+
+/**
+ * callLimit 计数 = request_logs 未归档明细 + daily_stats 已归档部分求和。
+ * 此前只 count request_logs：never 周期 Key 的计数随 log-archiver 归档"回血"
+ * （30 天前明细被删后计数下降，已达上限的 Key 被重新放行）。
+ */
+function mockCallLimitDb(overrides: { recentCount?: number; archivedSum?: number | null } = {}) {
+  const { recentCount = 0, archivedSum = 0 } = overrides;
+  const dailyStatsAggregate = vi.fn(async () => ({ _sum: { totalRequests: archivedSum } }));
+  vi.mocked(createDb).mockResolvedValue({
+    apiKeys: {
+      findFirst: vi.fn(async () => makeKey({ callLimit: 10, resetPeriod: "never" })),
+    },
+    requestLogs: {
+      count: vi.fn(async () => recentCount),
+    },
+    dailyStats: {
+      aggregate: dailyStatsAggregate,
+    },
+  } as never);
+  return { dailyStatsAggregate };
+}
+
+describe("validateApiKey callLimit 检查（含 daily_stats 归档部分）", () => {
+  it("request_logs 计数未达 callLimit 时放行，且 daily_stats 按 keyId + periodStart 过滤", async () => {
+    const { dailyStatsAggregate } = mockCallLimitDb({ recentCount: 5, archivedSum: 0 });
+    const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
+    expect("apiKey" in result).toBe(true);
+
+    // never 周期 periodStart = 0（追溯到最早），date 过滤条件必须带上
+    expect(dailyStatsAggregate).toHaveBeenCalledWith({
+      where: { keyId: "key-id", date: { gte: 0 } },
+      _sum: { totalRequests: true },
+    });
+  });
+
+  it("request_logs + daily_stats 归档部分合计达到 callLimit 时返回 429", async () => {
+    // 未归档 3 次 + 已归档 7 次 = 10 = callLimit → 429（此前归档后只剩 3 会放行）
+    mockCallLimitDb({ recentCount: 3, archivedSum: 7 });
+    const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error.status).toBe(429);
+      const body = (await result.error.json()) as { error?: { message?: string } };
+      expect(body.error?.message).toContain("调用次数已达上限");
+    }
+  });
+
+  it("归档部分累计（_sum 为 null 时按 0 计），未达上限时放行", async () => {
+    mockCallLimitDb({ recentCount: 9, archivedSum: null });
+    const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
+    expect("apiKey" in result).toBe(true);
+  });
+});

@@ -438,7 +438,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
  *
  * 删除前校验：
  * - 检查是否被模型映射（model_mappings）引用，被引用时拒绝删除
- * - 清理关联的请求日志和平台模型
+ * - 清理关联的请求日志、每日统计和平台模型
  */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: string) {
   const admin = await getAdminFromRequest(req);
@@ -466,6 +466,9 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
     // 统计并清理关联数据
     // 删除关联的请求日志
     await db.requestLogs.deleteMany({ where: { platformId: id } });
+
+    // 级联清理每日统计：否则日志已删而 daily_stats 残留，仪表盘历史统计与日志页数据矛盾
+    await db.dailyStats.deleteMany({ where: { platformId: id } });
 
     // 删除关联的平台模型
     await db.platformModels.deleteMany({ where: { platformId: id } });

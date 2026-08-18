@@ -47,6 +47,30 @@ interface ProxyConfig {
  */
 const MAX_ESTIMATED_TOKENS = 8192;
 
+/**
+ * 透传白名单禁止项（大小写不敏感）：认证/请求语义类头不得由下游客户端透传覆盖。
+ *
+ * authorization/x-api-key 承载平台密钥，若平台把同名头加入 forwardHeaders，
+ * 展开顺序上透传值会覆盖代理注入的认证头——任意下游客户端可借此替换平台密钥
+ * （401 封禁循环 / BYOK 绕过计费）；content-type 决定上游对请求体的解析语义、
+ * host 决定虚拟主机路由，均须由本代理按平台配置生成。管理后台表单同样禁止
+ * 把此类头名写入白名单（双端防护，代理层为最终防线）。
+ */
+const FORBIDDEN_FORWARD_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "x-auth-token",
+  "cookie",
+  "content-type",
+  "content-length",
+  "host",
+  "connection",
+  "transfer-encoding",
+  "upgrade",
+  "expect",
+]);
+
 /** 提取上游错误体中的可读消息 */
 function extractUpstreamErrorMessage(text: string): string {
   try {
@@ -105,12 +129,14 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
     if (env.TIDB_URL) process.env.TIDB_URL = env.TIDB_URL;
     if (env.PG_URL) process.env.PG_URL = env.PG_URL;
     if (env.MARIADB_URL) process.env.MARIADB_URL = env.MARIADB_URL;
+    if (env.MYSQL_URL) process.env.MYSQL_URL = env.MYSQL_URL;
     return {
       DB_TYPE: env.DB_TYPE,
       DATABASE_URL: env.DATABASE_URL,
       TIDB_URL: env.TIDB_URL,
       PG_URL: env.PG_URL,
       MARIADB_URL: env.MARIADB_URL,
+      MYSQL_URL: env.MYSQL_URL,
       KV: env.KV,
       // D1 binding 必须透传：v1 路由的 createDb 依赖 env.DB 构造 PrismaD1，
       // 缺失时 D1 部署下所有统计/熔断/错误计数写入静默失败
@@ -124,6 +150,7 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
       TIDB_URL: process.env.TIDB_URL,
       PG_URL: process.env.PG_URL,
       MARIADB_URL: process.env.MARIADB_URL,
+      MYSQL_URL: process.env.MYSQL_URL,
     };
   }
 }
@@ -343,7 +370,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     const downstreamHeaders = new Headers();
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") downstreamHeaders.set(k, v);
     for (const [k, v] of Object.entries(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders)))
-      if (/^[a-zA-Z0-9-]+$/.test(k)) fwd[k] = v;
+      // 认证类/语义类头名（大小写不敏感）直接丢弃：下游透传白名单不得覆盖
+      // 平台密钥与请求语义（见 FORBIDDEN_FORWARD_HEADERS 注释）
+      if (/^[a-zA-Z0-9-]+$/.test(k) && !FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) fwd[k] = v;
 
     const url = upstreamIsAnthropic
       ? `${cur.baseUrl.replace(/\/+$/, "")}/v1/messages`
@@ -422,7 +451,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined);
+      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -503,7 +532,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
@@ -664,10 +693,24 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       clearInterval(watchdog);
     }
     if (idleTimedOut) {
+      // 空闲超时与 EOF 截断同属上游失败：触发平台熔断，否则挂起平台评分不降、
+      // 负载均衡反复撞上同一坏平台（此前只补日志不打分，熔断机制被架空）
+      try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 504);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else if (streamError) {
-      // 流内 error：按错误码记录失败日志（不计 Key 用量），下游实际收到的是 200 + error 流
+      // 流内 error：HTTP 头无法反映失败（下游实际收到 200 + error 流），
+      // 按错误码记失败日志（不计 Key 用量）并触发平台熔断——此前只记日志不打分，
+      // 坏平台永远不会被降级，负载均衡反复撞上它（与 Worker 版 createUsageTransformer
+      // flush 语义一致）
+      try { await recordFailure(platform.id, dummyDb, env); } catch {}
+      // 流内 error 为密钥类状态码（429/401/402/403）时与 HTTP 重试路径对齐：
+      // 封禁当前平台 Key + 累计错误计数（errorCount 达阈值自动禁用）；白名单密钥
+      // 由 banKey/recordKeyError 内部豁免（仅降级不计数）。404/503 等非密钥错误不打 Key 分
+      if (platformKey && (streamError.code === 429 || streamError.code === 401 || streamError.code === 402 || streamError.code === 403)) {
+        try { await banKey(platformKey, undefined, platform.id, env?.KV); } catch {}
+        try { await recordKeyError(platformKey, streamError.code, platform.id, dummyDb, env); } catch {}
+      }
       if (proxyUrl) recordProxyTraffic(proxyUrl, streamError.code);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else if (!sawDone && !clientClosed) {
@@ -774,18 +817,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     // 首次请求时加载 Key 白名单：recordKeyError / banKey 的豁免判定（isKeyWhitelisted /
     // isPlatformWhitelisted）依赖该内存集合，不加载则白名单在 Pages 部署模式下永不生效；
-    // loadWhitelist 内部已容错（失败仅记日志），重复并发加载幂等无害，与 worker 入口同模式
+    // 成功加载后才置 loaded 标志：加载失败时本次请求降级为无白名单继续，下次请求重试——
+    // 此前先置位，首次请求遇 DB 瞬时故障则进程生命周期内永不重试，白名单豁免与
+    // 持久化禁用恢复永久失效（loadWhitelist 内部已容错，重复并发加载幂等无害）
     if (!whitelistLoaded) {
-      whitelistLoaded = true;
-      await loadWhitelist(dummyDb, await createPagesEnv());
+      // loadWhitelist 返回 boolean（内部容错不抛异常）：成功才置标志，
+      // 失败保留可重试——此前 try/catch 空转导致失败也置位，缺陷原样保留
+      whitelistLoaded = (await loadWhitelist(dummyDb, await createPagesEnv())) === true;
     }
     // 首次请求时恢复 Key 持久化状态（DB enabled=false 的禁用密钥）：
     // 不恢复则进程重启后自动禁用（402/错误计数达阈值）的密钥复活且不再累计错误；
-    // 非 Cloudflare 部署无 KV，loadKeyStatusFromKV 会退化为仅从 DB 恢复禁用集合
+    // 非 Cloudflare 部署无 KV，loadKeyStatusFromKV 会退化为仅从 DB 恢复禁用集合；
+    // 与白名单同模式：成功加载后才置标志，失败保留可重试
     if (!keyStatusLoaded) {
-      keyStatusLoaded = true;
       const pagesEnv = await createPagesEnv();
-      await loadKeyStatusFromKV(dummyDb, pagesEnv.KV, pagesEnv);
+      // loadKeyStatusFromKV 返回 boolean（内部容错不抛异常）：成功才置标志，失败可重试
+      keyStatusLoaded = (await loadKeyStatusFromKV(dummyDb, pagesEnv.KV, pagesEnv)) === true;
     }
     const v1 = (req.query.v1 as string[])?.join("/") || "";
     const full = `/v1/${v1}`;

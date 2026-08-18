@@ -36,6 +36,22 @@ function now(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/** 解析分页 limit（钳制 1~500，缺省/非法取默认 50） */
+function parseLimitParam(raw: string | string[] | undefined): number {
+  if (raw === undefined) return 50;
+  const n = parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
+  if (Number.isNaN(n)) return 50;
+  return Math.min(500, Math.max(1, n));
+}
+
+/** 解析分页 offset（非负整数，缺省/非法取 0） */
+function parseOffsetParam(raw: string | string[] | undefined): number {
+  if (raw === undefined) return 0;
+  const n = parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, n);
+}
+
 // ==================== Handler ====================
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -60,6 +76,24 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const db = await createDb();
+    const query = req.query || {};
+    const hasPaging = query.limit !== undefined || query.offset !== undefined;
+
+    // 带 limit/offset 参数时返回分页形态 { total, items }；不带参数保持原数组形态（向后兼容）
+    if (hasPaging) {
+      const limit = parseLimitParam(query.limit);
+      const offset = parseOffsetParam(query.offset);
+      const [total, keys] = await Promise.all([
+        db.systemApiKeys.count(),
+        db.systemApiKeys.findMany({ orderBy: { createdAt: "desc" }, take: limit, skip: offset }),
+      ]);
+      const maskedKeys = keys.map((k) => ({
+        ...k,
+        key: maskKey(k.key),
+      }));
+      return res.status(200).json({ success: true, data: { total, items: maskedKeys } });
+    }
+
     const keys = await db.systemApiKeys.findMany({
       orderBy: { createdAt: "desc" },
     });

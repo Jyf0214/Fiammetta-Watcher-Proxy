@@ -241,6 +241,8 @@ export default function KeysPage() {
       const data: Record<string, any> = await res.json();
       if (data.success) {
         message.success(t("deleteSuccess"));
+        // 删除当前页最后一条时回退一页，避免停留在空页
+        if (keys.length === 1 && page > 1) setPage(page - 1);
         mutate();
       } else {
         message.error(data.error?.message || t("common:error"));

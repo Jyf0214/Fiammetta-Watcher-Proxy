@@ -340,7 +340,9 @@ async function archiveSingleDay(
   // 删除该天已归档的原始日志（按已收集的 id 分批删除，
   // 避免按整天时间范围误删未被分页拉取到的部分）
   let deleted = 0;
-  const DELETE_BATCH = 5000;
+  // D1 官方限制：单条查询绑定参数上限 100（developers.cloudflare.com/d1/platform/limits/），
+  // id IN (...) 每个值占一个绑定参数——分批必须 ≤100，此前 5000 在 D1 部署下 deleteMany 直接失败
+  const DELETE_BATCH = 100;
   for (let i = 0; i < logIds.length; i += DELETE_BATCH) {
     const r = await prisma.requestLogs.deleteMany({
       where: { id: { in: logIds.slice(i, i + DELETE_BATCH) } },

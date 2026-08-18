@@ -144,6 +144,22 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
       data: { enabled, updatedAt: now() },
     });
 
+    // 审计日志
+    try {
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: getAuditAdminId(admin),
+          action: "update_system_key",
+          detail: JSON.stringify({ target: id, name: existing.name, enabled }),
+          ip: null,
+          createdAt: now(),
+        },
+      });
+    } catch {
+      /* 审计日志失败不阻塞 */
+    }
+
     return res.status(200).json({ success: true, message: enabled ? "系统 Key 已启用" : "系统 Key 已禁用" });
   } catch (err) {
     console.error("[PATCH /api/admin/system-keys] 更新系统 Key 失败:", err instanceof Error ? err.message : String(err));

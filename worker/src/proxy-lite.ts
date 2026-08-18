@@ -9,7 +9,7 @@
  */
 
 import { routeRequestLite } from "./router-lite";
-import { getNextKey, recordKeyError } from "./platform-keys";
+import { getNextKey, recordKeyError, banKey } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
@@ -89,6 +89,28 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
 /** 请求体大小上限 */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
+/**
+ * 透传白名单禁止项（大小写不敏感）：认证/请求语义类头不得由下游客户端透传覆盖。
+ * 与全量版 proxy.ts 同集合——lite 部署若允许 authorization/x-api-key 等透传覆盖，
+ * 下游客户端可替换平台密钥（401 封禁循环 / BYOK 绕过计费），content-length 等
+ * 则与重写后的请求体不符导致上游解析错乱。管理后台表单同样禁止（双端防护，
+ * 代理层为最终防线）。
+ */
+const FORBIDDEN_FORWARD_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "x-auth-token",
+  "cookie",
+  "content-type",
+  "content-length",
+  "host",
+  "connection",
+  "transfer-encoding",
+  "upgrade",
+  "expect",
+]);
+
 // ==================== 请求体解析 ====================
 
 async function parseRequestBody<T>(
@@ -115,10 +137,9 @@ async function parseRequestBody<T>(
     };
   }
 
-  if (!rawText) {
-    return { body: {} as T };
-  }
-
+  // 空 body 不特判放行：JSON.parse("") 抛错走下方 catch → 400「请求体格式错误」，
+  // 与全量版 proxy.ts parseRequestBody 行为一致（此前空 body 放行走 __any__ 路由
+  // 发起真实上游请求浪费配额，两版行为分叉）
   try {
     return { body: JSON.parse(rawText) as T };
   } catch {
@@ -145,6 +166,8 @@ function createLiteUsageTransformer(params: {
   platformId: string;
   model: string;
   startTime: number;
+  /** 上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */
+  key?: string;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -206,6 +229,18 @@ function createLiteUsageTransformer(params: {
 
       // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）
       const truncated = !sawDone && !streamError && chunkCount > 0;
+
+      // 流内 error 为密钥类状态码（429/401/402/403）时与自身 HTTP 透传路径
+      // （:608 附近 recordKeyError）及全量版 token.ts flush 对齐：封禁 Key +
+      // 累加错误计数（DB errorCount 达阈值自动禁用），否则 lite 部署下
+      // 「200 + 流内 429/401/402/403」永不计数，密钥自动禁用机制在流式场景漏检
+      if (streamError && params.key &&
+          (streamError.code === 429 || streamError.code === 401 ||
+           streamError.code === 402 || streamError.code === 403)) {
+        const keyErrorCode = streamError.code;
+        try { await banKey(params.key, undefined, params.platformId); } catch {}
+        try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
+      }
 
       try {
         await recordRequestLog({
@@ -470,9 +505,12 @@ export async function proxyV1RequestLite(
   );
   const forwardHeaders: Record<string, string> = {};
   for (const [k, v] of Object.entries(rawForwardHeaders)) {
-    if (/^[a-zA-Z0-9-]+$/.test(k)) {
-      forwardHeaders[k] = v;
-    }
+    // 只保留合法 header 名
+    if (!/^[a-zA-Z0-9-]+$/.test(k)) continue;
+    // 丢弃认证类/请求语义关键头（大小写不敏感）：白名单展开在认证头与
+    // extraHeaders 之前，若允许透传覆盖则下游客户端可替换平台密钥或破坏请求语义
+    if (FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) continue;
+    forwardHeaders[k] = v;
   }
 
   const upstreamUrl = upstreamIsAnthropic
@@ -761,6 +799,8 @@ async function handleUpstreamResponseLite(
       platformId: platform.id,
       model: requestedModel,
       startTime,
+      // 流内密钥类错误（429/401/402/403）时封禁+计数（与 HTTP 透传路径对齐）
+      key: currentKey,
       db: env.DB,
       env: workerEnv,
     });
@@ -919,7 +959,36 @@ async function handleUpstreamResponseLite(
       },
     });
     return new Response(
-      withIdleTimeout(multipartPadded, UPSTREAM_IDLE_TIMEOUT_MS),
+      withIdleTimeout(
+        multipartPadded,
+        UPSTREAM_IDLE_TIMEOUT_MS,
+        () => {
+          // 挂起超时补记 504（与 SSE 分支一致）：用 ctx.waitUntil 保护补记日志，
+          // 超时路径下请求随即终结，在途 DB 写入会被 isolate 冻结截断
+          ctx.waitUntil(
+            recordRequestLog({
+              keyId: apiKey.id,
+              keyName: apiKey.name,
+              platformId: platform.id,
+              model: requestedModel,
+              endpoint: config.upstreamPath,
+              method: "POST",
+              status: 504,
+              tokens: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              ttft: 0,
+              duration: Date.now() - startTime,
+              isError: true,
+              errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+              db: env.DB,
+              env: workerEnv,
+            }).catch((logError) => {
+              console.error("[proxy-lite] 空闲超时日志写入失败:", logError);
+            })
+          );
+        }
+      ),
       {
         status: upstreamResponse.status,
         headers: { "Content-Type": responseContentType },

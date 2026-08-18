@@ -297,8 +297,10 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
             { value: "200", label: "200" },
             { value: "400", label: "400" },
             { value: "401", label: "401" },
+            { value: "402", label: "402" },
             { value: "429", label: "429" },
             { value: "500", label: "500" },
+            { value: "502", label: "502" },
             { value: "503", label: "503" },
           ]}
         />
