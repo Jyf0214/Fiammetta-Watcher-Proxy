@@ -8,7 +8,8 @@ WORKDIR /app
 
 # 创建非 root 用户（构建阶段也以此用户运行，避免最终 chown）
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
 
 # 构建方言：all=生成全部四种方言 client（d1/mysql/mariadb/pg），镜像与任意运行时
 # DB_TYPE 通用（Docker 无 Worker 体积限制）；指定单一方言可缩小镜像体积，
@@ -53,7 +54,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # 创建非 root 用户（与 builder 阶段相同 UID/GID）
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
 
 # 安装精简生产依赖（含 prisma CLI，用于启动时同步表结构）
 COPY --chown=nextjs:nodejs lite/package.json lite/package-lock.json ./
