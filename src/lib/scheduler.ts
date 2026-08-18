@@ -6,9 +6,11 @@
 // 全部定时任务，无需外部调用（也无需配置 CRON_SECRET——任务直连
 // 函数而非走 HTTP 端点）。
 //
-// 入口：instrumentation.ts 的 register() 在 next start / standalone
-// server.js 启动时调用 startScheduler()。Node 直部署等非 docker
-// 平台不受影响（门控返回）。
+// 入口：scripts/build-scheduler.mjs 把本模块打包为独立进程产物
+// .build/scheduler.cjs，docker-entrypoint 在容器启动时以后台进程
+// 方式运行（脱离 Next.js 构建产物；instrumentation 方案会把调度器
+// 链编入 Cloudflare Edge Worker 导致 Pages Function 体积超限，
+// 已于 2026-08-18 移除）。Node 直部署等非 docker 平台不受影响（门控返回）。
 // ================================================================
 
 import { fetchAllPlatformModels } from "../../worker/src/model-fetcher";
@@ -29,6 +31,10 @@ export { PROXY_HEALTH_INTERVAL_MIN_RANGE };
 export interface ScheduleSpec {
   minutes?: Set<number>;
   hours?: Set<number>;
+  /** 距上次执行完成的最小间隔（毫秒）：大代理池健康检查一轮可能远超触发
+   *   间隔（数千代理 × 并发 20 × 超时 10s ≈ 30+ 分钟），固定分钟触发会
+   *   退化为连续满负荷轮转；上一轮完成后未满间隔的触发一律跳过 */
+  minIntervalMs?: number;
 }
 
 /**
@@ -68,8 +74,15 @@ export function healthCheckSpec(intervalMin: number): ScheduleSpec {
   return { minutes };
 }
 
-/** 当前时间是否命中调度规格（按本地时区） */
-export function matchesSchedule(spec: ScheduleSpec, date: Date): boolean {
+/** 当前时间是否命中调度规格（按本地时区）；lastFinishedAtMs 用于 minIntervalMs 门控 */
+export function matchesSchedule(
+  spec: ScheduleSpec,
+  date: Date,
+  lastFinishedAtMs?: number
+): boolean {
+  if (spec.minIntervalMs && lastFinishedAtMs && date.getTime() - lastFinishedAtMs < spec.minIntervalMs) {
+    return false;
+  }
   if (spec.minutes && !spec.minutes.has(date.getMinutes())) return false;
   if (spec.hours && !spec.hours.has(date.getHours())) return false;
   return true;
@@ -86,6 +99,8 @@ export function createScheduler(
   const running = new Set<string>();
   /** 最近一次触发的时间键（HH:mm），防止同一分钟重复触发 */
   const lastRunKey = new Map<string, string>();
+  /** 最近一次执行完成时间（ms）：minIntervalMs 门控依据 */
+  const lastFinishedAt = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
@@ -94,7 +109,7 @@ export function createScheduler(
     for (const task of tasks) {
       if (running.has(task.name)) continue; // 上一轮未完成则跳过，不积压
       const spec = typeof task.spec === "function" ? task.spec() : task.spec;
-      if (!matchesSchedule(spec, now)) continue;
+      if (!matchesSchedule(spec, now, lastFinishedAt.get(task.name))) continue;
       const key = `${now.getHours()}:${now.getMinutes()}`;
       if (lastRunKey.get(task.name) === key) continue;
 
@@ -111,6 +126,7 @@ export function createScheduler(
         })
         .finally(() => {
           running.delete(task.name);
+          lastFinishedAt.set(task.name, Date.now());
         });
     }
   };
@@ -184,7 +200,13 @@ export const DOCKER_TASKS: ScheduledTask[] = [
   },
   {
     name: "proxy-health",
-    spec: () => healthCheckSpec(getHealthCheckIntervalMin()),
+    // minIntervalMs：上一轮完成后满一个间隔才再触发——大代理池一轮
+    // （数千代理）远超触发间隔，固定分钟触发会退化为连续满负荷轮转；
+    // 完成后的间隔内 tick 全部跳过，实际周期 = 一轮耗时 + 间隔
+    spec: () => {
+      const intervalMin = getHealthCheckIntervalMin();
+      return { ...healthCheckSpec(intervalMin), minIntervalMs: intervalMin * 60_000 };
+    },
     // 环境变量 UPSTREAM_PROXY_DISABLED=all/health 时定时健康检查跳过
     //（设备级禁用，不写库；管理页手动「立即检查」不受影响）
     run: () =>
@@ -200,7 +222,7 @@ export const DOCKER_TASKS: ScheduledTask[] = [
 ];
 
 /**
- * 启动 Docker 内部定时器（全局单例，instrumentation register 调用）
+ * 启动 Docker 内部定时器（全局单例，独立进程入口调用）
  */
 export function startScheduler(): void {
   if (process.env.DEPLOY_PLATFORM !== "docker") return;

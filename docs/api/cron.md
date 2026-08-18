@@ -3,7 +3,7 @@
 FWP 提供定时任务端点，用于系统维护。触发机制因部署方式而异：
 
 - **Cloudflare 部署**：定时任务由 Worker 内置 `scheduled` 事件自动执行（模型发现、Key 用量重置、日志归档），**无需**通过 HTTP 调用本页端点
-- **Docker 部署**：定时任务由容器内部定时器自动执行（应用启动时注册，无需任何额外配置），**无需**通过 HTTP 调用本页端点，也无需 `CRON_SECRET`
+- **Docker 部署**：定时任务由容器内部定时器进程自动执行（容器启动时自动启动，无需任何额外配置），**无需**通过 HTTP 调用本页端点，也无需 `CRON_SECRET`
 - **其他部署**（Vercel / EdgeOne / Node.js）：由外部调度服务（Vercel Cron、Cron-job.org、UptimeRobot 或任何 HTTP 调度器）定时调用本页端点
 
 ## 端点列表

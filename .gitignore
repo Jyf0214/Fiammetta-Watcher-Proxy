@@ -46,6 +46,9 @@ tsconfig.tsbuildinfo
 .lite-gate-tmp/
 .build-gate-tmp/
 
+# 独立定时器进程产物（scripts/build-scheduler.mjs）
+.build/
+
 # EdgeOne CLI build output
 .edgeone/
 

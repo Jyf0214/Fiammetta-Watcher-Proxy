@@ -38,8 +38,20 @@ fi
 echo "[启动] 同步数据库表结构（DB_TYPE=$DB_TYPE）..."
 DB_PUSH=1 node scripts/prepare-db.mjs
 
-echo "[启动] 启动应用..."
-# 限制 V8 堆上限为 192MB，在 256MB 容器中预留 ~64MB 给 V8 外部内存（pg 连接 buffer、libuv 线程池等），
-# 迫使 GC 在接近上限时积极回收，防止 RSS 无限增长触发 OOM killer
+# ==================== 启动独立定时器进程 ====================
+# 定时器为容器内独立 Node 进程（.build/scheduler.cjs，由 build-scheduler.mjs
+# 打包，内联 Prisma client 与 wasm 编译器），与主应用进程分离：
+# 不依赖 Next.js instrumentation（instrumentation 会把调度器链编入 Cloudflare
+# Edge Worker 导致 Pages Function 体积超限）。DB_TYPE/DATABASE_URL 已在上方
+# 推断导出，定时器进程继承后直连数据库。
+echo "[启动] 启动内部定时器进程..."
+# 限制 V8 堆上限为 192MB，在 256MB 容器中预留 ~64MB 给 V8 外部内存（pg 连接
+# buffer、libuv 线程池等），迫使 GC 在接近上限时积极回收，防止 RSS 无限增长
+# 触发 OOM killer（定时器进程与主进程同受此限制）
 export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=192"
+# 产物缺失/损坏时阻止容器启动，避免定时任务（key-reset/log-archive/model-fetch）静默停摆
+node --check .build/scheduler.cjs || { echo "[启动] 错误：定时器进程产物缺失或损坏（.build/scheduler.cjs）"; exit 1; }
+node .build/scheduler.cjs &
+
+echo "[启动] 启动应用..."
 exec node server.js
