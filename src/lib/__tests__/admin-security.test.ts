@@ -295,3 +295,114 @@ describe("checkCsrfOrigin — 无来源标识与本地开发", () => {
     expect(statusCode).toBe(403);
   });
 });
+
+describe("checkCsrfOrigin — 环境变量白名单域名", () => {
+  let statusCode: number;
+  let body: unknown;
+
+  function makeReq(overrides: Record<string, unknown> = {}): any {
+    return { method: "POST", headers: { host: "example.com" }, ...overrides };
+  }
+
+  function makeRes(): any {
+    statusCode = 200;
+    body = undefined;
+    const res: any = {
+      status(c: number) {
+        statusCode = c;
+        return res;
+      },
+      json(b: unknown) {
+        body = b;
+        return res;
+      },
+    };
+    return res;
+  }
+
+  beforeEach(() => {
+    delete process.env.ENVIRONMENT;
+    delete process.env.CSRF_ALLOWED_ORIGINS;
+  });
+
+  afterEach(() => {
+    delete process.env.ENVIRONMENT;
+    delete process.env.CSRF_ALLOWED_ORIGINS;
+  });
+
+  it("Origin 命中白名单放行（CDN 场景：Host 为源站域名，Origin 为 CDN 域名）", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "cdn.example.com";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({ headers: { host: "origin.example.com", origin: "https://cdn.example.com" } }),
+      res
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("Referer 命中白名单放行", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "cdn.example.com";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({
+        headers: { host: "origin.example.com", referer: "https://cdn.example.com/admin" },
+      }),
+      res
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("白名单支持逗号分隔多域名（含空白）", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "a.example.com, cdn.example.com";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({ headers: { host: "origin.example.com", origin: "https://cdn.example.com" } }),
+      res
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("白名单域名匹配忽略默认端口", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "cdn.example.com";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({
+        headers: { host: "origin.example.com", origin: "https://cdn.example.com:443" },
+      }),
+      res
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("白名单域名匹配不区分大小写", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "CDN.Example.COM";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({ headers: { host: "origin.example.com", origin: "https://cdn.example.com" } }),
+      res
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("未命中白名单仍拒绝 403", () => {
+    process.env.CSRF_ALLOWED_ORIGINS = "cdn.example.com";
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({ headers: { host: "origin.example.com", origin: "https://evil.example" } }),
+      res
+    );
+    expect(ok).toBe(false);
+    expect(statusCode).toBe(403);
+    expect(body).toEqual({ success: false, error: "请求来源不合法" });
+  });
+
+  it("未设置环境变量时白名单不生效", () => {
+    const res = makeRes();
+    const ok = checkCsrfOrigin(
+      makeReq({ headers: { host: "example.com", origin: "https://evil.example" } }),
+      res
+    );
+    expect(ok).toBe(false);
+    expect(statusCode).toBe(403);
+  });
+});

@@ -75,6 +75,10 @@ export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason
  * 检查 Origin 或 Referer 头是否匹配当前服务器。
  * 对 SameSite=Lax 无法覆盖的场景（如 GET 请求携带 Cookie）提供额外防护。
  *
+ * 环境变量 CSRF_ALLOWED_ORIGINS（逗号分隔的域名列表）用于 CDN 等前置代理
+ * 场景：代理回源时源站收到的 Host 是源站域名，而浏览器 Origin 是 CDN 域名，
+ * 二者必然不同，命中白名单的域名来源视为合法。
+ *
  * @returns true 表示来源合法，false 表示已被拦截（已发送 403 响应）
  */
 export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): boolean {
@@ -94,16 +98,25 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
     return true;
   }
 
-  // 从 Origin/Referer 提取 host
+  // 从 Origin/Referer 提取 host（hostname 不含端口，用于白名单匹配）
   let sourceHost = "";
+  let sourceHostname = "";
   if (origin) {
-    try { sourceHost = new URL(origin).host; } catch {
+    try {
+      const url = new URL(origin);
+      sourceHost = url.host;
+      sourceHostname = url.hostname;
+    } catch {
       // 提供了 Origin 但无法解析（畸形字符串 / "null"）→ 视为攻击，fail-closed
       res.status(403).json({ success: false, error: "请求来源不合法" });
       return false;
     }
   } else if (referer) {
-    try { sourceHost = new URL(referer).host; } catch {
+    try {
+      const url = new URL(referer);
+      sourceHost = url.host;
+      sourceHostname = url.hostname;
+    } catch {
       res.status(403).json({ success: false, error: "请求来源不合法" });
       return false;
     }
@@ -117,7 +130,18 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
     h === "localhost" || h === "127.0.0.1" || h.startsWith("localhost:");
   const localhostAllowed = !isProd && isLocalhost(sourceHost) && isLocalhost(reqHost);
 
-  if (sourceHost && sourceHost !== reqHost && !localhostAllowed) {
+  // 环境变量白名单：逗号分隔的域名列表（CDN 前置代理场景）
+  const allowedOrigins = (process.env.CSRF_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (
+    sourceHost &&
+    sourceHost !== reqHost &&
+    !localhostAllowed &&
+    !allowedOrigins.includes(sourceHostname.toLowerCase())
+  ) {
     res.status(403).json({ success: false, error: "请求来源不合法" });
     return false;
   }
