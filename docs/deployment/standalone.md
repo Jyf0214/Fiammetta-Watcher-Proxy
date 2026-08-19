@@ -82,6 +82,16 @@ http://localhost:3000/admin
 
 用 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录。
 
+## 第六步：验证代理可用性
+
+管理后台创建用户 API Key 后，验证代理接口（对外路径为 `/v1/*`，内部转发到 `/api/v1/*`）：
+
+```bash
+curl -H "Authorization: Bearer <用户API Key>" http://localhost:3000/v1/models
+```
+
+返回 200 模型列表即正常；返回 401 表示 Key 无效或未创建。
+
 ## 配置定时任务
 
 定时任务通过 HTTP 端点暴露，用系统 cron（`crontab -e`）定时调用即可（端点、频率与认证见 [Cron 任务说明](/api/cron)）：

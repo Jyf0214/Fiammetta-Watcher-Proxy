@@ -9,11 +9,11 @@ Go to "API Key Management" in the admin panel and click "Add Key".
 | Field | Description |
 |-------|-------------|
 | Name | Custom identifier |
-| Token Quota | Total token usage limit |
-| Call Limit | Total call count limit |
+| Token Quota | Total token usage limit (0 = unlimited) |
+| Call Limit | Total call count limit (0 = unlimited) |
 | RPM Limit | Requests per minute limit |
 | TPM Limit | Tokens per minute limit |
-| Reset Period | monthly / daily / never |
+| Reset Period | monthly / daily / never (default: monthly) |
 | Expiration | Optional; requests are rejected with 401 after expiry (no input field in the admin UI yet — set it via import or API) |
 
 ## Auto Reset

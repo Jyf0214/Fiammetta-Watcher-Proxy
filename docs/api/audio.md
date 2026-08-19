@@ -44,11 +44,11 @@ POST /v1/audio/transcriptions
 
 ### 请求参数
 
-该端点使用 `multipart/form-data` 格式：
+> 注：网关层仅接受 **JSON 请求体**（multipart 文件上传未实现），JSON 请求体会原样透传上游——是否可用取决于上游是否接受 JSON 格式；需要文件上传的调用请直接对接上游平台。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| file | file | 是 | 音频文件 |
+| file | string | 是 | 音频文件引用（JSON 字段，内容格式取决于上游） |
 | model | string | 是 | 模型名称（如 `whisper-1`） |
 | language | string | 否 | 音频语言（ISO-639-1 格式） |
 | prompt | string | 否 | 提示文本 |
@@ -59,8 +59,11 @@ POST /v1/audio/transcriptions
 ```bash
 curl -X POST https://example.com/v1/audio/transcriptions \
   -H "Authorization: Bearer fwp-your-api-key" \
-  -F "file=@audio.mp3" \
-  -F "model=whisper-1"
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "https://example.com/audio.mp3",
+    "model": "whisper-1"
+  }'
 ```
 
 ## 语音翻译
@@ -73,11 +76,11 @@ POST /v1/audio/translations
 
 ### 请求参数
 
-该端点使用 `multipart/form-data` 格式：
+> 注：网关层仅接受 **JSON 请求体**（multipart 文件上传未实现），JSON 请求体会原样透传上游——是否可用取决于上游是否接受 JSON 格式；需要文件上传的调用请直接对接上游平台。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| file | file | 是 | 音频文件 |
+| file | string | 是 | 音频文件引用（JSON 字段，内容格式取决于上游） |
 | model | string | 是 | 模型名称（如 `whisper-1`） |
 | prompt | string | 否 | 提示文本 |
 | response_format | string | 否 | 输出格式 |
@@ -87,8 +90,11 @@ POST /v1/audio/translations
 ```bash
 curl -X POST https://example.com/v1/audio/translations \
   -H "Authorization: Bearer fwp-your-api-key" \
-  -F "file=@audio.mp3" \
-  -F "model=whisper-1"
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "https://example.com/audio.mp3",
+    "model": "whisper-1"
+  }'
 ```
 
 ## 下一步

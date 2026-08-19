@@ -58,6 +58,20 @@ curl -X POST https://example.com/v1/chat/completions \
   }'
 ```
 
+流式响应按 SSE（Server-Sent Events）格式返回，`Content-Type: text/event-stream`，每个数据块为 `data: {json}`，以 `data: [DONE]` 结束：
+
+```text
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+错误（如 401/429）在流式模式下同样以 `data: {...}` 块形式出现在流中。
+
 ## 响应格式
 
 ```json

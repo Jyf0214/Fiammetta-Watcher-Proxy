@@ -39,6 +39,7 @@ Select database via `DB_TYPE` env var. `lib/prisma.ts` unified factory switches 
 | `mysql` | Pure MySQL | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
 | `mariadb` | MariaDB | `@prisma/adapter-mariadb` | TCP | Non-Cloudflare only (EdgeOne/Vercel/Docker/Node) |
 | `pg` | PostgreSQL direct | `@prisma/adapter-pg` | TCP | All |
+| `hyperdrive` | PostgreSQL (Hyperdrive connection pool) | `@prisma/adapter-pg` | TCP via Hyperdrive | Cloudflare only |
 
 > **TiDB note:** TiDB Cloud on Cloudflare Workers requires HTTP protocol (`@tidbcloud/prisma-adapter`), not TCP-based `@prisma/adapter-mariadb`, because Workers run on V8 Isolate without Node.js TCP Socket support. The `mariadb` driver uses TCP and works with MariaDB / pure MySQL direct connections (use `DB_TYPE=mariadb` / `DB_TYPE=mysql` respectively), on **non-Cloudflare platforms only** (Cloudflare builds exclude the mariadb driver from the bundle). Free-tier Workers have CPU/request limits — batch log imports (multi-row writes) may time out.
 
@@ -64,7 +65,7 @@ Configure these in GitHub repo Settings → Secrets:
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID |
 | `ADMIN_USERNAME` | Admin username |
 | `ADMIN_PASSWORD` | Admin password |
-| `DB_TYPE` | Database type (`d1` / `tidb` / `pg`, default `d1`) |
+| `DB_TYPE` | Database type (Cloudflare deployments: `d1` / `tidb` / `pg` / `hyperdrive`, default `d1`) |
 | `DATABASE_URL` | External database URL (required for TiDB/PostgreSQL, not needed for D1) |
 | `EO_PROJECT_NAME` | EdgeOne Makers project name (required for EdgeOne deployments) |
 | `EO_API_TOKEN` | EdgeOne API Token (required for EdgeOne deployments) |

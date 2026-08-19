@@ -31,9 +31,8 @@ Platform A (weight=3) : Platform B (weight=2) : Platform C (weight=1)
 
 ### Health-based
 
-- Prefer healthy platforms
+- Healthy and degraded platforms both participate normally (degraded only means failure counts are accumulated, closer to the breaker threshold — it does not lower selection weight)
 - Skip down platforms completely (circuit breaker)
-- Degraded platforms still participate normally but carry failure counts, closer to the breaker threshold
 
 ## Auto Model ID
 

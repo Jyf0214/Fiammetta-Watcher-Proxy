@@ -17,8 +17,8 @@ In the admin panel, go to "Request Templates" and click "New Template":
 | Template name | Required, custom identifier |
 | Description | Optional |
 | Applicable models | Model ID wildcard list (e.g. `gpt-*`), press Enter to add; default `*` (all models) |
-| Request body | JSON fields to inject (see whitelist below), deep-merged into the upstream request body |
-| Enabled | Off = template does not apply |
+| Request body | Required; JSON fields to inject (see whitelist below), deep-merged into the upstream request body |
+| Enabled | On by default; off = template does not apply |
 
 The page offers 4 quick-fill examples: Enable Deep Thinking, Model Reasoning Effort, Force JSON Output, Temperature Control.
 

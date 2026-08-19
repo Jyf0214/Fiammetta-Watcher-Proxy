@@ -58,6 +58,20 @@ curl -X POST https://example.com/v1/chat/completions \
   }'
 ```
 
+Streaming responses use SSE (Server-Sent Events) format with `Content-Type: text/event-stream`; each chunk is a `data: {json}` line, ending with `data: [DONE]`:
+
+```text
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+Errors (e.g. 401/429) also appear as `data: {...}` blocks inside the stream in streaming mode.
+
 ## Response
 
 ```json

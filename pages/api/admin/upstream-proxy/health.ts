@@ -12,7 +12,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
-import { getProxyHealth, runProxyHealthCheck, getHealthCheckProgress, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
+import { getProxyHealth, runProxyHealthCheck, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 
 export default async function handler(
   req: NextApiRequest,
@@ -44,10 +44,11 @@ export default async function handler(
     if (req.method === "POST") {
       if (!checkCsrfOrigin(req, res)) return;
       if (!(await checkAdminRateLimit(admin.adminId, res))) return;
-      // 已在检查中：直接返回当前进度，不重复启动
-      if (getHealthCheckProgress().running) {
-        const { results, progress } = await getProxyHealth(db);
-        return res.status(200).json({ success: true, data: { alreadyRunning: true, results, progress } });
+      // 已在检查中（跨实例：进度读 configs 表锁行，LB 分发到任意实例一致）：
+      // 直接返回当前进度，不重复启动
+      const current = await getProxyHealth(db);
+      if (current.progress.running) {
+        return res.status(200).json({ success: true, data: { alreadyRunning: true, ...current } });
       }
       // 后台执行并立即返回，前端轮询 GET 渐进显示「检查中 X/Y」；
       // 数千代理的完整检查需数分钟，等全部完成才返回会让前端一直挂着

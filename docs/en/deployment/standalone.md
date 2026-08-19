@@ -82,6 +82,16 @@ http://localhost:3000/admin
 
 Log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
 
+## Step 6: Verify the Proxy
+
+After creating a user API Key in the admin panel, verify the proxy endpoints (public path is `/v1/*`, internally rewritten to `/api/v1/*`):
+
+```bash
+curl -H "Authorization: Bearer <user-api-key>" http://localhost:3000/v1/models
+```
+
+A 200 with the model list means everything is working; 401 means the key is invalid or not created yet.
+
 ## Configure Cron Tasks
 
 Scheduled tasks are exposed as HTTP endpoints — call them via system cron (`crontab -e`); endpoints, frequencies and auth: [Cron Tasks](/en/api/cron).

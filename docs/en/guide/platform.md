@@ -15,16 +15,18 @@ Creation auto-fills the platform type, priority, weight and the built-in model l
 
 ## Configuration
 
-| Field | Description |
-|-------|-------------|
-| Name | Custom identifier |
-| Base URL | Platform API address |
-| API Key | Platform authentication key |
-| Type | OpenAI-compatible / Azure / Custom / Anthropic |
-| Priority | Higher number = higher priority |
-| Weight | Routing distribution ratio |
-| RPM Limit | Requests per minute limit |
-| TPM Limit | Tokens per minute limit |
+The table below lists the required fields for **manually adding a platform** (preset one-click creation may leave the API Key empty and fill it in later on the detail page):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| Name | Yes | Custom identifier |
+| Base URL | Yes | Platform API address |
+| API Key | Yes | Platform authentication key (may be left empty only for preset creation) |
+| Type | Yes | OpenAI-compatible / Azure / Custom / Anthropic |
+| Priority | No | Higher number = higher priority |
+| Weight | No | Routing distribution ratio |
+| RPM Limit | No | Requests per minute limit |
+| TPM Limit | No | Tokens per minute limit |
 
 ## Platform Types
 
@@ -54,7 +56,7 @@ The advanced settings group provides these optional fields:
 |-------|-------------|---------|
 | Forward Headers | Downstream request headers to forward to upstream (JSON array) | empty |
 | Inject stream_options | Whether to auto-inject `stream_options` (turn off when the upstream rejects it) | on |
-| Platform Whitelist | When enabled, the platform is never banned on 429 — it is only degraded for 2 minutes (per-key error-count auto-disable is unaffected) | off |
+| Platform Whitelist | When enabled, neither the platform nor its keys are banned or auto-disabled on errors — they are only degraded for 2 minutes | off |
 | Override UA | When enabled, replaces the User-Agent sent to upstream with the custom UA (requires Custom UA to be filled in; takes priority over UA in Extra Headers) | off |
 | Custom UA | Override the User-Agent sent to upstream | empty |
 | Extra Headers | Additional request headers sent to upstream (JSON object, max 20) | empty |

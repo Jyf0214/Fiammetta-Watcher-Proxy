@@ -44,11 +44,11 @@ POST /v1/audio/transcriptions
 
 ### Parameters
 
-This endpoint uses `multipart/form-data` format:
+> Note: the gateway only accepts **JSON request bodies** (multipart file upload is not implemented). A JSON body is passed through to the upstream as-is — usability depends on whether the upstream accepts JSON. For file uploads, call the upstream platform directly.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file | file | Yes | Audio file |
+| file | string | Yes | Audio file reference (JSON field; content format depends on the upstream) |
 | model | string | Yes | Model name (e.g. `whisper-1`) |
 | language | string | No | Audio language (ISO-639-1 format) |
 | prompt | string | No | Prompt text |
@@ -59,8 +59,11 @@ This endpoint uses `multipart/form-data` format:
 ```bash
 curl -X POST https://example.com/v1/audio/transcriptions \
   -H "Authorization: Bearer fwp-your-api-key" \
-  -F "file=@audio.mp3" \
-  -F "model=whisper-1"
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "https://example.com/audio.mp3",
+    "model": "whisper-1"
+  }'
 ```
 
 ## Audio Translation
@@ -73,11 +76,11 @@ POST /v1/audio/translations
 
 ### Parameters
 
-This endpoint uses `multipart/form-data` format:
+> Note: the gateway only accepts **JSON request bodies** (multipart file upload is not implemented). A JSON body is passed through to the upstream as-is — usability depends on whether the upstream accepts JSON. For file uploads, call the upstream platform directly.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file | file | Yes | Audio file |
+| file | string | Yes | Audio file reference (JSON field; content format depends on the upstream) |
 | model | string | Yes | Model name (e.g. `whisper-1`) |
 | prompt | string | No | Prompt text |
 | response_format | string | No | Output format |
@@ -87,8 +90,11 @@ This endpoint uses `multipart/form-data` format:
 ```bash
 curl -X POST https://example.com/v1/audio/translations \
   -H "Authorization: Bearer fwp-your-api-key" \
-  -F "file=@audio.mp3" \
-  -F "model=whisper-1"
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "https://example.com/audio.mp3",
+    "model": "whisper-1"
+  }'
 ```
 
 ## Next Steps

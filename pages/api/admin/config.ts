@@ -13,32 +13,53 @@ import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import {
   UPSTREAM_PROXY_HEALTH_KEY,
   UPSTREAM_PROXY_POOL_KEY,
+  UPSTREAM_PROXY_CHECK_LOCK_KEY,
+  UPSTREAM_PROXY_PULL_AT_KEY,
 } from "@/lib/upstream-proxy";
 
 /**
- * 内部派生键黑名单：pool（拉取结果）与 health（健康度）由 upstream-proxy
- * 模块内部写入（cron 拉取/健康检查/失败标记），前端保存代理配置走
- * system:upstream_proxy 主键。若允许 PUT 直写这两个键，可注入任意代理
- * （引流）或伪造/清空健康表（操纵路由），且绕过前端全部格式校验
+ * 内部派生键黑名单：pool（拉取结果）、health（健康度）、check_lock（健康
+ * 检查锁/进度）与 pull_at（各组最近成功拉取时刻）由 upstream-proxy 模块
+ * 内部写入（cron 拉取/健康检查/失败标记/跨实例互斥租约/组级自动更新计时），
+ * 前端保存代理配置走 system:upstream_proxy 主键。若允许 PUT 直写这些键，
+ * 可注入任意代理（引流）、伪造/清空健康表（操纵路由）、破坏检查互斥锁或
+ * 伪造拉取时间（让某组自动更新停摆/立即重拉），且绕过前端全部格式校验
  * （组名唯一/保留名/interval/URL 合法性）——API 层必须同步拒绝。
  */
 const PROTECTED_CONFIG_KEYS = new Set<string>([
   UPSTREAM_PROXY_POOL_KEY,
   UPSTREAM_PROXY_HEALTH_KEY,
+  UPSTREAM_PROXY_CHECK_LOCK_KEY,
+  UPSTREAM_PROXY_PULL_AT_KEY,
 ]);
 
 /**
  * configs.updatedAt 为 Int 秒级列（毫秒写入会溢出），同一秒内两次保存会得到
  * 相同 updatedAt；出站代理等模块以「updatedAt 等值比较」做缓存失效检查，
  * 同秒双保存会被判定为无变化、继续返回旧缓存（最长 30s 不生效）。
- * 进程内记录上次写入值，同秒时 +1 单调递增补偿（Docker 单实例部署即完备，
- * 与 upstream-proxy 的进程内写锁/单飞假设一致）。
+ * 旧实现以进程内自增补偿（Docker 单实例即完备）——多实例部署下各实例的
+ * 补偿互不可见：同一秒内两个实例各自保存会写入相同 updatedAt，甚至倒退
+ * （实例 A 已补偿到 t+2，实例 B 仍写 t），跨实例失效检查再次失效。
+ * 改为读库取 max：以数据库当前值 +1 为下限，任意实例的写入都相对库中
+ * 最新值单调递增（并发读改写同一秒仍可能相同，但上游缓存已改用 value
+ * 内容做失效信号，updatedAt 不再承担失效判断职责）。读库失败时退回
+ * 进程内补偿兜底，不阻断保存。
  */
 let lastConfigSaveAt = 0;
 
-function nextConfigUpdatedAt(): number {
+async function nextConfigUpdatedAt(db: Awaited<ReturnType<typeof createDb>>, key: string): Promise<number> {
   const now = Math.floor(Date.now() / 1000);
-  lastConfigSaveAt = Math.max(now, lastConfigSaveAt + 1);
+  let dbUpdatedAt = 0;
+  try {
+    const row = await db.configs.findFirst({
+      where: { key },
+      select: { updatedAt: true },
+    });
+    dbUpdatedAt = row?.updatedAt ?? 0;
+  } catch (err) {
+    console.error("[API /api/admin/config] 读取配置 updatedAt 失败，退化为进程内补偿:", err);
+  }
+  lastConfigSaveAt = Math.max(now, dbUpdatedAt + 1, lastConfigSaveAt + 1);
   return lastConfigSaveAt;
 }
 
@@ -95,8 +116,8 @@ export default async function handler(
         return;
       }
 
-      // 单调递增补偿：同秒双保存不产生相同 updatedAt（见 nextConfigUpdatedAt 说明）
-      const now = nextConfigUpdatedAt();
+      // 单调递增补偿：相对库中当前 updatedAt 取 max（见 nextConfigUpdatedAt 说明）
+      const now = await nextConfigUpdatedAt(db, body.key);
 
       // 使用 Prisma upsert 实现 upsert（configs.key 是唯一约束）
       await db.configs.upsert({

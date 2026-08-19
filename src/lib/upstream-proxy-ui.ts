@@ -7,6 +7,12 @@ export const HEALTH_KEY = "system:upstream_proxy_health";
 export const DEFAULT_CHECK_URL = "https://cp.cloudflare.com/generate_204";
 /** 旧版配置（无 groups 字段）解析时补的组名，与后端「单组」语义等价 */
 export const LEGACY_GROUP_NAME = "default";
+/** 健康检查间隔允许范围（分钟，与后端 PROXY_HEALTH_INTERVAL_MIN_RANGE 一致） */
+export const PROXY_HEALTH_INTERVAL_RANGE = { min: 1, max: 1440 } as const;
+/** 自动更新周期允许范围（分钟，1 ~ 14 天，与后端 PROXY_PULL_INTERVAL_MIN_RANGE 一致） */
+export const PROXY_PULL_INTERVAL_RANGE = { min: 1, max: 20160 } as const;
+/** 自动更新周期缺省值（分钟，留空使用；与后端 DEFAULT_PROXY_PULL_INTERVAL_MIN 一致） */
+export const DEFAULT_PULL_INTERVAL_MIN = 60;
 
 export interface ProxyHealthEntry {
   status: "ok" | "fail";
@@ -23,13 +29,17 @@ export interface ParsedGroup {
   urls: string[];
   /** 组启用开关：禁用组不参与拉取/健康检查/请求路由（旧配置缺省视为启用） */
   enabled: boolean;
+  /** 自动更新开关（旧配置缺省视为启用） */
+  autoRefresh: boolean;
+  /** 自动更新周期分钟（缺省不写 = 后端默认 60） */
+  refreshIntervalMin?: number;
 }
 export interface ParsedConfig {
   groups: ParsedGroup[];
   platformIds: string[];
   platformGroup: Record<string, string>;
   healthCheckUrl?: string;
-  /** 健康检查间隔分钟（1~60，缺省后端默认 5） */
+  /** 健康检查间隔分钟（1~1440，缺省后端默认 5） */
   healthCheckIntervalMin?: number;
 }
 
@@ -40,6 +50,9 @@ export interface GroupFormState {
   urlsText: string;
   boundPlatformIds: string[];
   enabled: boolean;
+  autoRefresh: boolean;
+  /** 自动更新周期分钟（null = 未设置，保存时留空，后端默认 60） */
+  refreshIntervalMin: number | null;
 }
 
 /** 解析代理配置（兼容旧版纯 URL 字符串 / {urls,...} / 新版 groups，与后端 parseProxyConfig 对齐） */
@@ -53,7 +66,7 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
   }
   if (typeof parsed === "string") {
     return {
-      groups: [{ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: [parsed], enabled: true }],
+      groups: [{ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: [parsed], enabled: true, autoRefresh: true }],
       platformIds: [],
       platformGroup: {},
     };
@@ -66,6 +79,7 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
           sourceUrl: "",
           urls: parsed.filter((u): u is string => typeof u === "string"),
           enabled: true,
+          autoRefresh: true,
         },
       ],
       platformIds: [],
@@ -83,13 +97,24 @@ export function parseProxyConfig(raw: string | undefined): ParsedConfig {
       urls: Array.isArray(g.urls) ? g.urls.filter((u): u is string => typeof u === "string") : [],
       // 缺省视为启用（旧配置无该字段）
       enabled: typeof g.enabled === "boolean" ? g.enabled : true,
+      // 缺省视为启用（旧配置无该字段）
+      autoRefresh: typeof g.autoRefresh === "boolean" ? g.autoRefresh : true,
+      // 缺省不写字段（后端默认 60）；范围外/非整数按后端 normalizePullIntervalMin
+      // 同规则视为未设置，避免 UI 展示值与后端生效值不一致
+      refreshIntervalMin:
+        typeof g.refreshIntervalMin === "number" &&
+        Number.isInteger(g.refreshIntervalMin) &&
+        g.refreshIntervalMin >= PROXY_PULL_INTERVAL_RANGE.min &&
+        g.refreshIntervalMin <= PROXY_PULL_INTERVAL_RANGE.max
+          ? g.refreshIntervalMin
+          : undefined,
     }))
     .filter((g) => g.name.length > 0);
 
   // 旧版字段（顶层 urls）兼容：无 groups 时视为单组
   const legacyUrls = Array.isArray(obj.urls) ? obj.urls.filter((u): u is string => typeof u === "string") : [];
   if (groups.length === 0 && legacyUrls.length > 0) {
-    groups.push({ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: legacyUrls, enabled: true });
+    groups.push({ name: LEGACY_GROUP_NAME, sourceUrl: "", urls: legacyUrls, enabled: true, autoRefresh: true });
   }
 
   const platformIds = Array.isArray(obj.platformIds)
@@ -221,7 +246,8 @@ export type ConfigValidationError =
   | "upstreamProxyGroupNameReserved"
   | "upstreamProxyInvalidSourceUrl"
   | "upstreamProxyInvalidUrls"
-  | "upstreamProxyInvalidInterval";
+  | "upstreamProxyInvalidInterval"
+  | "upstreamProxyInvalidRefreshInterval";
 
 /**
  * 表单 → 配置 JSON 字符串（全空返回 "{}"；供保存与「已保存一致性」校验共用）。
@@ -233,17 +259,30 @@ export function buildConfigJson(
   checkUrl: string,
   healthIntervalMin: number | null | undefined
 ): { ok: true; value: string } | { ok: false; error: ConfigValidationError } {
-  // 健康检查间隔：1~60 的整数；留空不写字段（后端默认 5）
+  // 健康检查间隔：允许范围内的整数；留空不写字段（后端默认 5）
   let interval: number | undefined;
   if (healthIntervalMin !== null && healthIntervalMin !== undefined) {
     if (
       !Number.isInteger(healthIntervalMin) ||
-      healthIntervalMin < 1 ||
-      healthIntervalMin > 60
+      healthIntervalMin < PROXY_HEALTH_INTERVAL_RANGE.min ||
+      healthIntervalMin > PROXY_HEALTH_INTERVAL_RANGE.max
     ) {
       return { ok: false, error: "upstreamProxyInvalidInterval" };
     }
     interval = healthIntervalMin;
+  }
+
+  // 自动更新周期：允许范围内的整数；留空不写字段（后端默认 60）
+  for (const g of groups) {
+    if (g.refreshIntervalMin !== null && g.refreshIntervalMin !== undefined) {
+      if (
+        !Number.isInteger(g.refreshIntervalMin) ||
+        g.refreshIntervalMin < PROXY_PULL_INTERVAL_RANGE.min ||
+        g.refreshIntervalMin > PROXY_PULL_INTERVAL_RANGE.max
+      ) {
+        return { ok: false, error: "upstreamProxyInvalidRefreshInterval" };
+      }
+    }
   }
 
   const trimmed = groups
@@ -253,6 +292,8 @@ export function buildConfigJson(
       urls: parseUrlsText(g.urlsText),
       boundPlatformIds: [...new Set(g.boundPlatformIds)],
       enabled: g.enabled,
+      autoRefresh: g.autoRefresh,
+      refreshIntervalMin: g.refreshIntervalMin,
     }))
     .filter(
       (g) =>
@@ -288,9 +329,15 @@ export function buildConfigJson(
     value: JSON.stringify({
       groups: trimmed.map((g) => ({
         name: g.name,
-        // 显式写 enabled（与 parseProxyConfig 读取对称，保证「已保存一致性」比较成立；
-        // 旧配置无该字段保存后补齐，语义不变）
+        // 显式写 enabled/autoRefresh（与 parseProxyConfig 读取对称，保证「已保存
+        // 一致性」比较成立；旧配置无该字段保存后补齐，语义不变）
         enabled: g.enabled,
+        autoRefresh: g.autoRefresh,
+        // 留空时不写字段，由后端 normalizeConfig 填充默认周期 60（与后端默认值
+        // 保持单一来源）
+        ...(g.refreshIntervalMin !== null && g.refreshIntervalMin !== undefined
+          ? { refreshIntervalMin: g.refreshIntervalMin }
+          : {}),
         ...(g.sourceUrl ? { sourceUrl: g.sourceUrl } : {}),
         ...(g.urls.length > 0 ? { urls: g.urls } : {}),
       })),

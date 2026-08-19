@@ -6,7 +6,7 @@ System API Keys are credentials for **admin panel API authentication** (`Authori
 
 In the admin panel, go to "System API Key" (System group) and click "Create System Key". Only a name is required.
 
-- The key is shown **only once** after creation — copy and save it immediately
+- The plaintext key is shown **only once** in the create response — copy and save it immediately; afterwards you can retrieve it again anytime via the copy button on the list row
 - Format: `sk-sys-` + 48 hex chars (55 chars total)
 - System API keys never expire
 

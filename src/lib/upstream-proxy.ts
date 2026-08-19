@@ -50,12 +50,27 @@ export const UPSTREAM_PROXY_CONFIG_KEY = "system:upstream_proxy";
 export const UPSTREAM_PROXY_POOL_KEY = "system:upstream_proxy_pool";
 /** 健康度记录键 */
 export const UPSTREAM_PROXY_HEALTH_KEY = "system:upstream_proxy_health";
+/** 最近拉取时间记录键：{ groupName: 成功拉取时刻(unix 秒) }——定时拉取按组周期
+ *  判定是否到期；手动「立即拉取」与容器启动拉取同样记录，周期重新计时 */
+export const UPSTREAM_PROXY_PULL_AT_KEY = "system:upstream_proxy_pull_at";
+/** 健康检查锁/进度键：跨实例互斥 + 进度落库（多实例下各实例进程内进度
+ *  互不可见，LB 把轮询 GET 分发到非发起实例会返回残留旧进度/误判完成；
+ *  锁与进度合一行，由检查实例每批 CAS 续期更新） */
+export const UPSTREAM_PROXY_CHECK_LOCK_KEY = "system:upstream_proxy_check_lock";
+/** 锁 TTL（秒）：每批写入进度时续期；实例崩溃残留最多 TTL 后即可被重新抢占。
+ *  一轮检查数百批（每批 20 并发 × 10s 超时 ≈ 最坏 3.3 分钟/批间隔），
+ *  正常完成前不会过期 */
+const CHECK_LOCK_TTL_SEC = 15 * 60;
 /** 默认健康检查探测地址（HTTP 204，轻量；可选国内可达的 Cloudflare 联通性端点） */
 export const DEFAULT_PROXY_HEALTH_CHECK_URL = "https://cp.cloudflare.com/generate_204";
 /** 默认健康检查间隔（分钟）：与调度器 proxy-health 任务默认频率一致 */
 export const DEFAULT_PROXY_HEALTH_INTERVAL_MIN = 5;
-/** 健康检查间隔允许范围（分钟）：调度器按该间隔生成触发时刻 */
-export const PROXY_HEALTH_INTERVAL_MIN_RANGE = { min: 1, max: 60 } as const;
+/** 健康检查间隔允许范围（分钟）：上限放宽至 24 小时，低频维护场景可设长周期 */
+export const PROXY_HEALTH_INTERVAL_MIN_RANGE = { min: 1, max: 1440 } as const;
+/** 默认自动更新周期（分钟）：组级缺省值，与旧版定时拉取每小时触发频率一致 */
+export const DEFAULT_PROXY_PULL_INTERVAL_MIN = 60;
+/** 自动更新周期允许范围（分钟）：1 分钟 ~ 14 天（20160 分钟） */
+export const PROXY_PULL_INTERVAL_MIN_RANGE = { min: 1, max: 20160 } as const;
 
 /**
  * 设备级禁用出站代理（环境变量 UPSTREAM_PROXY_DISABLED，仅影响当前部署实例，
@@ -129,6 +144,11 @@ export interface ProxyGroupConfig {
   urls: string[];
   /** 组开关：禁用组不参与拉取/健康检查/请求路由（旧配置缺省视为启用） */
   enabled: boolean;
+  /** 自动更新开关：关闭后定时拉取跳过该组，手动「立即拉取」仍可用
+   *  （旧配置缺省视为启用，行为与旧版一致） */
+  autoRefresh: boolean;
+  /** 自动更新周期（分钟，1~20160=14 天；缺省 60，与旧版每小时定时拉取频率一致） */
+  refreshIntervalMin: number;
 }
 
 export interface ProxyConfig {
@@ -174,7 +194,12 @@ export interface ProxyPullGroupResult {
 }
 
 let cachedConfig: ProxyConfig | null = null;
-let cachedConfigUpdatedAt: number | null = null;
+/** config 缓存失效信号：最近一次写入/读取的原始 value 字符串。与 pool/health
+ *  同模式——秒级 updatedAt 在多实例同秒双保存（各实例进程内单调补偿互不可见，
+ *  写入相同 updatedAt 甚至倒退）时不变，等值比较判定「无变化」导致其他实例
+ *  最长 TTL 内继续用旧配置（禁用组仍被路由、cron 按旧代理集污染 pool/health）；
+ *  以内容为信号后，任何实例写入的新值必然触发重读 */
+let cachedConfigValue: string | null = null;
 let lastConfigRefresh = 0;
 let cachedPool: Record<string, string[]> | null = null;
 /** pool 缓存失效信号：最近一次写入/读取的原始 value 字符串。秒级 updatedAt
@@ -227,8 +252,11 @@ let runningCheck: Promise<ProxyHealthMap> | null = null;
  *  实例即完备；缓存由每次写入同步，锁内重读拿到的是最新已落库状态） */
 let healthWriteTail: Promise<unknown> = Promise.resolve();
 /** 进行中的拉取任务 promise（单飞：启动拉取/cron/管理页「立即拉取」并发时
- *  复用同一任务，避免并发拉取双写 pool 行与互相覆盖，见 pullProxyGroups） */
+ *  复用同一任务，避免并发拉取双写 pool 行与互相覆盖，见 pullProxyGroups）。
+ *  手动与定时按模式分开单飞：手动模式必须拉取全部组，复用定时任务会退化为
+ *  只拉到期组 */
 let pullInFlight: Promise<Record<string, ProxyPullGroupResult>> | null = null;
+let pullInFlightManual: Promise<Record<string, ProxyPullGroupResult>> | null = null;
 
 /** 当前健康检查进度（无进行中任务时返回空进度） */
 export function getHealthCheckProgress(): HealthCheckProgress {
@@ -312,6 +340,16 @@ function normalizeUrls(raw: unknown): string[] {
   return urls;
 }
 
+/** 自动更新周期规范化：正整数且在允许范围内，否则回退默认（防御脏数据） */
+function normalizePullIntervalMin(raw: unknown): number {
+  return typeof raw === "number" &&
+    Number.isInteger(raw) &&
+    raw >= PROXY_PULL_INTERVAL_MIN_RANGE.min &&
+    raw <= PROXY_PULL_INTERVAL_MIN_RANGE.max
+    ? raw
+    : DEFAULT_PROXY_PULL_INTERVAL_MIN;
+}
+
 /** 解析并规范化组定义（name 必填唯一；sourceUrl 非法视为无拉取源） */
 function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[] {
   const groups: ProxyGroupConfig[] = [];
@@ -342,6 +380,10 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
         urls: normalizeUrls(g.urls),
         // 组开关：旧配置无该字段视为启用
         enabled: typeof g.enabled === "boolean" ? g.enabled : true,
+        // 自动更新：旧配置无该字段视为启用（行为与旧版一致）
+        autoRefresh: typeof g.autoRefresh === "boolean" ? g.autoRefresh : true,
+        // 自动更新周期：非法值/越界回退默认（管理页保存时已校验，此处防御脏数据）
+        refreshIntervalMin: normalizePullIntervalMin(g.refreshIntervalMin),
       });
     }
   }
@@ -349,7 +391,14 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
   if (groups.length === 0) {
     // 无显式组：旧版配置（顶层 urls）视为单组，行为与旧版一致
     if (legacyUrls.length === 0) return [];
-    groups.push({ name: "", sourceUrl: "", urls: legacyUrls, enabled: true });
+    groups.push({
+      name: "",
+      sourceUrl: "",
+      urls: legacyUrls,
+      enabled: true,
+      autoRefresh: true,
+      refreshIntervalMin: DEFAULT_PROXY_PULL_INTERVAL_MIN,
+    });
     return groups;
   }
 
@@ -472,7 +521,9 @@ function parsePoolMap(raw: string | null | undefined): Record<string, string[]> 
 
 // ===== 缓存读写（config / pool / health）=====
 
-/** 读取代理配置（带缓存：TTL 内先用 configs.updatedAt 做廉价失效检查，管理后台保存后立即生效） */
+/** 读取代理配置（带缓存：TTL 内先用 configs.value 内容做廉价失效检查，
+ *  任何实例保存后立即生效；同秒双保存/updatedAt 倒退不影响判断——
+ *  见 cachedConfigValue 注释） */
 async function readProxyConfig(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -484,11 +535,11 @@ async function readProxyConfig(
     try {
       const meta = await prisma.configs.findFirst({
         where: { key: UPSTREAM_PROXY_CONFIG_KEY },
-        select: { updatedAt: true },
+        select: { value: true },
       });
-      // 行缺失时 meta?.updatedAt 为 undefined，需归一到 null 再比较，
+      // 行缺失时 meta?.value 为 undefined，需归一到 null 再比较，
       // 否则与缓存的 null 恒不等，每次调用都穿透全量读库
-      if ((meta?.updatedAt ?? null) === cachedConfigUpdatedAt) return cachedConfig;
+      if ((meta?.value ?? null) === cachedConfigValue) return cachedConfig;
     } catch (err) {
       // 失效检查失败时退回 TTL 缓存，不阻断请求
       console.error("[upstream-proxy] 配置失效检查失败，使用缓存:", err);
@@ -502,11 +553,11 @@ async function readProxyConfig(
       select: { value: true, updatedAt: true },
     });
     cachedConfig = parseProxyConfig(row?.value ?? null);
-    cachedConfigUpdatedAt = row?.updatedAt ?? null;
+    cachedConfigValue = row?.value ?? null;
   } catch (err) {
     console.error("[upstream-proxy] 读取代理配置失败:", err);
     cachedConfig = null;
-    cachedConfigUpdatedAt = null;
+    cachedConfigValue = null;
   }
   lastConfigRefresh = now;
   return cachedConfig;
@@ -573,6 +624,74 @@ async function writeProxyPool(
   });
   cachedPool = pool;
   cachedPoolValue = value;
+}
+
+/** 解析最近拉取时间记录（容忍脏数据：非整数的条目丢弃） */
+function parsePullAtMap(raw: string | null | undefined): Record<string, number> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, number> = {};
+    for (const [groupName, ts] of Object.entries(parsed)) {
+      if (typeof ts === "number" && Number.isInteger(ts)) map[groupName] = ts;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+/** 读取最近拉取时间记录（不缓存：定时拉取每次 tick 判定到期，直读保证
+ *  多实例下看到最新写入；写入由 updatePullAtMap 进程内写链串行化） */
+async function readPullAtMap(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<Record<string, number>> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  try {
+    const row = await prisma.configs.findFirst({
+      where: { key: UPSTREAM_PROXY_PULL_AT_KEY },
+      select: { value: true },
+    });
+    return parsePullAtMap(row?.value ?? null);
+  } catch (err) {
+    console.error("[upstream-proxy] 读取拉取时间记录失败:", err);
+    return {};
+  }
+}
+
+/** 更新最近拉取时间记录：进程内写链串行化「读→合并→写」（与 withHealthLock
+ *  同模式），避免并发 upsert 同一行的行锁竞争（TiDB Error 1205）；多实例
+ *  并发写偶发覆盖只导致下一次定时拉取提前触发一次（拉取幂等，可接受） */
+let pullAtWriteTail: Promise<void> = Promise.resolve();
+
+/** 记录拉取成功时刻（合并写入，不覆盖其他组的时间） */
+async function updatePullAtMap(
+  db: D1Database | Database,
+  env: WorkerEnv | undefined,
+  pulledAt: Record<string, number>
+): Promise<void> {
+  const run = async (): Promise<void> => {
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const map = await readPullAtMap(db, env);
+    Object.assign(map, pulledAt);
+    const now = Math.floor(Date.now() / 1000);
+    const value = JSON.stringify(map);
+    await prisma.configs.upsert({
+      where: { key: UPSTREAM_PROXY_PULL_AT_KEY },
+      create: {
+        id: crypto.randomUUID(),
+        key: UPSTREAM_PROXY_PULL_AT_KEY,
+        value,
+        updatedAt: now,
+      },
+      update: { value, updatedAt: now },
+    });
+  };
+  const p = pullAtWriteTail.then(run, run);
+  pullAtWriteTail = p.catch(() => undefined);
+  return p;
 }
 
 /** 读取健康度记录（缓存模式与配置一致；失效信号为 value 内容而非 updatedAt，
@@ -882,7 +1001,21 @@ async function pullOneSource(sourceUrl: string): Promise<string[]> {
 }
 
 /**
+ * 拉取选项：manual=true 为手动模式（管理页「立即拉取」/容器启动时），忽略
+ * autoRefresh 与周期判定，拉取全部启用且有订阅地址的组；缺省为定时模式，
+ * 仅拉取「自动更新开启 + 距上次成功拉取 ≥ 组周期」的组
+ */
+export interface PullProxyGroupsOptions {
+  manual?: boolean;
+}
+
+/**
  * 拉取各组的代理列表（cron proxy-pull 与管理页「立即拉取」共用）
+ *
+ * 组级自动更新：定时模式按每组 autoRefresh 与 refreshIntervalMin 判定是否
+ * 到期（距上次成功拉取时刻 ≥ 周期），手动模式不受开关与周期限制；成功拉取
+ * 的组记录时刻（失败/空结果不记录，定时任务按周期重试；手动与定时共用同一
+ * 记录，手动拉取后定时周期重新计时）。
  *
  * 状态同步（以最新拉取列表为准）：
  * - 交集（两次拉取都有）：健康表记录保留（status 切换为 ok = 恢复在池，
@@ -893,26 +1026,46 @@ async function pullOneSource(sourceUrl: string): Promise<string[]> {
  */
 export async function pullProxyGroups(
   db: D1Database | Database,
-  env?: WorkerEnv
+  env?: WorkerEnv,
+  options: PullProxyGroupsOptions = {}
 ): Promise<Record<string, ProxyPullGroupResult>> {
   // 与 getUpstreamProxy 相同的部署/禁用门控：非 Docker 部署不创建代理/写库；
   // 环境变量整体禁用（all）时拉取同样不执行
   if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return {};
-  // 单飞：启动拉取/cron/管理页「立即拉取」并发时复用进行中的任务，避免并发
-  // 拉取双写 pool 行（TiDB 行锁 1205）与互相覆盖（与 runningCheck 同模式）
-  if (pullInFlight) return pullInFlight;
+  // 单飞：同模式并发（启动拉取/cron 定时/管理页「立即拉取」各自并发）时复用
+  // 进行中的任务，避免并发拉取双写 pool 行（TiDB 行锁 1205）与互相覆盖
+  // （与 runningCheck 同模式）。手动与定时按模式分开单飞：手动模式要拉取
+  // 全部组（绕过周期判定），若复用进行中的定时任务只会拉到「到期组」，与
+  // 手动语义冲突；两模式并发双写 pool 内容幂等（同组同源拉取结果一致），
+  // 且写失败有 try/catch 兜底，可接受
+  if (options.manual) {
+    if (pullInFlightManual) return pullInFlightManual;
+  } else if (pullInFlight) {
+    return pullInFlight;
+  }
 
-  pullInFlight = (async (): Promise<Record<string, ProxyPullGroupResult>> => {
+  const flight = (async (): Promise<Record<string, ProxyPullGroupResult>> => {
     try {
       const config = await readProxyConfig(db, env);
       if (!config) return {};
-      // 禁用组不参与拉取
-      const pullGroups = config.groups.filter((g) => g.enabled && g.sourceUrl.length > 0);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const pullAt = await readPullAtMap(db, env);
+      // 定时模式：启用 + 自动更新开启 + 有订阅地址 + 距上次成功拉取 ≥ 周期；
+      // 手动模式：启用 + 有订阅地址（自动更新关闭不影响手动「立即拉取」）
+      const pullGroups = config.groups.filter((g) => {
+        if (!g.enabled || g.sourceUrl.length === 0) return false;
+        if (options.manual) return true;
+        if (!g.autoRefresh) return false;
+        const lastAt = pullAt[g.name] ?? 0;
+        return nowSec - lastAt >= g.refreshIntervalMin * 60;
+      });
       if (pullGroups.length === 0) return {};
 
       const prevPool = await readProxyPool(db, env);
       const nextPool: Record<string, string[]> = { ...prevPool };
       const results: Record<string, ProxyPullGroupResult> = {};
+      // 本次拉取成功的组：{ groupName: 成功时刻 }，循环后统一落库
+      const pulledAt: Record<string, number> = {};
       // 跨组收集需要同步健康表的 URL，锁内统一应用（见下方 withHealthLock）
       const keptUrls = new Set<string>();
       const removedUrls = new Set<string>();
@@ -938,7 +1091,8 @@ export async function pullProxyGroups(
 
         if (error) {
           // 拉取失败/空结果：沿用旧列表，且不改变任何健康状态——源故障与
-          // 代理本身的连通性无关，不应误"恢复"被惩罚中的代理
+          // 代理本身的连通性无关，不应误"恢复"被惩罚中的代理；也不记录
+          // 拉取时刻，定时任务按组周期重试
           if (fetched.length > 0) nextPool[group.name] = fetched;
           else delete nextPool[group.name];
           results[group.name] = { pulled: 0, total, added: 0, removed: 0, kept: 0, error };
@@ -977,6 +1131,8 @@ export async function pullProxyGroups(
           removed: removed.length,
           kept: kept.length,
         };
+        // 拉取成功：记录时刻，定时周期从此刻重新计时
+        pulledAt[group.name] = nowSec;
       }
 
       // 组被删除/重命名后清理残留键，避免孤儿组池数据长期滞留
@@ -989,6 +1145,16 @@ export async function pullProxyGroups(
         await writeProxyPool(db, env, nextPool);
       } catch (err) {
         console.error("[upstream-proxy] 拉取结果写入失败:", err);
+      }
+
+      // 记录成功拉取时刻（失败组不入 pulledAt，前面已 continue；写失败仅
+      // 影响下一次定时拉取提前触发一次，拉取幂等可接受）
+      if (Object.keys(pulledAt).length > 0) {
+        try {
+          await updatePullAtMap(db, env, pulledAt);
+        } catch (err) {
+          console.error("[upstream-proxy] 拉取时间记录写入失败:", err);
+        }
       }
 
       // 健康表同步走写锁：交集 status 切换为 ok（最新拉取列表确认其存在 =
@@ -1013,10 +1179,13 @@ export async function pullProxyGroups(
       await releaseStaleAgents(new Set(collectAllGroupUrls(config, nextPool)));
       return results;
     } finally {
-      pullInFlight = null;
+      if (options.manual) pullInFlightManual = null;
+      else pullInFlight = null;
     }
   })();
-  return pullInFlight;
+  if (options.manual) pullInFlightManual = flight;
+  else pullInFlight = flight;
+  return flight;
 }
 
 // ===== 请求路由 =====
@@ -1264,11 +1433,114 @@ export async function markProxyFailure(
  * 健康检查：对每个配置的代理发起探测请求，结果写入健康度表
  * （cron proxy-health 任务与管理页「立即检查」共用）
  *
- * 并发互斥：已有检查任务时复用同一 promise（手动 POST 与 cron 并发自然
+ * 并发互斥（跨实例）：configs 表租约锁（UPSTREAM_PROXY_CHECK_LOCK_KEY）
+ * 原子抢占——多实例各自跑 cron/手动触发时同一时刻仅一个实例执行检查，
+ * 其余返回当前健康表（锁由每批 CAS 续期，崩溃残留 TTL 后自动释放）。
+ * 进程内 runningCheck 单飞保持同实例并发复用（手动 POST 与 cron 并发自然
  * 串行），避免多个任务共享进度对象互相覆盖、先完成者提前复位 running。
  * 进度对象在函数入口即设置（含 startedAt），提前返回/异常由 finally 复位，
- * 前端轮询以 running=false 且 total>0 判完成、total=0 判「无候选」
+ * 并同步落库（每批 CAS 更新），前端轮询 GET 打到任意实例读到一致的进度；
+ * 以 running=false 且 total>0 判完成、total=0 判「无候选」。
+ * 锁丢失（CAS 失败 = 被其他实例接管）时停止后续写入，避免污染健康表。
  */
+
+/** 健康检查锁/进度（configs 表单行 JSON；owner 防误释放，expiresAt 兜底崩溃） */
+interface CheckLock {
+  owner: string;
+  startedAt: number;
+  expiresAt: number;
+  running: boolean;
+  total: number;
+  checked: number;
+}
+
+/** 读取健康检查锁/进度（行缺失/解析失败返回 null） */
+async function readCheckLock(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<CheckLock | null> {
+  try {
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const row = await prisma.configs.findFirst({
+      where: { key: UPSTREAM_PROXY_CHECK_LOCK_KEY },
+      select: { value: true },
+    });
+    if (!row?.value) return null;
+    const lock = JSON.parse(row.value) as CheckLock;
+    return typeof lock.owner === "string" && typeof lock.running === "boolean" ? lock : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 构造锁 value（owner/startedAt 保留，进度字段更新，续期 expiresAt） */
+function serializeLock(lock: CheckLock): string {
+  return JSON.stringify(lock);
+}
+
+/**
+ * 抢占健康检查锁：锁不存在/已完成（running=false）/过期时写入自己的锁并
+ * 回读验证 owner——并发 upsert 由「最后写者胜 + 回读验证」兜底，始终只有
+ * 一个实例成功；已被其他实例持有（running 且未过期）返回 null。
+ * 返回 { owner, value }（成功）或 null（占用中）
+ */
+async function acquireCheckLock(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<{ owner: string; value: string } | null> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const existing = await readCheckLock(db, env);
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (existing && existing.running && existing.expiresAt > nowSec) return null;
+
+  const owner = crypto.randomUUID();
+  const lock: CheckLock = {
+    owner,
+    startedAt: nowSec,
+    expiresAt: nowSec + CHECK_LOCK_TTL_SEC,
+    running: true,
+    total: 0,
+    checked: 0,
+  };
+  const value = serializeLock(lock);
+  await prisma.configs.upsert({
+    where: { key: UPSTREAM_PROXY_CHECK_LOCK_KEY },
+    create: {
+      id: crypto.randomUUID(),
+      key: UPSTREAM_PROXY_CHECK_LOCK_KEY,
+      value,
+      updatedAt: nowSec,
+    },
+    update: { value, updatedAt: nowSec },
+  });
+  const verify = await readCheckLock(db, env);
+  return verify?.owner === owner ? { owner, value } : null;
+}
+
+/**
+ * 锁内 CAS 更新：where value 与本地持有值精确匹配才写入（原子），
+ * 防止锁被其他实例接管/释放后本实例的迟到写入覆盖新锁。
+ * 返回是否更新成功；失败 = 锁已易主，调用方应停止后续写入
+ */
+async function casUpdateCheckLock(
+  db: D1Database | Database,
+  env: WorkerEnv | undefined,
+  expectedValue: string,
+  next: CheckLock
+): Promise<boolean> {
+  try {
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const res = await prisma.configs.updateMany({
+      where: { key: UPSTREAM_PROXY_CHECK_LOCK_KEY, value: expectedValue },
+      data: { value: serializeLock(next), updatedAt: Math.floor(Date.now() / 1000) },
+    });
+    return res.count === 1;
+  } catch (err) {
+    console.error("[upstream-proxy] 健康检查进度写入失败:", err);
+    return false;
+  }
+}
+
 export async function runProxyHealthCheck(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -1279,8 +1551,25 @@ export async function runProxyHealthCheck(
   if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return {};
   if (runningCheck) return runningCheck;
 
+  // 跨实例互斥：抢占 configs 表租约锁（多实例各自跑 cron/手动触发时仅一个
+  // 实例执行检查，其余返回当前健康表；同实例并发仍由 runningCheck 单飞兜底）
+  const acquired = await acquireCheckLock(db, env);
+  if (!acquired) return readProxyHealth(db, env);
+
+  const { owner, value: initialLockValue } = acquired;
   healthCheckProgress = { running: true, total: 0, checked: 0, startedAt: Date.now() };
   runningCheck = (async (): Promise<ProxyHealthMap> => {
+    // 本地持锁值：CAS 更新/释放的 where 依据（锁被其他实例接管后值变化，
+    // CAS 自然失败停止写入）；finally 用最终值写 running=false 释放
+    let lockValue: string = initialLockValue;
+    let lockState: CheckLock = {
+      owner,
+      startedAt: Math.floor(Date.now() / 1000),
+      expiresAt: Math.floor(Date.now() / 1000) + CHECK_LOCK_TTL_SEC,
+      running: true,
+      total: 0,
+      checked: 0,
+    };
     try {
       const config = await readProxyConfig(db, env);
       if (!config) return {};
@@ -1334,19 +1623,44 @@ export async function runProxyHealthCheck(
         } catch (err) {
           console.error("[upstream-proxy] 健康度结果写入失败:", err);
         }
+
+        // 进度落库（跨实例可见）并续期锁：CAS 失败 = 锁已被其他实例接管
+        //（本实例运行超 TTL/异常），停止后续写入避免污染健康表
+        lockState = {
+          ...lockState,
+          expiresAt: Math.floor(Date.now() / 1000) + CHECK_LOCK_TTL_SEC,
+          total: allUrls.length,
+          checked: healthCheckProgress?.checked ?? 0,
+        };
+        if (!(await casUpdateCheckLock(db, env, lockValue, lockState))) {
+          console.warn("[upstream-proxy] 健康检查锁已被其他实例接管，停止本轮写入");
+          break;
+        }
+        lockValue = serializeLock(lockState);
       }
 
       return results;
     } finally {
-      // 异常/提前返回（无配置、无候选）也复位，不残留 running=true
+      // 异常/提前返回（无配置、无候选、锁被接管）也复位，不残留 running=true
       if (healthCheckProgress) healthCheckProgress.running = false;
       runningCheck = null;
+      // 释放锁：写 running=false 保留 total/checked（前端以 running=false
+      // 判完成；CAS 失败 = 锁已易主，忽略）
+      await casUpdateCheckLock(
+        db,
+        env,
+        lockValue,
+        { ...lockState, running: false, expiresAt: Math.floor(Date.now() / 1000) + CHECK_LOCK_TTL_SEC }
+      ).catch(() => {});
     }
   })();
   return runningCheck;
 }
 
-/** 读取最近一次健康度结果与当前检查进度（管理页展示，非 Docker 部署或整体禁用返回空） */
+/** 读取最近一次健康度结果与当前检查进度（管理页展示，非 Docker 部署或整体禁用返回空）。
+ *  进度从 configs 表锁行读取（跨实例一致）：多实例 + LB 下轮询 GET 可能打到
+ *  任意实例，进程内进度互不可见会返回残留旧进度（running=false + 旧 total）
+ *  导致前端误判「检查完成」；落库后任意实例读到同一份进度 */
 export async function getProxyHealth(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -1354,5 +1668,14 @@ export async function getProxyHealth(
   if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) {
     return { results: {}, progress: { running: false, total: 0, checked: 0, startedAt: 0 } };
   }
-  return { results: await readProxyHealth(db, env), progress: getHealthCheckProgress() };
+  const lock = await readCheckLock(db, env);
+  const progress: HealthCheckProgress = lock
+    ? {
+        running: lock.running,
+        total: lock.total,
+        checked: lock.checked,
+        startedAt: lock.startedAt * 1000,
+      }
+    : { running: false, total: 0, checked: 0, startedAt: 0 };
+  return { results: await readProxyHealth(db, env), progress };
 }

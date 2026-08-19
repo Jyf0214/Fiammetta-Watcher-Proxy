@@ -94,6 +94,8 @@ id = "你的-kv-namespace-id"
 crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
 
+> 仓库自带的 `worker/wrangler.toml` 还包含一个 `[[hyperdrive]]` 占位块（`id = "placeholder-hyperdrive-id"`）与 `[observability]` 块。`[observability]` 可保留；**`[[hyperdrive]]` 占位 ID 不是合法 UUID，直接部署会校验失败**——不使用 Hyperdrive 时请删除整个块，使用 Hyperdrive（`DB_TYPE=hyperdrive`）时填入真实 ID。
+
 ### 3. 初始化数据库
 
 ```bash

@@ -24,4 +24,5 @@ export const VALIDATION_KEYS: Record<ConfigValidationError, string> = {
   upstreamProxyInvalidSourceUrl: "upstreamProxyInvalidSourceUrl",
   upstreamProxyInvalidUrls: "upstreamProxyInvalidUrls",
   upstreamProxyInvalidInterval: "upstreamProxyInvalidInterval",
+  upstreamProxyInvalidRefreshInterval: "upstreamProxyInvalidRefreshInterval",
 };

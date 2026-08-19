@@ -17,6 +17,7 @@ import {
   POOL_KEY,
   HEALTH_KEY,
   DEFAULT_CHECK_URL,
+  PROXY_HEALTH_INTERVAL_RANGE,
   parseProxyConfig,
   parseHealthMap,
   parsePoolMap,
@@ -27,6 +28,7 @@ import {
   sumMaskedStats,
   errMsg,
   type GroupFormState,
+  type ParsedConfig,
 } from "@/lib/upstream-proxy-ui";
 
 /** 安全上下文（HTTPS/localhost）外 crypto.randomUUID 不存在——HTTP 局域网访问
@@ -161,23 +163,35 @@ export default function UpstreamProxyPage() {
     };
   });
 
-  /** 当前表单（组数据来自已保存配置，仅全局字段可编辑）→ 配置 JSON */
-  const currentFormGroups = (): GroupFormState[] =>
-    parsed.groups.map((g) => ({
+  /** 某份已解析配置 → 全组表单态（组数据来自已保存配置，仅全局字段可编辑） */
+  const currentFormGroups = (src: ParsedConfig): GroupFormState[] =>
+    src.groups.map((g) => ({
       id: genId(),
       name: g.name,
       sourceUrl: g.sourceUrl,
       urlsText: g.urls.join("\n"),
-      boundPlatformIds: Object.entries(parsed.platformGroup)
+      boundPlatformIds: Object.entries(src.platformGroup)
         .filter(([, groupName]) => groupName === g.name)
         .map(([pid]) => pid),
       enabled: g.enabled,
+      autoRefresh: g.autoRefresh,
+      refreshIntervalMin: g.refreshIntervalMin ?? null,
     }));
 
-  const buildCurrent = () => buildConfigJson(currentFormGroups(), platformIds, checkUrl, healthIntervalMin);
+  const buildCurrent = (raw: string | undefined) =>
+    buildConfigJson(currentFormGroups(parseProxyConfig(raw)), platformIds, checkUrl, healthIntervalMin);
+
+  /** 保存前强制重新验证：多实例/多标签页下 SWR 缓存可能落后于其他页面刚做的
+   *  修改（禁用/删除组），直接基于旧缓存构造整份配置会把旧状态写回覆盖；
+   *  mutate 失败时退回当前缓存 */
+  const latestConfigRaw = async (): Promise<string | undefined> => {
+    const latest = await mutate();
+    return latest?.[CONFIG_KEY] ?? config?.[CONFIG_KEY];
+  };
 
   const save = async () => {
-    const result = buildCurrent();
+    const raw = await latestConfigRaw();
+    const result = buildCurrent(raw);
     if (!result.ok) {
       message.error(t(VALIDATION_KEYS[result.error]));
       return;
@@ -203,11 +217,12 @@ export default function UpstreamProxyPage() {
     }
   };
 
-  /** 手动触发拉取/检查前确认表单与已保存配置一致，避免结果与页面显示对不上 */
-  const ensureSaved = (): boolean => {
-    const saved = config?.[CONFIG_KEY];
-    const current = buildCurrent();
-    if (!current.ok || current.value !== saved) {
+  /** 手动触发拉取/检查前确认表单与已保存配置一致（基准用最新已保存配置，
+   *  否则旧缓存下误判「一致」放行），避免结果与页面显示对不上 */
+  const ensureSaved = async (): Promise<boolean> => {
+    const raw = await latestConfigRaw();
+    const current = buildCurrent(raw);
+    if (!current.ok || current.value !== raw) {
       message.warning(t("upstreamProxySaveFirst"));
       return false;
     }
@@ -215,7 +230,7 @@ export default function UpstreamProxyPage() {
   };
 
   const pullNow = async () => {
-    if (!ensureSaved()) return;
+    if (!(await ensureSaved())) return;
     setPulling(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/pull", { method: "POST" });
@@ -251,7 +266,7 @@ export default function UpstreamProxyPage() {
   /** 立即健康检查：POST 后台启动后轮询 GET 渐进刷新「检查中 X/Y」
    * （每批写库后 mutate 同步健康数据），running=false 且已启动过视为完成 */
   const checkNow = async () => {
-    if (!ensureSaved()) return;
+    if (!(await ensureSaved())) return;
     setChecking(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
@@ -472,8 +487,8 @@ export default function UpstreamProxyPage() {
               <InputNumber
                 value={healthIntervalMin}
                 onChange={(v) => setHealthIntervalMin(v ?? null)}
-                min={1}
-                max={60}
+                min={PROXY_HEALTH_INTERVAL_RANGE.min}
+                max={PROXY_HEALTH_INTERVAL_RANGE.max}
                 precision={0}
                 placeholder={`5 (${t("upstreamProxyHealthIntervalDefault")})`}
                 className="w-full"

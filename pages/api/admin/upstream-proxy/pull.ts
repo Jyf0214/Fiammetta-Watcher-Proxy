@@ -44,7 +44,8 @@ export default async function handler(
 
   try {
     const db = await createDb();
-    const results = await pullProxyGroups(db);
+    // 手动模式：不受组级自动更新开关与周期限制，立即拉取全部启用且有订阅地址的组
+    const results = await pullProxyGroups(db, undefined, { manual: true });
     return res.status(200).json({ success: true, data: { results } });
   } catch (err) {
     console.error(

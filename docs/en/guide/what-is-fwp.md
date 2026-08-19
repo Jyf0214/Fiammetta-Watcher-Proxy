@@ -8,7 +8,7 @@ When using multiple AI platforms (OpenAI, Anthropic, Google, etc.), you face sev
 
 - Each platform has different API formats and authentication methods
 - You need to manage multiple API keys separately
-- There's no unified way to monitor usage and costs across platforms
+- There's no unified way to monitor usage across platforms
 - Manual switching is required when a platform goes down
 
 **FWP solves these problems**: it provides a single entry point that intelligently routes requests to different backend platforms.

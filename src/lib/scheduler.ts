@@ -49,18 +49,31 @@ export interface ScheduledTask {
 
 /**
  * 生成代理健康检查触发时刻：以固定偏移 2 分为锚点、按间隔步进（interval=5 时
- * 为 2/7/12/.../57，与历史默认行为一致）。间隔钳制到 1~60。
+ * 为 2/7/12/.../57，与历史默认行为一致）。间隔钳制到允许范围（1~1440）。
  *
- * 间隔不整除 60 时（如 25、7），整数步进会在整点前后留下短尾间隙
- * （interval=25 时 2/27/52，:52 后仅 10 分钟即到下一小时 :02，触发间隔变为
- * 25/25/10 交替）。此时改用 60/k 浮点均匀步进取整：每小时触发次数 =
- * floor(60/interval)，相邻触发间隙误差 ≤1 分钟。整除间隔行为保持不变。
+ * ≤60 分钟：分钟级网格。间隔不整除 60 时（如 25、7），整数步进会在整点前后
+ * 留下短尾间隙（interval=25 时 2/27/52，:52 后仅 10 分钟即到下一小时 :02，
+ * 触发间隔变为 25/25/10 交替）。此时改用 60/k 浮点均匀步进取整：每小时触发
+ * 次数 = floor(60/interval)，相邻触发间隙误差 ≤1 分钟。整除间隔行为保持不变。
+ *
+ * >60 分钟：小时级网格。以锚点小时 2 为起点按 interval/60 步进（分钟固定 2
+ * 分），取整小时后去重；interval=1440（24 小时）时仅锚点小时 2，每天 02:02
+ * 触发一次。
  */
 export function healthCheckSpec(intervalMin: number): ScheduleSpec {
   const interval = Math.min(
     Math.max(Math.trunc(intervalMin), PROXY_HEALTH_INTERVAL_MIN_RANGE.min),
     PROXY_HEALTH_INTERVAL_MIN_RANGE.max
   );
+  if (interval > 60) {
+    const hours = new Set<number>();
+    const step = interval / 60;
+    for (let h = 2; h < 24; h += step) {
+      const hh = Math.round(h);
+      if (hh >= 0 && hh < 24) hours.add(hh);
+    }
+    return { minutes: new Set([2]), hours };
+  }
   const minutes = new Set<number>();
   if (60 % interval === 0) {
     // 整除间隔：保持历史步进行为（测试断言 5 → 2/7/12/.../57）
@@ -83,8 +96,10 @@ export function matchesSchedule(
   if (spec.minIntervalMs && lastFinishedAtMs && date.getTime() - lastFinishedAtMs < spec.minIntervalMs) {
     return false;
   }
-  if (spec.minutes && !spec.minutes.has(date.getMinutes())) return false;
-  if (spec.hours && !spec.hours.has(date.getHours())) return false;
+  // 空/未定义分钟集合 = 每分钟（size > 0 防御空 Set：空 Set 为 truthy 且
+  // has() 恒 false，若不加判断会让「每分钟」规格永不命中）
+  if (spec.minutes && spec.minutes.size > 0 && !spec.minutes.has(date.getMinutes())) return false;
+  if (spec.hours && spec.hours.size > 0 && !spec.hours.has(date.getHours())) return false;
   return true;
 }
 
@@ -175,7 +190,8 @@ export function __resetSchedulerForTests(): void {
  * - log-archive  日志归档    每天 3:10（错开 3:00 的 key-reset，避免并发写库）
  * - proxy-health 代理健康检查 默认每 5 分钟（间隔可在出站代理管理页自定义，
  *   动态 spec 每次 tick 从进程内配置缓存读取，修改保存后于下一次检查生效）
- * - proxy-pull   代理列表拉取 每小时（:17）
+ * - proxy-pull   代理列表拉取 每分钟 tick（组级自动更新：按每组的开关与周期
+ *   判定是否到期，未到期组跳过；最小组周期 1 分钟）
  */
 // 与 /api/cron/[[...cron]].ts 端点一致：非 d1 方言下 createDb 忽略传入的 DB
 // binding，仅用 process.env（DB_TYPE / DATABASE_URL）建立连接
@@ -216,7 +232,10 @@ export const DOCKER_TASKS: ScheduledTask[] = [
   },
   {
     name: "proxy-pull",
-    spec: { minutes: new Set([17]) },
+    // 每分钟 tick（空 spec = 无分钟/小时约束），到期判定在 pullProxyGroups
+    // 内部按组进行（组级自动更新开关 + 周期；未到期/关闭自动更新的组跳过，
+    // 任务本体是轻量读库判断）
+    spec: {},
     run: () => pullProxyGroups(db, env),
   },
 ];
@@ -234,9 +253,10 @@ export function startScheduler(): void {
   scheduler.start();
 
   // 容器重启后立即拉取一次代理列表：proxy-pull 的首个触发周期最长要等
-  // 一小时（每小时 :17），重启后不等调度周期即可刷新订阅源（幂等，
-  // 与定时任务共用 pullProxyGroups；无订阅地址的组/非 docker 部署内部返回空）
-  void pullProxyGroups(db, env).catch((err) => {
+  // 一分钟，重启后不等调度周期即可刷新订阅源（幂等，与定时任务共用
+  // pullProxyGroups；手动模式绕过组周期判定——启动拉取视为立即执行。
+  // 无订阅地址的组/非 docker 部署内部返回空）
+  void pullProxyGroups(db, env, { manual: true }).catch((err) => {
     console.error(
       "[scheduler] 启动时代理列表拉取失败:",
       err instanceof Error ? err.message : String(err)

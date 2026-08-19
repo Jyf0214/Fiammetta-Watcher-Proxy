@@ -13,8 +13,8 @@ FWP 提供定时任务端点，用于系统维护。触发机制因部署方式�
 | `GET/POST /api/cron/model-fetch` | 模型发现 | 每 6 小时 | 自动发现各平台支持的模型列表 |
 | `GET/POST /api/cron/key-reset` | Key 用量重置 | 每小时 | 按周期重置 Key 的月度/日度用量计数器（仅在周期开始时实际清零） |
 | `GET/POST /api/cron/log-archive` | 日志归档 | 每天 3:00 | 将 30 天前的详细日志聚合为统计数据（Docker 内部定时器在 3:10 执行，错开整点的 Key 重置） |
-| `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 默认每 5 分钟 | 检查出站代理连通性（Docker 部署内部定时器按此频率自动执行，间隔可在出站代理管理页「全局设置」自定义 1~60 分钟；配置了出站代理时才生效）。设备级禁用（`UPSTREAM_PROXY_DISABLED=all`/`health`）时跳过并返回 `disabled: true`，外部调度器不会误判失败重试 |
-| `GET/POST /api/cron/proxy-pull` | 出站代理列表拉取 | 每小时 | 从各代理组的拉取地址拉取最新代理列表（Docker 部署内部定时器按此频率自动执行；配置了拉取源的组才生效）。设备级整体禁用（`UPSTREAM_PROXY_DISABLED=all`）时跳过并返回 `disabled: true` |
+| `GET/POST /api/cron/proxy-health` | 出站代理健康检查 | 默认每 5 分钟 | 检查出站代理连通性（Docker 部署内部定时器按此频率自动执行，间隔可在出站代理管理页「全局设置」自定义 1~1440 分钟（最长 24 小时）；配置了出站代理时才生效）。设备级禁用（`UPSTREAM_PROXY_DISABLED=all`/`health`）时跳过并返回 `disabled: true`，外部调度器不会误判失败重试 |
+| `GET/POST /api/cron/proxy-pull` | 出站代理列表拉取 | 按组周期 | 从各代理组的拉取地址拉取最新代理列表（Docker 部署内部定时器每分钟触发，按每组的自动更新开关与周期（1~20160 分钟，最长 14 天）判定是否到期；配置了拉取源且启用的组才生效）。设备级整体禁用（`UPSTREAM_PROXY_DISABLED=all`）时跳过并返回 `disabled: true` |
 
 > Docker 部署下定时触发由容器内部完成，无需外部调用；本页端点仍保留，供需要手动触发或从外部调用的场景使用（需 `CRON_SECRET`）。
 

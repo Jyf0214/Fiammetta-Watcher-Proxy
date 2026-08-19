@@ -17,6 +17,8 @@ FWP 提供 OpenAI 兼容的代理 API 和管理后台 API。
 Authorization: Bearer fwp-your-api-key
 ```
 
+Anthropic 客户端亦可使用 `x-api-key` 头（Anthropic 协议惯例），两种方式等价。
+
 ### 端点列表
 
 | 端点 | 方法 | 说明 |
@@ -28,11 +30,15 @@ Authorization: Bearer fwp-your-api-key
 | `/v1/models` | GET | 获取平台支持的模型列表 |
 | `/v1/models/{model}` | GET | 获取单个模型信息 |
 | `/v1/images/generations` | POST | 图像生成 |
-| `/v1/images/edits` | POST | 图像编辑（multipart/form-data） |
-| `/v1/images/variations` | POST | 图像变体（multipart/form-data） |
+| `/v1/images/edits` | POST | 图像编辑（仅 JSON 请求体） |
+| `/v1/images/variations` | POST | 图像变体（仅 JSON 请求体） |
 | `/v1/audio/speech` | POST | 文字转语音（TTS） |
 | `/v1/audio/transcriptions` | POST | 语音转文字（Whisper） |
 | `/v1/audio/translations` | POST | 语音翻译 |
+| `/v1/messages` | POST | Anthropic Messages 协议（双向格式转换） |
+| `/v1/messages/count_tokens` | POST | Anthropic token 估算 |
+
+> 注：网关层请求体解析仅支持 JSON。`/v1/images/edits`、`/v1/images/variations`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 原生需要 multipart 文件上传的端点，当前**不支持 multipart 请求体**（JSON 请求体会原样透传上游，能否使用取决于上游是否接受 JSON 格式）。需要文件上传的调用请直接对接上游平台。
 
 ### 请求示例
 
@@ -55,11 +61,26 @@ curl -X POST https://your-domain/v1/chat/completions \
 |--------|------|
 | 400 | 请求参数错误 |
 | 401 | API Key 无效、已过期或已禁用 |
+| 404 | 端点不存在，或 `GET /v1/models/{model}` 的模型不存在 |
 | 413 | 请求体过大 |
-| 429 | 速率限制（RPM/TPM 超限） |
+| 429 | 速率限制（RPM/TPM 超限），或 API Key 调用次数/Token 额度已达上限 |
 | 500 | 服务器内部错误（含所有平台无可用 Key、模型不存在） |
 | 502 | 上游平台错误（含上游返回空响应） |
 | 504 | 上游请求或响应超时 |
+
+错误响应体为 OpenAI 兼容格式：
+
+```json
+{
+  "error": {
+    "message": "错误描述",
+    "type": "invalid_request_error",
+    "code": "rate_limit_error"
+  }
+}
+```
+
+（`429` 响应还会包含 `retry_after` 字段。）
 
 ## 定时任务 API
 
@@ -71,7 +92,7 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 | `/api/cron/key-reset` | GET/POST | 重置 Key 用量计数器 |
 | `/api/cron/log-archive` | GET/POST | 归档过期请求日志 |
 | `/api/cron/proxy-health` | GET/POST | 出站代理健康检查（仅 Docker 部署配置了出站代理时生效） |
-| `/api/cron/proxy-pull` | GET/POST | 出站代理列表拉取（仅 Docker 部署配置了拉取源的组生效） |
+| `/api/cron/proxy-pull` | GET/POST | 出站代理列表拉取（仅 Docker 部署配置了拉取源且启用自动更新的组生效） |
 
 ## 管理后台 API
 
@@ -91,11 +112,13 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 |------|------|------|
 | `/api/admin/platforms` | GET | 获取所有平台列表 |
 | `/api/admin/platforms` | POST | 创建新平台 |
+| `/api/admin/platforms/{id}` | GET | 获取单个平台详情 |
 | `/api/admin/platforms/{id}` | PUT | 更新平台配置 |
 | `/api/admin/platforms/{id}` | DELETE | 删除平台 |
 | `/api/admin/platforms/{id}/models` | GET | 获取平台发现的模型列表 |
 | `/api/admin/platforms/{id}/models` | POST | 手动添加平台模型 |
 | `/api/admin/platforms/{id}/models` | PUT | 更新平台模型 |
+| `/api/admin/platforms/{id}/models` | PATCH | 启用/禁用平台模型（单个或批量） |
 | `/api/admin/platforms/{id}/models` | DELETE | 删除平台模型 |
 
 ### API Key 管理 API
@@ -104,6 +127,7 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 |------|------|------|
 | `/api/admin/keys` | GET | 获取所有 Key 列表 |
 | `/api/admin/keys` | POST | 创建新 Key |
+| `/api/admin/keys/{id}` | GET | 获取单个 Key 明文（用于复制） |
 | `/api/admin/keys/{id}` | PUT | 更新 Key 配置 |
 | `/api/admin/keys/{id}` | DELETE | 删除 Key |
 
@@ -125,7 +149,8 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/admin/system-keys` | GET | 获取所有系统密钥 |
-| `/api/admin/system-keys` | POST | 创建系统密钥（密钥仅返回一次） |
+| `/api/admin/system-keys` | POST | 创建系统密钥（创建响应仅显示一次明文，之后可用 GET 取回） |
+| `/api/admin/system-keys/{id}` | GET | 获取单个系统密钥明文 |
 | `/api/admin/system-keys/{id}` | PATCH | 启用/禁用系统密钥 |
 | `/api/admin/system-keys/{id}` | DELETE | 删除系统密钥 |
 
@@ -138,8 +163,18 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 | `/api/admin/usage/trend` | GET | 获取用量趋势（支持 period 参数） |
 | `/api/admin/usage/platform` | GET | 按平台维度获取用量 |
 | `/api/admin/logs` | GET | 获取请求日志（支持分页） |
+| `/api/admin/logs/archive` | GET | 分页查询已归档的用量统计 |
 | `/api/admin/logs/archive` | POST | 手动触发日志归档 |
 | `/api/admin/audit` | GET | 获取审计日志（支持分页） |
+
+### 出站代理 API（仅 Docker 部署）
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/admin/upstream-proxy/health` | GET | 查询代理健康检查结果 |
+| `/api/admin/upstream-proxy/health` | POST | 手动触发健康检查 |
+| `/api/admin/upstream-proxy/pull` | POST | 手动触发代理列表拉取 |
+| `/api/admin/upstream-proxy/stats` | GET | 代理可用性统计（支持 `?hours=` 参数） |
 
 ### 系统管理 API
 

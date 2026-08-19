@@ -38,9 +38,23 @@ const mockUpsert = vi.fn(async (args: any) => {
   }
   return {};
 });
+// 锁 CAS（updateMany where value 等值匹配）：仅当行存在且 value 与期望一致
+// 才更新并返回 count=1，否则 count=0（多实例互斥语义；健康检查锁与进度共用）
+const mockUpdateMany = vi.fn(async (args: any) => {
+  const key: string | undefined = args?.where?.key;
+  const row = key !== undefined ? dbRows[key] : undefined;
+  if (key !== undefined && row && args?.where?.value !== undefined && row.value === args.where.value) {
+    dbRows[key] = {
+      value: args.data?.value ?? row.value,
+      updatedAt: args.data?.updatedAt ?? row.updatedAt,
+    };
+    return { count: 1 };
+  }
+  return { count: 0 };
+});
 vi.mock("@/lib/prisma", () => ({
   createDb: vi.fn(async () => ({
-    configs: { findFirst: mockFindFirst, upsert: mockUpsert },
+    configs: { findFirst: mockFindFirst, upsert: mockUpsert, updateMany: mockUpdateMany },
   })),
 }));
 
@@ -312,7 +326,7 @@ describe("配置解析与代理创建", () => {
   });
 
   it("健康检查间隔：缺失/非法/越界回退默认 5", async () => {
-    for (const value of [undefined, 0, 61, 5.5, "10", "abc"]) {
+    for (const value of [undefined, 0, 1441, 5.5, "10", "abc"]) {
       vi.resetModules();
       const { getUpstreamProxy, getHealthCheckIntervalMin } = await loadModule();
       const config: Record<string, unknown> = { urls: ["https://proxy.example.com:8443"], platformIds: [] };
@@ -741,10 +755,108 @@ describe("runProxyHealthCheck 健康检查", () => {
     expect(results[URL_A]).toMatchObject({ status: "ok", latencyMs: expect.any(Number) });
     expect(results[URL_B]).toMatchObject({ status: "ok" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(mockUpsert).toHaveBeenCalledTimes(1);
-    const upsertArgs = mockUpsert.mock.calls[0][0];
-    const written = JSON.parse(upsertArgs.create.value) as Record<string, any>;
+    // 健康表仅写一次（锁行写入不在此列：锁 value 与健康表 value 分开断言）
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthUpserts).toHaveLength(1);
+    const written = JSON.parse(healthUpserts[0][0].create.value) as Record<string, any>;
     expect(written[URL_A]).toMatchObject({ status: "ok", failCount: 0 });
+  });
+
+  it("健康检查锁生命周期：先抢锁（upsert 锁行）→ 每批 CAS 续期 → 完成后 CAS 释放", async () => {
+    const { runProxyHealthCheck, getProxyHealth } = await loadModule();
+    configWith([URL_A, URL_B]);
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 204 })));
+
+    await runProxyHealthCheck(mockDb, mockEnv);
+
+    // acquire：锁行 upsert 一次（running=true）
+    const lockUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === "system:upstream_proxy_check_lock");
+    expect(lockUpserts).toHaveLength(1);
+    const acquired = JSON.parse(lockUpserts[0][0].create.value) as Record<string, any>;
+    expect(acquired).toMatchObject({ running: true, total: 0, checked: 0 });
+    // 批后续期 + finally 释放：2 次 CAS（1 批 = 续期 1 次 + 释放 1 次），
+    // 释放值 running=false 且保留 final total/checked
+    const casCalls = mockUpdateMany.mock.calls.filter((c) => c[0].where.key === "system:upstream_proxy_check_lock");
+    expect(casCalls).toHaveLength(2);
+    const released = JSON.parse(casCalls[1][0].data.value) as Record<string, any>;
+    expect(released).toMatchObject({ running: false, total: 2, checked: 2 });
+    // 进度落库后任意实例（此处新实例进程内无状态）读到同一进度
+    const { progress } = await getProxyHealth(mockDb, mockEnv);
+    expect(progress).toMatchObject({ running: false, total: 2, checked: 2 });
+  });
+
+  it("锁被其他实例持有（running 且未过期）→ 不执行探测，返回当前健康表（跨实例互斥）", async () => {
+    const { runProxyHealthCheck, getProxyHealth } = await loadModule();
+    configWith([URL_A, URL_B]);
+    const nowSec = Math.floor(Date.now() / 1000);
+    // 预置他人锁：running=true、未过期（进度 3/5）
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [], healthCheckUrl: CHECK_URL }),
+        updatedAt: 1000,
+      },
+      ["system:upstream_proxy_check_lock"]: {
+        value: JSON.stringify({
+          owner: "other-instance",
+          startedAt: nowSec - 60,
+          expiresAt: nowSec + 600,
+          running: true,
+          total: 5,
+          checked: 3,
+        }),
+        updatedAt: 1000,
+      },
+      [HEALTH_KEY]: {
+        value: JSON.stringify({ [URL_A]: { status: "fail", latencyMs: 0, checkedAt: 900, failCount: 2 } }),
+        updatedAt: 1000,
+      },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    // 未抢到锁：不探测、不写健康表、不改锁
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+    // 返回当前健康表（调用方展示用）
+    expect(results[URL_A]).toMatchObject({ status: "fail", failCount: 2 });
+    // 他人进度原样保留（前端轮询读到检查中 3/5）
+    const { progress } = await getProxyHealth(mockDb, mockEnv);
+    expect(progress).toMatchObject({ running: true, total: 5, checked: 3 });
+  });
+
+  it("过期锁（running=true 但 expiresAt 已过）→ 可抢占：旧锁被覆盖并正常执行检查", async () => {
+    const { runProxyHealthCheck } = await loadModule();
+    configWith([URL_A, URL_B]);
+    const nowSec = Math.floor(Date.now() / 1000);
+    // 预置崩溃残留锁：running=true、已过期
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [], healthCheckUrl: CHECK_URL }),
+        updatedAt: 1000,
+      },
+      ["system:upstream_proxy_check_lock"]: {
+        value: JSON.stringify({
+          owner: "crashed-instance",
+          startedAt: nowSec - 3600,
+          expiresAt: nowSec - 1800,
+          running: true,
+          total: 99,
+          checked: 10,
+        }),
+        updatedAt: 1000,
+      },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await runProxyHealthCheck(mockDb, mockEnv);
+
+    // 过期锁可抢占：正常探测并写入健康表
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(results[URL_A]).toMatchObject({ status: "ok" });
   });
 
   it("探测失败 → 写入 fail 记录，failCount 从历史递增", async () => {
@@ -762,7 +874,8 @@ describe("runProxyHealthCheck 健康检查", () => {
     const results = await runProxyHealthCheck(mockDb, mockEnv);
 
     expect(results[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
-    const written = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    const written = JSON.parse(healthUpserts[0][0].create.value) as Record<string, any>;
     expect(written[URL_A]).toMatchObject({ status: "fail", failCount: 3 });
   });
 
@@ -787,7 +900,8 @@ describe("runProxyHealthCheck 健康检查", () => {
     expect(results[URL_A]).toMatchObject({ status: "fail", failCount: 1 });
     // 延迟记录的是响应头到达耗时（TTFB），不是被 abort 顶满的超时值
     expect(results[URL_A]!.latencyMs).toBeLessThan(10000);
-    const written = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    const written = JSON.parse(healthUpserts[0][0].create.value) as Record<string, any>;
     expect(written[URL_A]).toMatchObject({ status: "fail", failCount: 1 });
   });
 
@@ -833,14 +947,16 @@ describe("runProxyHealthCheck 健康检查", () => {
     expect(result.url).toBe(URL_A);
   });
 
-  it("未配置代理 → 返回空结果且不写表", async () => {
+  it("未配置代理 → 返回空结果且不写健康表", async () => {
     const { runProxyHealthCheck } = await loadModule();
     setConfigRows({});
 
     const results = await runProxyHealthCheck(mockDb, mockEnv);
 
     expect(results).toEqual({});
-    expect(mockUpsert).not.toHaveBeenCalled();
+    // 无候选不进批循环：健康表零写入（锁行写入/释放不在此列）
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthUpserts).toHaveLength(0);
   });
 
   it("大代理池分批探测：并发峰值不超过批次上限（不瞬间全量并发）", async () => {
@@ -936,10 +1052,12 @@ describe("健康检查渐进进度", () => {
 
     await runProxyHealthCheck(mockDb, mockEnv);
 
-    // 每批一次合并写库：2 批 = 2 次 upsert（此前只在循环后写 1 次）
-    expect(mockUpsert).toHaveBeenCalledTimes(2);
-    const firstWrite = JSON.parse(mockUpsert.mock.calls[0][0].create.value) as Record<string, any>;
-    const secondWrite = JSON.parse(mockUpsert.mock.calls[1][0].create.value) as Record<string, any>;
+    // 每批一次合并写库：2 批 = 2 次健康表 upsert（此前只在循环后写 1 次；
+    // 锁行写入不在此列）
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthUpserts).toHaveLength(2);
+    const firstWrite = JSON.parse(healthUpserts[0][0].create.value) as Record<string, any>;
+    const secondWrite = JSON.parse(healthUpserts[1][0].create.value) as Record<string, any>;
     // 首批写库只有前 20 个有结果（未检查的保留表内现状，空健康表 → 无条目）
     expect(Object.keys(firstWrite)).toHaveLength(20);
     // 末批写库全部 25 个（前批结果保留 + 本批新增）
@@ -959,21 +1077,34 @@ describe("健康检查渐进进度", () => {
     expect(getHealthCheckProgress()).toMatchObject({ running: false, total: 2, checked: 2 });
   });
 
-  it("并发调用复用同一任务（互斥：不重复探测、进度不被覆盖）", async () => {
+  it("并发调用复用同一任务（runningCheck 单飞：不重复探测、进度不被覆盖）", async () => {
     const { runProxyHealthCheck, getHealthCheckProgress } = await loadModule();
     setConfigRows({
       [CONFIG_KEY]: { value: JSON.stringify({ urls: [URL_A, URL_B], platformIds: [] }), updatedAt: 1000 },
       [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
     });
-    const fetchMock = vi.fn(async (_input: any) => ({ ok: true, status: 204 }));
+    // 首个探测挂起在 gate 上，锁定「runningCheck 已赋值、任务进行中」窗口
+    let resolveGate!: () => void;
+    const gate = new Promise<void>((r) => { resolveGate = r; });
+    let startedResolve!: () => void;
+    const started = new Promise<void>((r) => { startedResolve = r; });
+    let fetchCount = 0;
+    const fetchMock = vi.fn(async (_input: any) => {
+      if (fetchCount++ === 0) {
+        startedResolve(); // 首个探测发起 = 任务已进入批循环
+        await gate;
+      }
+      return { ok: true, status: 204 };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    // 同步连续调用（模拟手动 POST 与 cron 并发）：第二个复用第一个的任务
-    // （async 包装 promise 实例不同，但行为上串行：只探测一轮、结果一致）
-    const [r1, r2] = await Promise.all([
-      runProxyHealthCheck(mockDb, mockEnv),
-      runProxyHealthCheck(mockDb, mockEnv),
-    ]);
+    const p1 = runProxyHealthCheck(mockDb, mockEnv);
+    // 确定性等待首个 fetch 发起（非轮询：started 是即时信号），此时
+    // runningCheck 已赋值；期间发起的第二个调用命中单飞复用
+    await started;
+    const p2 = runProxyHealthCheck(mockDb, mockEnv);
+    resolveGate();
+    const [r1, r2] = await Promise.all([p1, p2]);
 
     expect(r1).toEqual(r2);
     // 只探测一轮（代理数 2，而非 4）
@@ -1016,7 +1147,9 @@ describe("缓存与更新", () => {
     // 第一次全量读取（config+health+pool）+ 第二次失效检查（config+health+pool）
     expect(mockFindFirst).toHaveBeenCalledTimes(6);
     expect(mockFindFirst.mock.calls[0][0].select).toHaveProperty("value");
-    expect(mockFindFirst.mock.calls[3][0].select).not.toHaveProperty("value");
+    // 失效检查 select 同样只取 value（内容比较：同秒双保存下 updatedAt 区分不了）
+    expect(mockFindFirst.mock.calls[3][0].select).toHaveProperty("value");
+    expect(mockFindFirst.mock.calls[3][0].select).not.toHaveProperty("updatedAt");
   });
 
   it("配置 updatedAt 变化 → 强制重载新代理地址，旧 ProxyAgent 被 close 释放", async () => {
@@ -1070,11 +1203,11 @@ describe("缓存与更新", () => {
     await getUpstreamProxy(mockDb, mockEnv);
 
     // 无配置时健康表不会被读取（config null 提前返回）：
-    // 第一次全量读取配置 + 第二次失效检查（行缺失时 updatedAt 归一到 null
+    // 第一次全量读取配置 + 第二次失效检查（行缺失时 value 归一到 null
     // 与缓存一致，短路命中不再全量读）
     expect(mockFindFirst).toHaveBeenCalledTimes(2);
     expect(mockFindFirst.mock.calls[0][0].select).toHaveProperty("value");
-    expect(mockFindFirst.mock.calls[1][0].select).not.toHaveProperty("value");
+    expect(mockFindFirst.mock.calls[1][0].select).toHaveProperty("value");
   });
 
   it("数据库读取失败 → 返回 null 不抛错", async () => {
@@ -1588,8 +1721,48 @@ describe("健康表并发写串行化（TiDB 1205 锁等待回归）", () => {
 
     expect(r1).toEqual(r2);
     expect(fetchCount).toBe(1);
-    // pool + 健康表（交集恢复 ok）各恰一次写——并发双拉取曾双写 pool 行
-    expect(mockUpsert).toHaveBeenCalledTimes(2);
+    // pool + 健康表（交集恢复 ok）+ 拉取时刻记录各恰一次写——并发双拉取曾双写 pool 行
+    expect(mockUpsert).toHaveBeenCalledTimes(3);
+  });
+
+  it("手动拉取不被进行中的定时拉取吞掉（单飞按模式分开）", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [POOL_KEY]: { value: JSON.stringify({ g1: [URL_A] }), updatedAt: 1000 },
+      [HEALTH_KEY]: { value: JSON.stringify({}), updatedAt: 1000 },
+    });
+    // 首个源请求挂起在 gate 上，锁定「定时拉取进行中」窗口
+    let resolveGate!: () => void;
+    const gate = new Promise<void>((r) => { resolveGate = r; });
+    let startedResolve!: () => void;
+    const started = new Promise<void>((r) => { startedResolve = r; });
+    let fetchCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: any) => {
+        if (fetchCount++ === 0) {
+          startedResolve(); // 定时拉取已发起源请求 = pullInFlight 已赋值
+          await gate;
+        }
+        return { ok: true, status: 200, text: async () => URL_A };
+      })
+    );
+
+    const autoP = pullProxyGroups(mockDb, mockEnv); // 定时模式先行
+    // 确定性等待定时拉取进入源请求（非轮询：started 是即时信号）
+    await started;
+    const manualP = pullProxyGroups(mockDb, mockEnv, { manual: true });
+    resolveGate();
+    const [autoResult, manualResult] = await Promise.all([autoP, manualP]);
+
+    expect(autoResult.g1).toEqual({ pulled: 0, total: 1, added: 0, removed: 0, kept: 1 });
+    expect(manualResult.g1).toEqual({ pulled: 0, total: 1, added: 0, removed: 0, kept: 1 });
+    // 两个模式各自发起源请求（此前手动拉取会复用定时任务、退化为只拉「到期组」）
+    expect(fetchCount).toBe(2);
   });
 
   it("健康表写失败后串行链继续：后续写不受阻，失败写不污染缓存", async () => {
@@ -1650,6 +1823,148 @@ describe("健康表并发写串行化（TiDB 1205 锁等待回归）", () => {
     const { results } = await getProxyHealth(mockDb, mockEnv);
     expect(results[URL_A]).toMatchObject({ status: "ok", failCount: 2 });
     expect(results[URL_X]).toMatchObject({ status: "fail", failCount: 3 });
+  });
+});
+
+describe("组级自动更新（autoRefresh / refreshIntervalMin / 周期判定）", () => {
+  const URL_A = "http://127.0.0.1:7890";
+  const SRC = "https://example.com/proxies.txt";
+  const PULL_AT_KEY = "system:upstream_proxy_pull_at";
+  const nowSec = () => Math.floor(Date.now() / 1000);
+
+  it("缺省（无 autoRefresh/refreshIntervalMin 字段）→ 视为启用、默认周期 60：首次拉取全部到期", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    // 无拉取记录：lastAt=0 视为长期未拉，全部到期
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(results.g1).toMatchObject({ pulled: 1 });
+  });
+
+  it("未到期组（距上次成功拉取 < 周期）定时模式跳过，不发起拉取", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+      [PULL_AT_KEY]: { value: JSON.stringify({ g1: nowSec() - 30 }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await pullProxyGroups(mockDb, mockEnv);
+
+    // 默认周期 60 分钟：30 秒前刚拉过 → 未到期，整轮跳过不写库
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(results).toEqual({});
+  });
+
+  it("到期组（距上次拉取 ≥ 周期）定时模式拉取；自定义周期生效", async () => {
+    const { pullProxyGroups } = await loadModule();
+    // 周期 20160 分钟（14 天）的最长边界：2 小时前拉过 → 未到期（断言长周期生效）
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC, refreshIntervalMin: 20160 }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [PULL_AT_KEY]: { value: JSON.stringify({ g1: nowSec() - 7200 }), updatedAt: 1000 },
+    });
+    let fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await pullProxyGroups(mockDb, mockEnv)).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // 同样 2 小时前拉过但周期 60 → 已到期拉取
+    vi.resetModules();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC, refreshIntervalMin: 60 }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [PULL_AT_KEY]: { value: JSON.stringify({ g1: nowSec() - 7200 }), updatedAt: 1000 },
+    });
+    const fresh = await import("../upstream-proxy");
+    fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await fresh.pullProxyGroups(mockDb, mockEnv);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(results.g1).toMatchObject({ pulled: 1 });
+  });
+
+  it("越界/非法周期回退默认 60（0、负数、超上限、小数）", async () => {
+    const { pullProxyGroups } = await loadModule();
+    // 非法周期 0 回退 60：30 秒前拉过 → 未到期（若按 0 分钟周期会立即重拉）
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC, refreshIntervalMin: 0 }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [PULL_AT_KEY]: { value: JSON.stringify({ g1: nowSec() - 30 }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await pullProxyGroups(mockDb, mockEnv)).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("autoRefresh=false：定时模式跳过（禁用自动更新），手动模式仍立即拉取", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: {
+        value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC, autoRefresh: false }], platformIds: [] }),
+        updatedAt: 1000,
+      },
+      [PULL_AT_KEY]: { value: JSON.stringify({ g1: nowSec() - 7200 }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // 定时模式：即使已到期也不拉（自动更新关闭）
+    expect(await pullProxyGroups(mockDb, mockEnv)).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // 手动模式：忽略 autoRefresh 与周期，立即拉取
+    const results = await pullProxyGroups(mockDb, mockEnv, { manual: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(results.g1).toMatchObject({ pulled: 1 });
+  });
+
+  it("拉取成功后记录时刻（手动与定时共用：手动拉取后定时周期重新计时），失败不记录", async () => {
+    const { pullProxyGroups } = await loadModule();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await pullProxyGroups(mockDb, mockEnv, { manual: true });
+
+    // 成功：PULL_AT_KEY 行记录该组时刻（≈ 当前秒），此后定时模式未到期
+    const row = dbRows[PULL_AT_KEY];
+    expect(row?.value).toBeDefined();
+    const record = JSON.parse(row!.value) as Record<string, number>;
+    expect(record.g1).toBeGreaterThan(nowSec() - 5);
+    const fetchMock2 = vi.fn(async () => ({ ok: true, status: 200, text: async () => URL_A }));
+    vi.stubGlobal("fetch", fetchMock2);
+    expect(await pullProxyGroups(mockDb, mockEnv)).toEqual({});
+    expect(fetchMock2).not.toHaveBeenCalled();
+
+    // 失败：不记录时刻（定时任务按周期重试）
+    vi.resetModules();
+    setConfigRows({
+      [CONFIG_KEY]: { value: JSON.stringify({ groups: [{ name: "g1", sourceUrl: SRC }], platformIds: [] }), updatedAt: 1000 },
+    });
+    const fresh = await import("../upstream-proxy");
+    const failFetch = vi.fn(async () => { throw new Error("network down"); });
+    vi.stubGlobal("fetch", failFetch);
+    const failed = await fresh.pullProxyGroups(mockDb, mockEnv);
+    expect(failed.g1.error).toBeDefined();
+    expect(dbRows[PULL_AT_KEY]).toBeUndefined();
   });
 });
 
@@ -1981,15 +2296,15 @@ describe("健康检查间隔配置（healthCheckIntervalMin）", () => {
     expect(await intervalAfterLoad(undefined)).toBe(5);
   });
 
-  it("越界/非法值回退默认 5（0、61、小数、字符串、null）", async () => {
-    for (const bad of [0, 61, 2.5, "10", null]) {
+  it("越界/非法值回退默认 5（0、1441、小数、字符串、null）", async () => {
+    for (const bad of [0, 1441, 2.5, "10", null]) {
       expect(await intervalAfterLoad(bad)).toBe(5);
     }
   });
 
-  it("边界值 1 与 60 均合法", async () => {
+  it("边界值 1 与上限 1440（24 小时）均合法", async () => {
     expect(await intervalAfterLoad(1)).toBe(1);
-    expect(await intervalAfterLoad(60)).toBe(60);
+    expect(await intervalAfterLoad(1440)).toBe(1440);
   });
 
   it("无代理配置（{} / 纯 URL 旧格式）→ 默认 5，不抛错", async () => {
@@ -2065,7 +2380,9 @@ describe("环境变量设备级禁用（UPSTREAM_PROXY_DISABLED）", () => {
     const results = await runProxyHealthCheck(mockDb, mockEnv);
     expect(results[URL_A]).toMatchObject({ status: "ok", latencyMs: expect.any(Number) });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    // 健康表写一次（锁行 upsert 不在此列）
+    const healthUpserts = mockUpsert.mock.calls.filter((c) => c[0].where.key === HEALTH_KEY);
+    expect(healthUpserts).toHaveLength(1);
   });
 });
 

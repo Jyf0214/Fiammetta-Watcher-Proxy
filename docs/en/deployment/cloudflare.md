@@ -94,6 +94,8 @@ id = "your-kv-namespace-id"
 crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *"]
 ```
 
+> The `worker/wrangler.toml` shipped with the repo also contains a `[[hyperdrive]]` placeholder block (`id = "placeholder-hyperdrive-id"`) and an `[observability]` block. You can keep `[observability]`; the **`[[hyperdrive]]` placeholder ID is not a valid UUID and will fail deployment validation** — delete the whole block if you do not use Hyperdrive, or fill in a real ID when using Hyperdrive (`DB_TYPE=hyperdrive`).
+
 ### 3. Initialize the Database
 
 ```bash

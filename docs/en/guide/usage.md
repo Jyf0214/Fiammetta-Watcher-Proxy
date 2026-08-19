@@ -13,7 +13,7 @@ The dashboard provides a global view of system status:
 - **Performance**: Average TTFT, average request duration
 - **Trend charts**: Mini trend charts per stat card in detail view (requests, tokens, TPS; no trend for TTFT/duration without per-period data)
 
-The dashboard auto-refreshes every 30 seconds. Supports grid view and detail view modes.
+The dashboard auto-refreshes every 30 seconds. Supports grid view and detail view modes, and a manual refresh button.
 
 ## Platform Management
 
@@ -43,7 +43,7 @@ The platform type determines the upstream protocol: choose `openai` for most pro
 |-------|-------------|---------|
 | Forward Headers | Downstream request headers to forward to upstream (JSON array) | empty |
 | Inject stream_options | Whether to auto-inject `stream_options` (turn off when the upstream rejects it) | on |
-| Platform Whitelist | When enabled, the platform is never banned on 429 — it is only degraded for 2 minutes (per-key error-count auto-disable is unaffected) | off |
+| Platform Whitelist | When enabled, neither the platform nor its keys are banned or auto-disabled on errors — they are only degraded for 2 minutes | off |
 | Override UA | When enabled, replaces the User-Agent sent to upstream with the custom UA (requires Custom UA to be filled in; takes priority over UA in Extra Headers) | off |
 | Custom UA | Override the User-Agent sent to upstream | empty |
 | Extra Headers | Additional request headers sent to upstream (JSON object, max 20) | empty |
@@ -104,6 +104,8 @@ Based on `resetPeriod`:
 
 ### Key States
 
+The status column in the admin key list shows **Enabled / Disabled** only; "Expired" and "Over Limit" are runtime rejection behaviors, not visible statuses:
+
 - **Enabled**: Accepts requests normally
 - **Disabled**: Rejects all requests (returns 401)
 - **Expired**: Requests are rejected after the expiry date (returns 401)
@@ -111,7 +113,7 @@ Based on `resetPeriod`:
 
 ## Model Mapping
 
-Model mappings map client-requested model names to actual upstream model names (including `*` wildcard prefix matching, e.g. `gpt-4*`). There is **no dedicated management page** — maintain mappings via Export/Import JSON in the "Data Manager": add records (`alias` / `targetModel` / `platformId`) in the exported `modelMaps` array and import; mappings whose `alias` already exists are skipped on import.
+Model mappings map client-requested model names to actual upstream model names (including `*` wildcard prefix matching, e.g. `gpt-4*`). There is **no dedicated management page** — maintain mappings via Export/Import JSON in the "Data Manager": add records (`alias` / `targetModel` / `platformId`) in the exported `modelMaps` array and import; mappings whose `alias` + platform combination already exists are skipped on import (the same alias mapped to different platforms is valid and not skipped).
 
 ### Configuration
 
@@ -141,7 +143,7 @@ Auto Model is an advanced routing feature:
 1. System discovers available models from each platform on a schedule (default every 6 hours; on Cloudflare this is driven by Cron, on Docker by the in-container timer, other deployments call `/api/cron/model-fetch` externally — see [Cron Tasks](/en/api/cron))
 2. View discovery results on the "Auto Model" page
 3. Select specific models to include in the auto-routing pool
-4. System generates an auto-model ID — when clients use this ID, FWP automatically selects the best platform and model
+4. Click "Enable Auto Model" on the "Auto Model" page to generate the auto-model ID (format `fwp-auto-model-xxxxxxxxxxxxxxxx`) — when clients use this ID, FWP automatically selects the best platform and model
 5. Failed auto-model requests are temporarily frozen for 3 minutes to prevent repeated failures
 
 ::: warning
@@ -217,7 +219,7 @@ Import uses a **preview-then-confirm** flow: it shows per-type counts and issues
 
 ## System Settings
 
-The "System" group contains the Data Manager and System Keys pages (see above). The database type and connection status are shown in the sidebar status bar (from `/api/health`, admin auth required).
+The "System" group contains three pages: Data Manager, System Keys, and Outbound Proxy (the latter is only available on Docker deployments). The database type and connection status are shown in the sidebar status bar (from `/api/health`, admin auth required).
 
 ## Related Docs
 

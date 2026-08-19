@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { Input, Select, Alert, message, Popconfirm, Switch } from "antd";
+import { Input, InputNumber, Select, Alert, message, Popconfirm, Switch } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
@@ -17,6 +17,8 @@ import {
   CONFIG_KEY,
   POOL_KEY,
   HEALTH_KEY,
+  PROXY_PULL_INTERVAL_RANGE,
+  DEFAULT_PULL_INTERVAL_MIN,
   parseProxyConfig,
   parseHealthMap,
   parsePoolMap,
@@ -29,6 +31,7 @@ import {
   formatChecked,
   errMsg,
   type GroupFormState,
+  type ParsedConfig,
 } from "@/lib/upstream-proxy-ui";
 
 /** 安全上下文（HTTPS/localhost）外 crypto.randomUUID 不存在——HTTP 局域网访问
@@ -78,6 +81,8 @@ export default function UpstreamProxyGroupPage() {
     urlsText: "",
     boundPlatformIds: [],
     enabled: true,
+    autoRefresh: true,
+    refreshIntervalMin: null,
   });
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -217,31 +222,44 @@ export default function UpstreamProxyGroupPage() {
           .filter(([, groupName]) => groupName === g.name)
           .map(([pid]) => pid),
         enabled: g.enabled,
+        autoRefresh: g.autoRefresh,
+        refreshIntervalMin: g.refreshIntervalMin ?? null,
       });
     } else if (isNew) {
-      setFormGroup({ id: genId(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [], enabled: true });
+      setFormGroup({ id: genId(), name: "", sourceUrl: "", urlsText: "", boundPlatformIds: [], enabled: true, autoRefresh: true, refreshIntervalMin: null });
     }
   }
 
-  /** 全部组 → 表单态（保存/删除时与当前组合并；组顺序保持配置原序） */
-  const allGroupsForm = (): GroupFormState[] =>
-    parsed.groups.map((g) => ({
+  /** 某份已解析配置 → 全组表单态（组顺序保持配置原序；保存/删除时与当前组合并） */
+  const groupsFormFrom = (src: ParsedConfig): GroupFormState[] =>
+    src.groups.map((g) => ({
       id: genId(),
       name: g.name,
       sourceUrl: g.sourceUrl,
       urlsText: g.urls.join("\n"),
-      boundPlatformIds: Object.entries(parsed.platformGroup)
+      boundPlatformIds: Object.entries(src.platformGroup)
         .filter(([, groupName]) => groupName === g.name)
         .map(([pid]) => pid),
       enabled: g.enabled,
+      autoRefresh: g.autoRefresh,
+      refreshIntervalMin: g.refreshIntervalMin ?? null,
     }));
 
-  const saveConfig = async (groupsForm: GroupFormState[], successKey: string) => {
+  /** 保存前强制重新验证并解析最新配置：多实例/多标签页下 SWR 缓存可能落后于
+   *  其他页面刚做的修改（禁用/删除组），直接基于旧缓存构造整份配置会把
+   *  旧状态写回覆盖（如已禁用的组复活）；mutate 失败时退回当前缓存 */
+  const latestConfig = async (): Promise<{ raw: string | undefined; src: ParsedConfig }> => {
+    const latest = await mutate();
+    const raw = latest?.[CONFIG_KEY] ?? config?.[CONFIG_KEY];
+    return { raw, src: parseProxyConfig(raw) };
+  };
+
+  const saveConfig = async (groupsForm: GroupFormState[], src: ParsedConfig, successKey: string) => {
     const result = buildConfigJson(
       groupsForm,
-      parsed.platformIds,
-      parsed.healthCheckUrl ?? "",
-      parsed.healthCheckIntervalMin ?? null
+      src.platformIds,
+      src.healthCheckUrl ?? "",
+      src.healthCheckIntervalMin ?? null
     );
     if (!result.ok) {
       message.error(t(VALIDATION_KEYS[result.error]));
@@ -272,11 +290,14 @@ export default function UpstreamProxyGroupPage() {
 
   const handleSave = async () => {
     const name = formGroup.name.trim();
-    // 新建组追加到末尾；编辑组在原位置替换（其余组原样保留）
+    // 保存前强制重新验证（见 latestConfig）：多实例/多标签页下旧缓存构造
+    // 会把其他页面刚做的禁用/删除等修改写回覆盖
+    const { src } = await latestConfig();
+    // 新建组追加到末尾；编辑组在原位置替换（其余组以最新已保存配置为基准）
     const merged = isNew
-      ? [...allGroupsForm(), formGroup]
-      : allGroupsForm().map((g) => (g.name === id ? formGroup : g));
-    const ok = await saveConfig(merged, "upstreamProxyGroupSaved");
+      ? [...groupsFormFrom(src), formGroup]
+      : groupsFormFrom(src).map((g) => (g.name === id ? formGroup : g));
+    const ok = await saveConfig(merged, src, "upstreamProxyGroupSaved");
     if (ok && name) {
       router.replace(`/admin/upstream-proxy/${encodeURIComponent(name)}`);
       // 保存后立即拉取订阅源并验证代理连通性（仅 Docker，整体禁用时跳过——
@@ -300,18 +321,20 @@ export default function UpstreamProxyGroupPage() {
   };
 
   /** 手动触发拉取/检查前确认表单与已保存配置一致，避免结果与页面显示对不上。
-   *  比较构造与 handleSave 相同（编辑中的组替换到对应位置），
-   *  否则 allGroupsForm 全派生自已保存配置，恒等比较恒真、守卫失效 */
-  const ensureSaved = (): boolean => {
-    const saved = config?.[CONFIG_KEY];
+   *  比较构造与 handleSave 相同（编辑中的组替换到对应位置），且基准用最新
+   *  已保存配置（见 latestParsed），否则 allGroupsForm 全派生自已保存配置、
+   *  恒等比较恒真、守卫失效——旧缓存下还会误判「一致」放行 */
+  const ensureSaved = async (): Promise<boolean> => {
+    const { raw, src } = await latestConfig();
+    const saved = raw;
     const merged = isNew
-      ? [...allGroupsForm(), formGroup]
-      : allGroupsForm().map((g) => (g.name === id ? formGroup : g));
+      ? [...groupsFormFrom(src), formGroup]
+      : groupsFormFrom(src).map((g) => (g.name === id ? formGroup : g));
     const result = buildConfigJson(
       merged,
-      parsed.platformIds,
-      parsed.healthCheckUrl ?? "",
-      parsed.healthCheckIntervalMin ?? null
+      src.platformIds,
+      src.healthCheckUrl ?? "",
+      src.healthCheckIntervalMin ?? null
     );
     if (!result.ok || result.value !== saved) {
       message.warning(t("upstreamProxySaveFirst"));
@@ -323,7 +346,7 @@ export default function UpstreamProxyGroupPage() {
   /** 立即拉取订阅源（手动按钮与「保存后自动拉取」共用）；
    *  拉取针对全部配置了订阅地址的组，成功后刷新配置与健康数据 */
   const pullProxyGroupsNow = async (skipEnsure = false) => {
-    if (!skipEnsure && !ensureSaved()) return;
+    if (!skipEnsure && !(await ensureSaved())) return;
     setPulling(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/pull", { method: "POST" });
@@ -359,7 +382,7 @@ export default function UpstreamProxyGroupPage() {
    *  manual=true（按钮发起）时无候选（total=0）如实 warning；自动验证（保存后
    *  触发）保持静默，不打断保存成功提示 */
   const checkProxyHealthNow = async (skipEnsure = false, manual = true) => {
-    if (!skipEnsure && !ensureSaved()) return;
+    if (!skipEnsure && !(await ensureSaved())) return;
     setChecking(true);
     try {
       const res = await fetch("/api/admin/upstream-proxy/health", { method: "POST" });
@@ -471,8 +494,12 @@ export default function UpstreamProxyGroupPage() {
     if (isNew) return;
     setDeleting(true);
     try {
+      // 删除前也以最新已保存配置为基准（同 handleSave：旧缓存下会把其他
+      // 页面刚做的禁用/删除修改写回覆盖）
+      const { src } = await latestConfig();
       const ok = await saveConfig(
-        allGroupsForm().filter((g) => g.name !== id),
+        groupsFormFrom(src).filter((g) => g.name !== id),
+        src,
         "upstreamProxyGroupDeleted"
       );
       if (ok) router.push("/admin/upstream-proxy");
@@ -770,6 +797,35 @@ export default function UpstreamProxyGroupPage() {
                   onChange={(checked) => setFormGroup({ ...formGroup, enabled: checked })}
                 />
               </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    {t("upstreamProxyAutoRefreshLabel")}
+                  </label>
+                  <p className="text-xs text-zinc-400 mt-0.5">{t("upstreamProxyAutoRefreshHelp")}</p>
+                </div>
+                <Switch
+                  checked={formGroup.autoRefresh}
+                  onChange={(checked) => setFormGroup({ ...formGroup, autoRefresh: checked })}
+                />
+              </div>
+              {formGroup.autoRefresh && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                    {t("upstreamProxyRefreshIntervalLabel")}
+                  </label>
+                  <InputNumber
+                    value={formGroup.refreshIntervalMin}
+                    onChange={(v) => setFormGroup({ ...formGroup, refreshIntervalMin: v ?? null })}
+                    min={PROXY_PULL_INTERVAL_RANGE.min}
+                    max={PROXY_PULL_INTERVAL_RANGE.max}
+                    precision={0}
+                    placeholder={`${DEFAULT_PULL_INTERVAL_MIN} (${t("upstreamProxyHealthIntervalDefault")})`}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-zinc-400 mt-1">{t("upstreamProxyRefreshIntervalHelp")}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
                   {t("upstreamProxyGroupNameLabel")}

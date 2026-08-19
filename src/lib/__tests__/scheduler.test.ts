@@ -40,6 +40,14 @@ describe("matchesSchedule 调度匹配", () => {
     expect(matchesSchedule({}, new Date(2026, 7, 16, 23, 59))).toBe(true);
   });
 
+  it("空分钟/小时集合 = 每分钟每小时都命中（防御空 Set 恒 false 的回归用例）", () => {
+    // 空 Set 为 truthy 且 has() 恒 false——若不判 size，该规格永不命中
+    const spec = { minutes: new Set<number>(), hours: new Set<number>() };
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 0, 0))).toBe(true);
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 12, 34))).toBe(true);
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 23, 59))).toBe(true);
+  });
+
   it("minIntervalMs：距上次完成未满间隔 → false（无完成记录时不受限）", () => {
     const spec = { minutes: new Set([17, 22, 27]), minIntervalMs: 10 * 60_000 };
     const at = (minute: number) => new Date(2026, 7, 16, 10, minute);
@@ -258,16 +266,36 @@ describe("healthCheckSpec 间隔生成", () => {
     expect([...healthCheckSpec(60).minutes!].sort((a, b) => a - b)).toEqual([2]);
   });
 
-  it("越界/非整数钳制到允许范围（0→1、99→60、2.7→2）", () => {
+  it("越界/非整数钳制到允许范围（0→1、1441→1440、2.7→2）", () => {
     expect([...healthCheckSpec(0).minutes!].length).toBe(58);
-    expect([...healthCheckSpec(99).minutes!]).toEqual([2]);
+    // 1441 钳制到 1440（24 小时）→ 小时级网格：每天仅锚点小时 2 的 :02
+    const clamped = healthCheckSpec(1441);
+    expect([...clamped.minutes!]).toEqual([2]);
+    expect([...clamped.hours!]).toEqual([2]);
     expect([...healthCheckSpec(2.7).minutes!].sort((a, b) => a - b)).toEqual(
       Array.from({ length: 29 }, (_, i) => i * 2 + 2)
     );
   });
 
-  it("范围常量与文档一致（1~60）", () => {
-    expect(PROXY_HEALTH_INTERVAL_MIN_RANGE).toEqual({ min: 1, max: 60 });
+  it(">60 分钟：小时级网格（分钟固定 :02，小时按 interval/60 步进取整）", () => {
+    // 1440（24 小时）→ 每天 02:02 一次
+    const daily = healthCheckSpec(1440);
+    expect([...daily.minutes!]).toEqual([2]);
+    expect([...daily.hours!]).toEqual([2]);
+    // 720（12 小时）→ 02:02 / 14:02
+    const halfDay = healthCheckSpec(720);
+    expect([...halfDay.minutes!]).toEqual([2]);
+    expect([...halfDay.hours!].sort((a, b) => a - b)).toEqual([2, 14]);
+    // 120（2 小时）→ 2/4/.../22 的 :02
+    const twoHours = healthCheckSpec(120);
+    expect([...twoHours.minutes!]).toEqual([2]);
+    expect([...twoHours.hours!].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 11 }, (_, i) => i * 2 + 2)
+    );
+  });
+
+  it("范围常量与文档一致（1~1440）", () => {
+    expect(PROXY_HEALTH_INTERVAL_MIN_RANGE).toEqual({ min: 1, max: 1440 });
   });
 });
 
@@ -318,13 +346,22 @@ describe("DOCKER_TASKS 任务表与文档频率一致", () => {
       ["key-reset", [0], []], // 每小时（:00）
       ["log-archive", [10], [3]], // 每天 3:10（错开整点 key-reset）
       ["proxy-health", [2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57], []], // 每 5 分钟
-      ["proxy-pull", [17], []], // 每小时（:17）
+      ["proxy-pull", [], []], // 每分钟 tick（组级自动更新按每组周期判定到期）
     ]);
   });
 
   it("任务名互不重复", () => {
     const names = DOCKER_TASKS.map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("proxy-pull 空 spec 每分钟都命中（到期判定在 pullProxyGroups 内部按组进行）", () => {
+    const pull = DOCKER_TASKS.find((t) => t.name === "proxy-pull");
+    expect(pull).toBeDefined();
+    const spec = resolveSpec(pull!.spec);
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 0, 0))).toBe(true);
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 12, 34))).toBe(true);
+    expect(matchesSchedule(spec, new Date(2026, 7, 16, 23, 59))).toBe(true);
   });
 
   it("proxy-health 默认间隔（5）分钟集合 = 分钟 % 5 == 2 的完整 12 个值", () => {

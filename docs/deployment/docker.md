@@ -83,8 +83,8 @@ volumes:
 | 模型发现（model-fetch） | 每 6 小时 |
 | Key 用量重置（key-reset） | 每小时 |
 | 日志归档（log-archive） | 每天 3:10 |
-| 出站代理健康检查（proxy-health） | 每 5 分钟（可在出站代理管理页「全局设置」自定义 1~60 分钟） |
-| 出站代理列表拉取（proxy-pull） | 每小时 |
+| 出站代理健康检查（proxy-health） | 每 5 分钟（可在出站代理管理页「全局设置」自定义 1~1440 分钟） |
+| 出站代理列表拉取（proxy-pull） | 每分钟触发（按每个代理组的自动更新开关与周期判定是否拉取） |
 
 无需外部调度器调用 `/api/cron/*`，也无需配置 `CRON_SECRET`（内部定时器直接执行任务函数，不经过 HTTP 端点）。`CRON_SECRET` 仅在从外部手动调用端点时需要。
 
@@ -107,7 +107,12 @@ docker pull ghcr.io/jyf0214/fiammetta-watcher-proxy:canary-lite
 - `docker-compose.yml` — 应用 + PostgreSQL 一体式部署（内置数据库，含安全加固与健康检查），适合开箱即用
 - `docker-compose.standalone.yml` — 应用 + 外部数据库（自备 PostgreSQL / TiDB / MySQL / MariaDB）
 
-在仓库根目录创建 `.env` 文件，按 compose 内注释填写必填项（`POSTGRES_PASSWORD` / `DATABASE_URL` / `ADMIN_PASSWORD` / `JWT_SECRET` 等，缺失时 compose 会报错提示），然后：
+在仓库根目录创建 `.env` 文件，按对应 compose 文件内注释填写必填项：
+
+- `docker-compose.yml`（内置 PostgreSQL）：`POSTGRES_PASSWORD`、`ADMIN_PASSWORD`、`JWT_SECRET`（缺失时 compose 会报错提示）
+- `docker-compose.standalone.yml`（外部数据库）：`PORT`、`DB_TYPE`、`DATABASE_URL`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`JWT_SECRET`、`CRON_SECRET` 全部必填（缺失时 compose 会报错提示）
+
+然后：
 
 ```bash
 docker compose up -d

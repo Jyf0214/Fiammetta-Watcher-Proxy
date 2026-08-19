@@ -83,8 +83,8 @@ The container registers an in-container timer at startup — all scheduled tasks
 | Model discovery (model-fetch) | Every 6 hours |
 | Key usage reset (key-reset) | Hourly |
 | Log archival (log-archive) | Daily at 3:10 |
-| Outbound proxy health check (proxy-health) | Every 5 minutes (customizable to 1–60 minutes under Global settings on the outbound proxy page) |
-| Outbound proxy list pull (proxy-pull) | Hourly |
+| Outbound proxy health check (proxy-health) | Every 5 minutes (customizable to 1–1440 minutes under Global settings on the outbound proxy page) |
+| Outbound proxy list pull (proxy-pull) | Every minute (per-group pull gated by each group's auto-update toggle and interval) |
 
 No external scheduler is needed for `/api/cron/*`, and `CRON_SECRET` is **not required** (the timer calls the task functions directly, bypassing the HTTP endpoints). `CRON_SECRET` is only needed when calling the endpoints externally.
 
@@ -107,7 +107,12 @@ The repository ships two compose files — clone it and use them directly:
 - `docker-compose.yml` — app + PostgreSQL in one deployment (bundled database, with security hardening and health checks), ready to use out of the box
 - `docker-compose.standalone.yml` — app + external database (bring your own PostgreSQL / TiDB / MySQL / MariaDB)
 
-Create a `.env` file in the repo root and fill in the required values (see the comments in the compose file — `POSTGRES_PASSWORD` / `DATABASE_URL` / `ADMIN_PASSWORD` / `JWT_SECRET`, etc.; compose refuses to start if they are missing), then:
+Create a `.env` file in the repo root and fill in the required values for the compose file you use (compose refuses to start if they are missing):
+
+- `docker-compose.yml` (bundled PostgreSQL): `POSTGRES_PASSWORD`, `ADMIN_PASSWORD`, `JWT_SECRET`
+- `docker-compose.standalone.yml` (external database): `PORT`, `DB_TYPE`, `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`, `CRON_SECRET` — all required
+
+Then:
 
 ```bash
 docker compose up -d
