@@ -150,9 +150,12 @@ const EMPTY_UPSTREAM_RESPONSE = Symbol("empty-upstream-response");
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
+/** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
+type MultipartBody = { model: string | null; raw: Uint8Array; contentType: string };
+
 async function parseRequestBody<T>(
   request: Request
-): Promise<{ body: T } | { error: Response }> {
+): Promise<{ body: T } | { multipart: MultipartBody } | { error: Response }> {
   // 优先用 Content-Length 头快速拒绝超大请求，避免读取整个 body
   const contentLength = Number(request.headers.get("content-length") || "0");
   if (contentLength > MAX_BODY_BYTES) {
@@ -162,6 +165,48 @@ async function parseRequestBody<T>(
         { status: 413 }
       ),
     };
+  }
+
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
+    // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
+    // 标准客户端必然发送 multipart 导致固定 400「请求体格式错误」，端点形同虚设；
+    // 现读取原始字节（重试循环需可重放 body），formData 仅用于提取 model 路由
+    let raw: Uint8Array;
+    try {
+      raw = new Uint8Array(await request.arrayBuffer());
+    } catch {
+      return {
+        error: Response.json(
+          { error: { message: "读取请求体失败", type: "invalid_request_error" } },
+          { status: 400 }
+        ),
+      };
+    }
+
+    // Content-Length 不存在或不准时，用实际字节数兜底
+    if (raw.length > MAX_BODY_BYTES) {
+      return {
+        error: Response.json(
+          { error: { message: "请求体过大", type: "invalid_request_error" } },
+          { status: 413 }
+        ),
+      };
+    }
+
+    let model: string | null = null;
+    try {
+      const fd = await new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: raw,
+      }).formData();
+      const m = fd.get("model");
+      model = typeof m === "string" && m.length > 0 ? m : null;
+    } catch {
+      // 非标准 multipart（boundary 畸形等）：model 留 null，调用方按缺 model 400
+    }
+    return { multipart: { model, raw, contentType } };
   }
 
   let bodyText: string;
@@ -231,7 +276,20 @@ export async function proxyV1Request(
     const errBody = (await errRes.json().catch(() => ({}))) as { error?: { message?: string } };
     return v1ErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
   }
-  const rawBody = parseResult.body;
+  // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
+  // 原始字节在循环内原样透传上游（JSON 管道字段如 max_tokens/stream 不适用）
+  let multipart: MultipartBody | null = null;
+  if ("multipart" in parseResult) {
+    multipart = parseResult.multipart;
+    if (!multipart.model) {
+      return v1ErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+    }
+  }
+  // TS 联合收窄：in 运算符分支后 parseResult 类型被收窄到 { multipart }，
+  // 不能直接写 .body；用 in 三元取回 body 分支（error 分支已提前 return）
+  const rawBody = "body" in parseResult
+    ? parseResult.body
+    : { model: multipart!.model as string };
   let body = rawBody;
 
   // ── 2. 额外校验 ──
@@ -255,10 +313,14 @@ export async function proxyV1Request(
 
   // ── 3. 路由选择 ──
   const modelName = body.model as string | undefined;
-  const requestedModel = modelName || "unknown";
-  const route = modelName
-    ? await routeRequest(modelName, env.DB, workerEnv)
-    : await routeRequest("__any__", env.DB, workerEnv);
+  if (!modelName) {
+    // 客户端漏传 model（/v1/models 之外所有端点必填）：按 4xx 返回，
+    // 此前用 "__any__" 兜底恒路由失败返回 500，把客户端错误伪装成
+    // 服务器故障并污染错误统计
+    return v1ErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+  }
+  const requestedModel = modelName;
+  const route = await routeRequest(modelName, env.DB, workerEnv);
 
   if (!route) {
     // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
@@ -515,14 +577,17 @@ export async function proxyV1Request(
     // Anthropic 分支随后转换——convertOpenAIRequest 白名单会剥离模板中的 OpenAI 专属字段
     // （stream_options/n/response_format 等），避免 Anthropic 严格后端 422 extra_forbidden
     let upstreamBody: Record<string, unknown> = { ...body, model: currentTargetModel };
-    try {
-      const templates = await loadTemplates(env.DB, workerEnv);
-      const applicable = getApplicableTemplates(templates, requestedModel);
-      if (applicable.length > 0) {
-        upstreamBody = applyTemplates(upstreamBody, applicable);
+    // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
+    if (!multipart) {
+      try {
+        const templates = await loadTemplates(env.DB, workerEnv);
+        const applicable = getApplicableTemplates(templates, requestedModel);
+        if (applicable.length > 0) {
+          upstreamBody = applyTemplates(upstreamBody, applicable);
+        }
+      } catch (tplErr) {
+        console.error(`${logTag} 加载请求模板失败:`, tplErr);
       }
-    } catch (tplErr) {
-      console.error(`${logTag} 加载请求模板失败:`, tplErr);
     }
 
     if (upstreamIsAnthropic) {
@@ -608,7 +673,8 @@ export async function proxyV1Request(
     );
     try {
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
+        // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
+        "Content-Type": multipart ? multipart.contentType : "application/json",
         // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
         // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
         ...(upstreamIsAnthropic
@@ -625,7 +691,7 @@ export async function proxyV1Request(
       upstreamResponse = await fetch(upstreamUrl, {
         method: "POST",
         headers,
-        body: JSON.stringify(upstreamBody),
+        body: multipart ? multipart.raw : JSON.stringify(upstreamBody),
         signal: upstreamController.signal,
         // 禁止跟随重定向：isSafeUpstreamUrl 只校验初始 URL，
         // 跟随 3xx 可能将请求重定向到内网（SSRF / DNS rebinding TOCTOU）
@@ -692,6 +758,7 @@ export async function proxyV1Request(
         upstreamResponse,
         currentPlatform,
         apiKey,
+        currentKey,
         requestedModel,
         config,
         effectiveIsStream,
@@ -843,7 +910,11 @@ export async function proxyV1Request(
             currentKey = nextPlatformKey;
             switched = true;
           } else {
-            // 该平台无可用 Key：剔除后继续尝试下一个候选
+            // 该平台无可用 Key：剔除后继续尝试下一个候选。
+            // 同时释放半开探测配额：选中但无 Key（Key 常处于封禁冷却，熔断 open
+            // 60 秒先解除）时若不释放，探测槽位被无 Key 候选占满后该平台被排除，
+            // 直到缓存重建（最长 30 秒）才恢复探测
+            releaseHalfOpenPending(nextPlatform.id);
             candidates.splice(candidates.indexOf(nextPlatform), 1);
           }
         }
@@ -1049,6 +1120,8 @@ async function handleUpstreamResponse(
   upstreamResponse: Response,
   platform: { id: string; name: string; type?: string },
   apiKey: ApiKeyRecord,
+  /** 当前使用的平台上游 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数 */
+  currentKey: string,
   requestedModel: string,
   config: ProxyConfig,
   isStream: boolean,
@@ -1137,8 +1210,11 @@ async function handleUpstreamResponse(
       platformId: platform.id,
       model: requestedModel,
       startTime,
-      // 流内密钥类错误（429/401/402/403）时封禁+计数：传入当前 Key 明文
-      key: apiKey.key,
+      // 流内密钥类错误（429/401/402/403）时封禁+计数：必须传当前平台上游 Key。
+      // 传客户端 API Key 会让 recordKeyError 在平台 apiKeys 中查不到目标而静默
+      // 跳过、banKey 产生永不命中的幽灵冷却条目，平台 Key 封禁机制被架空
+      key: currentKey,
+      endpoint: config.upstreamPath,
       // 上游未返回 usage 时以请求体 max_tokens 预估值兜底记账（防 tokenLimit 绕过）
       maxTokensEstimate,
       // 流内密钥类错误封禁时同步写 KV 持久化（CF 部署管理后台可见、冷启动恢复），

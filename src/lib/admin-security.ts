@@ -126,8 +126,13 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   const reqHost = req.headers.host || "";
 
   // 仅在非生产环境允许 localhost 绕过
+  // 端口形式同样放行（localhost:3000 与 127.0.0.1:3000 对称——此前仅
+  // localhost 带端口命中，127.0.0.1:3000 跨 host 混合访问被单向误杀）
   const isLocalhost = (h: string) =>
-    h === "localhost" || h === "127.0.0.1" || h.startsWith("localhost:");
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h.startsWith("localhost:") ||
+    h.startsWith("127.0.0.1:");
   const localhostAllowed = !isProd && isLocalhost(sourceHost) && isLocalhost(reqHost);
 
   // 环境变量白名单：逗号分隔的域名列表（CDN 前置代理场景）
@@ -147,16 +152,4 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   }
 
   return true;
-}
-
-// ==================== 输入净化 ====================
-
-/** HTML 特殊字符转义，防止存储型 XSS */
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
 }

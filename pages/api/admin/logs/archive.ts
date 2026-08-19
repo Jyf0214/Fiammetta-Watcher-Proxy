@@ -157,6 +157,12 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     // createDb 忽略传入的 dummy DB，走 DB_TYPE + TIDB_URL/PG_URL 环境变量；
     // D1 部署下应改传真实 binding（无参调用自动检测）。与 pages/api/cron/[[...cron]].ts 用法一致。
     const result = await runArchiveTask({} as D1Database, { DB_TYPE: process.env.DB_TYPE });
+    if (result && typeof result === "object" && "success" in result && result.success === false) {
+      // 与 cron 入口一致：任务失败不伪装成成功（此前无条件 200 会把失败伪装成
+      // 成功，外部调度器/监控无法感知失败重试）；不回显内部错误细节
+      res.status(500).json({ success: false, error: "归档失败" });
+      return;
+    }
     res.status(200).json(result);
   } catch (err) {
     console.error("[POST /api/admin/logs/archive] 手动归档失败:", err);

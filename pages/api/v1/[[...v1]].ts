@@ -195,13 +195,49 @@ const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
 const EMPTY_UPSTREAM_RESPONSE = Symbol("empty-upstream-response");
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
-async function parseRequestBody<T>(req: NextApiRequest): Promise<{ body: T } | { error: string }> {
+
+/** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
+type MultipartBody = { model: string | null; raw: Buffer; contentType: string };
+
+type ParseBodyResult<T> =
+  | { body: T }
+  | { multipart: MultipartBody }
+  | { error: string };
+
+/** 从 multipart body 中提取指定文本字段（latin1 保字节序：仅头部与文本字段为
+ *  ASCII，文件二进制不受影响；按 boundary 切分逐 part 查 Content-Disposition） */
+function extractMultipartField(raw: Buffer, contentType: string, field: string): string | null {
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  if (!m) return null;
+  const boundary = (m[1] ?? m[2]).trim();
+  const text = raw.toString("latin1");
+  for (const part of text.split(`--${boundary}`)) {
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd === -1) continue;
+    const header = part.slice(0, headerEnd);
+    const dm = /name="([^"]*)"/.exec(header);
+    if (!dm || dm[1] !== field) continue;
+    return part.slice(headerEnd + 4).replace(/\r\n$/, "").trim();
+  }
+  return null;
+}
+
+async function parseRequestBody<T>(req: NextApiRequest): Promise<ParseBodyResult<T>> {
   const cl = Number(req.headers["content-length"] || "0");
   if (cl > MAX_BODY_BYTES) return { error: "请求体过大" };
+  const contentType = String(req.headers["content-type"] ?? "");
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const text = Buffer.concat(chunks).toString("utf-8");
-  if (text.length > MAX_BODY_BYTES) return { error: "请求体过大" };
+  const raw = Buffer.concat(chunks);
+  if (raw.length > MAX_BODY_BYTES) return { error: "请求体过大" };
+  // 媒体类型不区分大小写：与 Worker/lite 版 parseRequestBody 的 toLowerCase 判定对齐
+  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
+    // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
+    // 标准客户端必然发送 multipart 导致固定 400「请求体格式错误」，端点形同虚设；
+    // 现提取 model 用于路由，原始字节连同 Content-Type 原样透传上游
+    return { multipart: { model: extractMultipartField(raw, contentType, "model"), raw, contentType } };
+  }
+  const text = raw.toString("utf-8");
   try { return { body: JSON.parse(text) as T }; } catch { return { error: "请求体格式错误" }; }
 }
 
@@ -263,11 +299,26 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
 
   const parseResult = await parseRequestBody<Record<string, unknown>>(req);
   if ("error" in parseResult) { sendV1Error(res, config, 400, parseResult.error, "invalid_request_error"); return; }
-  const rawBody = parseResult.body;
+  // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
+  // 原始字节在循环内原样透传上游（JSON 管道字段如 max_tokens/stream 不适用）
+  let multipart: MultipartBody | null = null;
+  if ("multipart" in parseResult) {
+    multipart = parseResult.multipart;
+    if (!multipart.model) {
+      sendV1Error(res, config, 400, "缺少 model 参数", "invalid_request_error");
+      return;
+    }
+  }
+  // TS 联合收窄：in 运算符分支后 parseResult 类型被收窄到 { multipart }，
+  // 不能直接写 .body；用 in 三元取回 body 分支（error 分支已提前 return）
+  const rawBody = "body" in parseResult
+    ? parseResult.body
+    : { model: multipart!.model as string };
   let body = rawBody;
 
   // Anthropic 协议：下游 /v1/messages 请求体 → OpenAI /chat/completions 请求体。
   // 转换后 model/max_tokens/stream 字段名与语义对齐，后续路由/限流/重试管道原样复用
+  // （multipart 端点无 Anthropic 协议映射，天然跳过）
   if (config.buildUpstreamBody) {
     try {
       body = config.buildUpstreamBody(body);
@@ -281,8 +332,15 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 
   const modelName = body.model as string | undefined;
-  const requestedModel = modelName || "unknown";
-  const route = modelName ? await routeRequest(modelName, dummyDb, env) : await routeRequest("__any__", dummyDb, env);
+  if (!modelName) {
+    // 客户端漏传 model（/v1/models 之外所有端点必填）：按 4xx 返回，
+    // 此前用 "__any__" 兜底恒路由失败返回 500，把客户端错误伪装成
+    // 服务器故障并污染错误统计
+    sendV1Error(res, config, 400, "缺少 model 参数", "invalid_request_error");
+    return;
+  }
+  const requestedModel = modelName;
+  const route = await routeRequest(modelName, dummyDb, env);
   if (!route) {
     // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "此模型不存在", db: dummyDb, env }); } catch {}
@@ -316,7 +374,6 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   if (!kTpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return; }
 
   const MAX_UPSTREAM_RETRIES = 3;
-  const isStream = config.supportsStreaming !== false && body.stream === true;
   let cur = route.platform; const tgt = route.targetModel;
   let curKey = getNextKey(cur);
   const tried = new Set<string>(), triedP = new Set<string>();
@@ -343,7 +400,10 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 模板先作用于原始 OpenAI 请求体；Anthropic 分支随后转换——转换白名单会剥离
     // 模板中的 OpenAI 专属字段（stream_options/n/response_format 等），避免严格后端 422
     let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
-    try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
+    // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
+    if (!multipart) {
+      try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
+    }
     // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
     // 认证用 x-api-key + anthropic-version
     const upstreamIsAnthropic = cur.type === "anthropic";
@@ -358,6 +418,11 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         throw convertError;
       }
     }
+    // 流式判定以模板应用后的结果为准：模板可改写 stream 字段，若按原始请求体
+    // 预判定，模板开流而原始请求未开流时上游返回 SSE 而代理走非流式 JSON 分支，
+    // JSON.parse 失败后原样透传 SSE 文本 + application/json，客户端必解析失败
+    // （与 Worker 全量版 effectiveIsStream 语义一致）
+    const isStream = config.supportsStreaming !== false && upstreamBody.stream === true;
     // 流式请求注入 stream_options：仅当平台开启了注入开关时添加
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游
@@ -389,7 +454,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
     const headers = new Headers({
-      "Content-Type": "application/json",
+      // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
+      "Content-Type": multipart ? multipart.contentType : "application/json",
       // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
       // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
       ...(upstreamIsAnthropic ? { "x-api-key": curKey, "anthropic-version": "2023-06-01" } : { Authorization: `Bearer ${curKey}` }),
@@ -406,19 +472,24 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       // 出站代理（仅 Docker 部署，DEPLOY_PLATFORM=docker）：上游请求经代理
       // 服务器出网；其他部署形态返回 null（直连），边缘运行时不受影响
       proxy = await getUpstreamProxy(dummyDb, env, cur.id);
-      upRes = await fetch(url, { method: "POST", headers, body: JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}) });
+      upRes = await fetch(url, { method: "POST", headers, body: multipart ? new Uint8Array(multipart.raw) : JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}) });
     }
     catch (e) {
       clearTimeout(upstreamTimeoutId);
       if (e instanceof DOMException && e.name === "AbortError") {
-        // 上游请求超时（未收到响应头）：计入该平台错误统计
+        // 上游请求超时（未收到响应头）：计入该平台错误统计并触发平台熔断
+        // （此前只记日志不熔断，坏平台永远不会被降级，负载均衡反复撞上它——
+        // 与 Worker 全量版 catch 分支行为对齐）
+        void recordFailure(cur.id, dummyDb, env).catch(() => {});
         if (proxy?.url) recordProxyTraffic(proxy.url, 504);
         void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游请求超时", proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
         sendV1Error(res, config, 504, "上游请求超时", "timeout_error"); return;
       }
       // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过；
       // 补落请求日志（status=0），否则真实失败不出现在 request_logs——
-      // 统计可用率高估且与降权统计（recordProxyTraffic 记 errOther）口径矛盾
+      // 统计可用率高估且与降权统计（recordProxyTraffic 记 errOther）口径矛盾；
+      // 同时触发平台熔断（与 Worker 全量版一致）
+      void recordFailure(cur.id, dummyDb, env).catch(() => {});
       if (proxy?.url) {
         recordProxyTraffic(proxy.url, 0);
         void markProxyFailure(dummyDb, env, proxy.url).catch(() => {});
@@ -496,7 +567,15 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       if (ops.length > 0) {
         // 复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择（与 Worker 版一致）
         const nextPlatform = selectPlatform(ops);
-        if (nextPlatform) { cur = nextPlatform; curKey = getNextKey(cur); continue; }
+        if (nextPlatform) {
+          const nextKey = getNextKey(nextPlatform);
+          if (nextKey) {
+            cur = nextPlatform; curKey = nextKey; continue;
+          }
+          // 选中但无可用 Key（如仅剩封禁冷却中的 Key）：释放半开探测配额，
+          // 否则探测槽位被占满后该平台被排除，直到缓存重建才恢复（与 Worker 版一致）
+          releaseHalfOpenPending(nextPlatform.id);
+        }
       }
     }
 
@@ -855,7 +934,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       const parseResult = await parseRequestBody<Record<string, unknown>>(req);
       if ("error" in parseResult) { res.status(400).json(formatAnthropicError(400, parseResult.error)); return; }
-      res.status(200).json({ input_tokens: estimateInputTokens(parseResult.body) });
+      // count_tokens 是 JSON 端点：multipart 形态（"multipart" in parseResult）属客户端
+      // 协议错误，按空体估算 0（不参与路由，无透传语义）
+      res.status(200).json({ input_tokens: estimateInputTokens("body" in parseResult ? parseResult.body : {}) });
       return;
     }
     const cfgResolved = getEndpointConfig(full);

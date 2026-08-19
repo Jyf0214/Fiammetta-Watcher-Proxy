@@ -61,11 +61,14 @@ export default function UsagePage() {
   );
 
   // 峰值耗时（秒）：/api/admin/usage 顶层 peakDuration 字段。
-  // apiFetcher 只解包 data，顶层字段需此处直接请求读取；401 处理与 apiFetcher 对齐
+  // apiFetcher 只解包 data，顶层字段需此处直接请求读取；401 处理与 apiFetcher 对齐。
+  // key 用数组而非 URL 字符串：KeyUsageTab 以同一 URL 为 key 通过 useApi 读取 data
+  // 数组，若此处也以 URL 为 key，SWR 按 key 去重缓存且不区分 fetcher，一方必然
+  // 拿到另一方形态的数据（number 上 .reduce 崩溃 / 数组被当峰值显示）
   const { data: peakDuration, mutate: mutatePeakDuration } = useSWR<number | null>(
-    `/api/admin/usage?period=${period}`,
-    async (url: string) => {
-      const res = await fetch(url);
+    ["usage-peak", period],
+    async ([, p]: [string, string]) => {
+      const res = await fetch(`/api/admin/usage?period=${p}`);
       const body = (await res.json().catch(() => null)) as
         | (ApiResponse<unknown> & { peakDuration?: number | null })
         | null;

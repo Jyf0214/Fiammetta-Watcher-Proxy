@@ -39,11 +39,18 @@ export function useSidebarItems() {
 export function registerDefaultItems(
   defaults: SidebarItem[],
 ) {
+  const seen = new Set(items.map((i) => i.key));
+  const merged = [...items];
   for (const item of defaults) {
-    if (!items.find((i) => i.key === item.key)) {
-      items.push(item);
+    if (!seen.has(item.key)) {
+      seen.add(item.key);
+      merged.push(item);
     }
   }
-  items.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  merged.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  // 快照不可变契约：useSyncExternalStore 以 Object.is 比较前后快照，原地
+  // push/sort 引用不变，emit 后 React 判定「无变化」跳过重渲染——任何运行时
+  // 动态注册都会静默失效；必须替换为新数组引用
+  items = merged;
   emit();
 }

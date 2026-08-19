@@ -208,6 +208,7 @@ function TopHeader({
     "/admin": "dashboard",
     "/admin/platforms": "platforms",
     "/admin/platforms/[id]": "platforms",
+    "/admin/platforms/presets": "platforms",
     "/admin/keys": "keys",
     "/admin/auto-model": "autoModel",
     "/admin/request-templates": "requestTemplates",
@@ -217,6 +218,7 @@ function TopHeader({
     "/admin/data-manager": "dataManager",
     "/admin/system-keys": "systemKeys",
     "/admin/upstream-proxy": "upstreamProxy",
+    "/admin/upstream-proxy/[id]": "upstreamProxy",
   };
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "dashboard";

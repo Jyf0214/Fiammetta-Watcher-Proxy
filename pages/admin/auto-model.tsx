@@ -112,10 +112,12 @@ export default function AutoModelPage() {
     }
   );
 
-  // 初始化：config 与 models 就绪后将已保存的选择填入 enabledModelIds
+  // 初始化：config 与 models 加载完成（空数组也算完成）后将已保存的选择填入
+  // enabledModelIds——此前要求 models 非空，平台存在但模型列表为空时已保存的
+  // 启用集合永不载入，UI 显示与持久化状态不符
   const initializedRef = useRef(false);
   useEffect(() => {
-    if (!initializedRef.current && config !== undefined && (models ?? []).length > 0) {
+    if (!initializedRef.current && config !== undefined && models !== undefined) {
       initializedRef.current = true;
       const next = new Set(savedModelIds);
       enabledModelIdsRef.current = next;

@@ -15,7 +15,7 @@
  *     "platformIds": ["p1", "p2"],       // 空数组 = 所有平台经代理（勾选=白名单）
  *     "platformGroup": { "p1": "g1" },   // 平台绑定组（未绑定的白名单平台走默认组=第一组）
  *     "healthCheckUrl": "https://...",   // 可选，默认公网探测地址
- *     "healthCheckIntervalMin": 5        // 可选，健康检查间隔分钟（1~60，默认 5）
+ *     "healthCheckIntervalMin": 5        // 可选，健康检查间隔分钟（1~1440，默认 5）
  *   }
  * 兼容旧版纯 URL 字符串 / { urls, platformIds, healthCheckUrl } 格式
  * （无 groups 时视为单组，行为与旧版一致）。
@@ -158,7 +158,7 @@ export interface ProxyConfig {
   /** 平台 → 组名映射（绑定后该平台固定使用指定组） */
   platformGroup: Record<string, string>;
   healthCheckUrl: string;
-  /** 健康检查间隔（分钟，1~60）：调度器 proxy-health 任务按此周期触发；缺省默认 5 */
+  /** 健康检查间隔（分钟，1~1440）：调度器 proxy-health 任务按此周期触发；缺省默认 5 */
   healthCheckIntervalMin: number;
 }
 
@@ -180,7 +180,7 @@ export interface UpstreamProxySelection {
 
 /** 单组拉取结果（管理页展示；error 非空 = 本次拉取失败/结果为空，沿用旧列表） */
 export interface ProxyPullGroupResult {
-  /** 本次拉取到的代理数（沿用旧列表时为 0） */
+  /** 本次拉取相对上次新增的代理数（沿用旧列表/拉取失败时为 0） */
   pulled: number;
   /** 拉取后组内总数（含手动代理） */
   total: number;
@@ -389,10 +389,13 @@ function normalizeGroups(raw: unknown, legacyUrls: string[]): ProxyGroupConfig[]
   }
 
   if (groups.length === 0) {
-    // 无显式组：旧版配置（顶层 urls）视为单组，行为与旧版一致
+    // 无显式组：旧版配置（顶层 urls）视为单组，行为与旧版一致。
+    // 组名必须与前端 LEGACY_GROUP_NAME（src/lib/upstream-proxy-ui.ts）保持一致：
+    // 此前后端用 ""、前端用 "default"，用户在管理页保存一次旧格式配置后组名被
+    // 重写为 "default"，与历史 pool/pullAt 键（""）失配导致已拉取代理池被清空
     if (legacyUrls.length === 0) return [];
     groups.push({
-      name: "",
+      name: "default",
       sourceUrl: "",
       urls: legacyUrls,
       enabled: true,
@@ -1316,8 +1319,10 @@ export async function getUpstreamProxy(
     // 因探测地址/时机陈旧而误伤）；全部被排除时才兜底全量轮询
     // （黑名单随健康检查成功自动清除，全黑名单是暂时状态）。
     // 告警节流到每分钟一次，避免代理持续故障期间每个请求刷日志。
-    // 注意：fail 条目的 latencyMs 也是实测值（>0），延迟最优选择会
-    // 固定打向最低延迟的 fail 代理，故此处强制轮询分摊
+    // 注意：fail 条目中仅健康检查失败带实测延迟，业务失败标记
+    // （markProxyFailure）写入 latencyMs=0——若按延迟择优仍可能固定打向
+    // 最低延迟的 fail 代理（探测结果可能因探测地址/时机陈旧而误伤），
+    // 故此处强制轮询分摊
     const now = Date.now();
     if (now - lastAllUnhealthyWarn > 60_000) {
       console.warn("[upstream-proxy] 所有代理健康度异常，回退可用代理轮询");

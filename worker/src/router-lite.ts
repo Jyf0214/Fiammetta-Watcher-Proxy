@@ -95,6 +95,11 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
       tpmLimit: p.tpmLimit,
       forwardHeaders: p.forwardHeaders,
       injectStreamOptions: p.injectStreamOptions ?? true,
+      // 与全量版 router.ts 一致：缺失时 proxy-lite 的 extraHeaders/UA 覆盖
+      // 功能会静默失效（undefined 被当作未配置）
+      reuseUserAgent: p.reuseUserAgent ?? false,
+      customUserAgent: p.customUserAgent ?? null,
+      extraHeaders: p.extraHeaders ?? null,
       status: p.status as PlatformConfig["status"],
       failCount: p.failCount,
       lastFailAt: p.lastFailAt,

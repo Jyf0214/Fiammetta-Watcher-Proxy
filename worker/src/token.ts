@@ -201,6 +201,8 @@ export function createUsageTransformer(params: {
   startTime: number;
   /** 上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */
   key?: string;
+  /** 上游真实端点路径（如 /chat/completions）：请求日志 endpoint 字段落库值 */
+  endpoint: string;
   /** max_tokens 预估值：上游未返回 usage 时兜底记账，防 tokenLimit 绕过 */
   maxTokensEstimate?: number;
   /**
@@ -316,7 +318,9 @@ export function createUsageTransformer(params: {
             keyName: params.keyName,
             platformId: params.platformId,
             model: params.model,
-            endpoint: "stream",
+            // 与 Pages 版一致：endpoint 落上游真实路径（此前硬编码 "stream"，
+            // 后台按端点过滤统计时两部署形态结果不一致）
+            endpoint: params.endpoint,
             method: "POST",
             status: streamError ? streamError.code : truncated ? 502 : 200,
             latency: duration,

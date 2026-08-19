@@ -124,7 +124,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
 
     const currentTime = now();
     const updateData: Record<string, unknown> = { updatedAt: currentTime };
-    if (body.name !== undefined) updateData.name = body.name;
+    if (body.name !== undefined) updateData.name = body.name.trim();
     if (body.rpmLimit !== undefined) updateData.rpmLimit = body.rpmLimit ?? null;
     if (body.tpmLimit !== undefined) updateData.tpmLimit = body.tpmLimit ?? null;
     if (body.callLimit !== undefined) updateData.callLimit = body.callLimit ?? null;

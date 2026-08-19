@@ -113,9 +113,12 @@ const FORBIDDEN_FORWARD_HEADERS = new Set([
 
 // ==================== 请求体解析 ====================
 
+/** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
+type MultipartBody = { model: string | null; raw: Uint8Array; contentType: string };
+
 async function parseRequestBody<T>(
   request: Request
-): Promise<{ body: T } | { error: Response }> {
+): Promise<{ body: T } | { multipart: MultipartBody } | { error: Response }> {
   if (Number(request.headers.get("content-length") || "0") > MAX_BODY_BYTES) {
     return {
       error: Response.json(
@@ -123,6 +126,48 @@ async function parseRequestBody<T>(
         { status: 413 }
       ),
     };
+  }
+
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
+    // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
+    // 标准客户端必然发送 multipart 导致固定 400「请求体格式错误」，端点形同虚设；
+    // 现读取原始字节透传上游，formData 仅用于提取 model 路由
+    let raw: Uint8Array;
+    try {
+      raw = new Uint8Array(await request.arrayBuffer());
+    } catch {
+      return {
+        error: Response.json(
+          { error: { message: "读取请求体失败", type: "invalid_request_error" } },
+          { status: 400 }
+        ),
+      };
+    }
+
+    // Content-Length 预检之外的按字节兜底（与全量版 proxy.ts 一致）
+    if (raw.length > MAX_BODY_BYTES) {
+      return {
+        error: Response.json(
+          { error: { message: "请求体过大", type: "invalid_request_error" } },
+          { status: 413 }
+        ),
+      };
+    }
+
+    let model: string | null = null;
+    try {
+      const fd = await new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: raw,
+      }).formData();
+      const m = fd.get("model");
+      model = typeof m === "string" && m.length > 0 ? m : null;
+    } catch {
+      // 非标准 multipart（boundary 畸形等）：model 留 null，调用方按缺 model 400
+    }
+    return { multipart: { model, raw, contentType } };
   }
 
   let rawText: string;
@@ -133,6 +178,17 @@ async function parseRequestBody<T>(
       error: Response.json(
         { error: { message: "读取请求体失败", type: "invalid_request_error" } },
         { status: 400 }
+      ),
+    };
+  }
+
+  // Content-Length 预检之外的按字节兜底（与全量版 proxy.ts 一致）：chunked 编码
+  // （无 Content-Length 头）时任意大的请求体会被整体读入内存，无上限保护
+  if (rawText.length > MAX_BODY_BYTES) {
+    return {
+      error: Response.json(
+        { error: { message: "请求体过大", type: "invalid_request_error" } },
+        { status: 413 }
       ),
     };
   }
@@ -168,6 +224,8 @@ function createLiteUsageTransformer(params: {
   startTime: number;
   /** 上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */
   key?: string;
+  /** 上游真实端点路径（如 /chat/completions）：请求日志 endpoint 字段落库值 */
+  endpoint: string;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -248,7 +306,8 @@ function createLiteUsageTransformer(params: {
           keyName: params.keyName,
           platformId: params.platformId,
           model: params.model,
-          endpoint: "stream",
+          // 与 Pages 版一致：endpoint 落上游真实路径（此前硬编码 "stream"）
+          endpoint: params.endpoint,
           method: "POST",
           status: streamError ? streamError.code : truncated ? 502 : 200,
           tokens: streamError || truncated ? 0 : totalTokens,
@@ -388,7 +447,21 @@ export async function proxyV1RequestLite(
     const errBody = (await errRes.json().catch(() => ({}))) as { error?: { message?: string } };
     return liteErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
   }
-  let body = parseResult.body;
+  // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
+  // 原始字节透传上游（JSON 管道字段如 max_tokens/stream 不适用）
+  let multipart: MultipartBody | null = null;
+  if ("multipart" in parseResult) {
+    multipart = parseResult.multipart;
+    if (!multipart.model) {
+      return liteErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+    }
+  }
+  // TS 联合收窄：in 运算符分支后 parseResult 类型被收窄到 { multipart }，
+  // 不能直接写 .body；用 in 三元取回 body 分支（error 分支已提前 return）
+  const rawBody = "body" in parseResult
+    ? parseResult.body
+    : { model: multipart!.model as string };
+  let body = rawBody;
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   const anthropicInputEstimate =
     config.protocol === "anthropic" ? estimateInputTokens(body) : 0;
@@ -407,10 +480,15 @@ export async function proxyV1RequestLite(
   }
 
   // ── 3. 路由（纯负载均衡：权重随机，无评分/优先级/熔断） ──
-  const requestedModel = (body.model as string | undefined) || "unknown";
-  const route = body.model
-    ? await routeRequestLite(requestedModel, env.DB, workerEnv)
-    : await routeRequestLite("__any__", env.DB, workerEnv);
+  const modelName = body.model as string | undefined;
+  if (!modelName) {
+    // 客户端漏传 model（/v1/models 之外所有端点必填）：按 4xx 返回，
+    // 此前用 "__any__" 兜底恒路由失败返回 500，把客户端错误伪装成
+    // 服务器故障并污染错误统计
+    return liteErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+  }
+  const requestedModel = modelName;
+  const route = await routeRequestLite(requestedModel, env.DB, workerEnv);
   if (!route) {
     // 路由失败：平台维度未知记 null（配置问题，不计入任何平台评分）
     try {
@@ -435,7 +513,8 @@ export async function proxyV1RequestLite(
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
-    return liteErrorResponse(config, 500, "此模型不存在", "invalid_request_error");
+    // 与全量版 proxy.ts 一致：路由/模型不存在属服务器侧配置问题，返回 server_error
+    return liteErrorResponse(config, 500, "此模型不存在", "server_error");
   }
 
   // ── 3. 选择平台 Key（轮询，跳过已封禁/降级） ──
@@ -554,7 +633,8 @@ export async function proxyV1RequestLite(
   let upstreamResponse: Response;
   try {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
+      "Content-Type": multipart ? multipart.contentType : "application/json",
       // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
       // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
       ...(upstreamIsAnthropic
@@ -571,7 +651,7 @@ export async function proxyV1RequestLite(
     upstreamResponse = await fetch(upstreamUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify(upstreamBody),
+      body: multipart ? multipart.raw : JSON.stringify(upstreamBody),
       signal: upstreamController.signal,
       // 禁止跟随重定向：isSafeUpstreamUrl 只校验初始 URL，
       // 跟随 3xx 可能将请求重定向到内网（SSRF / DNS rebinding TOCTOU）
@@ -801,6 +881,7 @@ async function handleUpstreamResponseLite(
       startTime,
       // 流内密钥类错误（429/401/402/403）时封禁+计数（与 HTTP 透传路径对齐）
       key: currentKey,
+      endpoint: config.upstreamPath,
       db: env.DB,
       env: workerEnv,
     });

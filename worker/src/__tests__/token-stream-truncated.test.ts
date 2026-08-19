@@ -36,6 +36,7 @@ async function runTransformer(
     platformId: "truncated-platform",
     model: "test-model",
     startTime: Date.now(),
+    endpoint: "/chat/completions",
     db: {} as D1Database,
     ...overrides,
   });

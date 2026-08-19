@@ -61,6 +61,7 @@ export function estimateInputTokens(body: Record<string, unknown>): number {
         : req.system
             .filter(
               (b): b is { type: "text"; text: string } =>
+                (b as { type?: unknown }).type === "text" &&
                 typeof (b as { text?: unknown }).text === "string"
             )
             .map((b) => b.text)

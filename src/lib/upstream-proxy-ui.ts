@@ -200,6 +200,18 @@ export function isProxyLineValid(line: string): boolean {
   }
 }
 
+/** http(s) URL 且含主机名校验（与后端 isValidHttpUrl 语义一致：new URL 解析 +
+ *  hostname 非空）。仅前缀校验会放行 "http://" 等畸形地址，保存后后端静默清空
+ *  字段，用户以为配好了拉取源实际永不拉取 */
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return /^https?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** 展示用代理地址脱敏：剥离 URL 中的 user:pass 凭据（健康列表仅展示，匹配仍用完整 URL）。
  *  用正则而非 URL 序列化，避免剥离后补尾斜杠导致展示与真实地址不一致 */
 export function maskProxyUrl(url: string): string {
@@ -308,7 +320,7 @@ export function buildConfigJson(
   if (names.some((n) => n === "new")) return { ok: false, error: "upstreamProxyGroupNameReserved" };
   // 校验拉取地址与手动代理
   for (const g of trimmed) {
-    if (g.sourceUrl && !/^https?:\/\//i.test(g.sourceUrl)) {
+    if (g.sourceUrl && !isValidHttpUrl(g.sourceUrl)) {
       return { ok: false, error: "upstreamProxyInvalidSourceUrl" };
     }
     if (g.urls.some((u) => !isProxyLineValid(u))) {
@@ -321,7 +333,7 @@ export function buildConfigJson(
     for (const pid of [...new Set(g.boundPlatformIds)]) platformGroup[pid] = g.name;
   }
   const checkUrlTrimmed = checkUrl.trim();
-  if (checkUrlTrimmed && !/^https?:\/\//i.test(checkUrlTrimmed)) {
+  if (checkUrlTrimmed && !isValidHttpUrl(checkUrlTrimmed)) {
     return { ok: false, error: "upstreamProxyInvalidUrls" };
   }
   return {
