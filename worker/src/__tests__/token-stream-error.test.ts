@@ -18,6 +18,14 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("../platform-keys", () => ({
   banKey: vi.fn(async () => {}),
   recordKeyError: vi.fn(async () => {}),
+  isPlatformWhitelisted: vi.fn(() => false),
+}));
+
+// token.ts 依赖 recordFailure：不 mock 会走真实实现访问 mock prisma 不存在的
+// platforms 键，内部 catch 打印 "[circuit-breaker] 更新平台状态失败" 噪音
+vi.mock("../load-balancer", () => ({
+  recordFailure: vi.fn(async () => {}),
+  recordSuccess: vi.fn(async () => {}),
 }));
 
 function makePrisma() {
@@ -91,7 +99,7 @@ describe("createUsageTransformer 流内 error", () => {
     expect(log.tokens).toBe(0);
   });
 
-  it("无效 code（非 400-599）不视为流内错误，回退 200 成功路径", async () => {
+  it("无效 code（非 400-599）不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
     const prisma = makePrisma();
     await runTransformer(prisma, [
       'data: {"error":{"message":"warning","code":200}}\n\n',
@@ -99,28 +107,32 @@ describe("createUsageTransformer 流内 error", () => {
       "data: [DONE]\n\n",
     ]);
 
-    expect(prisma.apiKeys.update).toHaveBeenCalledTimes(1);
+    // 上游错误对象 code 200 非有效错误码，不触发 streamError 路径；
+    // 但流内无任何内容输出（completion_tokens 与内容缺失矛盾，上游异常）——
+    // 空完成检测判定 502 失败，不计入 Key 用量（此前误记 200 成功并计入用量）
+    expect(prisma.apiKeys.update).not.toHaveBeenCalled();
     const log = prisma.requestLogs.create.mock.calls[0][0].data;
-    expect(log.status).toBe(200);
-    expect(log.isError).toBe(false);
-    expect(log.tokens).toBe(12);
+    expect(log.status).toBe(502);
+    expect(log.isError).toBe(true);
+    expect(log.tokens).toBe(0);
   });
 
-  it("浮点 code（503.5）不视为错误码：避免 Prisma Int 校验失败导致整条日志丢失", async () => {
+  it("浮点 code（503.5）不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
     const prisma = makePrisma();
     await runTransformer(prisma, [
       'data: {"error":{"message":"odd code","code":503.5}}\n\n',
       "data: [DONE]\n\n",
     ]);
 
-    // 不抛错、日志仍写入（回退 200 成功形态）
+    // 不抛错、日志仍写入（status 502 为合法 Int，无 Prisma 校验风险）——
+    // 流内无内容 → 空完成，此前误记 200 成功
     expect(prisma.requestLogs.create).toHaveBeenCalledTimes(1);
     const log = prisma.requestLogs.create.mock.calls[0][0].data;
-    expect(log.status).toBe(200);
-    expect(log.isError).toBe(false);
+    expect(log.status).toBe(502);
+    expect(log.isError).toBe(true);
   });
 
-  it("数组 code（[\"503\"]）不被 String 化误解析为 503", async () => {
+  it("数组 code 不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
     const prisma = makePrisma();
     await runTransformer(prisma, [
       'data: {"error":{"message":"array code","code":["503"]}}\n\n',
@@ -128,8 +140,8 @@ describe("createUsageTransformer 流内 error", () => {
     ]);
 
     const log = prisma.requestLogs.create.mock.calls[0][0].data;
-    expect(log.status).toBe(200);
-    expect(log.isError).toBe(false);
+    expect(log.status).toBe(502);
+    expect(log.isError).toBe(true);
   });
 
   it("error 事件与 usage 并存时 error 优先（不计 Key 用量）", async () => {

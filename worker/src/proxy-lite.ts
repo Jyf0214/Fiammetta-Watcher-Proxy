@@ -235,6 +235,11 @@ function createLiteUsageTransformer(params: {
   let lastUsage: Record<string, unknown> | undefined;
   let streamError: { code: number; message: string } | undefined;
   let sawDone = false;
+  // 空完成检测：是否收到过有效输出内容（content/reasoning_content 非空）。
+  // 上游 200 + 只有 [DONE]/空 data 的伪成功流不触发空流哨兵/流内 error/截断/
+  // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
+  // 数十秒首字延迟"即此场景）
+  let sawContent = false;
   let ttft = 0;
   let isFirstChunk = true;
   let chunkCount = 0;
@@ -263,6 +268,17 @@ function createLiteUsageTransformer(params: {
         if (!data) continue;
         try {
           const parsed = JSON.parse(data);
+          // 空完成检测：记录是否收到过有效输出内容（content/reasoning_content
+          // 非空字符串；初始 role 占位 chunk 的 content 为空字符串不计）。
+          // tool_calls 增量同样计入：纯工具调用流（无文本）不得误判空完成
+          if (Array.isArray(parsed.choices)) {
+            for (const c of parsed.choices) {
+              const delta = c?.delta;
+              if (delta && ((typeof delta.content === "string" && delta.content.length > 0) || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0))) {
+                sawContent = true;
+              }
+            }
+          }
           if (parsed.usage) {
             lastUsage = parsed.usage;
           }
@@ -289,6 +305,11 @@ function createLiteUsageTransformer(params: {
 
       // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）
       const truncated = !sawDone && !streamError && chunkCount > 0;
+      // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
+      // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
+      // "伪成功"流，客户端收到 200 + 空完成（"empty completion"）；此前记 200
+      // 成功，坏平台评分不降。与截断同属失败（sawDone 使二者互斥）
+      const emptyCompletion = sawDone && !streamError && !sawContent;
 
       // 流内 error 为密钥类状态码（429/401/402/403）时与自身 HTTP 非 2xx 透传
       // 路径（banKey + recordKeyError）及全量版 token.ts flush 对齐：封禁 Key +
@@ -311,14 +332,14 @@ function createLiteUsageTransformer(params: {
           // 与 Pages 版一致：endpoint 落上游真实路径（此前硬编码 "stream"）
           endpoint: params.endpoint,
           method: "POST",
-          status: streamError ? streamError.code : truncated ? 502 : 200,
-          tokens: streamError || truncated ? 0 : totalTokens,
-          promptTokens: streamError || truncated ? 0 : promptTokens,
-          completionTokens: streamError || truncated ? 0 : completionTokens,
+          status: streamError ? streamError.code : truncated || emptyCompletion ? 502 : 200,
+          tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
+          promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
+          completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
           ttft,
           duration,
-          isError: !!streamError || truncated,
-          errorMessage: streamError?.message ?? (truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : undefined),
+          isError: !!streamError || truncated || emptyCompletion,
+          errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : undefined),
           db: params.db,
           env: params.env,
         });

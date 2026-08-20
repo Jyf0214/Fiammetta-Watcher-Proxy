@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import handler from "../../../pages/api/v1/[[...v1]]";
 import { validateApiKey } from "../../../worker/src/auth";
 import { routeRequest } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept, banKey, recordKeyError } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
 import { getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { recordFailure } from "../../../worker/src/load-balancer";
 import { recordRequestLog } from "../../../worker/src/token";
@@ -45,6 +45,7 @@ vi.mock("../../../worker/src/platform-keys", () => ({
   isKeyDisabled: vi.fn(() => false),
   recordKeyError: vi.fn(async () => {}),
   parseApiKeys: vi.fn(() => ["sk-key1", "sk-key2"]),
+  isPlatformWhitelisted: vi.fn(() => false),
   // W10 契约：loadWhitelist/loadKeyStatusFromKV 返回 Promise<boolean>，v1.ts 以 === true 判定置位
   loadWhitelist: vi.fn(async () => true),
   loadKeyStatusFromKV: vi.fn(async () => true),
@@ -307,6 +308,71 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", undefined);
     expect(recordKeyError).toHaveBeenCalledWith("sk-key1", 429, "test-platform", expect.anything(), expect.anything());
     expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
+  });
+
+  it("修复验证：空完成（流内仅 [DONE] 无内容）→ 日志记 502 + isError=true + 平台熔断", async () => {
+    const encoder = new TextEncoder();
+    const emptyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(emptyStream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      )
+    );
+
+    const req = makeReq({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    // 下游收到 200（响应头已发出，无法改状态）；日志按空完成记 502 失败
+    // （此前记 200 成功，坏平台评分不降、负载均衡反复撞上它）
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(502);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.tokens).toBe(0);
+    expect(logParams.errorMessage).toContain("空完成");
+    // 非白名单平台：空完成触发平台熔断（软失败也降级，防止反复撞上）
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
+    // 空完成非密钥类错误，不触发 Key 级处理
+    expect(banKey).not.toHaveBeenCalled();
+    expect(recordKeyError).not.toHaveBeenCalled();
+  });
+
+  it("修复验证：白名单平台空完成 → 日志记 502 但不触发熔断（软失败豁免）", async () => {
+    vi.mocked(isPlatformWhitelisted).mockReturnValue(true);
+    const encoder = new TextEncoder();
+    const emptyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(emptyStream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      )
+    );
+
+    const req = makeReq({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    // 白名单=永不封禁语义：空完成（软失败）不触发熔断，平台评分不降；
+    // 但日志如实记失败（客户端确实收到空完成）
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(502);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.tokens).toBe(0);
   });
 
   it("修复验证：流式上游挂起（看门狗 120s 无数据）→ 日志记 504 + isError=true", async () => {

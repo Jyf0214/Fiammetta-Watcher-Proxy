@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
-import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV } from "../../../worker/src/platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
@@ -664,6 +664,11 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache, no-transform"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
     let tt = 0, pt = 0, ct = 0, buf = "";
+    // 空完成检测：是否收到过有效输出内容（content/reasoning_content 非空）。
+    // 上游 200 + 只有 [DONE]/空 data 的伪成功流不触发空流哨兵/流内 error/截断/
+    // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
+    // 数十秒首字延迟"即此场景）
+    let sawContent = false;
     // SSE 行缓冲上限：防异常/恶意上游发送无换行的超长数据导致内存无限增长
     const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
     // 带背压的写入：write 返回 false（写缓冲超过 highWaterMark）时暂停读取，
@@ -750,6 +755,17 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
               if (ol === "data: [DONE]") { sawDone = true; if (!streamer) await writeChunk(ol + "\n"); continue; }
               try {
                 const d = JSON.parse(ol.slice(6));
+                // 空完成检测：记录是否收到过有效输出内容（content/reasoning_content
+                // 非空字符串；初始 role 占位 chunk 的 content 为空字符串不计）。
+                // tool_calls 增量同样计入：纯工具调用流（无文本）不得误判空完成
+                if (Array.isArray(d.choices)) {
+                  for (const c of d.choices) {
+                    const delta = c?.delta;
+                    if (delta && ((typeof delta.content === "string" && delta.content.length > 0) || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0))) {
+                      sawContent = true;
+                    }
+                  }
+                }
                 if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
                 if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } }
                 if (streamer) {
@@ -815,6 +831,19 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", proxyUrl, db: dummyDb, env }).catch(() => {});
+    } else if (sawDone && !sawContent) {
+      // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
+      // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
+      // "伪成功"流——客户端收到 200 + 空完成（"empty completion"），日志此前
+      // 记 200 成功且不触发熔断，坏平台评分不降、负载均衡反复撞上它。
+      // 与截断同属上游失败：记失败日志（客户端已收到的 200 无法改写）；
+      // 熔断软失败豁免——白名单平台（永不封禁语义）不因空完成被熔断，
+      // 网络错误/5xx/截断/流内 error 等硬失败仍照常熔断
+      if (!isPlatformWhitelisted(platform.id)) {
+        try { await recordFailure(platform.id, dummyDb, env); } catch {}
+      }
+      if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游返回空完成（200 + 流内无有效内容）", proxyUrl, db: dummyDb, env }).catch(() => {});
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);

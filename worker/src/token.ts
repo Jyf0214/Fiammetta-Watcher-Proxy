@@ -8,7 +8,7 @@
 import { createDb } from "@/lib/prisma";
 import { proxyStatKey } from "@/lib/upstream-proxy";
 import { recordFailure } from "./load-balancer";
-import { banKey, recordKeyError } from "./platform-keys";
+import { banKey, recordKeyError, isPlatformWhitelisted } from "./platform-keys";
 import type { WorkerEnv } from "./config";
 
 /**
@@ -287,6 +287,11 @@ export function createUsageTransformer(params: {
   // 上游正常结束的标志：SSE 流必须以 data: [DONE] 收尾。上游在思考中途截断
   // （EOF 但无 [DONE]）时若按成功记录，坏平台永远不会被熔断，负载均衡会反复撞上它
   let sawDone = false;
+  // 空完成检测：是否收到过有效输出内容（content/reasoning_content 非空）。
+  // 上游 200 + 只有 [DONE]/空 data 的伪成功流不触发空流哨兵/流内 error/截断/
+  // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
+  // 数十秒首字延迟"即此场景），坏平台评分不降、负载均衡反复撞上它
+  let sawContent = false;
   let ttft = 0;
   let isFirstChunk = true;
   let chunkCount = 0;
@@ -315,6 +320,17 @@ export function createUsageTransformer(params: {
         if (!data) continue;
         try {
           const parsed = JSON.parse(data);
+          // 空完成检测：记录是否收到过有效输出内容（content/reasoning_content
+          // 非空字符串；初始 role 占位 chunk 的 content 为空字符串不计）。
+          // tool_calls 增量同样计入：纯工具调用流（无文本）不得误判空完成
+          if (Array.isArray(parsed.choices)) {
+            for (const c of parsed.choices) {
+              const delta = c?.delta;
+              if (delta && ((typeof delta.content === "string" && delta.content.length > 0) || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0))) {
+                sawContent = true;
+              }
+            }
+          }
           if (parsed.usage) {
             lastUsage = parsed.usage;
           }
@@ -343,9 +359,16 @@ export function createUsageTransformer(params: {
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
       // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
       const truncated = !sawDone && !streamError && chunkCount > 0;
-      // 流内 error 与截断同属失败：触发熔断（此前流内 error 只记日志不打分，
-      // 坏平台永远不被降级，负载均衡反复撞上它）
-      if (streamError || truncated) {
+      // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
+      // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
+      // "伪成功"流，客户端收到 200 + 空完成（"empty completion"）；此前记 200
+      // 成功且不触发熔断，坏平台评分不降。与截断同属失败（sawDone 使二者互斥）
+      const emptyCompletion = sawDone && !streamError && !sawContent;
+      // 流内 error / 截断 / 空完成同属失败：触发熔断（此前流内 error 和空完成
+      // 只记日志不打分，坏平台永远不被降级，负载均衡反复撞上它）。
+      // 软失败豁免：空完成对白名单平台不触发熔断（白名单=永不封禁语义），
+      // 硬失败（流内 error/截断）照常熔断；白名单未加载时按非白名单处理
+      if (streamError || truncated || (emptyCompletion && !isPlatformWhitelisted(params.platformId))) {
         try { await recordFailure(params.platformId, params.db, params.env); } catch {}
       }
 
@@ -365,8 +388,8 @@ export function createUsageTransformer(params: {
       // 复用同一个 PrismaClient 完成所有 DB 操作
       const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
       try {
-        // 流内 error / 截断均视为失败请求：不计入 Key 用量/次数
-        if (!streamError && !truncated && totalTokens > 0) {
+        // 流内 error / 截断 / 空完成均视为失败请求：不计入 Key 用量/次数
+        if (!streamError && !truncated && !emptyCompletion && totalTokens > 0) {
           await prisma.apiKeys.update({
             where: { id: params.keyId },
             data: {
@@ -388,14 +411,14 @@ export function createUsageTransformer(params: {
             // 后台按端点过滤统计时两部署形态结果不一致）
             endpoint: params.endpoint,
             method: "POST",
-            status: streamError ? streamError.code : truncated ? 502 : 200,
+            status: streamError ? streamError.code : truncated || emptyCompletion ? 502 : 200,
             latency: duration,
-            tokens: streamError || truncated ? 0 : totalTokens,
-            promptTokens: streamError || truncated ? 0 : promptTokens,
-            completionTokens: streamError || truncated ? 0 : completionTokens,
+            tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
+            promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
+            completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
             ttft,
-            isError: !!streamError || truncated,
-            errorMessage: streamError?.message ?? (truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
+            isError: !!streamError || truncated || emptyCompletion,
+            errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
             nodeName: resolveNodeName(params.env),
             createdAt: Math.floor(Date.now() / 1000),
           },
