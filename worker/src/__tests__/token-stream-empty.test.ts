@@ -201,6 +201,22 @@ describe("createUsageTransformer 空完成检测", () => {
     expect(log.isError).toBe(false);
   });
 
+  it("完全空输入（无任何 chunk）→ 按截断记 502 + 熔断 + 不计入 Key 用量", async () => {
+    const prisma = makePrisma();
+    await runTransformer(prisma, []);
+
+    // 真实链路（proxy.ts 首块 read 即 done）已拦截为空响应，此处防御直接调用
+    // transformer 的场景：无 [DONE] 且无任何数据 → 按截断失败处理（此前记 200 成功）
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+    expect(prisma.apiKeys.update).not.toHaveBeenCalled();
+    expect(prisma.requestLogs.create).toHaveBeenCalledTimes(1);
+    const log = prisma.requestLogs.create.mock.calls[0][0].data;
+    expect(log.status).toBe(502);
+    expect(log.isError).toBe(true);
+    expect(log.tokens).toBe(0);
+    expect(log.errorMessage).toContain("截断");
+  });
+
   it("正常流（content + usage + [DONE]）→ 不受空完成检测影响：记 200 且计入 Key 用量", async () => {
     const prisma = makePrisma();
     await runTransformer(prisma, [

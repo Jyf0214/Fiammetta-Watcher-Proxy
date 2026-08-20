@@ -242,13 +242,10 @@ function createLiteUsageTransformer(params: {
   let sawContent = false;
   let ttft = 0;
   let isFirstChunk = true;
-  let chunkCount = 0;
   const decoder = new TextDecoder();
 
   return new TransformStream({
     transform(chunk, controller) {
-      chunkCount++;
-
       if (isFirstChunk) {
         ttft = Date.now() - params.startTime;
         isFirstChunk = false;
@@ -303,8 +300,10 @@ function createLiteUsageTransformer(params: {
         extractUsage(lastUsage);
       const duration = Date.now() - params.startTime;
 
-      // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）
-      const truncated = !sawDone && !streamError && chunkCount > 0;
+      // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）。
+      // 含完全空输入（无任何 chunk）：真实链路（proxy-lite 首块 read 即 done）
+      // 已拦截为空响应，此处防御直接调用 transformer 的场景，同样按截断记失败
+      const truncated = !sawDone && !streamError;
       // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
       // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
       // "伪成功"流，客户端收到 200 + 空完成（"empty completion"）；此前记 200

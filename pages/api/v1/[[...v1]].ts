@@ -831,14 +831,16 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", proxyUrl, db: dummyDb, env }).catch(() => {});
-    } else if (sawDone && !sawContent) {
+    } else if (sawDone && !sawContent && !clientClosed) {
       // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
       // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
       // "伪成功"流——客户端收到 200 + 空完成（"empty completion"），日志此前
       // 记 200 成功且不触发熔断，坏平台评分不降、负载均衡反复撞上它。
       // 与截断同属上游失败：记失败日志（客户端已收到的 200 无法改写）；
       // 熔断软失败豁免——白名单平台（永不封禁语义）不因空完成被熔断，
-      // 网络错误/5xx/截断/流内 error 等硬失败仍照常熔断
+      // 网络错误/5xx/截断/流内 error 等硬失败仍照常熔断。
+      // 客户端主动断开时不走此分支（与截断分支一致：断开是下游原因，
+      // 无法确认上游是否真的返回空流，不应触发熔断）
       if (!isPlatformWhitelisted(platform.id)) {
         try { await recordFailure(platform.id, dummyDb, env); } catch {}
       }

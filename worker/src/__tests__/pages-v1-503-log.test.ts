@@ -133,6 +133,7 @@ function makeReq(body: Record<string, unknown>): any {
 function makeRes(): any {
   const calls: Array<{ type: string; status: number; body: unknown }> = [];
   let statusCode = 200;
+  const listeners: Record<string, Array<() => void>> = {};
   const res: any = {
     calls,
     status(c: number) {
@@ -156,8 +157,9 @@ function makeRes(): any {
     setHeader() {
       return res;
     },
-    // Pages 流式分支监听 res close（客户端断开取消上游），测试桩需提供
-    on() {
+    // Pages 流式分支监听 res close（客户端断开取消上游流），测试桩需提供
+    on(ev: string, cb: () => void) {
+      (listeners[ev] ||= []).push(cb);
       return res;
     },
     off() {
@@ -166,9 +168,31 @@ function makeRes(): any {
     once() {
       return res;
     },
+    // 模拟客户端断开：触发 handler 注册的 close 回调（clientClosed=true + 取消上游流）
+    emitClose() {
+      (listeners["close"] || []).forEach((cb) => cb());
+    },
     get statusCode() {
       return statusCode;
     },
+  };
+  return res;
+}
+
+/**
+ * 在首次写入时模拟客户端断开（与上游首个 chunk 到达几乎同时）的 response 桩：
+ * 首个 write 触发 close，验证客户端断开后空完成/截断分支不指责平台（不熔断）
+ */
+function makeResClosingOnFirstWrite(): any {
+  const res = makeRes();
+  const origWrite = res.write.bind(res);
+  let wrote = false;
+  res.write = (s: unknown) => {
+    if (!wrote) {
+      wrote = true;
+      res.emitClose();
+    }
+    return origWrite(s);
   };
   return res;
 }
@@ -373,6 +397,35 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     expect(logParams.status).toBe(502);
     expect(logParams.isError).toBe(true);
     expect(logParams.tokens).toBe(0);
+  });
+
+  it("修复验证：客户端断开 + 空完成流（[DONE] 无内容）→ 不记失败不熔断（与截断分支的 clientClosed 语义对齐）", async () => {
+    const encoder = new TextEncoder();
+    const emptyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(emptyStream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      )
+    );
+
+    const req = makeReq({ model: "m", stream: true, messages: [{ role: "user", content: "hi" }] });
+    const res = makeResClosingOnFirstWrite();
+    await handler(req, res);
+
+    // 客户端断开是下游原因，无法确认上游是否真的返回空流：不触发熔断
+    // （修复前空完成分支无 !clientClosed 守卫，会记 502 并熔断平台）
+    expect(recordFailure).not.toHaveBeenCalled();
+    // 日志按成功路径记录（与截断分支客户端断开时落入 else 的行为一致）
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(200);
+    expect(logParams.isError).toBe(false);
   });
 
   it("修复验证：流式上游挂起（看门狗 120s 无数据）→ 日志记 504 + isError=true", async () => {

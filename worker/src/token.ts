@@ -294,13 +294,10 @@ export function createUsageTransformer(params: {
   let sawContent = false;
   let ttft = 0;
   let isFirstChunk = true;
-  let chunkCount = 0;
   const decoder = new TextDecoder();
 
   return new TransformStream({
     transform(chunk, controller) {
-      chunkCount++;
-
       if (isFirstChunk) {
         ttft = Date.now() - params.startTime;
         isFirstChunk = false;
@@ -358,7 +355,9 @@ export function createUsageTransformer(params: {
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
       // 否则坏平台永远不会被降级，负载均衡会反复撞上它（此前一直记 200 成功）。
-      const truncated = !sawDone && !streamError && chunkCount > 0;
+      // 含完全空输入（无任何 chunk）：真实链路（proxy.ts 首块 read 即 done）已
+      // 拦截为空响应，此处防御直接调用 transformer 的场景，同样按截断记失败
+      const truncated = !sawDone && !streamError;
       // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
       // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
       // "伪成功"流，客户端收到 200 + 空完成（"empty completion"）；此前记 200
