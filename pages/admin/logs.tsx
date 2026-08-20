@@ -154,7 +154,6 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       ellipsis: true,
       render: (_: unknown, record: LogEntry) =>
         record.platform?.name || "-",
-      responsive: ["md"],
     },
     {
       title: t("nodeName"),
@@ -162,7 +161,6 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       width: 120,
       ellipsis: true,
       render: (_: unknown, record: LogEntry) => record.nodeName || "-",
-      responsive: ["md"],
     },
     {
       title: t("model"),
