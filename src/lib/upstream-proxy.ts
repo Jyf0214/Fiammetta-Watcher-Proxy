@@ -502,6 +502,150 @@ function normalizeConfig(input: Record<string, unknown>): ProxyConfig | null {
   return { groups, platformIds, platformGroup, healthCheckUrl, healthCheckIntervalMin: interval };
 }
 
+/** 代理配置写入路径校验结果 */
+export type ProxyConfigValidation = { ok: true } | { ok: false; error: string };
+
+/**
+ * 代理配置写入路径严格校验（保存前防御，与前端 buildConfigJson 校验对齐并更严）：
+ * - value 必须是合法 JSON 对象/数组（兼容旧版顶层 urls 数组格式）
+ * - 组名非空/唯一/非保留名 "new"；拉取地址 http(s)，手动代理 http(s)/socks4/socks5
+ * - 自动更新周期与健康检查间隔整数且在允许范围
+ * - platformGroup 绑定的组必须存在于 groups——保存后指向缺失组的绑定会被
+ *   normalizeConfig 静默丢弃，是「绑定保存后消失」的直接来源，写入前 400 拒绝
+ * 读取路径 normalizeConfig 保持宽容回退（防御存量脏数据）不变。
+ */
+export function validateUpstreamProxyConfig(raw: string): ProxyConfigValidation {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: "配置不能为空" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { ok: false, error: "配置不是合法 JSON" };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, error: "配置必须是 JSON 对象或数组" };
+  }
+
+  const cfg = Array.isArray(parsed) ? { urls: parsed } : (parsed as Record<string, unknown>);
+
+  // 旧版顶层 urls 数组（无 groups）：每条必须是合法代理地址
+  if (cfg.urls !== undefined) {
+    if (!Array.isArray(cfg.urls)) return { ok: false, error: "urls 必须是数组" };
+    for (const item of cfg.urls) {
+      if (typeof item !== "string" || !normalizeProxyLine(item)) {
+        return {
+          ok: false,
+          error: `代理地址无效：${maskProxyUrl(typeof item === "string" ? item : String(item))}`,
+        };
+      }
+    }
+  }
+
+  const groupNames = new Set<string>();
+  if (cfg.groups !== undefined) {
+    if (!Array.isArray(cfg.groups)) return { ok: false, error: "groups 必须是数组" };
+    for (const item of cfg.groups) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return { ok: false, error: "代理组格式错误" };
+      }
+      const g = item as Record<string, unknown>;
+      const name = typeof g.name === "string" ? g.name.trim() : "";
+      if (!name) return { ok: false, error: "代理组名称不能为空" };
+      if (name === "new") return { ok: false, error: `代理组名称 "${name}" 为保留名，不能使用` };
+      if (groupNames.has(name)) return { ok: false, error: `代理组名称重复：${name}` };
+      groupNames.add(name);
+
+      if (g.sourceUrl !== undefined) {
+        if (typeof g.sourceUrl !== "string") {
+          return { ok: false, error: `代理组 "${name}" 的拉取地址格式错误` };
+        }
+        const sourceUrl = g.sourceUrl.trim();
+        if (sourceUrl && !isValidHttpUrl(sourceUrl)) {
+          return { ok: false, error: `代理组 "${name}" 的拉取地址无效：${maskProxyUrl(sourceUrl)}` };
+        }
+      }
+      if (g.urls !== undefined) {
+        if (!Array.isArray(g.urls)) return { ok: false, error: `代理组 "${name}" 的代理列表必须是数组` };
+        for (const u of g.urls) {
+          if (typeof u !== "string" || !normalizeProxyLine(u)) {
+            return {
+              ok: false,
+              error: `代理组 "${name}" 的代理地址无效：${maskProxyUrl(typeof u === "string" ? u : String(u))}`,
+            };
+          }
+        }
+      }
+      if (g.enabled !== undefined && typeof g.enabled !== "boolean") {
+        return { ok: false, error: `代理组 "${name}" 的启用开关格式错误` };
+      }
+      if (g.autoRefresh !== undefined && typeof g.autoRefresh !== "boolean") {
+        return { ok: false, error: `代理组 "${name}" 的自动更新开关格式错误` };
+      }
+      if (g.refreshIntervalMin !== undefined) {
+        const v = g.refreshIntervalMin;
+        if (
+          typeof v !== "number" ||
+          !Number.isInteger(v) ||
+          v < PROXY_PULL_INTERVAL_MIN_RANGE.min ||
+          v > PROXY_PULL_INTERVAL_MIN_RANGE.max
+        ) {
+          return {
+            ok: false,
+            error: `代理组 "${name}" 的自动更新周期必须在 ${PROXY_PULL_INTERVAL_MIN_RANGE.min}~${PROXY_PULL_INTERVAL_MIN_RANGE.max} 分钟之间`,
+          };
+        }
+      }
+    }
+  }
+
+  if (cfg.platformIds !== undefined) {
+    if (!Array.isArray(cfg.platformIds)) return { ok: false, error: "platformIds 必须是数组" };
+    for (const pid of cfg.platformIds) {
+      if (typeof pid !== "string" || !pid) return { ok: false, error: "platformIds 包含无效平台 ID" };
+    }
+  }
+
+  if (cfg.platformGroup !== undefined) {
+    if (!cfg.platformGroup || typeof cfg.platformGroup !== "object" || Array.isArray(cfg.platformGroup)) {
+      return { ok: false, error: "平台绑定格式错误" };
+    }
+    for (const [pid, groupName] of Object.entries(cfg.platformGroup as Record<string, unknown>)) {
+      if (!pid) return { ok: false, error: "平台绑定包含无效平台 ID" };
+      if (typeof groupName !== "string" || !groupNames.has(groupName)) {
+        return {
+          ok: false,
+          error: `平台绑定指向不存在的代理组：${typeof groupName === "string" ? groupName : String(groupName)}`,
+        };
+      }
+    }
+  }
+
+  if (cfg.healthCheckUrl !== undefined) {
+    if (typeof cfg.healthCheckUrl !== "string") return { ok: false, error: "健康检查地址格式错误" };
+    const url = cfg.healthCheckUrl.trim();
+    if (url && !isValidHttpUrl(url)) return { ok: false, error: `健康检查地址无效：${maskProxyUrl(url)}` };
+  }
+
+  if (cfg.healthCheckIntervalMin !== undefined) {
+    const v = cfg.healthCheckIntervalMin;
+    if (
+      typeof v !== "number" ||
+      !Number.isInteger(v) ||
+      v < PROXY_HEALTH_INTERVAL_MIN_RANGE.min ||
+      v > PROXY_HEALTH_INTERVAL_MIN_RANGE.max
+    ) {
+      return {
+        ok: false,
+        error: `健康检查间隔必须在 ${PROXY_HEALTH_INTERVAL_MIN_RANGE.min}~${PROXY_HEALTH_INTERVAL_MIN_RANGE.max} 分钟之间`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 /**
  * 当前生效的健康检查间隔（分钟）：进程内配置缓存的最新值，未加载过配置时返回默认。
  * 供 Docker 调度器 proxy-health 动态 spec 使用（readProxyConfig 每次刷新缓存时更新）

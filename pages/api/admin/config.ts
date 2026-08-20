@@ -12,10 +12,12 @@ import { getClientIp } from "./auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import {
+  UPSTREAM_PROXY_CONFIG_KEY,
   UPSTREAM_PROXY_HEALTH_KEY,
   UPSTREAM_PROXY_POOL_KEY,
   UPSTREAM_PROXY_CHECK_LOCK_KEY,
   UPSTREAM_PROXY_PULL_AT_KEY,
+  validateUpstreamProxyConfig,
 } from "@/lib/upstream-proxy";
 
 /**
@@ -117,8 +119,40 @@ export default async function handler(
         return;
       }
 
+      // 代理配置主键：写入前严格校验（合法 JSON、组名/URL/周期/绑定完整性）。
+      // 此前非法 JSON body 直接入库并返回 200 假成功，前端解析回退旧版格式、
+      // normalizeConfig 丢弃指向缺失组的绑定，表现为「绑定保存后消失」——
+      // 保存路径必须在写入前 400 拒绝（详见 validateUpstreamProxyConfig 说明）
+      if (body.key === UPSTREAM_PROXY_CONFIG_KEY) {
+        const validation = validateUpstreamProxyConfig(body.value);
+        if (!validation.ok) {
+          res.status(400).json({ success: false, error: { message: validation.error, type: "invalid_request_error" } });
+          return;
+        }
+      }
+
       // 单调递增补偿：相对库中当前 updatedAt 取 max（见 nextConfigUpdatedAt 说明）
       const now = await nextConfigUpdatedAt(db, body.key);
+
+      // 审计日志：配置修改属安全敏感操作（可含代理地址等），记录变更内容；
+      // 值内嵌的 user:pass 凭据按 maskProxyUrl 同规则脱敏，防止凭据在审计表
+      // 长期可读。审计先于 upsert 写入：审计写入失败时主流程抛错返回 500，
+      // 配置不会落库——避免「配置已生效但无审计」的假成功（TiDB HTTP 适配器
+      // 下 $transaction 不可依赖，改为按顺序先审计后写入）
+      const ip = getClientIp(req);
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: getAuditAdminId(admin),
+          action: "update_config",
+          detail: JSON.stringify({
+            key: body.key,
+            value: body.value.replace(/\/\/[^@\s]+@/g, "//***@"),
+          }),
+          ip,
+          createdAt: now,
+        },
+      });
 
       // 使用 Prisma upsert 实现 upsert（configs.key 是唯一约束）
       await db.configs.upsert({
@@ -132,24 +166,6 @@ export default async function handler(
         update: {
           value: body.value,
           updatedAt: now,
-        },
-      });
-
-      // 审计日志：配置修改属安全敏感操作（可含代理地址等），记录变更内容；
-      // 值内嵌的 user:pass 凭据按 maskProxyUrl 同规则脱敏，防止凭据在审计表
-      // 长期可读（写失败随主流程返回 500，与 keys/[id].ts 审计写法一致）
-      const ip = getClientIp(req);
-      await db.auditLogs.create({
-        data: {
-          id: crypto.randomUUID(),
-          adminId: getAuditAdminId(admin),
-          action: "update_config",
-          detail: JSON.stringify({
-            key: body.key,
-            value: body.value.replace(/\/\/[^@\s]+@/g, "//***@"),
-          }),
-          ip,
-          createdAt: now,
         },
       });
 

@@ -218,6 +218,98 @@ describe("PUT /api/admin/config 内部派生键保护（L1）", () => {
   });
 });
 
+describe("PUT /api/admin/config 代理配置写入校验（绑定保存后消失回归）", () => {
+  function putBody(key: string, value: string) {
+    return { method: "PUT", body: { key, value } };
+  }
+
+  it("非法 JSON（含多余 ] 的组对象）拒绝 400，不写库不审计", async () => {
+    // 与生产事故同构：sourceUrl 后跟 "],{" 的畸形组对象，任何 UI 版本都无法生成
+    const broken =
+      '{"groups":[{"name":"A","sourceUrl":"http://127.0.0.1:8181"],{"name":"B","urls":["http://127.0.0.1:7890"]}]}';
+    const { res } = await call(putBody("system:upstream_proxy", broken));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("配置不是合法 JSON");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("platformGroup 绑定指向缺失组拒绝 400（绑定消失根因回归）", async () => {
+    const dangling = JSON.stringify({
+      groups: [{ name: "A", urls: ["http://127.0.0.1:7890"] }],
+      platformGroup: { "plat-1": "B" },
+    });
+    const { res } = await call(putBody("system:upstream_proxy", dangling));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("平台绑定指向不存在的代理组：B");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("合法四组配置（含绑定/健康检查/周期）通过并写库写审计", async () => {
+    const valid = JSON.stringify({
+      groups: [
+        { name: "TheSpeedX", sourceUrl: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", enabled: true, autoRefresh: true, refreshIntervalMin: 60 },
+        { name: "ProxyScrape", sourceUrl: "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http", enabled: true, autoRefresh: true },
+        { name: "Hello", sourceUrl: "https://raw.githubusercontent.com/HookZz64/monosans/master/v1/http.txt", enabled: true, autoRefresh: true },
+        { name: "游客", urls: ["http://127.0.0.1:7890"], enabled: true, autoRefresh: true },
+      ],
+      platformIds: ["plat-1", "plat-2"],
+      platformGroup: { "plat-1": "TheSpeedX", "plat-2": "游客" },
+      healthCheckUrl: "https://cp.cloudflare.com/generate_204",
+      healthCheckIntervalMin: 5,
+    });
+    const { res } = await call(putBody("system:upstream_proxy", valid));
+    expect(res.statusCode).toBe(200);
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.auditCreate).toHaveBeenCalledTimes(1);
+    const data = mocks.upsert.mock.calls[0][0];
+    expect(data.create.value).toBe(valid);
+  });
+
+  it("旧版顶层 urls 数组格式仍兼容（200 正常保存）", async () => {
+    const legacy = JSON.stringify({ urls: ["http://127.0.0.1:7890", "socks5://127.0.0.1:1080"] });
+    const { res } = await call(putBody("system:upstream_proxy", legacy));
+    expect(res.statusCode).toBe(200);
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("组名重复 / 保留名 new / 非法周期拒绝 400", async () => {
+    const dup = JSON.stringify({
+      groups: [
+        { name: "A", urls: ["http://127.0.0.1:7890"] },
+        { name: "A", urls: ["http://127.0.0.1:7891"] },
+      ],
+    });
+    const dupRes = await call(putBody("system:upstream_proxy", dup));
+    expect(dupRes.res.statusCode).toBe(400);
+    expect(dupRes.res.body.error.message).toBe("代理组名称重复：A");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+
+    const reserved = JSON.stringify({ groups: [{ name: "new", urls: ["http://127.0.0.1:7890"] }] });
+    const reservedRes = await call(putBody("system:upstream_proxy", reserved));
+    expect(reservedRes.res.statusCode).toBe(400);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+
+    const badInterval = JSON.stringify({
+      groups: [{ name: "A", urls: ["http://127.0.0.1:7890"], refreshIntervalMin: 99999 }],
+    });
+    const badRes = await call(putBody("system:upstream_proxy", badInterval));
+    expect(badRes.res.statusCode).toBe(400);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("审计写入失败时阻止配置落库（500，不 upsert）", async () => {
+    mocks.auditCreate.mockRejectedValueOnce(new Error("db down"));
+    const { res } = await call(putBody("system:upstream_proxy", "{}"));
+    expect(res.statusCode).toBe(500);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe("PUT /api/admin/config 审计日志（A9）", () => {
   it("成功后写审计：action=update_config、目标键、值内嵌凭据脱敏", async () => {
     vi.useFakeTimers();
