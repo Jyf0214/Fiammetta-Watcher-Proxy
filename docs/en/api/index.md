@@ -30,15 +30,15 @@ Anthropic clients may alternatively use the `x-api-key` header (Anthropic protoc
 | `/v1/models` | GET | List available models |
 | `/v1/models/{model}` | GET | Get single model info |
 | `/v1/images/generations` | POST | Image generation |
-| `/v1/images/edits` | POST | Image editing (JSON body only) |
-| `/v1/images/variations` | POST | Image variations (JSON body only) |
+| `/v1/images/edits` | POST | Image editing (multipart passthrough) |
+| `/v1/images/variations` | POST | Image variations (multipart passthrough) |
 | `/v1/audio/speech` | POST | Text-to-speech (TTS) |
 | `/v1/audio/transcriptions` | POST | Speech-to-text (Whisper) |
 | `/v1/audio/translations` | POST | Audio translation |
 | `/v1/messages` | POST | Anthropic Messages protocol (bidirectional format conversion) |
 | `/v1/messages/count_tokens` | POST | Anthropic token estimation |
 
-> Note: the gateway only parses JSON request bodies. Endpoints that natively require multipart file uploads in OpenAI (`/v1/images/edits`, `/v1/images/variations`, `/v1/audio/transcriptions`, `/v1/audio/translations`) currently **do not support multipart requests** (a JSON body is passed through to the upstream as-is; usability depends on whether the upstream accepts JSON). For file uploads, call the upstream platform directly.
+> Note: the gateway supports **multipart file upload passthrough**. For endpoints that natively require multipart file uploads in OpenAI (`/v1/images/edits`, `/v1/images/variations`, `/v1/audio/transcriptions`, `/v1/audio/translations`), the gateway extracts the `model` field from the form for routing and passes the raw request bytes along with the `Content-Type` (including the boundary) to the upstream as-is, without injecting template fields. JSON bodies are also supported and passed through as-is; usability depends on whether the upstream accepts JSON.
 
 ### Request Example
 

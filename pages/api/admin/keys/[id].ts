@@ -13,6 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
+import { getClientIp } from "../auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
@@ -23,12 +24,6 @@ function maskKey(key: string): string {
 
 function generateId(): string { return crypto.randomUUID(); }
 function now(): number { return Math.floor(Date.now() / 1000); }
-
-function getClientIp(req: NextApiRequest): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const str = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return str?.split(",")[0]?.trim() || (req.headers["x-real-ip"] as string) || "unknown";
-}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const admin = await getAdminFromRequest(req);

@@ -1420,7 +1420,7 @@ describe("组启用开关", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://other.example/proxies.txt");
     expect(results.g1).toBeUndefined();
-    expect(results.g2).toMatchObject({ pulled: 1 });
+    expect(results.g2).toMatchObject({ added: 1 });
   });
 
   it("禁用组不参与健康检查（仅检查启用组的候选）", async () => {
@@ -1488,7 +1488,7 @@ describe("pullProxyGroups 拉取", () => {
 
     const results = await pullProxyGroups(mockDb, mockEnv);
 
-    expect(results.g1).toMatchObject({ pulled: 3, added: 3, removed: 0, kept: 0, total: 3 });
+    expect(results.g1).toMatchObject({ added: 3, removed: 0, kept: 0, total: 3 });
     const upsertArgs = lastUpsertFor(POOL_KEY);
     const pool = JSON.parse(upsertArgs.create.value) as Record<string, any>;
     expect(pool.g1).toEqual(["http://127.0.0.1:7890", "http://127.0.0.1:7891", "socks5://127.0.0.1:1080"]);
@@ -1570,7 +1570,7 @@ describe("pullProxyGroups 拉取", () => {
     const results = await pullProxyGroups(mockDb, mockEnv);
 
     expect(results.g1.error).toBeDefined();
-    expect(results.g1.pulled).toBe(0);
+    expect(results.g1.added).toBe(0);
     const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
     expect(pool.g1).toEqual([URL_A]);
   });
@@ -1610,7 +1610,7 @@ describe("pullProxyGroups 拉取", () => {
     const results = await pullProxyGroups(mockDb, mockEnv);
 
     expect(results.g1.error).toBe("empty");
-    expect(results.g1.pulled).toBe(0);
+    expect(results.g1.added).toBe(0);
     const pool = JSON.parse(lastUpsertFor(POOL_KEY).create.value) as Record<string, any>;
     expect(pool.g1).toEqual([URL_A]);
   });
@@ -1759,8 +1759,8 @@ describe("健康表并发写串行化（TiDB 1205 锁等待回归）", () => {
     resolveGate();
     const [autoResult, manualResult] = await Promise.all([autoP, manualP]);
 
-    expect(autoResult.g1).toEqual({ pulled: 0, total: 1, added: 0, removed: 0, kept: 1 });
-    expect(manualResult.g1).toEqual({ pulled: 0, total: 1, added: 0, removed: 0, kept: 1 });
+    expect(autoResult.g1).toEqual({ total: 1, added: 0, removed: 0, kept: 1 });
+    expect(manualResult.g1).toEqual({ total: 1, added: 0, removed: 0, kept: 1 });
     // 两个模式各自发起源请求（此前手动拉取会复用定时任务、退化为只拉「到期组」）
     expect(fetchCount).toBe(2);
   });
@@ -1844,7 +1844,7 @@ describe("组级自动更新（autoRefresh / refreshIntervalMin / 周期判定�
 
     // 无拉取记录：lastAt=0 视为长期未拉，全部到期
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(results.g1).toMatchObject({ pulled: 1 });
+    expect(results.g1).toMatchObject({ added: 1 });
   });
 
   it("未到期组（距上次成功拉取 < 周期）定时模式跳过，不发起拉取", async () => {
@@ -1892,7 +1892,7 @@ describe("组级自动更新（autoRefresh / refreshIntervalMin / 周期判定�
     vi.stubGlobal("fetch", fetchMock);
     const results = await fresh.pullProxyGroups(mockDb, mockEnv);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(results.g1).toMatchObject({ pulled: 1 });
+    expect(results.g1).toMatchObject({ added: 1 });
   });
 
   it("越界/非法周期回退默认 60（0、负数、超上限、小数）", async () => {
@@ -1931,7 +1931,7 @@ describe("组级自动更新（autoRefresh / refreshIntervalMin / 周期判定�
     // 手动模式：忽略 autoRefresh 与周期，立即拉取
     const results = await pullProxyGroups(mockDb, mockEnv, { manual: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(results.g1).toMatchObject({ pulled: 1 });
+    expect(results.g1).toMatchObject({ added: 1 });
   });
 
   it("拉取成功后记录时刻（手动与定时共用：手动拉取后定时周期重新计时），失败不记录", async () => {
@@ -2417,5 +2417,73 @@ describe("normalizeProxyStatKey 统计键归一化（#28）", () => {
     expect(normalizeProxyStatKey("http://[::1]:7890")).toBe("[::1]:7890");
     // 无法解析的畸形地址回退 maskProxyUrl（键稳定且不含凭据）
     expect(normalizeProxyStatKey("not a url with user:pass@")).toBe("not a url with user:pass@");
+  });
+});
+
+describe("proxyStatKey 代理级统计键（账号独立成键）", () => {
+  it("无凭据地址 → 裸 host:port（与历史日志键兼容）", async () => {
+    const { proxyStatKey } = await loadModule();
+    expect(proxyStatKey("http://127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    expect(proxyStatKey("socks5://127.0.0.1:1080")).toBe("127.0.0.1:1080");
+    expect(proxyStatKey("http://host")).toBe("host:80");
+  });
+
+  it("带凭据地址 → host:port#账号指纹，同 host:port 不同账号独立成键", async () => {
+    const { proxyStatKey } = await loadModule();
+    const a1 = proxyStatKey("http://user1:pass1@proxy.example.com:8080");
+    const a2 = proxyStatKey("http://user2:pass2@proxy.example.com:8080");
+    // 同 host:port、账号不同 → 键不同（不再合并统计）
+    expect(a1).toBe("proxy.example.com:8080#87c99c34");
+    expect(a2).toBe("proxy.example.com:8080#e24df5b4");
+    expect(a1).not.toBe(a2);
+    // 同一 URL 幂等（指纹稳定可复现）
+    expect(proxyStatKey("http://user1:pass1@proxy.example.com:8080")).toBe(a1);
+    // 键不含凭据明文
+    expect(a1).not.toContain("pass1");
+    expect(a2).not.toContain("pass2");
+  });
+
+  it("历史脱敏键（***@host:port）→ 裸 host:port（历史数据无法归属具体账号）", async () => {
+    const { proxyStatKey } = await loadModule();
+    expect(proxyStatKey("http://***@127.0.0.1:7890")).toBe("127.0.0.1:7890");
+    expect(proxyStatKey("***@127.0.0.1:7890")).toBe("127.0.0.1:7890");
+  });
+
+  it("幂等：对已落库统计键再次调用返回原值（聚合/查表往返不剥离指纹）", async () => {
+    const { proxyStatKey } = await loadModule();
+    // 落库键（带凭据账号指纹）→ 聚合键 → 前端查表键 三者必须一致：
+    // stats 聚合与前端查表都会对已落库键/原始 URL 调用 proxyStatKey，
+    // 若 # 后指纹被当 fragment 剥离，带凭据代理统计将查表失配
+    const stored = proxyStatKey("http://user1:pass1@proxy.example.com:8080");
+    expect(stored).toBe("proxy.example.com:8080#87c99c34");
+    expect(proxyStatKey(stored)).toBe(stored);
+    expect(proxyStatKey(proxyStatKey(stored))).toBe(stored);
+    // 无凭据键往返同样保持原值
+    expect(proxyStatKey(proxyStatKey("http://127.0.0.1:7890"))).toBe("127.0.0.1:7890");
+  });
+});
+
+describe("displayProxyUrl 展示用地址（用户名保留 + 密码打码）", () => {
+  async function loadUiModule() {
+    return import("../upstream-proxy-ui");
+  }
+
+  it("user:pass 凭据 → 用户名保留、密码打码", async () => {
+    const { displayProxyUrl } = await loadUiModule();
+    expect(displayProxyUrl("http://user1:pass1@proxy.example.com:8080")).toBe(
+      "http://user1:***@proxy.example.com:8080"
+    );
+  });
+
+  it("无凭据地址原样返回（无 @ 可打码）", async () => {
+    const { displayProxyUrl } = await loadUiModule();
+    expect(displayProxyUrl("http://127.0.0.1:7890")).toBe("http://127.0.0.1:7890");
+  });
+
+  it("密码含冒号/特殊字符不泄漏其余片段", async () => {
+    const { displayProxyUrl } = await loadUiModule();
+    expect(displayProxyUrl("http://user:p:a:ss@proxy.example.com:8080")).toBe(
+      "http://user:***@proxy.example.com:8080"
+    );
   });
 });

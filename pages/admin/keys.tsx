@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, Pagination, message } from "antd";
+import { Tag, Popconfirm, Modal, Form, Input, InputNumber, Select, Alert, Pagination, message, DatePicker } from "antd";
+import dayjs from "dayjs";
 import { Plus, Trash2, Copy, Key, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -53,6 +54,9 @@ function ApiKeyCard({
   const statusText = apiKey.status === "active" ? t("statusActive") : t("statusDisabled");
 
   const createdDate = formatDate(apiKey.createdAt);
+  // 列表为静态渲染，挂载时取一次当前秒作为过期判定基准（渲染期禁止直接调 Date.now）
+  const [nowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const isExpired = apiKey.expiresAt !== null && apiKey.expiresAt < nowSec;
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
@@ -78,6 +82,18 @@ function ApiKeyCard({
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("common:createdAt")}</span>
           <span className="text-[11px] text-zinc-600 dark:text-zinc-300">{createdDate}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("expiresAt")}</span>
+          {apiKey.expiresAt ? (
+            isExpired ? (
+              <Tag color="red" className="!text-[10px] !px-1.5 !py-0 !m-0">{t("expired")}</Tag>
+            ) : (
+              <span className="text-[11px] text-zinc-600 dark:text-zinc-300">{formatDateTime(apiKey.expiresAt)}</span>
+            )
+          ) : (
+            <span className="text-[11px] text-zinc-400">{t("noExpiry")}</span>
+          )}
         </div>
       </div>
 
@@ -108,6 +124,8 @@ export default function KeysPage() {
   // 服务端分页：带 limit/offset 时后端返回 { total, items }（接口约定 A12）
   const PAGE_SIZE = 50;
   const [page, setPage] = useState(1);
+  // 列表为静态渲染，挂载时取一次当前秒作为过期判定基准（渲染期禁止直接调 Date.now）
+  const [nowSec] = useState(() => Math.floor(Date.now() / 1000));
   const {
     data: keysData,
     isLoading,
@@ -166,6 +184,8 @@ export default function KeysPage() {
       rpmLimit: item.rpmLimit,
       tpmLimit: item.tpmLimit,
       resetPeriod: item.resetPeriod,
+      // 数据库存秒级时间戳，转换为 dayjs 供 DatePicker 回显；null 表示未设置过期
+      expiresAt: item.expiresAt ? dayjs.unix(item.expiresAt) : null,
     });
     setModalOpen(true);
   };
@@ -175,11 +195,19 @@ export default function KeysPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
+      // 过期时间：dayjs 转 ISO 字符串提交（后端 new Date() 解析后存秒级时间戳，
+      // 不能直接传秒数——new Date(秒) 会按毫秒解析出 1970 年）；null/空 = 无过期
+      //（编辑时后端将 null 解释为清除过期时间）
+      const payload = {
+        ...values,
+        expiresAt: values.expiresAt ? values.expiresAt.toISOString() : null,
+      };
+
       if (editItem) {
         const res = await fetch(`/api/admin/keys/${editItem.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(values),
+          body: JSON.stringify(payload),
         });
         const data: Record<string, any> = await res.json();
         if (data.success) {
@@ -193,7 +221,7 @@ export default function KeysPage() {
         const res = await fetch("/api/admin/keys", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(values),
+          body: JSON.stringify(payload),
         });
         const data: Record<string, any> = await res.json();
         if (data.success) {
@@ -325,6 +353,19 @@ export default function KeysPage() {
       key: "createdAt",
       width: 180,
       render: (v: number) => formatDateTime(v),
+      responsive: ["lg" as const],
+    },
+    {
+      title: t("expiresAt"),
+      dataIndex: "expiresAt",
+      key: "expiresAt",
+      width: 180,
+      render: (v: number | null) => {
+        // 列表为静态渲染，过期判定用挂载时的当前秒（与 worker/src/auth.ts 口径一致）
+        if (!v) return <span className="text-zinc-400">{t("noExpiry")}</span>;
+        if (v < nowSec) return <Tag color="red">{t("expired")}</Tag>;
+        return formatDateTime(v);
+      },
       responsive: ["lg" as const],
     },
     {
@@ -489,6 +530,13 @@ export default function KeysPage() {
                   { value: "daily", label: t("resetDaily") },
                   { value: "never", label: t("resetNever") },
                 ]}
+              />
+            </Form.Item>
+            <Form.Item name="expiresAt" label={t("expiresAt")}>
+              <DatePicker
+                className="w-full"
+                showTime
+                placeholder={t("expiresAtPlaceholder")}
               />
             </Form.Item>
           </Form>

@@ -73,16 +73,6 @@ export function isHalfOpenProbeFull(platformId: string): boolean {
 }
 
 /**
- * 递增半开状态下的并发探测计数
- */
-export function incrementHalfOpenPending(platformId: string): void {
-  const entry = breakers.get(platformId);
-  if (entry && entry.state === "half-open") {
-    entry.halfOpenPending++;
-  }
-}
-
-/**
  * 释放半开探测配额
  *
  * 请求被选中 half-open 平台后、实际发出上游请求前被门禁拒绝

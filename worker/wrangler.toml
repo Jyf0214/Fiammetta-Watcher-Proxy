@@ -9,6 +9,10 @@ mode = "smart"
 # 环境变量（通过 Cloudflare Dashboard 或 wrangler secret 设置）
 [vars]
 DB_TYPE = "d1"
+# 运行时部署平台标识：请求日志 nodeName 未设置 NODE_NAME 时回退为友好平台名
+# （Cloudflare）。构建期 build-gate 的 DEPLOY_PLATFORM 只作用于构建产物，不会
+# 进入 Worker 运行时——此处显式注入，否则 CF 部署日志恒显示 local
+DEPLOY_PLATFORM = "cf"
 # TIDB_URL = ""      # TiDB Cloud 连接串（DB_TYPE=tidb 时设置）
 # PG_URL = ""        # PostgreSQL 直连串（DB_TYPE=pg 时设置）
 

@@ -148,7 +148,9 @@ export default async function handler(
         return;
       }
 
-      if (!mergeBody || typeof mergeBody !== "object") {
+      // mergeBody 校验与 PUT 分支同款：null/空/非对象/数组均 400（数组此前会
+      // 被 sanitizeMergeBody 静默过滤为空对象，与 PUT 行为分叉）
+      if (!mergeBody || typeof mergeBody !== "object" || Array.isArray(mergeBody)) {
         res.status(400).json({ success: false, error: "请求体内容不能为空" });
         return;
       }
@@ -243,7 +245,15 @@ export default async function handler(
         }
         templates[idx].models = models;
       }
-      if (mergeBody !== undefined) templates[idx].mergeBody = sanitizeMergeBody(mergeBody as Record<string, unknown>);
+      if (mergeBody !== undefined) {
+        // 与 POST 分支同款校验：null/非对象/数组 → 400（合法对象才调用
+        // sanitizeMergeBody；否则对 null 执行 Object.entries 抛 TypeError → 500）
+        if (!mergeBody || typeof mergeBody !== "object" || Array.isArray(mergeBody)) {
+          res.status(400).json({ success: false, error: "请求体内容不能为空" });
+          return;
+        }
+        templates[idx].mergeBody = sanitizeMergeBody(mergeBody);
+      }
       if (enabled !== undefined) {
         if (typeof enabled !== "boolean") {
           res.status(400).json({ success: false, error: "模板启用状态必须为布尔值" });

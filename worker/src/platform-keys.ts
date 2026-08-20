@@ -476,12 +476,14 @@ export function parseApiKeys(raw: string | null | undefined): string[] {
               typeof k.key === "string" &&
               k.key.trim().length > 0
           )
-          .map((k) => k.key);
+          .map((k) => k.key.trim());
       }
       // 旧格式：字符串数组 ["key1", "key2"]
-      return parsed.filter(
-        (k): k is string => typeof k === "string" && k.trim().length > 0
-      );
+      return parsed
+        .filter(
+          (k): k is string => typeof k === "string" && k.trim().length > 0
+        )
+        .map((k) => k.trim());
     }
   } catch {
     // JSON 解析失败，忽略
@@ -522,7 +524,8 @@ const KEY_ERROR_THRESHOLD = 5;
 /**
  * 根据上游错误状态码计算错误计数增量
  *
- * 429 算 1 次，401 算 2 次，其余可重试错误（403/空响应等）算 1 次
+ * 429 算 1 次，401 算 2 次，402（Payment Required）算 5 次（一次即达阈值立即禁用），
+ * 其余可重试错误（403/空响应等）算 1 次
  */
 function errorIncrement(status: number): number {
   if (status === 402) return 5;
@@ -534,7 +537,7 @@ function errorIncrement(status: number): number {
 /**
  * 记录密钥错误并更新数据库中的 errorCount
  *
- * - 累加错误计数（429→+1, 401→+2, 其余→+1）
+ * - 累加错误计数（429→+1, 401→+2, 402→+5 一次即达阈值禁用, 其余→+1）
  * - 达到 5 次后自动将密钥 enabled 设为 false，不再变更 errorCount
  * - 已禁用的密钥再次调用不会变更 errorCount
  * - 白名单 Key 或白名单平台的密钥豁免：不累计错误计数、不自动禁用，仅临时降级（与 banKey 语义一致）
@@ -652,11 +655,15 @@ export async function enableKey(
         where: { id: platformId },
         select: { apiKeys: true },
       });
-      if (!platform?.apiKeys) return;
+      if (!platform?.apiKeys) {
+        throw new Error(`平台不存在或无 apiKeys 配置（platformId: ${platformId}）`);
+      }
 
       const keys = parseApiKeyObjects(platform.apiKeys);
       const target = keys.find((k) => k.key === key);
-      if (!target) return;
+      if (!target) {
+        throw new Error(`密钥不存在于平台配置中（platformId: ${platformId}）`);
+      }
 
       target.enabled = true;
       target.errorCount = 0;
@@ -686,10 +693,13 @@ export async function enableKey(
     keyWriteTail = p.catch(() => undefined);
     await p;
   } catch (err) {
+    // 必须上抛：管理端 PATCH 依赖失败信号返回非 200，
+    // 吞掉会让调用方误报"密钥已启用"假成功
     console.error(
       `[platform-keys] 启用密钥失败:`,
       (err instanceof Error ? err.message : String(err)).substring(0, 200)
     );
+    throw err;
   }
 }
 

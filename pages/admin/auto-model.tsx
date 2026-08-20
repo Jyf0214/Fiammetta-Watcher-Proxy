@@ -71,13 +71,21 @@ export default function AutoModelPage() {
 
   const { data: config, mutate: mutateConfig } = useApi<Record<string, string>>("/api/admin/config");
   const autoModelId = config?.["system:auto_model_id"] ?? null;
+  // 三态解析（与 worker router.ts 的 autoModelSelected 解析口径一致）：
+  // - 键缺失/非法 JSON → null（未配置 = 全部模型参与分流）
+  // - 显式空数组 → []（全部关闭）
+  // - 数组元素全非法（如 [1,2]）→ 过滤后为空且原始非空 → null（降级为全部参与）
   const savedModelIds = useMemo(() => {
     const saved = config?.["system:auto_model_selected"];
-    if (!saved) return [] as string[];
+    if (saved === undefined || saved === null || saved === "") return null;
     try {
-      return JSON.parse(saved) as string[];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return null;
+      const filtered = parsed.filter((m): m is string => typeof m === "string");
+      if (filtered.length > 0 || parsed.length === 0) return filtered;
+      return null;
     } catch {
-      return [] as string[];
+      return null;
     }
   }, [config]);
 
@@ -114,12 +122,17 @@ export default function AutoModelPage() {
 
   // 初始化：config 与 models 加载完成（空数组也算完成）后将已保存的选择填入
   // enabledModelIds——此前要求 models 非空，平台存在但模型列表为空时已保存的
-  // 启用集合永不载入，UI 显示与持久化状态不符
+  // 启用集合永不载入，UI 显示与持久化状态不符。
+  // 未配置（savedModelIds === null）时 UI 表达"全部参与"：所有模型开关置开，
+  // 与运行期 null=全部参与 的口径一致（此前显示全部关闭，与真实行为相反）
   const initializedRef = useRef(false);
   useEffect(() => {
     if (!initializedRef.current && config !== undefined && models !== undefined) {
       initializedRef.current = true;
-      const next = new Set(savedModelIds);
+      const next =
+        savedModelIds === null
+          ? new Set((models ?? []).map((m) => m.modelId))
+          : new Set(savedModelIds);
       enabledModelIdsRef.current = next;
       setEnabledModelIds(next);
     }
@@ -144,7 +157,7 @@ export default function AutoModelPage() {
         mutateConfig();
         message.success(t("autoModelRegenerated"));
       } else {
-        message.error(data.error || t("common:error"));
+        message.error(typeof data.error === "string" ? data.error : t("common:error"));
       }
     } catch {
       message.error(t("common:error"));
@@ -181,7 +194,7 @@ export default function AutoModelPage() {
       );
       const modelIds = Array.from(
         new Set([
-          ...savedModelIds.filter((id) => !(models ?? []).some((m) => m.modelId === id)),
+          ...(savedModelIds ?? []).filter((id) => !(models ?? []).some((m) => m.modelId === id)),
           ...visibleIds,
         ])
       );
@@ -197,15 +210,21 @@ export default function AutoModelPage() {
       if (data.success) {
         mutateConfig();
       } else {
-        message.error(data.error || t("common:error"));
-        // 失败回滚：UI 恢复为服务器已保存集合，开关不得停留在未保存状态
-        const rollback = new Set(savedModelIds);
+        message.error(typeof data.error === "string" ? data.error : t("common:error"));
+        // 失败回滚：UI 恢复为服务器已保存状态（未配置=全部参与），开关不得停留在未保存状态
+        const rollback =
+          savedModelIds === null
+            ? new Set((models ?? []).map((m) => m.modelId))
+            : new Set(savedModelIds);
         enabledModelIdsRef.current = rollback;
         setEnabledModelIds(rollback);
       }
     } catch {
       message.error(t("common:error"));
-      const rollback = new Set(savedModelIds);
+      const rollback =
+        savedModelIds === null
+          ? new Set((models ?? []).map((m) => m.modelId))
+          : new Set(savedModelIds);
       enabledModelIdsRef.current = rollback;
       setEnabledModelIds(rollback);
     } finally {
@@ -331,6 +350,11 @@ export default function AutoModelPage() {
             </span>
           }
         >
+          {savedModelIds === null && (
+            <div className="mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              {t("autoModelAllEnabled")}
+            </div>
+          )}
           <div className="mb-4">
             <Input
               prefix={<Search size={14} className="text-zinc-400" />}

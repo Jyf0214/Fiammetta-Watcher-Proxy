@@ -15,6 +15,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { getClientIp } from "./auth";
 
 /** 导出类型 */
 type ExportType = "system" | "data" | "all";
@@ -171,6 +172,7 @@ export default async function handler(
             isError: r.isError,
             ipAddress: r.ipAddress,
             userAgent: r.userAgent,
+            nodeName: r.nodeName,
             proxyUrl: r.proxyUrl,
             errorMessage: r.errorMessage,
             createdAt: r.createdAt,
@@ -211,8 +213,7 @@ export default async function handler(
         adminId: getAuditAdminId(admin),
         action: "export_data",
         detail: JSON.stringify({ exportType }),
-        ip:
-          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        ip: getClientIp(req),
         createdAt: now,
       },
     });

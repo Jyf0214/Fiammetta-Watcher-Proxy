@@ -135,6 +135,24 @@ export function createScheduler(
       // 不 await：任务耗时可能超过 tick 周期，串行等待会让调度停摆
       void task
         .run()
+        .then((result) => {
+          // 任务返回 { success: false } 而非抛错时（如 log-archiver 的
+          // runArchiveTask），失败会被静默吞掉——此处显式输出任务名与失败
+          // 信息；lastFinishedAt 照常更新，失败后按周期重试是既有设计，
+          // 只需让失败可见
+          if (
+            result &&
+            typeof result === "object" &&
+            "success" in result &&
+            (result as { success?: boolean }).success === false
+          ) {
+            const detail =
+              (result as { message?: string }).message ??
+              (result as { error?: string }).error ??
+              "success: false";
+            console.error(`[scheduler] ${task.name} 执行失败:`, detail);
+          }
+        })
         .catch((err) => {
           console.error(
             `[scheduler] ${task.name} 执行失败:`,

@@ -14,7 +14,7 @@ import { getAdminFromRequest } from "@/lib/admin-auth";
 import {
   getProxyHealth,
   getDegradedProxyUrls,
-  normalizeProxyStatKey,
+  proxyStatKey,
   getProxyDisableMode,
   UPSTREAM_PROXY_POOL_KEY,
 } from "@/lib/upstream-proxy";
@@ -67,10 +67,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const stats: Record<string, ProxyTrafficStats> = {};
     for (const row of grouped) {
       if (!row.proxyUrl) continue;
-      // 聚合键归一化为去凭据 host:port：新落库键已归一化（幂等）；历史
-      // maskProxyUrl 键（***@host:port）与旧版原样落库键在此并入新键，
-      // 同 host:port 不同凭据不再分成两个键
-      const url = normalizeProxyStatKey(row.proxyUrl);
+      // 聚合键转为代理级统计键：带凭据账号按指纹（host:port#<hash>）独立成键，
+      // 同 host:port 不同账号的请求数/可用率不再合并；历史无凭据/maskProxyUrl 键
+      // 归入裸 host:port（历史数据无法归属具体账号），兼容旧日志
+      const url = proxyStatKey(row.proxyUrl);
       const cur = stats[url] ?? {
         total: 0,
         ok: 0,
@@ -115,8 +115,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 当前统计降权（路由已跳过）的代理：进程内实时状态（与 v1 路由同进程，
-    // 直接读内存 Map；键为原始 URL，转归一化键与前端查表一致）
-    const degradedUrls = getDegradedProxyUrls().map(normalizeProxyStatKey);
+    // 直接读内存 Map；键为原始 URL，转代理级统计键与前端查表一致——带凭据
+    // 账号按指纹独立成键，同 host:port 不同账号的降权状态互不误伤）
+    const degradedUrls = getDegradedProxyUrls().map(proxyStatKey);
 
     return res.status(200).json({
       success: true,

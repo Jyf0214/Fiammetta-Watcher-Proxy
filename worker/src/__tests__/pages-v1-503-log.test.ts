@@ -347,6 +347,80 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     // W4：空闲超时与 EOF 截断同属上游失败，触发平台熔断（此前只补日志不打分）
     expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
   });
+
+  it("HTTP 429 四轮耗尽：每轮（含最后一轮）封禁 Key + 错误计数，日志 4 条，下游 429", async () => {
+    // fetch 恒定 429：attempt 0..3 共 4 轮；修复前最后一轮跳过 banKey/
+    // recordKeyError，该 Key 逃过封禁与计数，自动禁用阈值被系统性稀释
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    );
+
+    const req = makeReq({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    // 下游真实 429（重试耗尽后透传上游状态）
+    expect(res.calls.length).toBe(1);
+    expect(res.calls[0].status).toBe(429);
+
+    // 每轮封禁当前 Key：第 1 轮 sk-key1，后 3 轮换到 sk-key2（mock 恒返回）
+    expect(banKey).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(banKey).mock.calls.map((c) => c[0])).toEqual([
+      "sk-key1",
+      "sk-key2",
+      "sk-key2",
+      "sk-key2",
+    ]);
+    // 每轮错误计数（429→+1），最后一轮同样累计
+    expect(recordKeyError).toHaveBeenCalledTimes(4);
+    for (const c of vi.mocked(recordKeyError).mock.calls) {
+      expect(c[1]).toBe(429);
+      expect(c[2]).toBe("test-platform");
+    }
+    // 日志 4 条（前 3 轮重试日志 + 第 4 轮最终日志），status 均为真实 429
+    expect(recordRequestLog).toHaveBeenCalledTimes(4);
+    for (const logParams of vi.mocked(recordRequestLog).mock.calls.map((c) => c[0])) {
+      expect(logParams.status).toBe(429);
+      expect(logParams.isError).toBe(true);
+    }
+    // 仅最终轮触发平台熔断（中间轮次由重试覆盖，不打分）
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("网络错误（fetch 拒绝，非超时）→ 下游 502 + 补记 status=502 日志 + 平台熔断", async () => {
+    // 修复前：直连路径 throw 冒泡返回 500 且 request_logs 零记录；
+    // 修复后统一补记日志并返回 502（与 Worker 全量版/lite 版一致，status 记 502
+    // 而非 0——后台按状态码筛选/统计口径三端统一）
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      })
+    );
+
+    const req = makeReq({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res.calls.length).toBe(1);
+    expect(res.calls[0].status).toBe(502);
+    // 网络错误不触发 Key 级处理（非密钥类状态码）
+    expect(banKey).not.toHaveBeenCalled();
+    expect(recordKeyError).not.toHaveBeenCalled();
+    // 补记日志：status=502 + isError + 平台熔断
+    expect(recordRequestLog).toHaveBeenCalledTimes(1);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.status).toBe(502);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.errorMessage).toBe("fetch failed");
+    expect(recordFailure).toHaveBeenCalledWith("test-platform", expect.anything(), expect.anything());
+  });
 });
 
 // ==================== 上游 Anthropic 协议 ====================

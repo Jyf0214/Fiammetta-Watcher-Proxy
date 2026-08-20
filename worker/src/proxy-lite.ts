@@ -1,8 +1,10 @@
 /**
- * Lite 版上游代理 — 单次尝试，不重试、不封禁、不熔断
+ * Lite 版上游代理 — 单次尝试，不重试、不熔断平台
  *
  * VERSION=lite 时构建使用，以最小化 CPU 运行时间：
  * - 单次上游请求：429/401/403/5xx/空响应一律真实透传，不换 Key 不换平台
+ * - 密钥类错误（429/401/402/403）封禁 Key 并累加错误计数（达 5 次自动禁用，
+ *   与全量版一致；HTTP 透传与流内 error 两条路径均执行）
  * - 只写请求日志（request_logs）：不含熔断器写入、Key 用量更新、速率限制
  * - 流式响应仍做 usage/TTFT 提取（日志质量与全量版一致，供管理后台展示）
  * - 不应用请求模板、不检查平台/Key 级 RPM/TPM
@@ -288,8 +290,8 @@ function createLiteUsageTransformer(params: {
       // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）
       const truncated = !sawDone && !streamError && chunkCount > 0;
 
-      // 流内 error 为密钥类状态码（429/401/402/403）时与自身 HTTP 透传路径
-      // （:608 附近 recordKeyError）及全量版 token.ts flush 对齐：封禁 Key +
+      // 流内 error 为密钥类状态码（429/401/402/403）时与自身 HTTP 非 2xx 透传
+      // 路径（banKey + recordKeyError）及全量版 token.ts flush 对齐：封禁 Key +
       // 累加错误计数（DB errorCount 达阈值自动禁用），否则 lite 部署下
       // 「200 + 流内 429/401/402/403」永不计数，密钥自动禁用机制在流式场景漏检
       if (streamError && params.key &&
@@ -659,36 +661,46 @@ export async function proxyV1RequestLite(
     });
   } catch (fetchError) {
     clearTimeout(upstreamTimeoutId);
-    if (
-      fetchError instanceof DOMException &&
-      fetchError.name === "AbortError"
-    ) {
-      // 上游请求超时：计入该平台错误统计
-      try {
-        await recordRequestLog({
-          keyId: apiKey.id,
-          keyName: apiKey.name,
-          platformId: route.platform.id,
-          model: requestedModel,
-          endpoint: config.upstreamPath,
-          method: "POST",
-          status: 504,
-          tokens: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          ttft: 0,
-          duration: Date.now() - startTime,
-          isError: true,
-          errorMessage: "上游请求超时",
-          db: env.DB,
-          env: workerEnv,
-        });
-      } catch (logError) {
-        console.error("[proxy-lite] 日志写入失败:", logError);
-      }
+    // 网络层失败（总超时中止 / DNS 解析失败 / 连接拒绝等）统一补记请求日志再返回
+    // 明确错误——此前非 AbortError 直接 throw 冒泡到入口 catch 返回 500，
+    // request_logs 零记录、可用率统计被高估（与全量版 proxy.ts 网络层失败分支
+    // 对齐；lite 无熔断器，只补日志不触发平台级处置）
+    // AbortError 判断兼容 DOMException 与 Error 两种实现：Worker 原生 fetch 抛
+    // DOMException，Node/undici 抛 Error——只判 DOMException 会漏判超时
+    const isAbort =
+      (fetchError instanceof DOMException ||
+        fetchError instanceof Error) &&
+      fetchError.name === "AbortError";
+    const status = isAbort ? 504 : 502;
+    const errorMessage = isAbort
+      ? "上游请求超时"
+      : `上游请求失败: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`;
+    try {
+      await recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: route.platform.id,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage,
+        db: env.DB,
+        env: workerEnv,
+      });
+    } catch (logError) {
+      console.error("[proxy-lite] 日志写入失败:", logError);
+    }
+    if (isAbort) {
       return liteErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
     }
-    throw fetchError;
+    return liteErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
   }
 
   // ── 6. 2xx 成功响应：正常处理（流式/非流式） ──
@@ -720,9 +732,12 @@ export async function proxyV1RequestLite(
   }
   clearTimeout(upstreamTimeoutId);
 
-  // 累加密钥错误计数并持久化（429/401/402/403 密钥相关错误计数，达 5 次自动禁用；
-  // 402 = Payment Required 计数 +5 立即禁用，与全量版 RETRYABLE_UPSTREAM_STATUSES 对齐）
+  // 密钥类状态码（429/401/402/403）：封禁 Key + 累加错误计数（达 5 次自动禁用；
+  // 402 = Payment Required 计数 +5 立即禁用，与全量版 RETRYABLE_UPSTREAM_STATUSES
+  // 及流内 error 路径对齐——此前只计数不封禁，两条路径行为分叉；banKey 不传 KV
+  // 与流内路径一致，lite 封禁态为内存级）
   if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 402 || upstreamResponse.status === 403)) {
+    ctx.waitUntil(banKey(currentKey, undefined, route.platform.id).catch(() => {}));
     ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
   }
 

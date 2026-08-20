@@ -13,6 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { getClientIp } from "../../auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { keyFingerprint } from "@/lib/key-status";
 import { enableKey, markKeyDisabled } from "../../../../../worker/src/platform-keys";
@@ -102,8 +103,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           keyFingerprint: keyFingerprint(targetKey),
           enabled,
         }),
-        ip:
-          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        ip: getClientIp(req),
         createdAt: now,
       },
     });

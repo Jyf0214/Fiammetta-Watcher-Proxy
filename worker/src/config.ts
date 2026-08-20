@@ -18,6 +18,10 @@ export interface WorkerEnv {
   PG_URL?: string;
   MARIADB_URL?: string;
   HYPERDRIVE?: { connectionString: string };
+  /** 节点/设备名称（请求日志 nodeName 列；未设置时回退部署平台名） */
+  NODE_NAME?: string;
+  /** 部署平台标识（edgeone/vercel/docker/cf；NODE_NAME 未设置时的回退来源） */
+  DEPLOY_PLATFORM?: string;
 }
 
 /**

@@ -33,6 +33,7 @@ interface LogEntry {
   duration: number;
   isError: boolean;
   errorMessage: string | null;
+  nodeName: string | null;
   createdAt: string;
   key: { name: string } | null;
   platform: { name: string } | null;
@@ -153,6 +154,14 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       ellipsis: true,
       render: (_: unknown, record: LogEntry) =>
         record.platform?.name || "-",
+      responsive: ["md"],
+    },
+    {
+      title: t("nodeName"),
+      key: "nodeName",
+      width: 120,
+      ellipsis: true,
+      render: (_: unknown, record: LogEntry) => record.nodeName || "-",
       responsive: ["md"],
     },
     {

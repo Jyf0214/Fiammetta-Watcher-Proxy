@@ -1,8 +1,9 @@
 /**
- * Lite 代理测试 — 单次尝试，不重试/不封禁/不熔断，只写日志
+ * Lite 代理测试 — 单次尝试，不重试/不熔断平台
  *
  * 验证 proxyV1RequestLite：
  * - 上游 429/5xx → 真实透传，fetch 只调用一次（无重试）
+ * - 密钥类错误（429/401/402/403）→ 封禁 Key 并累加错误计数（与全量版一致）
  * - 路由失败 → 500 + 日志 platformId null
  * - 200+空 body → 下游 502 + 日志 status 502
  * - 成功路径日志 isError=false
@@ -158,6 +159,15 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.platformId).toBe("test-platform");
     expect(logParams.status).toBe(429);
     expect(logParams.isError).toBe(true);
+    // 密钥类错误：封禁 Key + 累加错误计数（#13，与流内 error 路径/全量版一致）
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform");
+    expect(recordKeyError).toHaveBeenCalledWith(
+      "sk-key1",
+      429,
+      "test-platform",
+      env.DB,
+      { DB_TYPE: "d1" }
+    );
   });
 
   it("上游 402：真实透传 402，计数 +5 立即禁用密钥（与全量版对齐）", async () => {
@@ -183,6 +193,15 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.platformId).toBe("test-platform");
     expect(logParams.status).toBe(402);
     expect(logParams.isError).toBe(true);
+    // 402 属密钥类错误（errorIncrement +5 立即达阈值禁用）：封禁 Key + 计数
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform");
+    expect(recordKeyError).toHaveBeenCalledWith(
+      "sk-key1",
+      402,
+      "test-platform",
+      env.DB,
+      { DB_TYPE: "d1" }
+    );
   });
 
   it("上游 503：真实透传 503，日志 status 记 503", async () => {

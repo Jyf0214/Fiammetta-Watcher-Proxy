@@ -130,6 +130,8 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
     if (env.PG_URL) process.env.PG_URL = env.PG_URL;
     if (env.MARIADB_URL) process.env.MARIADB_URL = env.MARIADB_URL;
     if (env.MYSQL_URL) process.env.MYSQL_URL = env.MYSQL_URL;
+    if (env.NODE_NAME) process.env.NODE_NAME = env.NODE_NAME;
+    if (env.DEPLOY_PLATFORM) process.env.DEPLOY_PLATFORM = env.DEPLOY_PLATFORM;
     return {
       DB_TYPE: env.DB_TYPE,
       DATABASE_URL: env.DATABASE_URL,
@@ -137,6 +139,8 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
       PG_URL: env.PG_URL,
       MARIADB_URL: env.MARIADB_URL,
       MYSQL_URL: env.MYSQL_URL,
+      NODE_NAME: env.NODE_NAME,
+      DEPLOY_PLATFORM: env.DEPLOY_PLATFORM,
       KV: env.KV,
       // D1 binding 必须透传：v1 路由的 createDb 依赖 env.DB 构造 PrismaD1，
       // 缺失时 D1 部署下所有统计/熔断/错误计数写入静默失败
@@ -151,6 +155,8 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
       PG_URL: process.env.PG_URL,
       MARIADB_URL: process.env.MARIADB_URL,
       MYSQL_URL: process.env.MYSQL_URL,
+      NODE_NAME: process.env.NODE_NAME,
+      DEPLOY_PLATFORM: process.env.DEPLOY_PLATFORM,
     };
   }
 }
@@ -202,7 +208,7 @@ type MultipartBody = { model: string | null; raw: Buffer; contentType: string };
 type ParseBodyResult<T> =
   | { body: T }
   | { multipart: MultipartBody }
-  | { error: string };
+  | { error: string; statusCode?: number };
 
 /** 从 multipart body 中提取指定文本字段（latin1 保字节序：仅头部与文本字段为
  *  ASCII，文件二进制不受影响；按 boundary 切分逐 part 查 Content-Disposition） */
@@ -224,12 +230,13 @@ function extractMultipartField(raw: Buffer, contentType: string, field: string):
 
 async function parseRequestBody<T>(req: NextApiRequest): Promise<ParseBodyResult<T>> {
   const cl = Number(req.headers["content-length"] || "0");
-  if (cl > MAX_BODY_BYTES) return { error: "请求体过大" };
+  // 请求体超限返回结构化 statusCode 413（与 Worker 版一致）：调用方据此回 413 而非一律 400
+  if (cl > MAX_BODY_BYTES) return { error: "请求体过大", statusCode: 413 };
   const contentType = String(req.headers["content-type"] ?? "");
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const raw = Buffer.concat(chunks);
-  if (raw.length > MAX_BODY_BYTES) return { error: "请求体过大" };
+  if (raw.length > MAX_BODY_BYTES) return { error: "请求体过大", statusCode: 413 };
   // 媒体类型不区分大小写：与 Worker/lite 版 parseRequestBody 的 toLowerCase 判定对齐
   if (contentType.toLowerCase().startsWith("multipart/form-data")) {
     // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
@@ -298,7 +305,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
 
   const parseResult = await parseRequestBody<Record<string, unknown>>(req);
-  if ("error" in parseResult) { sendV1Error(res, config, 400, parseResult.error, "invalid_request_error"); return; }
+  if ("error" in parseResult) { sendV1Error(res, config, parseResult.statusCode ?? 400, parseResult.error, "invalid_request_error"); return; }
   // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
   // 原始字节在循环内原样透传上游（JSON 管道字段如 max_tokens/stream 不适用）
   let multipart: MultipartBody | null = null;
@@ -486,34 +493,39 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         sendV1Error(res, config, 504, "上游请求超时", "timeout_error"); return;
       }
       // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过；
-      // 补落请求日志（status=0），否则真实失败不出现在 request_logs——
+      // 补落请求日志（status=502），否则真实失败不出现在 request_logs——
       // 统计可用率高估且与降权统计（recordProxyTraffic 记 errOther）口径矛盾；
       // 同时触发平台熔断（与 Worker 全量版一致）
       void recordFailure(cur.id, dummyDb, env).catch(() => {});
       if (proxy?.url) {
         recordProxyTraffic(proxy.url, 0);
         void markProxyFailure(dummyDb, env, proxy.url).catch(() => {});
-        void recordRequestLog({
-          keyId: apiKey.id,
-          keyName: apiKey.name,
-          platformId: cur.id,
-          model: requestedModel,
-          endpoint: config.upstreamPath,
-          method: "POST",
-          status: 0,
-          tokens: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          ttft: 0,
-          duration: Date.now() - startTime,
-          isError: true,
-          errorMessage: e instanceof Error ? e.message : String(e),
-          proxyUrl: proxy.url,
-          db: dummyDb,
-          env,
-        }).catch(() => {});
       }
-      throw e;
+      // 直连路径同样补落请求日志并返回 502——此前仅代理路径有日志、直连路径
+      // throw 冒泡到外层 catch 返回 500（request_logs 零记录、下游收到 500），
+      // 与 Worker 全量版/lite 版「网络错误统一补记 + 502」对齐（status 记 502，
+      // 后台按状态码筛选/统计口径一致；此前记 0 会从筛选与错误率聚合中丢失）
+      void recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: cur.id,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status: 502,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage: e instanceof Error ? e.message : String(e),
+        proxyUrl: proxy?.url ?? undefined,
+        db: dummyDb,
+        env,
+      }).catch(() => {});
+      sendV1Error(res, config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
+      return;
     }
 
     // ── 2xx 成功响应：正常处理（流式/非流式）──
@@ -547,15 +559,18 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     }
 
     // ── 429/401/403/空响应：封禁当前 Key 并尝试切换 ──
+    // 封禁与错误计数对每一轮（含最后一轮）都执行：此前仅封禁可重试的中间轮次，
+    // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
+    // 自动禁用阈值（5 次）被系统性稀释（与 Worker 版 proxy.ts 对齐）
+    await banKey(curKey, undefined, cur.id, env?.KV);
+    // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
+    void recordKeyError(curKey, isEmptyResponse ? 502 : upRes.status, cur.id, dummyDb, env).catch(() => {});
+    console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
     if (attempt < MAX_UPSTREAM_RETRIES) {
       // 本次尝试失败（429/401/403/空响应）独立记日志：被重试覆盖的错误平台也必须进入
       // 平台错误统计，否则评分只见最终成功平台、错误率被严重低估
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upRes.status}（已封禁该 Key 并重试切换）`, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
       if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
-      await banKey(curKey, undefined, cur.id, env?.KV);
-      // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
-      void recordKeyError(curKey, isEmptyResponse ? 502 : upRes.status, cur.id, dummyDb, env).catch(() => {});
-      console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);
       // 消费本次失败的响应体，避免 undici keep-alive 连接泄漏（空响应分支 body 已
@@ -933,7 +948,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return;
       }
       const parseResult = await parseRequestBody<Record<string, unknown>>(req);
-      if ("error" in parseResult) { res.status(400).json(formatAnthropicError(400, parseResult.error)); return; }
+      if ("error" in parseResult) { res.status(parseResult.statusCode ?? 400).json(formatAnthropicError(parseResult.statusCode ?? 400, parseResult.error)); return; }
       // count_tokens 是 JSON 端点：multipart 形态（"multipart" in parseResult）属客户端
       // 协议错误，按空体估算 0（不参与路由，无透传语义）
       res.status(200).json({ input_tokens: estimateInputTokens("body" in parseResult ? parseResult.body : {}) });

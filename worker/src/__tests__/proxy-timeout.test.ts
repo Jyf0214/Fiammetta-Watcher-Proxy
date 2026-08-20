@@ -232,7 +232,8 @@ describe("proxyV1Request 上游状态码处理", () => {
 
     // 初始 + 3 次重试
     expect(fetch).toHaveBeenCalledTimes(4);
-    expect(banKey).toHaveBeenCalledTimes(3);
+    // 每一轮（含最后一次失败）都封禁该 Key（#16：此前最后一轮逃过封禁/计数）
+    expect(banKey).toHaveBeenCalledTimes(4);
     expect(res.status).toBe(401);
   });
 
@@ -406,7 +407,8 @@ describe("proxyV1Request 空响应处理", () => {
 
     // 初始 + 3 次重试
     expect(fetch).toHaveBeenCalledTimes(4);
-    expect(banKey).toHaveBeenCalledTimes(3);
+    // 每一轮（含最后一次失败）都封禁该 Key（#16：此前最后一轮逃过封禁/计数）
+    expect(banKey).toHaveBeenCalledTimes(4);
     expect(res.status).toBe(502);
     // 绝不返回空响应：错误体必须非空且语义明确
     const bodyText = await res.text();

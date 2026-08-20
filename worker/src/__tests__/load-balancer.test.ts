@@ -32,7 +32,6 @@ import {
   selectPlatform,
   cleanupStaleBreakers,
   syncCircuitBreakersFromDatabase,
-  incrementHalfOpenPending,
   releaseHalfOpenPending,
   isHalfOpenProbeFull,
   resetCircuitBreaker,
@@ -167,31 +166,6 @@ describe("熔断器状态机", () => {
     expect(checkAndUpdateCircuitBreakerState("p1")).toBe("open");
   });
 
-  it("incrementHalfOpenPending 递增半开状态并发计数", async () => {
-    // 触发熔断 + 进入 half-open
-    for (let i = 0; i < 5; i++) {
-      await recordFailure("p1", mockDb);
-    }
-    vi.useFakeTimers();
-    vi.advanceTimersByTime(61000);
-    checkAndUpdateCircuitBreakerState("p1");
-    vi.useRealTimers();
-
-    // half-open 状态下递增 pending
-    // DEFAULT_HALF_OPEN_MAX = 3
-    incrementHalfOpenPending("p1");
-    incrementHalfOpenPending("p1");
-    incrementHalfOpenPending("p1");
-    // 配额满：状态查询仍返回 half-open（不因配额满转换状态），
-    // 配额满的放行控制由 selectPlatform 层（isHalfOpenProbeFull）负责
-    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("half-open");
-    expect(isHalfOpenProbeFull("p1")).toBe(true);
-
-    // 探测完成（成功）→ 转 closed，配额清零
-    await recordSuccess("p1", mockDb);
-    expect(isHalfOpenProbeFull("p1")).toBe(false);
-  });
-
   it("releaseHalfOpenPending 释放被门禁拒绝请求占用的探测配额", async () => {
     // 触发熔断 + 进入 half-open
     for (let i = 0; i < 5; i++) {
@@ -202,8 +176,10 @@ describe("熔断器状态机", () => {
     checkAndUpdateCircuitBreakerState("p1");
     vi.useRealTimers();
 
-    incrementHalfOpenPending("p1");
-    incrementHalfOpenPending("p1");
+    const p1 = makePlatform({ id: "p1" });
+    // 两个探测请求真实被 selectPlatform 选中（内联递增）→ 占用配额 2
+    selectPlatform([p1]);
+    selectPlatform([p1]);
     expect(isHalfOpenProbeFull("p1")).toBe(false);
 
     // 两个请求都在发出前被门禁拒绝 → 释放配额
@@ -212,11 +188,15 @@ describe("熔断器状态机", () => {
     expect(isHalfOpenProbeFull("p1")).toBe(false);
 
     // 再占满：配额满时释放一个即恢复可探测
-    incrementHalfOpenPending("p1");
-    incrementHalfOpenPending("p1");
-    incrementHalfOpenPending("p1");
+    selectPlatform([p1]);
+    selectPlatform([p1]);
+    selectPlatform([p1]);
     expect(isHalfOpenProbeFull("p1")).toBe(true);
     releaseHalfOpenPending("p1");
+    expect(isHalfOpenProbeFull("p1")).toBe(false);
+
+    // 探测完成（成功）→ 转 closed，配额清零
+    await recordSuccess("p1", mockDb);
     expect(isHalfOpenProbeFull("p1")).toBe(false);
   });
 

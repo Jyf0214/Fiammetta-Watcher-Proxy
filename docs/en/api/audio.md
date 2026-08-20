@@ -44,7 +44,7 @@ POST /v1/audio/transcriptions
 
 ### Parameters
 
-> Note: the gateway only accepts **JSON request bodies** (multipart file upload is not implemented). A JSON body is passed through to the upstream as-is — usability depends on whether the upstream accepts JSON. For file uploads, call the upstream platform directly.
+> Note: the gateway supports **multipart file upload passthrough** — the `model` field is extracted from the form for routing, and the raw request bytes along with the `Content-Type` (including the boundary) are passed to the upstream as-is, without injecting template fields. JSON bodies are also supported and passed through as-is; usability depends on whether the upstream accepts JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -76,7 +76,7 @@ POST /v1/audio/translations
 
 ### Parameters
 
-> Note: the gateway only accepts **JSON request bodies** (multipart file upload is not implemented). A JSON body is passed through to the upstream as-is — usability depends on whether the upstream accepts JSON. For file uploads, call the upstream platform directly.
+> Note: the gateway supports **multipart file upload passthrough** — the `model` field is extracted from the form for routing, and the raw request bytes along with the `Content-Type` (including the boundary) are passed to the upstream as-is, without injecting template fields. JSON bodies are also supported and passed through as-is; usability depends on whether the upstream accepts JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

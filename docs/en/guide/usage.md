@@ -179,7 +179,7 @@ Every API request is logged with:
 | Duration | Total request duration |
 | Error Message | Error details on failure |
 
-Supports filtering by date range, API Key, status code (200/400/401/429/500/503) and error/normal state.
+Supports filtering by date range, API Key, status code (200/400/401/402/429/500/502/503) and error/normal state.
 
 ### Log Archival
 

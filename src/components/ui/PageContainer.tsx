@@ -24,7 +24,7 @@ const paddingMap: Record<string, string> = {
 
 /**
  * 页面容器组件 — 约束内容宽度并提供统一的页面内边距
- * - 默认 max-w-4xl，内容紧凑
+ * - 默认 max-w-6xl，内容适中
  * - 支持 compact/default/wide 三档内边距
  */
 export function PageContainer({

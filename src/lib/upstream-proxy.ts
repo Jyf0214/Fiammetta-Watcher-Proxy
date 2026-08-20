@@ -180,8 +180,6 @@ export interface UpstreamProxySelection {
 
 /** 单组拉取结果（管理页展示；error 非空 = 本次拉取失败/结果为空，沿用旧列表） */
 export interface ProxyPullGroupResult {
-  /** 本次拉取相对上次新增的代理数（沿用旧列表/拉取失败时为 0） */
-  pulled: number;
   /** 拉取后组内总数（含手动代理） */
   total: number;
   /** 相比上次新增 */
@@ -306,6 +304,43 @@ export function normalizeProxyStatKey(url: string): string {
     const defaultPort =
       parsed.protocol === "https:" ? 443 : parsed.protocol === "http:" ? 80 : 1080;
     return `${parsed.hostname}:${parsed.port || defaultPort}`;
+  } catch {
+    return maskProxyUrl(url);
+  }
+}
+
+/** 稳定短哈希（FNV-1a 32 位，8 位十六进制）：账号指纹后缀用。仅需区分性与
+ *  稳定性，无需加密强度——配置表本就存凭据明文，指纹不新增泄密面 */
+function hashHex(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/** 代理级统计键：无凭据地址为 host:port（与历史日志键兼容）；带凭据地址追加
+ *  账号指纹后缀 host:port#<8hex>——同 host:port 不同账号（user:pass）在统计/
+ *  降权/日志中独立成键，不再合并（此前 normalizeProxyStatKey 去凭据合并导致
+ *  不同账号的请求数/可用率/429 混在一起、降权互相误伤）。指纹为完整地址的
+ *  确定性哈希，稳定可复现、不含凭据明文；历史已脱敏键（***@host:port）与
+ *  无凭据键归入裸 host:port（历史数据无法归属具体账号）。与前端
+ *  upstream-proxy-ui.ts 同实现，保证落库/聚合/查表键一致 */
+export function proxyStatKey(url: string): string {
+  // 幂等：已是统计键形态（host:port#<8hex>）时直接返回原值——stats 聚合与
+  // 前端查表会对已落库键再次调用，若重新解析 URL，# 后的指纹会被当作
+  // fragment 剥离、userinfo 为空，退回裸 host:port，导致聚合键与落库键
+  // 不一致（带凭据账号统计失真/查表失配）。无 # 的历史键不命中，走归一路径
+  if (/^[^/?#]+#[0-9a-f]{8}$/.test(url)) return url;
+  try {
+    const base = normalizeProxyStatKey(url);
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(url);
+    const parsed = new URL(hasScheme ? url : `http://${url}`);
+    const userinfo = parsed.username || parsed.password;
+    // 无凭据或历史脱敏键（*** 占位）→ 裸 host:port
+    if (!userinfo || userinfo === "***") return base;
+    return `${base}#${hashHex(url)}`;
   } catch {
     return maskProxyUrl(url);
   }
@@ -526,7 +561,8 @@ function parsePoolMap(raw: string | null | undefined): Record<string, string[]> 
 
 /** 读取代理配置（带缓存：TTL 内先用 configs.value 内容做廉价失效检查，
  *  任何实例保存后立即生效；同秒双保存/updatedAt 倒退不影响判断——
- *  见 cachedConfigValue 注释） */
+ *  见 cachedConfigValue 注释。DB 读失败时保留旧缓存并返回旧值，仅首次
+ *  加载无缓存时降级为 null（直连），不会把瞬时读失败当成「配置清空」） */
 async function readProxyConfig(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -558,9 +594,10 @@ async function readProxyConfig(
     cachedConfig = parseProxyConfig(row?.value ?? null);
     cachedConfigValue = row?.value ?? null;
   } catch (err) {
-    console.error("[upstream-proxy] 读取代理配置失败:", err);
-    cachedConfig = null;
-    cachedConfigValue = null;
+    // 读失败保留旧缓存（不清空 cachedConfig/cachedConfigValue），返回旧值；
+    // 仅首次加载无缓存时返回 null（合理降级：直连）。避免一次瞬时 DB 故障
+    // 被 getUpstreamProxy 当成「配置清空」而回收全部代理连接
+    console.error("[upstream-proxy] 读取代理配置失败，保留旧缓存:", err);
   }
   lastConfigRefresh = now;
   return cachedConfig;
@@ -568,7 +605,8 @@ async function readProxyConfig(
 
 /** 读取拉取结果（缓存模式与配置一致；失效信号为 value 内容而非 updatedAt，
  *  见 cachedPoolValue 注释——pool 由 cron/手动高频写，秒级时间戳区分不了
- *  同秒双保存） */
+ *  同秒双保存。DB 读失败时保留旧缓存并返回旧值，仅首次加载无缓存时
+ *  降级为 {}（直连）） */
 async function readProxyPool(
   db: D1Database | Database,
   env?: WorkerEnv
@@ -598,9 +636,9 @@ async function readProxyPool(
     cachedPool = parsePoolMap(row?.value ?? null);
     cachedPoolValue = row?.value ?? null;
   } catch (err) {
-    console.error("[upstream-proxy] 读取拉取结果失败:", err);
-    cachedPool = null;
-    cachedPoolValue = null;
+    // 读失败保留旧缓存（不清空 cachedPool/cachedPoolValue），返回旧值；
+    // 仅首次加载无缓存时返回 {}（合理降级：直连）
+    console.error("[upstream-proxy] 读取拉取结果失败，保留旧缓存:", err);
   }
   lastPoolRefresh = now;
   return cachedPool ?? {};
@@ -1098,7 +1136,7 @@ export async function pullProxyGroups(
           // 拉取时刻，定时任务按组周期重试
           if (fetched.length > 0) nextPool[group.name] = fetched;
           else delete nextPool[group.name];
-          results[group.name] = { pulled: 0, total, added: 0, removed: 0, kept: 0, error };
+          results[group.name] = { total, added: 0, removed: 0, kept: 0, error };
           continue;
         }
 
@@ -1128,7 +1166,6 @@ export async function pullProxyGroups(
         if (fetched.length > 0) nextPool[group.name] = fetched;
         else delete nextPool[group.name];
         results[group.name] = {
-          pulled: added.length,
           total,
           added: added.length,
           removed: removed.length,
@@ -1263,7 +1300,8 @@ export async function getUpstreamProxy(
 
   const config = await readProxyConfig(db, env);
   if (!config) {
-    // 配置清空：回收全部连接（仅首次/重载时执行，热路径跳过）
+    // 配置未配置或首次加载失败（读失败保留旧缓存，仅首次无缓存时降级直连）：
+    // 回收全部连接（仅首次/重载时执行，热路径跳过）
     await syncStaleAgentsOnce(null, null);
     return { dispatcher: null, url: null };
   }
@@ -1287,7 +1325,6 @@ export async function getUpstreamProxy(
     return { dispatcher: null, url: null };
   }
   const pool = await readProxyPool(db, env);
-  const allUrls = collectAllGroupUrls(config, pool);
   const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
   if (groupUrls.length === 0) {
     // 组内无代理（如拉取尚未成功）：返回直连，同时保持代理池与其他组同步

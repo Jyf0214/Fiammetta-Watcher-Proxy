@@ -76,6 +76,7 @@ export async function checkAdminRateLimit(
   const windowStart = now - WINDOW_MS;
 
   try {
+    // KV 读改写非原子，并发下可能略微超限（KV 限流固有局限，尽力而为）
     const raw = await kv.get(key);
     const record: KVRecord = raw ? JSON.parse(raw) : { timestamps: [] };
     const recent = record.timestamps.filter((ts) => ts > windowStart);

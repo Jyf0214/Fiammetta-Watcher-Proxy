@@ -93,9 +93,10 @@ export default async function handler(
       _max: { createdAt: true },
     });
 
-    // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求，
-    // 错误请求（ttft/latency 恒为 0）不稀释均值；请求总数/Token 仍取上方全量
-    // 口径（与仪表盘 stats.ts 的 perfAgg/detailAgg 双聚合一致）
+    // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求。
+    // 错误请求的 latency/ttft 是真实耗时（非 0，超时最高 120s），若计入分母
+    // 会系统性抬高均值；请求总数/Token 仍取上方全量口径（与仪表盘 stats.ts 的
+    // perfAgg/detailAgg 双聚合一致）
     const perfGrouped = await orm.requestLogs.groupBy({
       by: ["keyId"],
       where: { ...where, isError: false },
@@ -226,6 +227,12 @@ export default async function handler(
         timeSpanSeconds = Math.max(1, now - firstRequestAt);
       }
 
+      // 速率指标（TPS/RPM）仅在请求数 ≥ 2 且首末请求存在真实跨度（不在同一秒）
+      // 时才有统计意义：单请求/同秒突发时 firstRequestAt === lastRequestAt，
+      // 跨度 0 被钳为 1 秒，会得到 TPS=该次请求 token 数、RPM=60 的失真值；
+      // 此类情况统一返回 0（前端对 0 渲染 "-"）
+      const rateValid = totalRequests >= 2 && firstRequestAt != null && lastRequestAt != null && lastRequestAt > firstRequestAt;
+
       return {
         id: k.id,
         name: k.name,
@@ -241,10 +248,10 @@ export default async function handler(
           completionTokens: (g?._sum.completionTokens ?? 0) + (h?.completionTokens ?? 0),
           avgTtft: perfCount > 0 ? Math.round(ttftSum / perfCount) : 0,
           avgDuration: perfCount > 0 ? Math.round(latencySum / perfCount) : 0,
-          avgTokensPerSecond: timeSpanSeconds > 0
+          avgTokensPerSecond: rateValid && timeSpanSeconds > 0
             ? Math.round((totalTokens / timeSpanSeconds) * 100) / 100
             : 0,
-          avgRequestsPerMinute: timeSpanSeconds > 0
+          avgRequestsPerMinute: rateValid && timeSpanSeconds > 0
             ? Math.round(((totalRequests / timeSpanSeconds) * 60) * 100) / 100
             : 0,
           firstRequestAt,

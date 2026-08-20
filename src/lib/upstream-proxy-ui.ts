@@ -234,6 +234,50 @@ export function normalizeProxyStatKey(url: string): string {
   }
 }
 
+/** 稳定短哈希（FNV-1a 32 位，8 位十六进制）：账号指纹后缀用。仅需区分性与
+ *  稳定性，无需加密强度——配置表本就存凭据明文，指纹不新增泄密面 */
+function hashHex(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/** 代理级统计键：与后端落库/聚合键 proxyStatKey 同实现，保证查表一致——带凭据
+ *  地址按账号指纹（host:port#<8hex>）独立成键，同 host:port 不同账号不再合并；
+ *  无凭据/历史脱敏键归入裸 host:port */
+export function proxyStatKey(url: string): string {
+  // 幂等：已是统计键形态（host:port#<8hex>）时直接返回原值——stats 聚合与
+  // 前端查表会对已落库键再次调用，若重新解析 URL，# 后的指纹会被当作
+  // fragment 剥离、userinfo 为空，退回裸 host:port，导致聚合键与落库键
+  // 不一致（带凭据账号统计失真/查表失配）。无 # 的历史键不命中，走归一路径
+  if (/^[^/?#]+#[0-9a-f]{8}$/.test(url)) return url;
+  try {
+    const base = normalizeProxyStatKey(url);
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(url);
+    const parsed = new URL(hasScheme ? url : `http://${url}`);
+    const userinfo = parsed.username || parsed.password;
+    // 无凭据或历史脱敏键（*** 占位）→ 裸 host:port
+    if (!userinfo || userinfo === "***") return base;
+    return `${base}#${hashHex(url)}`;
+  } catch {
+    return maskProxyUrl(url);
+  }
+}
+
+/** 展示用代理地址：用户名保留 + 密码打码（管理后台已鉴权，用户名是账号标识，
+ *  可区分同 host:port 的不同账号；密码不进入展示。日志/报错等安全上下文仍用
+ *  maskProxyUrl 全打码）。无凭据地址原样返回 */
+export function displayProxyUrl(url: string): string {
+  return url.replace(/\/\/([^@\s]+)@/, (_m, userinfo: string) => {
+    const colon = userinfo.indexOf(":");
+    if (colon === -1) return `//${userinfo}@`;
+    return `//${userinfo.slice(0, colon)}:***@`;
+  });
+}
+
 /** 健康检查时间展示：unix 秒 → 「MM-DD HH:mm」（本地时区） */
 export function formatChecked(unixSec: number): string {
   const d = new Date(unixSec * 1000);
@@ -364,9 +408,10 @@ export function buildConfigJson(
 }
 
 /**
- * 组内代理按归一化统计键去重求和：同 host:port 不同凭据的代理在日志聚合中共享
- * 同一统计键（落库统一 normalizeProxyStatKey），逐代理累加会把同一条统计重复计入，
- * 组级聚合翻倍——每个统计键只计一次
+ * 组内代理按代理级统计键去重求和：带凭据账号各自独立成键（proxyStatKey），
+ * 不同账号的统计不再互相合并；键去重仅为防御同一 URL 在列表重复出现，
+ * 不再按 host:port 合并不同账号（此前 normalizeProxyStatKey 去凭据合并导致
+ * 不同账号统计互相污染）
  */
 export function sumMaskedStats<T>(
   urls: string[],
@@ -376,7 +421,7 @@ export function sumMaskedStats<T>(
   const seen = new Set<string>();
   let total = 0;
   for (const u of urls) {
-    const key = normalizeProxyStatKey(u);
+    const key = proxyStatKey(u);
     if (seen.has(key)) continue;
     seen.add(key);
     total += pick(rows?.[key]);

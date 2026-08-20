@@ -153,6 +153,7 @@ model requestLogs {
   isError          Boolean @default(false) @map("is_error")
   ipAddress        String? @map("ip_address")
   userAgent        String? @db.Text @map("user_agent")
+  nodeName         String? @map("node_name")
   errorMessage     String? @db.Text @map("error_message")
   proxyUrl         String? @db.Text @map("proxy_url")
   createdAt        Int     @default(0) @map("created_at")

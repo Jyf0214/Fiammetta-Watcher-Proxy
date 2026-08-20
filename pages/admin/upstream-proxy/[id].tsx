@@ -24,8 +24,8 @@ import {
   parsePoolMap,
   collectGroupUrls,
   parseUrlsText,
-  maskProxyUrl,
-  normalizeProxyStatKey,
+  displayProxyUrl,
+  proxyStatKey,
   buildConfigJson,
   sumMaskedStats,
   formatChecked,
@@ -687,10 +687,11 @@ export default function UpstreamProxyGroupPage() {
             {groupUrls.map((url) => {
               const entry = healthMap[url];
               const status = entry?.status ?? "none";
-              const stat = trafficStats?.[normalizeProxyStatKey(url)];
+              const stat = trafficStats?.[proxyStatKey(url)];
               // 统计降权：健康点仍显示 ok 但路由已跳过（窗口内错误率过高，
-              // 窗口滑动自动恢复）——此前完全不可见
-              const degraded = degradedUrls.includes(normalizeProxyStatKey(url));
+              // 窗口滑动自动恢复）——此前完全不可见；按代理级键匹配，
+              // 同 host:port 不同账号的降权状态互不误伤
+              const degraded = degradedUrls.includes(proxyStatKey(url));
               return (
                 <li key={url} className="flex items-start gap-2 text-xs">
                   <span
@@ -705,7 +706,7 @@ export default function UpstreamProxyGroupPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
-                        {maskProxyUrl(url)}
+                        {displayProxyUrl(url)}
                       </span>
                       {degraded && (
                         <span

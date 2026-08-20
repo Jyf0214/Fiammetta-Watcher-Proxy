@@ -17,6 +17,7 @@ import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { getPresetPlatform } from "@/lib/presets";
 import { detectModelType } from "@/lib/detect-model-type";
+import { getClientIp } from "../auth";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -177,7 +178,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           adminId: getAuditAdminId(admin),
           action: "create_platform",
           detail: JSON.stringify({ platformId, name: finalName, fromPreset: presetId, modelCount }),
-          ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          ip: getClientIp(req),
           createdAt: now,
         },
       });

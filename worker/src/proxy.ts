@@ -479,6 +479,11 @@ export async function proxyV1Request(
       `，尝试切换到其他平台`
     );
     triedPlatforms.add(currentPlatform.id);
+    // 释放半开探测配额：routeRequest 的 selectPlatform 选中该 half-open 平台时
+    // 已占用探测槽位（halfOpenPending++），此处因无可用 Key 放弃它必须归还，
+    // 否则槽位被无 Key 候选占满后该平台被排除探测，直到缓存重建（最长 30 秒）
+    // 才恢复——与重试路径换平台时的 releaseHalfOpenPending 行为对齐
+    releaseHalfOpenPending(currentPlatform.id);
 
     const availablePlatforms = getPlatformsForModel(
       currentTargetModel,
@@ -835,6 +840,15 @@ export async function proxyV1Request(
     }
 
     // ── 429/401/403/空响应：封禁当前 Key 并尝试切换 ──
+    // 封禁与错误计数对每一轮（含最后一轮）都执行：此前只封禁可重试的中间轮次，
+    // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
+    // 自动禁用阈值（5 次）被系统性稀释
+    await banKey(currentKey, undefined, currentPlatform.id, env.KV);
+    // 累加错误计数并持久化到数据库（429→+1, 401→+2, 402→+5, 其余→+1，达 5 次自动禁用）
+    ctx.waitUntil(recordKeyError(currentKey, isEmptyResponse ? 502 : upstreamResponse.status, currentPlatform.id, env.DB, workerEnv).catch(() => {}));
+    console.log(
+      `${logTag} 上游 ${upstreamResponse.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${currentPlatform.name}, key: fingerprint:${keyFingerprint(currentKey)}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
+    );
     if (attempt < MAX_UPSTREAM_RETRIES) {
       // 本次尝试失败独立记日志：被重试覆盖的错误平台也必须进入平台错误统计，
       // 否则评分只见最终成功平台、错误率被严重低估
@@ -860,13 +874,6 @@ export async function proxyV1Request(
       } catch (logError) {
         console.error(`${logTag} 日志写入失败:`, logError);
       }
-      // 封禁该 Key 5 分钟（内存 + KV 持久化，管理后台可见）
-      await banKey(currentKey, undefined, currentPlatform.id, env.KV);
-      // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
-      ctx.waitUntil(recordKeyError(currentKey, isEmptyResponse ? 502 : upstreamResponse.status, currentPlatform.id, env.DB, workerEnv).catch(() => {}));
-      console.log(
-        `${logTag} 上游 ${upstreamResponse.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${currentPlatform.name}, key: fingerprint:${keyFingerprint(currentKey)}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`
-      );
 
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);

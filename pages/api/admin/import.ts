@@ -16,8 +16,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { getClientIp } from "./auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
+import {
+  UPSTREAM_PROXY_HEALTH_KEY,
+  UPSTREAM_PROXY_POOL_KEY,
+  UPSTREAM_PROXY_CHECK_LOCK_KEY,
+  UPSTREAM_PROXY_PULL_AT_KEY,
+} from "@/lib/upstream-proxy";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -170,18 +177,24 @@ export default async function handler(
 
     // 定义导入步骤（保持依赖顺序）
     type DbClient = Awaited<ReturnType<typeof createDb>>;
+    // 请求私有集合：本批导入产生的新 id 按步骤顺序传递（platforms → modelMaps/
+    // requestLogs/platformModels 的外键校验需要知道「本次导入的 platform id」，
+    // 仅查已有库会把新导入的引用误判为悬空置 null）。每请求独立创建，
+    // 并发导入互不干扰
+    const importedPlatformIds = new Set<string>();
+    const importedApiKeyIds = new Set<string>();
     const steps: Array<{
       key: string;
       data: unknown;
       fn: (db: DbClient, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
     }> = [
-      { key: "platforms", data: body.platforms, fn: importPlatforms },
-      { key: "modelMaps", data: body.modelMaps, fn: importModelMaps },
-      { key: "platformModels", data: body.platformModels, fn: importPlatformModels },
+      { key: "platforms", data: body.platforms, fn: (db, data) => importPlatforms(db, data, importedPlatformIds) },
+      { key: "modelMaps", data: body.modelMaps, fn: (db, data) => importModelMaps(db, data, importedPlatformIds) },
+      { key: "platformModels", data: body.platformModels, fn: (db, data) => importPlatformModels(db, data, importedPlatformIds) },
       { key: "configs", data: body.configs, fn: importConfigs },
-      { key: "apiKeys", data: body.apiKeys, fn: importApiKeys },
+      { key: "apiKeys", data: body.apiKeys, fn: (db, data) => importApiKeys(db, data, importedApiKeyIds) },
       { key: "auditLogs", data: body.auditLogs, fn: importAuditLogs },
-      { key: "requestLogs", data: body.requestLogs, fn: importRequestLogs },
+      { key: "requestLogs", data: body.requestLogs, fn: (db, data) => importRequestLogs(db, data, importedPlatformIds, importedApiKeyIds) },
       { key: "dailyStats", data: body.dailyStats, fn: importDailyStats },
     ];
 
@@ -195,11 +208,6 @@ export default async function handler(
     };
 
     let totalProcessed = 0;
-
-    // 本次请求重新累积导入 id：模块级 Set 若跨请求保留，下一次导入时残留 id
-    // 会被当作「本批已导入」的平台/Key 引用，插入时外键违反导致整批莫名失败
-    importedPlatformIds.clear();
-    importedApiKeyIds.clear();
 
     for (const step of steps) {
       const arr = step.data;
@@ -224,8 +232,6 @@ export default async function handler(
     // 审计日志（独立处理，失败不影响导入结果）
     try {
       const now = Math.floor(Date.now() / 1000);
-      const ipHeader = req.headers["x-forwarded-for"] as string | undefined;
-      const clientIp = ipHeader?.split(",")[0]?.trim() || null;
       await db.auditLogs.create({
         data: {
           id: generateId(),
@@ -236,7 +242,7 @@ export default async function handler(
             exportedAt: body.exportedAt,
             details: result.details,
           }),
-          ip: clientIp,
+          ip: getClientIp(req),
           createdAt: now,
         },
       });
@@ -308,10 +314,12 @@ const VALID_RESET_PERIODS = new Set(["daily", "monthly", "never"]);
 /** Prisma Int 字段为 32 位有符号（TiDB/MySQL INT），超出会整批失败 */
 const MAX_INT_VALUE = 2147483647;
 
-// 本次导入产生的新 id 集合（按步骤顺序传递：platforms → modelMaps/requestLogs/platformModels
-// 的外键校验需要知道「本次导入的 platform id」，仅查已有库会把新导入的引用误判为悬空置 null）
-const importedPlatformIds = new Set<string>();
-const importedApiKeyIds = new Set<string>();
+// 测试/无参调用时的默认集合（模块级共享，仅串行测试使用）；
+// 真实请求由 handler 创建请求私有 Set 并经参数传入，避免并发导入互相踩踏
+// （历史问题：模块级 Set + 每请求 clear()，并发时 B 的 clear 抹掉 A 已累积的
+// "本批已导入 id"，A 后续外键校验把新导入引用误判为悬空置 null）
+const moduleImportedPlatformIds = new Set<string>();
+const moduleImportedApiKeyIds = new Set<string>();
 
 /** Float 字段安全上界：双精度可精确表示范围内，避免科学计数法溢出 */
 const MAX_FLOAT_VALUE = 1e15;
@@ -475,7 +483,8 @@ function normalizePlatformKeys(p: Record<string, unknown>): string | null {
  */
 async function importPlatforms(
   db: DbClient,
-  platforms: Array<Record<string, unknown>>
+  platforms: Array<Record<string, unknown>>,
+  importedPlatformIds: Set<string> = moduleImportedPlatformIds
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
@@ -597,7 +606,8 @@ async function importPlatforms(
  */
 async function importModelMaps(
   db: DbClient,
-  modelMaps: Array<Record<string, unknown>>
+  modelMaps: Array<Record<string, unknown>>,
+  importedPlatformIds: Set<string> = moduleImportedPlatformIds
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
@@ -690,7 +700,8 @@ async function importModelMaps(
  */
 async function importPlatformModels(
   db: DbClient,
-  platformModels: Array<Record<string, unknown>>
+  platformModels: Array<Record<string, unknown>>,
+  importedPlatformIds: Set<string> = moduleImportedPlatformIds
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
@@ -789,7 +800,8 @@ async function importPlatformModels(
  */
 async function importApiKeys(
   db: DbClient,
-  apiKeysData: Array<Record<string, unknown>>
+  apiKeysData: Array<Record<string, unknown>>,
+  importedApiKeyIds: Set<string> = moduleImportedApiKeyIds
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
@@ -891,10 +903,21 @@ async function importApiKeys(
  * 导入系统配置
  *
  * 按 key 做 upsert（已存在则更新 value，不存在则创建）
- * 跳过运行期关键配置（system:auto_model_id），
+ * 跳过运行期关键配置（system:auto_model_id + upstream-proxy 内部派生键），
  * 仅允许 system:* 前缀的键（与 /api/admin/config 的写入约束一致，其他键视为异常数据）
+ *
+ * 内部派生键与 config.ts PROTECTED_CONFIG_KEYS 同源同语义：pool/health/check_lock/
+ * pull_at 由 upstream-proxy 模块内部写入，导入备份若携带旧快照会覆盖当前健康表
+ * （操纵路由）、破坏检查互斥锁、伪造拉取时间（让某组自动更新停摆/立即重拉），
+ * 与 config PUT 直写同等级风险——导入路径必须同步跳过。
  */
-const SKIP_IMPORT_CONFIG_KEYS = new Set(["system:auto_model_id"]);
+const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
+  "system:auto_model_id",
+  UPSTREAM_PROXY_POOL_KEY,
+  UPSTREAM_PROXY_HEALTH_KEY,
+  UPSTREAM_PROXY_CHECK_LOCK_KEY,
+  UPSTREAM_PROXY_PULL_AT_KEY,
+]);
 const IMPORT_CONFIG_PREFIX = "system:";
 
 async function importConfigs(
@@ -1077,7 +1100,9 @@ async function importAuditLogs(
  */
 export async function importRequestLogs(
   db: DbClient,
-  logs: Array<Record<string, unknown>>
+  logs: Array<Record<string, unknown>>,
+  importedPlatformIds: Set<string> = moduleImportedPlatformIds,
+  importedApiKeyIds: Set<string> = moduleImportedApiKeyIds
 ): Promise<ImportResult> {
   let imported = 0;
   let skipped = 0;
@@ -1101,8 +1126,10 @@ export async function importRequestLogs(
     if (platformId) referencedPlatformIds.add(platformId);
   }
 
-  // 校验外键：request_logs 有 FOREIGN KEY(key_id) → api_keys(id) 和 FOREIGN KEY(platform_id) → platforms(id)
-  // 校验集合 = 已有 id ∪ 本次导入的 id（导入保留原始 id 后，新插入的 Key/平台引用必须保留）
+  // 外键引用校验（防御性）：库层并无 DB 级 FOREIGN KEY 约束（schema 无 @relation），
+  // 悬空引用不会在插入时报错，但会导致路由时查不到 Key/平台（此模型不存在/日志不可归因），
+  // 因此导入前校验引用存在性、不存在时置 null。校验集合 = 已有 id ∪ 本次导入的 id
+  // （导入保留原始 id 后，新插入的 Key/平台引用必须保留）
   const existingKeyRows = referencedKeyIds.size > 0
     ? await db.apiKeys.findMany({ where: { id: { in: Array.from(referencedKeyIds) } }, select: { id: true } })
     : [];
@@ -1154,6 +1181,7 @@ export async function importRequestLogs(
       isError: sanitizeBoolean(log.isError, false),
       ipAddress: sanitizeNullableString(log.ipAddress, 45),
       userAgent: sanitizeNullableString(log.userAgent),
+      nodeName: sanitizeNullableString(log.nodeName),
       proxyUrl: sanitizeNullableString(log.proxyUrl),
       errorMessage: sanitizeNullableString(log.errorMessage),
       createdAt: toUnixSeconds(log.createdAt),

@@ -8,6 +8,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { getClientIp } from "./auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import {
@@ -137,7 +138,7 @@ export default async function handler(
       // 审计日志：配置修改属安全敏感操作（可含代理地址等），记录变更内容；
       // 值内嵌的 user:pass 凭据按 maskProxyUrl 同规则脱敏，防止凭据在审计表
       // 长期可读（写失败随主流程返回 500，与 keys/[id].ts 审计写法一致）
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null;
+      const ip = getClientIp(req);
       await db.auditLogs.create({
         data: {
           id: crypto.randomUUID(),

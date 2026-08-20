@@ -12,6 +12,7 @@ import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../worker/src/platform-keys";
+import { getClientIp } from "./auth";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -379,8 +380,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           adminId: getAuditAdminId(admin),
           action: "create_platform",
           detail: JSON.stringify({ platformId: id, name }),
-          ip:
-            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+          ip: getClientIp(req),
           createdAt: now,
         },
       });

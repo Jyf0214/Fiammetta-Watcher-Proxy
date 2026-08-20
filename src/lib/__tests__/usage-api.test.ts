@@ -14,6 +14,12 @@
  * - 请求数全量口径（含错误请求）
  * - period=all 历史部分从 daily_stats 读 avgDuration 近似并入
  * - 数据库错误 500
+ * usage/platform.ts：
+ * - GET 认证检查（401）
+ * - TTFT/耗时均值分母排除错误请求（perfGrouped 仅 isError:false）
+ * - period=all 时 daily_stats 历史并入（按 platformId 聚合，null platformId 行跳过）
+ * - 速率指标在请求数 <2 或同秒突发时返回 0（rateValid，与 usage.ts 同口径）
+ * - period=today UTC 零点下界
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth
  * trend.ts 还 import worker/src/log-archiver 的 RETENTION_DAYS（仅常量 + createDb，
@@ -104,6 +110,29 @@ function mockUsageGroupBy(grouped: any[], perfGrouped: any[]) {
     if (args.where && args.where.isError === false) return perfGrouped;
     return grouped;
   });
+}
+
+/** platform.ts 的 groupBy 被调用三次：全量（无 isError）+ 错误（isError: true）+ 性能（isError: false） */
+function mockPlatformGroupBy(grouped: any[], errorGrouped: any[], perfGrouped: any[]) {
+  mocks.requestLogsGroupBy.mockImplementation(async (args: any) => {
+    if (args.where && args.where.isError === false) return perfGrouped;
+    if (args.where && args.where.isError === true) return errorGrouped;
+    return grouped;
+  });
+}
+
+/** platform.ts 的 platforms.findMany 返回值（含 handler 用到的全部字段） */
+function makePlatform(overrides: any = {}) {
+  return {
+    id: "plat-1",
+    name: "平台 1",
+    type: "openai",
+    enabled: true,
+    status: "healthy",
+    baseUrl: "https://example.com",
+    createdAt: 1700000000,
+    ...overrides,
+  };
 }
 
 /** trend.ts 的 findMany：take=1 是 period=all 的最早请求/最早历史探测，其余为明细分页 */
@@ -570,5 +599,201 @@ describe("GET /api/admin/usage/platform", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("TTFT/耗时均值分母只计非错误请求，请求总数仍为全量（#2）", async () => {
+    // 全量 10 个请求、非错误 8 个、错误 2 个；若分母误用全量，
+    // 均值会被错误请求（ttft/latency=0）稀释
+    mocks.platformsFindMany.mockResolvedValue([makePlatform()]);
+    mockPlatformGroupBy(
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 10 },
+          _sum: { tokens: 10000, promptTokens: 4000, completionTokens: 6000, ttft: 5000, latency: 9000 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 9000 },
+        },
+      ],
+      [{ platformId: "plat-1", _count: { id: 2 } }],
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 8 },
+          _sum: { ttft: 800, latency: 4000 },
+        },
+      ]
+    );
+
+    const req = makeReq({ query: { period: "week" } });
+    const res = makeRes() as any;
+    await platformUsageHandler(req, res);
+    expect(res.statusCode).toBe(200);
+    const stats = res.body.data[0].stats;
+    // 分母 = 8（非错误），而非 10（全量）：800/8=100、4000/8=500
+    expect(stats.totalRequests).toBe(10);
+    expect(stats.errorRequests).toBe(2);
+    expect(stats.avgTtft).toBe(100);
+    expect(stats.avgDuration).toBe(500);
+    expect(stats.totalTokens).toBe(10000);
+
+    // 3 次 groupBy：全量（无 isError 过滤）+ 错误（isError: true）+ 性能（isError: false）
+    expect(mocks.requestLogsGroupBy).toHaveBeenCalledTimes(3);
+    expect(mocks.requestLogsGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isError: false }) })
+    );
+    expect(mocks.requestLogsGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isError: true }) })
+    );
+    // period=week 未达归档界限，不读 daily_stats
+    expect(mocks.dailyStatsFindMany).not.toHaveBeenCalled();
+  });
+
+  it("period=all 时 daily_stats 历史并入，按 platformId 聚合（#3）", async () => {
+    mocks.platformsFindMany.mockResolvedValue([makePlatform()]);
+    mockPlatformGroupBy(
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 10 },
+          _sum: { tokens: 1000, promptTokens: 400, completionTokens: 600, ttft: 500, latency: 1500 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 2000 },
+        },
+      ],
+      [{ platformId: "plat-1", _count: { id: 1 } }],
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 9 },
+          _sum: { ttft: 450, latency: 1350 },
+        },
+      ]
+    );
+    mocks.dailyStatsFindMany.mockResolvedValue([
+      {
+        platformId: "plat-1",
+        date: 1700000000,
+        totalRequests: 200,
+        errorRequests: 20, // 非错误 180：avgTtft 100 → +18000，avgDuration 300 → +54000
+        totalTokens: 100000,
+        totalPromptTokens: 40000,
+        totalCompletionTokens: 60000,
+        avgTtft: 100,
+        avgDuration: 300,
+      },
+      {
+        platformId: "plat-1",
+        date: 1700086400,
+        totalRequests: 100,
+        errorRequests: 0, // 非错误 100：avgTtft=0 权重跳过，avgDuration 250 → +25000
+        totalTokens: 50000,
+        totalPromptTokens: 20000,
+        totalCompletionTokens: 30000,
+        avgTtft: 0,
+        avgDuration: 250,
+      },
+      {
+        // platformId 为 null 的历史行不归属任何平台，必须跳过（不并入 statsMap 也不产生未知平台条目）
+        platformId: null,
+        date: 1700000000,
+        totalRequests: 999,
+        errorRequests: 0,
+        totalTokens: 99999,
+        totalPromptTokens: 0,
+        totalCompletionTokens: 0,
+        avgTtft: 0,
+        avgDuration: 0,
+      },
+    ]);
+
+    // 不传 period → 默认 all → 触发 daily_stats 历史并入
+    const req = makeReq();
+    const res = makeRes() as any;
+    await platformUsageHandler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(mocks.dailyStatsFindMany).toHaveBeenCalledTimes(1);
+
+    const stats = res.body.data[0].stats;
+    // 请求数/Token：明细 + 历史全量合并（null platformId 行不计入）
+    expect(stats.totalRequests).toBe(10 + 200 + 100);
+    expect(stats.totalTokens).toBe(1000 + 100000 + 50000);
+    expect(stats.promptTokens).toBe(400 + 40000 + 20000);
+    expect(stats.completionTokens).toBe(600 + 60000 + 30000);
+    // 均值：分子 = 明细 ttft/latency 总和 + 历史 avg×非错误请求数近似
+    // perfCount = 9 + 180 + 100 = 289
+    // avgTtft = round((450 + 100×180) / 289) = round(63.84) = 64
+    // avgDuration = round((1350 + 300×180 + 250×100) / 289) = round(278.03) = 278
+    expect(stats.avgTtft).toBe(64);
+    expect(stats.avgDuration).toBe(278);
+    // 未知平台条目只由明细 null platformId 产出；历史 null 行已跳过 → 不出现
+    expect(res.body.data.map((p: any) => p.id)).toEqual(["plat-1"]);
+  });
+
+  it("速率指标在请求数 <2 时返回 0（#23 反例，与 usage.ts 同口径）", async () => {
+    mocks.platformsFindMany.mockResolvedValue([makePlatform()]);
+    // 单请求：首末同一秒，timeSpan 0 被钳为 1 秒会得到 TPS=token 数、RPM=60 的失真值
+    mockPlatformGroupBy(
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 1 },
+          _sum: { tokens: 100, promptTokens: 40, completionTokens: 60, ttft: 100, latency: 1000 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 1000 },
+        },
+      ],
+      [],
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 1 },
+          _sum: { ttft: 100, latency: 1000 },
+        },
+      ]
+    );
+
+    const req = makeReq({ query: { period: "week" } });
+    const res = makeRes() as any;
+    await platformUsageHandler(req, res);
+    expect(res.statusCode).toBe(200);
+    const stats = res.body.data[0].stats;
+    expect(stats.totalRequests).toBe(1);
+    expect(stats.avgTokensPerSecond).toBe(0);
+    expect(stats.avgRequestsPerMinute).toBe(0);
+  });
+
+  it("速率指标在请求数 ≥2 且首末跨秒时正常计算（#23 正例）", async () => {
+    mocks.platformsFindMany.mockResolvedValue([makePlatform()]);
+    mockPlatformGroupBy(
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 2 },
+          _sum: { tokens: 200, promptTokens: 80, completionTokens: 120, ttft: 200, latency: 4000 },
+          _min: { createdAt: 1000 },
+          _max: { createdAt: 2000 },
+        },
+      ],
+      [],
+      [
+        {
+          platformId: "plat-1",
+          _count: { id: 2 },
+          _sum: { ttft: 200, latency: 4000 },
+        },
+      ]
+    );
+
+    const req = makeReq({ query: { period: "week" } });
+    const res = makeRes() as any;
+    await platformUsageHandler(req, res);
+    expect(res.statusCode).toBe(200);
+    const stats = res.body.data[0].stats;
+    // timeSpan = 2000 - 1000 = 1000s
+    // avgTokensPerSecond = 200/1000 = 0.2
+    // avgRequestsPerMinute = (2/1000)×60 = 0.12
+    expect(stats.avgTokensPerSecond).toBe(0.2);
+    expect(stats.avgRequestsPerMinute).toBe(0.12);
   });
 });

@@ -11,6 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { getClientIp } from "./auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 
@@ -28,12 +29,6 @@ function generateApiKey(): string {
 
 function generateId(): string { return crypto.randomUUID(); }
 function now(): number { return Math.floor(Date.now() / 1000); }
-
-function getClientIp(req: NextApiRequest): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const str = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return str?.split(",")[0]?.trim() || (req.headers["x-real-ip"] as string) || "unknown";
-}
 
 /** 解析分页 limit（钳制 1~500，缺省/非法取默认 50） */
 function parseLimitParam(raw: string | string[] | undefined): number {

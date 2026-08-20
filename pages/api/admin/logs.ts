@@ -143,6 +143,7 @@ export default async function handler(
           errorMessage: log.errorMessage,
           ipAddress: log.ipAddress,
           userAgent: log.userAgent,
+          nodeName: log.nodeName,
           endpoint: log.endpoint,
           method: log.method,
           keyId: log.keyId,

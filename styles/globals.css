@@ -242,22 +242,36 @@ article header h1 {
 }
 
 /* ===== 按钮轻加载动画 ===== */
+/* 仅做柔和的透明度呼吸，不做 scale 变换：此前 scale(1)↔scale(0.98) 循环叠加
+   按下反馈会让按钮视觉上「变大变小+闪烁」，尺寸抖动对用户不友好 */
 @keyframes btn-loading-pulse {
-  0%, 100% { opacity: 0.55; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.98); }
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 0.45; }
 }
 
 .animate-btn-loading {
-  animation: btn-loading-pulse 0.9s ease-in-out infinite;
+  animation: btn-loading-pulse 1s ease-in-out infinite;
   pointer-events: none;
   cursor: not-allowed;
 }
 
 /* ===== 全局焦点可见性 ===== */
+/* 键盘导航焦点指示。输入类组件（原生 input/textarea/select 与 antd
+   Input/InputNumber/Select/DatePicker）自带 focus 样式（边框变色+光晕），
+   排除它们避免点击聚焦时叠加 2px outline 形成又黑又粗的双重描边 */
 *:focus-visible {
   outline: 2px solid var(--color-text-tertiary);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.ant-input-number:focus-visible,
+.ant-picker:focus-visible,
+.ant-select-selector:focus-visible {
+  outline: none;
 }
 
 /* ===== 图片懒加载 ===== */

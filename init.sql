@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS "request_logs" (
     "is_error" BOOLEAN NOT NULL DEFAULT false,
     "ip_address" TEXT,
     "user_agent" TEXT,
+    "node_name" TEXT,
     "error_message" TEXT,
     "proxy_url" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0

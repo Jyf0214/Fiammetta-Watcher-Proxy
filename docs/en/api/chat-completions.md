@@ -70,7 +70,7 @@ data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":
 data: [DONE]
 ```
 
-Errors (e.g. 401/429) also appear as `data: {...}` blocks inside the stream in streaming mode.
+Gateway-level errors (e.g. 401 auth failure, 429 rate limit, 400 invalid request) are returned as a JSON error body with the corresponding HTTP status code before the SSE stream opens; they do not appear in the stream. Only errors reported by the upstream inside the stream after the 2xx response has started streaming are passed through as `data: {...}` blocks. Clients should handle both forms: the JSON error body before the stream opens and in-stream error blocks after it starts.
 
 ## Response
 

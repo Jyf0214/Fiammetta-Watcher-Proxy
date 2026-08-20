@@ -6,7 +6,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
-import { normalizeProxyStatKey } from "@/lib/upstream-proxy";
+import { proxyStatKey } from "@/lib/upstream-proxy";
 import { recordFailure } from "./load-balancer";
 import { banKey, recordKeyError } from "./platform-keys";
 import type { WorkerEnv } from "./config";
@@ -86,6 +86,70 @@ export async function updateKeyUsage(
   }
 }
 
+/** 节点名称最大显示宽度：中文等全角字符按 2 计、ASCII 按 1，上限 20（纯中文 10 字、纯英文 20 字） */
+const MAX_NODE_NAME_WIDTH = 20;
+
+/**
+ * 解析并清洗节点/设备名称（请求日志 nodeName 列）
+ *
+ * 多实例部署（如 CDN 后多源站）时各实例设置 NODE_NAME 环境变量，用于在请求日志中
+ * 区分请求来自哪个实例；未设置时回退部署平台名（edgeone/vercel/docker/cf 映射为
+ * 友好名称，均未设置时写 local）。
+ *
+ * 清洗规则（防止名称破坏日志展示/导出结构）：
+ * - 删除控制字符（换行/回车/Tab/空字符等）与逗号、单双引号
+ * - 按显示宽度截断：中文等全角字符按 2 计算、ASCII 按 1，总宽度上限 20
+ *   （即纯中文最多 10 字、纯英文最多 20 字），超出截断保留前缀
+ * - 清洗后为空（NODE_NAME 全为非法字符）时回退部署平台名
+ */
+export function resolveNodeName(env?: WorkerEnv & { NODE_NAME?: string; DEPLOY_PLATFORM?: string }): string | null {
+  const raw = (env?.NODE_NAME ?? process.env.NODE_NAME ?? "").trim();
+  const cleaned = sanitizeNodeName(raw);
+  if (cleaned) return cleaned;
+  const platform = friendlyDeployPlatform(env?.DEPLOY_PLATFORM ?? process.env.DEPLOY_PLATFORM);
+  return sanitizeNodeName(platform);
+}
+
+/** 部署平台名 → 友好名称映射（NODE_NAME 未设置时的回退值） */
+function friendlyDeployPlatform(raw: string | undefined): string {
+  const p = (raw ?? "").trim().toLowerCase();
+  const map: Record<string, string> = {
+    edgeone: "EdgeOne",
+    vercel: "Vercel",
+    docker: "Docker",
+    cf: "Cloudflare",
+  };
+  return map[p] ?? (p || "local");
+}
+
+/** 清洗节点名称：删除控制字符与逗号引号，按显示宽度截断（中文 2/ASCII 1，上限 20） */
+function sanitizeNodeName(value: string): string | null {
+  // 宽度判定：CJK 统一表意文字、全角符号与代理对（emoji 等）按 2 列宽计，
+  // 其余按 1（for...of 按码点迭代，代理对不拆半）
+  const WIDE = /[\u3000-\u9fff\uff00-\uffef]/;
+  // 删除会破坏日志展示/导出结构的字符：控制字符（换行/回车/Tab/空字符等，
+  // 含 C1 控制字符 U+0080-U+009F）与逗号、单双引号（CSV/行式日志的分隔符
+  // 与引用符）
+  // 控制字符的匹配是刻意行为（正因会破坏日志结构才须删除），跳过 no-control-regex
+  // eslint-disable-next-line no-control-regex
+  const cleaned = value.replace(/[\u0000-\u001f\u007f-\u009f,"']/g, "").trim();
+  if (!cleaned) return null;
+  // 码点宽度：全角/CJK 与代理对（length 2，如 emoji）按 2 计，其余按 1
+  const widthOf = (ch: string) => (WIDE.test(ch) || ch.length === 2 ? 2 : 1);
+  let width = 0;
+  for (const ch of cleaned) width += widthOf(ch);
+  if (width <= MAX_NODE_NAME_WIDTH) return cleaned;
+  let out = "";
+  width = 0;
+  for (const ch of cleaned) {
+    const w = widthOf(ch);
+    if (width + w > MAX_NODE_NAME_WIDTH) break;
+    width += w;
+    out += ch;
+  }
+  return out || null;
+}
+
 /**
  * 记录请求日志
  */
@@ -132,12 +196,14 @@ export async function recordRequestLog(params: {
         ttft: params.ttft,
         isError: params.isError,
         errorMessage: params.errorMessage ?? null,
-        // 落库前归一化为去凭据的 host:port 统计键（同 host:port 不同凭据的
-        // 代理共享同一键，stats 聚合与前端查表一致；凭据不进入日志表。
-        // 历史 ***@host:port 键在 stats 聚合侧同样归一化，自动并入新键）
-        proxyUrl: params.proxyUrl ? normalizeProxyStatKey(params.proxyUrl) : null,
+        // 落库前转为代理级统计键：无凭据地址为 host:port（与历史键兼容），
+        // 带凭据地址带账号指纹后缀（host:port#<hash>），同 host:port 不同账号
+        // 独立成键，stats 聚合与前端查表一致；凭据明文不进入日志表（指纹为
+        // 不可逆哈希，历史 ***@host:port 键在聚合侧同样归一化并入裸 host:port）
+        proxyUrl: params.proxyUrl ? proxyStatKey(params.proxyUrl) : null,
         ipAddress: params.ipAddress ?? null,
         userAgent: params.userAgent ?? null,
+        nodeName: resolveNodeName(params.env),
         createdAt: Math.floor(Date.now() / 1000),
       },
     });
@@ -330,6 +396,7 @@ export function createUsageTransformer(params: {
             ttft,
             isError: !!streamError || truncated,
             errorMessage: streamError?.message ?? (truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
+            nodeName: resolveNodeName(params.env),
             createdAt: Math.floor(Date.now() / 1000),
           },
         });

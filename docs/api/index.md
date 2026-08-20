@@ -30,15 +30,15 @@ Anthropic 客户端亦可使用 `x-api-key` 头（Anthropic 协议惯例），�
 | `/v1/models` | GET | 获取平台支持的模型列表 |
 | `/v1/models/{model}` | GET | 获取单个模型信息 |
 | `/v1/images/generations` | POST | 图像生成 |
-| `/v1/images/edits` | POST | 图像编辑（仅 JSON 请求体） |
-| `/v1/images/variations` | POST | 图像变体（仅 JSON 请求体） |
+| `/v1/images/edits` | POST | 图像编辑（支持 multipart 透传） |
+| `/v1/images/variations` | POST | 图像变体（支持 multipart 透传） |
 | `/v1/audio/speech` | POST | 文字转语音（TTS） |
 | `/v1/audio/transcriptions` | POST | 语音转文字（Whisper） |
 | `/v1/audio/translations` | POST | 语音翻译 |
 | `/v1/messages` | POST | Anthropic Messages 协议（双向格式转换） |
 | `/v1/messages/count_tokens` | POST | Anthropic token 估算 |
 
-> 注：网关层请求体解析仅支持 JSON。`/v1/images/edits`、`/v1/images/variations`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 原生需要 multipart 文件上传的端点，当前**不支持 multipart 请求体**（JSON 请求体会原样透传上游，能否使用取决于上游是否接受 JSON 格式）。需要文件上传的调用请直接对接上游平台。
+> 注：网关层支持 **multipart 文件上传透传**。`/v1/images/edits`、`/v1/images/variations`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 原生需要 multipart 文件上传的端点，网关会从表单中提取 `model` 字段用于路由，原始请求字节连同 `Content-Type`（含 boundary）原样透传上游，且不注入模板字段。JSON 请求体同样受支持并原样透传上游，能否使用取决于上游是否接受 JSON 格式。
 
 ### 请求示例
 

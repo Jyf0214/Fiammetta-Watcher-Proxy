@@ -14,6 +14,7 @@ import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status"
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../../worker/src/platform-keys";
 import { resetCircuitBreaker } from "../../../../worker/src/load-balancer";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { getClientIp } from "../auth";
 
 /** 安全解析 JSON 字段，默认值为指定的 fallback */
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
@@ -263,12 +264,14 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       updateData.reuseUserAgent = !!body.reuseUserAgent;
     }
     if (body.customUserAgent !== undefined) {
-      if (typeof body.customUserAgent === "string") {
-        if (body.customUserAgent.trim().length === 0) {
-          updateData.customUserAgent = null;
-        } else if (body.customUserAgent.length <= 500) {
-          updateData.customUserAgent = body.customUserAgent.trim();
-        }
+      if (typeof body.customUserAgent !== "string") {
+        errors.push("自定义 User-Agent 必须为字符串");
+      } else if (body.customUserAgent.trim().length > 0 && body.customUserAgent.length > 500) {
+        errors.push("自定义 User-Agent 不能超过 500 个字符");
+      } else if (body.customUserAgent.trim().length === 0) {
+        updateData.customUserAgent = null;
+      } else {
+        updateData.customUserAgent = body.customUserAgent.trim();
       }
     }
 
@@ -413,8 +416,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
         adminId: getAuditAdminId(admin),
         action: "update_platform",
         detail: JSON.stringify({ platformId: id, changes: sanitized }),
-        ip:
-          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        ip: getClientIp(req),
         createdAt: now,
       },
     });
@@ -484,8 +486,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
         adminId: getAuditAdminId(admin),
         action: "delete_platform",
         detail: JSON.stringify({ platformId: id }),
-        ip:
-          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || null,
+        ip: getClientIp(req),
         createdAt: now,
       },
     });

@@ -16,19 +16,41 @@ interface PresetCreateModalProps {
   onCreated?: (platformId: string) => void;
 }
 
+interface PresetCreateModalInnerProps {
+  /** 选中预设（由外层保证非 null） */
+  preset: PlatformPreset;
+  onClose: () => void;
+  /** 创建成功回调（跳转详情页） */
+  onCreated?: (platformId: string) => void;
+}
+
 /**
  * 从预设创建平台确认弹窗
  * - baseUrl 默认取预设地址，预设无默认地址时必填
  * - 密钥可选，创建后可在详情页补充
+ *
+ * 组件在父页面常驻挂载，preset 在 null ↔ 具体预设间切换时不会卸载；
+ * 内部状态通过 key=<preset.id> 绑定预设重建，避免上次输入的
+ * baseUrl/apiKeys 残留到下一个预设导致误提交。
  */
 export function PresetCreateModal({ preset, onClose, onCreated }: PresetCreateModalProps) {
+  if (!preset) return null;
+  return (
+    <PresetCreateModalInner
+      key={preset.id}
+      preset={preset}
+      onClose={onClose}
+      onCreated={onCreated}
+    />
+  );
+}
+
+function PresetCreateModalInner({ preset, onClose, onCreated }: PresetCreateModalInnerProps) {
   const { t } = useTranslation("platform");
   const router = useRouter();
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKeys, setApiKeys] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  if (!preset) return null;
 
   const needBaseUrl = !preset.baseUrl;
 
@@ -71,7 +93,7 @@ export function PresetCreateModal({ preset, onClose, onCreated }: PresetCreateMo
 
   return (
     <Modal
-      open={!!preset}
+      open
       title={t("presetCreateTitle")}
       onCancel={onClose}
       onOk={handleCreate}
