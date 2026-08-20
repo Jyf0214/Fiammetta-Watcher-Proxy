@@ -3,7 +3,7 @@
 English | [简体中文](README.md)
 
 > [!TIP]
-> **Note: This project is under active development and unstable. Not recommended for production use.**
+> **Note: The project is ready for normal use; not recommended for production use yet.**
 > This repository (canary branch) publishes auto-built Docker images: `ghcr.io/jyf0214/fiammetta-watcher-proxy:canary` (full) and `:canary-lite` (lite — V1 proxy + scheduled tasks only). Pull and run directly; the Docker Build workflow runs automatically on every push to the `canary` branch (or when the `canary` tag is pushed or the workflow is triggered manually).
 
 LLM API proxy with multi-platform load balancing, circuit breaker recovery, and SSE streaming. Deployable on Cloudflare, EdgeOne, Vercel, or your own server (Docker).

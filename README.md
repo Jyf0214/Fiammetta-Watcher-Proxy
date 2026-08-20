@@ -3,7 +3,7 @@
 [English](README_EN.md) | 简体中文
 
 > [!TIP]
-> **注意：项目处于开发阶段，功能不稳定，暂不建议用于生产环境。**
+> **注意：项目已可正常使用，暂不建议用于生产环境。**
 > 本仓库（canary 分支）提供自动构建的预构建镜像：`ghcr.io/jyf0214/fiammetta-watcher-proxy:canary`（完整版）与 `:canary-lite`（精简版，仅 V1 代理与定时任务），可直接拉取运行；每次推送 `canary` 分支（或推送 `canary` 标签、手动触发）Docker Build 工作流即自动构建。
 
 LLM API 中转站，支持多平台负载均衡、熔断恢复、SSE 流式响应。可部署在 Cloudflare、EdgeOne、Vercel 或自有服务器（Docker）。
