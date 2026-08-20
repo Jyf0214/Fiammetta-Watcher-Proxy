@@ -8,6 +8,10 @@
  * CF-Connecting-IP、有 socket 时忽略伪造的 CF-Connecting-IP、直连忽略伪造 XFF、
  * 可信代理链从右向左取首个非可信条目、全可信链回退 X-Real-IP、无 socket 地址
  * 且无边缘注入头时返回 null（不归入共享桶）。
+ *
+ * TRUSTED_IP_HEADER（自定义可信头）：配置后优先于一切平台方案采信该头（头名
+ * 大小写不敏感、逗号取首项、IPv4-mapped 归一化），头缺失/为空/畸形时回退平台
+ * 方案而非 fail-open；未配置时行为不变。
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,9 +42,15 @@ function setDeployPlatform(value: string | undefined): void {
   else process.env.DEPLOY_PLATFORM = value;
 }
 
+function setTrustedIpHeader(value: string | undefined): void {
+  if (value === undefined) delete process.env.TRUSTED_IP_HEADER;
+  else process.env.TRUSTED_IP_HEADER = value;
+}
+
 afterEach(() => {
   setTrustedProxies(undefined);
   setDeployPlatform(undefined);
+  setTrustedIpHeader(undefined);
 });
 
 describe("getClientIp — EdgeOne 部署（DEPLOY_PLATFORM=edgeone）", () => {
@@ -294,5 +304,69 @@ describe("getClientIp — 极端环境", () => {
   it("无 socket 地址且无边缘注入头时返回 null（调用方限流 fail-open）", () => {
     const req = makeReq({ socket: {} });
     expect(getClientIp(asReq(req))).toBeNull();
+  });
+});
+
+describe("getClientIp — TRUSTED_IP_HEADER（自定义可信头，优先于平台方案）", () => {
+  it("配置后优先采信该头（优先于 edgeone 平台方案的 EO-Client-IP）", () => {
+    setDeployPlatform("edgeone");
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({
+      headers: { "x-real-ip": "5.6.7.8", "eo-client-ip": "9.9.9.9" },
+    });
+    expect(getClientIp(asReq(req))).toBe("5.6.7.8");
+  });
+
+  it("头名大小写不敏感（配置 X-Real-IP，请求头 x-real-ip / X-REAL-IP 均可命中）", () => {
+    setTrustedIpHeader("X-Real-IP");
+    const lower = makeReq({ headers: { "x-real-ip": "5.6.7.8" } });
+    const upper = makeReq({ headers: { "X-REAL-IP": "6.6.6.6" } });
+    expect(getClientIp(asReq(lower))).toBe("5.6.7.8");
+    expect(getClientIp(asReq(upper))).toBe("6.6.6.6");
+  });
+
+  it("环境变量值前后空白被忽略（配置 \" X-Real-IP \" 与 X-Real-IP 等价）", () => {
+    setTrustedIpHeader(" X-Real-IP ");
+    const req = makeReq({ headers: { "x-real-ip": "5.6.7.8" } });
+    expect(getClientIp(asReq(req))).toBe("5.6.7.8");
+  });
+
+  it("IPv4-mapped 形态归一化为点分十进制", () => {
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({ headers: { "x-real-ip": "::ffff:5.6.7.8" } });
+    expect(getClientIp(asReq(req))).toBe("5.6.7.8");
+  });
+
+  it("逗号分隔取首项（最靠近客户端的条目）", () => {
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({ headers: { "x-real-ip": "5.6.7.8, 43.168.0.1" } });
+    expect(getClientIp(asReq(req))).toBe("5.6.7.8");
+  });
+
+  it("头缺失时回退平台方案（edgeone 采信 EO-Client-IP）", () => {
+    setDeployPlatform("edgeone");
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({
+      headers: { "eo-client-ip": "5.6.7.8" },
+      socket: { remoteAddress: "43.168.0.1" },
+    });
+    expect(getClientIp(asReq(req))).toBe("5.6.7.8");
+  });
+
+  it("头为空时回退平台方案（直连按 socket 对端）", () => {
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({ headers: { "x-real-ip": " " } });
+    expect(getClientIp(asReq(req))).toBe("1.2.3.4");
+  });
+
+  it("畸形头值（前导逗号）回退平台方案而非 fail-open", () => {
+    setTrustedIpHeader("X-Real-IP");
+    const req = makeReq({ headers: { "x-real-ip": ", 5.6.7.8" } });
+    expect(getClientIp(asReq(req))).toBe("1.2.3.4");
+  });
+
+  it("未配置 TRUSTED_IP_HEADER 时行为不变（直连忽略伪造自定义头，按 socket 对端）", () => {
+    const req = makeReq({ headers: { "x-real-ip": "8.8.8.8" } });
+    expect(getClientIp(asReq(req))).toBe("1.2.3.4");
   });
 });

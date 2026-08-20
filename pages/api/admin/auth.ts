@@ -94,25 +94,29 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  * 解析真实客户端 IP（可信代理链）。
  *
  * 优先级：
- * 0. EdgeOne 部署（DEPLOY_PLATFORM=edgeone，Makers 控制台环境变量，构建与运行时
+ * 0. TRUSTED_IP_HEADER 环境变量显式指定的自定义可信请求头（如 X-Real-IP 或
+ *    网关注入的自定义头）——配置后优先于一切部署平台方案，头缺失或为空时
+ *    回退下方方案。仅当上游网关/反向代理强制覆盖该头（客户端无法伪造）时
+ *    配置，否则攻击者可直接伪造该头绕过限流；
+ * 1. EdgeOne 部署（DEPLOY_PLATFORM=edgeone，Makers 控制台环境变量，构建与运行时
  *    共享）：请求必经 EdgeOne 边缘，EO-Client-IP / EO-Connecting-IP 由边缘强制注入且
  *    客户端无法伪造，优先采信；X-Forwarded-For 由 EdgeOne 维护（首项为客户端真实 IP）
  *    作为回退。仅此部署平台采信——其他平台（Docker 显式 DEPLOY_PLATFORM=docker、
  *    Cloudflare、直连、未设置）EdgeOne 头完全不可信（攻击者可任意伪造绕过限流），一律忽略；
- * 1. Vercel 部署（DEPLOY_PLATFORM=vercel）：Vercel 边缘强制覆盖 X-Forwarded-For
+ * 2. Vercel 部署（DEPLOY_PLATFORM=vercel）：Vercel 边缘强制覆盖 X-Forwarded-For
  *    为真实客户端公网 IP 且不转发外部 IP（防 IP 伪造），并注入同值的
  *    x-vercel-forwarded-for / x-real-ip；x-vercel-forwarded-for 为 Vercel 专属头
  *   （上层代理覆盖 XFF 时仍保留真实值），优先采信，回退 XFF / X-Real-IP。
  *    仅此部署平台采信（其他平台可任意伪造这些头）；
- * 2. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
+ * 3. 无 TCP 对端概念的边缘运行时（Next adapter 模式下 req.socket.remoteAddress
  *    为 undefined，如 Cloudflare Pages/Workers）— 前置头由边缘强制注入且客户端
  *    无法伪造，采信 CF-Connecting-IP；
- * 3. 直连（socket 对端不在 TRUSTED_PROXY_IPS 内）— X-Forwarded-For /
+ * 4. 直连（socket 对端不在 TRUSTED_PROXY_IPS 内）— X-Forwarded-For /
  *    CF-Connecting-IP 等前置头完全不可信（攻击者可任意伪造），直接使用 TCP
  *    对端地址（攻击者无法伪造 socket 地址）；
- * 4. 经可信代理（socket 对端在 TRUSTED_PROXY_IPS 内）— 从右向左跳过可信代理，
+ * 5. 经可信代理（socket 对端在 TRUSTED_PROXY_IPS 内）— 从右向左跳过可信代理，
  *    取第一个不可信条目作为真实客户端；
- * 5. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
+ * 6. 全可信链或链为空时回退 X-Real-IP（可信代理设置的单值头）。
  *
  * 返回 null 仅发生在极端环境（无平台头且无 socket 地址）；调用方此时应跳过
  * 限流（fail-open），禁止把不同来源归入同一个共享桶——否则攻击者可预填共享
@@ -120,6 +124,21 @@ function firstHeaderValue(h: string | string[] | undefined): string | undefined 
  */
 export function getClientIp(req: NextApiRequest): string | null {
   const socketIp = normalizeIp(req.socket?.remoteAddress ?? "");
+
+  // TRUSTED_IP_HEADER：显式指定自定义可信请求头（如 X-Real-IP 或网关注入的
+  // 自定义头），优先级高于下方各部署平台方案。仅当上游网关/反向代理强制覆盖
+  // 该头（客户端无法伪造）时配置——否则攻击者可直接伪造该头绕过限流。
+  // 头缺失、为空或首项为空白时回退平台方案，保持默认行为不变
+  const trustedHeader = process.env.TRUSTED_IP_HEADER?.trim().toLowerCase();
+  if (trustedHeader) {
+    // 头名大小写不敏感（Node 的 req.headers 键为小写，用户配置可能带大小写）
+    const key = Object.keys(req.headers).find((h) => h.toLowerCase() === trustedHeader);
+    const value = firstHeaderValue(key ? req.headers[key] : undefined);
+    // 与平台方案同规则：逗号分隔取首项（最靠近客户端的条目），IPv4-mapped 归一化；
+    // 畸形形态（前导逗号等）回退平台方案而非 fail-open
+    const first = value?.split(",")[0]?.trim();
+    if (first) return normalizeIp(first);
+  }
 
   // EdgeOne 部署：采信边缘强制注入的专属头（仅当 DEPLOY_PLATFORM=edgeone，
   // 防止其他部署方案因伪造 EdgeOne 头绕过限流）
