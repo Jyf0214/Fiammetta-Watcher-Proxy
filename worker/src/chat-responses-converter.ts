@@ -146,8 +146,36 @@ export function convertChatToResponses(
   else if (typeof (chatBody as any).max_completion_tokens === "number") out.max_output_tokens = (chatBody as any).max_completion_tokens;
 
   if (chatBody.stream === true) out.stream = true;
-  if (chatBody.tools) out.tools = chatBody.tools;
-  if ((chatBody as any).tool_choice) out.tool_choice = (chatBody as any).tool_choice;
+  // 工具转换：chat 的 function 嵌套形态 → responses 的扁平形态（name 提升至顶层）
+  if (Array.isArray(chatBody.tools)) {
+    out.tools = (chatBody.tools as Array<any>).map((t: any) => {
+      if (t?.type === "function" && t?.function && typeof t.function.name === "string") {
+        const { function: fn, ...rest } = t;
+        return {
+          type: "function",
+          name: fn.name,
+          description: fn.description,
+          parameters: fn.parameters,
+          // 保留 strict 等额外字段
+          ...(fn.strict !== undefined ? { strict: fn.strict } : {}),
+          ...rest,
+        };
+      }
+      // 已为 responses 形态或内置工具（web_search_preview 等）直接透传
+      return t;
+    });
+  } else if (chatBody.tools) {
+    out.tools = chatBody.tools;
+  }
+  // tool_choice 转换：chat 的 {type:"function",function:{name}} → responses 的 {type:"function",name}
+  if ((chatBody as any).tool_choice) {
+    const tc = (chatBody as any).tool_choice;
+    if (tc && typeof tc === "object" && tc.type === "function" && tc.function?.name) {
+      out.tool_choice = { type: "function", name: tc.function.name } as any;
+    } else {
+      out.tool_choice = tc;
+    }
+  }
   if (typeof (chatBody as any).parallel_tool_calls !== "undefined") out.parallel_tool_calls = (chatBody as any).parallel_tool_calls;
   if ((chatBody as any).response_format) out.text = { format: (chatBody as any).response_format };
   if (typeof chatBody.n === "number") out.n = chatBody.n;
@@ -217,8 +245,33 @@ export function convertResponsesToChat(
   else if (typeof (respBody as any).max_tokens === "number") out.max_tokens = (respBody as any).max_tokens;
 
   if (respBody.stream === true) out.stream = true;
-  if ((respBody as any).tools) out.tools = (respBody as any).tools;
-  if ((respBody as any).tool_choice) out.tool_choice = (respBody as any).tool_choice;
+  // 工具逆向：responses 扁平 name → chat 嵌套 function
+  if (Array.isArray((respBody as any).tools)) {
+    out.tools = ((respBody as any).tools as Array<any>).map((t: any) => {
+      if (t?.type === "function" && typeof t.name === "string") {
+        return {
+          type: "function",
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+            ...(t.strict !== undefined ? { strict: t.strict } : {}),
+          },
+        };
+      }
+      return t;
+    });
+  } else if ((respBody as any).tools) {
+    out.tools = (respBody as any).tools;
+  }
+  if ((respBody as any).tool_choice) {
+    const tc = (respBody as any).tool_choice;
+    if (tc && typeof tc === "object" && tc.type === "function" && typeof tc.name === "string" && !tc.function) {
+      out.tool_choice = { type: "function", function: { name: tc.name } } as any;
+    } else {
+      out.tool_choice = tc;
+    }
+  }
   if ((respBody as any).text?.format) out.response_format = (respBody as any).text.format;
 
   for (const k of ["stop", "n", "seed", "frequency_penalty", "presence_penalty", "logprobs", "top_logprobs"]) {
