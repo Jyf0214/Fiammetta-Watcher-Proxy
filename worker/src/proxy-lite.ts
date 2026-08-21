@@ -277,8 +277,20 @@ function createLiteUsageTransformer(params: {
               }
             }
           }
-          if (parsed.usage) {
-            lastUsage = parsed.usage;
+          // Responses API 流式检测：适配 Responses 协议的 delta/output
+          const pAny = parsed as any;
+          if (typeof pAny.delta === "string" && pAny.delta.length > 0) sawContent = true;
+          if (typeof pAny.output_text === "string" && pAny.output_text.length > 0) sawContent = true;
+          if (typeof pAny.text === "string" && pAny.text.length > 0 && pAny.type && String(pAny.type).includes("output_text")) sawContent = true;
+          if (Array.isArray(pAny.output) && pAny.output.length > 0) sawContent = true;
+          if (pAny.response?.output) sawContent = true;
+          if (pAny.type === "response.completed" || pAny.type === "response.done" || pAny.response?.status === "completed" || pAny.response?.type === "response.completed") {
+            sawDone = true;
+          }
+          // 兼容 Chat 与 Responses 两种 usage 形态
+          const candidate = (pAny.usage ?? pAny.response?.usage ?? pAny.response?.response?.usage) as Record<string, unknown> | undefined;
+          if (candidate) {
+            lastUsage = candidate;
           }
           // 上游 200 + 流内 error 事件：失败语义由日志记录（status=error.code，isError=true）
           if (parsed.error) {
@@ -599,7 +611,8 @@ export async function proxyV1RequestLite(
   // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
   // 用户可在平台管理页关闭此选项以兼容这类上游
   // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
-  if (isStream && route.platform.injectStreamOptions !== false && !upstreamIsAnthropic) {
+  // Responses 端点不注入 stream_options
+  if (isStream && route.platform.injectStreamOptions !== false && !upstreamIsAnthropic && config.upstreamPath !== "/responses") {
     upstreamBody.stream_options = { include_usage: true };
   }
 

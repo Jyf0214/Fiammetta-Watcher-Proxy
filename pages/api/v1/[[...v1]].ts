@@ -365,7 +365,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const kRpm = await checkApiKeyRpm(apiKey.id, apiKey.rpmLimit);
   if (!kRpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return; }
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
-  const est = Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number(body.max_tokens || body.max_completion_tokens) || 1));
+  // Responses 使用 max_output_tokens，Chat 使用 max_tokens/max_completion_tokens
+  const est = Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1));
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 est）
   const anthropicInputEstimate = config.protocol === "anthropic" ? estimateInputTokens(rawBody) : est;
@@ -406,10 +407,16 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
 
     // 模板先作用于原始 OpenAI 请求体；Anthropic 分支随后转换——转换白名单会剥离
     // 模板中的 OpenAI 专属字段（stream_options/n/response_format 等），避免严格后端 422
+    // Responses 与 Chat 分流：responses 仅命中 responses 模板，chat 仅命中 chat 模板
     let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
     // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
     if (!multipart) {
-      try { const t = await loadTemplates(dummyDb, env); const a = getApplicableTemplates(t, requestedModel); if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a); } catch {}
+      try {
+        const t = await loadTemplates(dummyDb, env);
+        const templateType = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+        const a = getApplicableTemplates(t, requestedModel, templateType);
+        if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a);
+      } catch {}
     }
     // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
     // 认证用 x-api-key + anthropic-version
@@ -434,7 +441,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游
     // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
-    if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic) upstreamBody.stream_options = { include_usage: true };
+    // Responses 端点不注入 stream_options（Responses 的流式 usage 由独立事件携带）
+    if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic && config.upstreamPath !== "/responses") upstreamBody.stream_options = { include_usage: true };
 
     const fwd: Record<string, string> = {};
     // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），
@@ -771,7 +779,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
             for (const ol of outLines) {
               if (ol === "data: [DONE]") { sawDone = true; if (!streamer) await writeChunk(ol + "\n"); continue; }
               try {
-                const d = JSON.parse(ol.slice(6));
+                const d = JSON.parse(ol.slice(6)) as any;
                 // 空完成检测：记录是否收到过有效输出内容（content/reasoning_content
                 // 非空字符串；初始 role 占位 chunk 的 content 为空字符串不计）。
                 // tool_calls 增量同样计入：纯工具调用流（无文本）不得误判空完成
@@ -783,7 +791,16 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                     }
                   }
                 }
-                if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
+                // Responses API 流式：delta/output_text 等即视为有效内容
+                if (typeof d.delta === "string" && d.delta.length > 0) sawContent = true;
+                if (typeof d.output_text === "string" && d.output_text.length > 0) sawContent = true;
+                if (Array.isArray(d.output) && d.output.length > 0) sawContent = true;
+                if (d.response?.output) sawContent = true;
+                if (d.type === "response.completed" || d.type === "response.done" || d.response?.status === "completed") sawDone = true;
+                // 兼容 Chat 与 Responses 的 usage 形态
+                const usageCandidate = (d as any).usage ?? (d as any).response?.usage ?? (d as any).response?.response?.usage;
+                if (usageCandidate) { const ex = extractUsage(usageCandidate as Record<string, unknown>, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
+                else if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
                 if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } }
                 if (streamer) {
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉

@@ -36,8 +36,18 @@ export function extractUsage(
     return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   }
 
-  let promptTokens = Number(usage.prompt_tokens) || 0;
-  let completionTokens = Number(usage.completion_tokens) || 0;
+  // 兼容 Chat (prompt_tokens/completion_tokens) 与 Responses (input_tokens/output_tokens) 两种 usage 形态
+  // Responses API 返回 input_tokens/output_tokens/total_tokens，且可能包含 reasoning_tokens
+  let promptTokens = Number(usage.prompt_tokens ?? (usage as any).input_tokens) || 0;
+  let completionTokens = Number(usage.completion_tokens ?? (usage as any).output_tokens) || 0;
+  // reasoning_tokens 计入 completion（若单独返回）
+  const reasoningTokens = Number((usage as any).reasoning_tokens) || 0;
+  if (reasoningTokens > 0 && completionTokens === 0) {
+    completionTokens = reasoningTokens;
+  } else if (reasoningTokens > 0) {
+    // reasoning_tokens 已包含在 output_tokens 时不重复累加；否则累加
+    // 经验：output_tokens 已含 reasoning_tokens，故不额外加
+  }
   const totalTokens =
     Number(usage.total_tokens) || promptTokens + completionTokens;
 
@@ -328,8 +338,22 @@ export function createUsageTransformer(params: {
               }
             }
           }
-          if (parsed.usage) {
-            lastUsage = parsed.usage;
+          // Responses API 流式检测：适配 Responses 协议的 delta/output 等字段
+          // Responses 的增量事件如 response.output_text.delta {delta:"..."} 或 output 数组
+          const pAny = parsed as any;
+          if (typeof pAny.delta === "string" && pAny.delta.length > 0) sawContent = true;
+          if (typeof pAny.output_text === "string" && pAny.output_text.length > 0) sawContent = true;
+          if (typeof pAny.text === "string" && pAny.text.length > 0 && pAny.type && String(pAny.type).includes("output_text")) sawContent = true;
+          if (Array.isArray(pAny.output) && pAny.output.length > 0) sawContent = true;
+          if (pAny.response?.output) sawContent = true;
+          // Responses 完成事件亦视为 sawDone
+          if (pAny.type === "response.completed" || pAny.type === "response.done" || pAny.response?.status === "completed" || pAny.response?.type === "response.completed") {
+            sawDone = true;
+          }
+          // 兼容 Chat 与 Responses 两种 usage 形态：顶层 usage / response.usage
+          const candidate = (pAny.usage ?? pAny.response?.usage ?? pAny.response?.response?.usage) as Record<string, unknown> | undefined;
+          if (candidate) {
+            lastUsage = candidate;
           }
           // 上游 200 + 流内 error 事件：失败语义由日志记录（status=error.code，isError=true）
           if (parsed.error) {

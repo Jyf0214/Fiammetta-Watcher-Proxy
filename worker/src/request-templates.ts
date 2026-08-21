@@ -18,6 +18,8 @@ export interface RequestTemplate {
   models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
+  /** 模板适用端点类型：chat=Chat Completions 等普通 v1/chat，responses=Responses API；缺省兼容为 chat */
+  type?: "chat" | "responses";
 }
 
 // ==================== 缓存 ====================
@@ -29,11 +31,11 @@ const CACHE_TTL = 30_000;
 
 // ==================== 深度合并 ====================
 
-/** mergeBody 允许合并的字段白名单，防止注入 model/messages/tools 等危险字段。
+/** chat 模板允许合并的字段白名单，防止注入 model/messages/tools 等危险字段。
  *  字段按 OpenAI 请求语义编写；对 anthropic 上游平台，模板在转换前应用，
  *  OpenAI 专属字段（stream_options/n/response_format 等）会被转换白名单剥离，
  *  仅 system/temperature/top_p/top_k/max_tokens/stop/tools/tool_choice 生效。 */
-const MERGEBODY_ALLOWED_KEYS = new Set([
+const CHAT_MERGEBODY_ALLOWED_KEYS = new Set([
   "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
   "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
   "n", "logprobs", "top_logprobs", "response_format", "seed",
@@ -41,13 +43,57 @@ const MERGEBODY_ALLOWED_KEYS = new Set([
   "reasoning_effort", "chat_template_kwargs", "extra_body",
 ]);
 
+/** responses 模板允许合并的字段白名单：以 OpenAI Responses API 规范为基准
+ *  包含 instructions / reasoning（高阶思维链）/ max_output_tokens 等专有字段，
+ *  同时保留通用采样参数。model/input/previous_response_id 等路由关键字段禁止注入。 */
+const RESPONSES_MERGEBODY_ALLOWED_KEYS = new Set([
+  // Responses 专属
+  "instructions", "reasoning", "max_output_tokens", "truncation", "text", "tools", "tool_choice",
+  "parallel_tool_calls", "store", "include", "metadata", "service_tier", "prompt_cache_key",
+  "safety_identifier", "background", "previous_response_id",
+  // 通用采样/控制参数（Responses 同样支持）
+  "temperature", "top_p", "top_logprobs", "stream", "seed",
+  "frequency_penalty", "presence_penalty", "stop", "n", "logprobs", "response_format",
+  // 兼容思考透传
+  "reasoning_effort", "chat_template_kwargs", "extra_body",
+]);
+
 /**
- * 过滤 mergeBody 中不在白名单中的键
+ * 判断模板是否为 responses 类型（缺省兼容为 chat）
  */
-function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknown> {
+function isResponsesTemplate(t: RequestTemplate): boolean {
+  return t.type === "responses";
+}
+
+/**
+ * 获取模板对应的白名单集合
+ */
+function getAllowedKeysForTemplate(t: RequestTemplate): Set<string> {
+  return isResponsesTemplate(t) ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
+}
+
+/**
+ * 根据模板类型过滤 mergeBody 中不在白名单中的键
+ */
+function sanitizeMergeBody(body: Record<string, unknown>, type?: "chat" | "responses"): Record<string, unknown> {
+  const allowed = type === "responses" ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
-    if (MERGEBODY_ALLOWED_KEYS.has(key)) {
+    if (allowed.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+/**
+ * 兼容旧模板：缺省 type 视为 chat，并提供过滤时的类型解析
+ */
+function sanitizeMergeBodyForTemplate(body: Record<string, unknown>, template: RequestTemplate): Record<string, unknown> {
+  const allowed = getAllowedKeysForTemplate(template);
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (allowed.has(key)) {
       sanitized[key] = value;
     }
   }
@@ -56,13 +102,14 @@ function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknow
 
 /**
  * 深度合并两个对象。数组整体替换，不合并元素。
- * 仅允许白名单中的键参与合并。
+ * 仅允许白名单中的键参与合并（按模板类型选择白名单）。
  */
 function deepMerge(
   target: Record<string, unknown>,
-  source: Record<string, unknown>
+  source: Record<string, unknown>,
+  type?: "chat" | "responses"
 ): Record<string, unknown> {
-  const sanitized = sanitizeMergeBody(source);
+  const sanitized = sanitizeMergeBody(source, type);
   const result = { ...target };
   for (const key of Object.keys(sanitized)) {
     const srcVal = sanitized[key];
@@ -77,7 +124,40 @@ function deepMerge(
     ) {
       result[key] = deepMerge(
         tgtVal as Record<string, unknown>,
-        srcVal as Record<string, unknown>
+        srcVal as Record<string, unknown>,
+        type
+      );
+    } else {
+      result[key] = srcVal;
+    }
+  }
+  return result;
+}
+
+/**
+ * 按模板类型深度合并（模板内已携带 type，按模板自身白名单过滤）
+ */
+function deepMergeForTemplate(
+  target: Record<string, unknown>,
+  template: RequestTemplate
+): Record<string, unknown> {
+  const sanitized = sanitizeMergeBodyForTemplate(template.mergeBody, template);
+  const result = { ...target };
+  for (const key of Object.keys(sanitized)) {
+    const srcVal = sanitized[key];
+    const tgtVal = result[key];
+    if (
+      srcVal !== null &&
+      typeof srcVal === "object" &&
+      !Array.isArray(srcVal) &&
+      tgtVal !== null &&
+      typeof tgtVal === "object" &&
+      !Array.isArray(tgtVal)
+    ) {
+      result[key] = deepMerge(
+        tgtVal as Record<string, unknown>,
+        srcVal as Record<string, unknown>,
+        template.type
       );
     } else {
       result[key] = srcVal;
@@ -172,19 +252,21 @@ export async function loadTemplates(
 // ==================== 模板匹配与应用 ====================
 
 /**
- * 获取适用于指定模型的已启用模板
+ * 获取适用于指定模型的已启用模板（按端点类型过滤）
+ * type 缺省兼容为 chat：未设置 type 的旧模板仅在 chat 链路生效，responses 链路不命中
  */
 export function getApplicableTemplates(
   templates: RequestTemplate[],
-  modelId: string
+  modelId: string,
+  type: "chat" | "responses" = "chat"
 ): RequestTemplate[] {
   return templates.filter(
-    (t) => t.enabled && matchModel(modelId, t.models)
+    (t) => t.enabled && matchModel(modelId, t.models) && (t.type ?? "chat") === type
   );
 }
 
 /**
- * 将匹配的模板深度合并到请求体中
+ * 将匹配的模板深度合并到请求体中（按模板自身 type 选择白名单）
  */
 export function applyTemplates(
   body: Record<string, unknown>,
@@ -195,7 +277,7 @@ export function applyTemplates(
   let result = body;
   for (const template of templates) {
     if (template.mergeBody && Object.keys(template.mergeBody).length > 0) {
-      result = deepMerge(result, template.mergeBody);
+      result = deepMergeForTemplate(result, template);
     }
   }
   return result;

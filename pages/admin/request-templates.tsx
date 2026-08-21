@@ -27,9 +27,10 @@ interface RequestTemplate {
   models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
+  type?: "chat" | "responses";
 }
 
-const EXAMPLE_BODIES = [
+const EXAMPLE_BODIES_CHAT = [
   {
     nameKey: "rtExampleThinking",
     models: ["qwen-*", "deepseek-*"],
@@ -61,6 +62,41 @@ const EXAMPLE_BODIES = [
   },
 ];
 
+const EXAMPLE_BODIES_RESPONSES = [
+  {
+    nameKey: "rtExampleResponsesReasoningHigh",
+    models: ["gpt-5*", "o3*", "o4*"],
+    body: {
+      reasoning: { effort: "high", summary: "detailed" },
+      text: { verbosity: "high" },
+    },
+  },
+  {
+    nameKey: "rtExampleResponsesInstructions",
+    models: ["gpt-4o*"],
+    body: {
+      instructions: "You are a helpful assistant that thinks step by step.",
+      reasoning: { effort: "medium" },
+    },
+  },
+  {
+    nameKey: "rtExampleResponsesTools",
+    models: ["*"],
+    body: {
+      tools: [{ type: "web_search_preview" }],
+      tool_choice: "auto",
+    },
+  },
+  {
+    nameKey: "rtExampleResponsesTruncation",
+    models: ["*"],
+    body: {
+      truncation: "auto",
+      max_output_tokens: 4096,
+    },
+  },
+];
+
 export default function RequestTemplatesPage() {
   const { t } = useTranslation("system");
   const [modalOpen, setModalOpen] = useState(false);
@@ -70,6 +106,7 @@ export default function RequestTemplatesPage() {
   const [form] = Form.useForm();
   const [bodyJsonError, setBodyJsonError] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const typeWatch = Form.useWatch("type", form) as "chat" | "responses" | undefined;
 
   // 数据层：SWR 缓存 + 统一 fetcher（401 由 fetcher 统一提示并跳转登录页）
   const { data: templates, error, isLoading, mutate } = useApi<RequestTemplate[]>("/api/admin/request-templates");
@@ -85,9 +122,10 @@ export default function RequestTemplatesPage() {
     setEditingTemplate(null);
     form.resetFields();
     form.setFieldsValue({
+      type: "chat",
       models: ["*"],
       enabled: true,
-      mergeBody: JSON.stringify(EXAMPLE_BODIES[0].body, null, 2),
+      mergeBody: JSON.stringify(EXAMPLE_BODIES_CHAT[0].body, null, 2),
     });
     setBodyJsonError(false);
     setModalOpen(true);
@@ -98,6 +136,7 @@ export default function RequestTemplatesPage() {
     form.setFieldsValue({
       name: tpl.name,
       description: tpl.description,
+      type: tpl.type ?? "chat",
       models: tpl.models,
       enabled: tpl.enabled,
       mergeBody: JSON.stringify(tpl.mergeBody, null, 2),
@@ -107,7 +146,7 @@ export default function RequestTemplatesPage() {
   };
 
   const handleSave = async () => {
-    let values: { name: string; description?: string; models: string[]; enabled: boolean; mergeBody: string };
+    let values: { name: string; description?: string; type: "chat" | "responses"; models: string[]; enabled: boolean; mergeBody: string };
     try {
       values = await form.validateFields();
     } catch {
@@ -137,6 +176,7 @@ export default function RequestTemplatesPage() {
           ...(editingTemplate ? { id: editingTemplate.id } : {}),
           name: values.name,
           description: values.description,
+          type: values.type,
           models: values.models,
           mergeBody,
           enabled: values.enabled,
@@ -210,7 +250,7 @@ export default function RequestTemplatesPage() {
     setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const applyExample = (example: (typeof EXAMPLE_BODIES)[0]) => {
+  const applyExample = (example: (typeof EXAMPLE_BODIES_CHAT)[number] | (typeof EXAMPLE_BODIES_RESPONSES)[number]) => {
     form.setFieldsValue({
       name: t(example.nameKey),
       models: example.models,
@@ -267,6 +307,9 @@ export default function RequestTemplatesPage() {
                       <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                         {tpl.name}
                       </h3>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tpl.type === "responses" ? "text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-300" : "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-300"}`}>
+                        {tpl.type === "responses" ? t("rtTypeResponses") : t("rtTypeChat")}
+                      </span>
                       <span className="text-[10px] font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
                         {tpl.models.length === 1 && tpl.models[0] === "*" ? t("rtAllModels") : tpl.models.join(", ")}
                       </span>
@@ -328,7 +371,7 @@ export default function RequestTemplatesPage() {
           width={640}
           destroyOnClose
         >
-          <Form form={form} layout="vertical" initialValues={{ models: ["*"], enabled: true }}>
+          <Form form={form} layout="vertical" initialValues={{ type: "chat", models: ["*"], enabled: true }}>
             <Form.Item
               name="name"
               label={t("rtName")}
@@ -342,24 +385,32 @@ export default function RequestTemplatesPage() {
             </Form.Item>
 
             <div className="flex flex-col sm:flex-row gap-4">
-              <Form.Item name="models" label={t("rtModelsLabel")} className="flex-1" extra={t("rtModelsExtra")}>
+              <Form.Item name="type" label={t("rtTypeLabel")} extra={t("rtTypeExtra")} className="flex-1" rules={[{ required: true }]}>
                 <Select
-                  mode="tags"
-                  placeholder={t("rtModelsPlaceholder")}
-                  tokenSeparators={[","]}
+                  options={[
+                    { value: "chat", label: t("rtTypeChat") },
+                    { value: "responses", label: t("rtTypeResponses") },
+                  ]}
                 />
               </Form.Item>
-
               <Form.Item name="enabled" label={t("rtEnabled")} valuePropName="checked">
                 <Switch />
               </Form.Item>
             </div>
 
+            <Form.Item name="models" label={t("rtModelsLabel")} extra={t("rtModelsExtra")}>
+              <Select
+                mode="tags"
+                placeholder={t("rtModelsPlaceholder")}
+                tokenSeparators={[","]}
+              />
+            </Form.Item>
+
             {!editingTemplate && (
               <div className="mb-3">
                 <p className="text-xs text-zinc-400 mb-2">{t("rtExamplesTitle")}</p>
                 <div className="flex flex-wrap gap-2">
-                  {EXAMPLE_BODIES.map((ex) => (
+                  {(typeWatch === "responses" ? EXAMPLE_BODIES_RESPONSES : EXAMPLE_BODIES_CHAT).map((ex) => (
                     <button
                       key={ex.nameKey}
                       type="button"

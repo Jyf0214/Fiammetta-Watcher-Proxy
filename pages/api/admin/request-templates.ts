@@ -29,10 +29,12 @@ export interface RequestTemplate {
   models: string[];
   mergeBody: Record<string, unknown>;
   enabled: boolean;
+  /** 模板类型：chat=Chat Completions，responses=Responses API；缺省 chat 兼容旧数据 */
+  type?: "chat" | "responses";
 }
 
-/** mergeBody 允许的字段白名单，防止注入 tools/functions 等危险字段 */
-const MERGEBODY_ALLOWED_KEYS = new Set([
+/** chat 模板白名单 */
+const CHAT_MERGEBODY_ALLOWED_KEYS = new Set([
   "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
   "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
   "n", "logprobs", "top_logprobs", "response_format", "seed",
@@ -40,11 +42,22 @@ const MERGEBODY_ALLOWED_KEYS = new Set([
   "reasoning_effort", "chat_template_kwargs", "extra_body",
 ]);
 
-/** 校验 mergeBody 字段，过滤不在白名单中的键 */
-function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknown> {
+/** responses 模板白名单：基于 OpenAI Responses API 规范，解锁高阶思维链 reasoning */
+const RESPONSES_MERGEBODY_ALLOWED_KEYS = new Set([
+  "instructions", "reasoning", "max_output_tokens", "truncation", "text", "tools", "tool_choice",
+  "parallel_tool_calls", "store", "include", "metadata", "service_tier", "prompt_cache_key",
+  "safety_identifier", "background", "previous_response_id",
+  "temperature", "top_p", "top_logprobs", "stream", "seed",
+  "frequency_penalty", "presence_penalty", "stop", "n", "logprobs", "response_format",
+  "reasoning_effort", "chat_template_kwargs", "extra_body",
+]);
+
+/** 校验 mergeBody 字段，按类型过滤不在白名单中的键 */
+function sanitizeMergeBody(body: Record<string, unknown>, type: "chat" | "responses" = "chat"): Record<string, unknown> {
+  const allowed = type === "responses" ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
-    if (MERGEBODY_ALLOWED_KEYS.has(key)) {
+    if (allowed.has(key)) {
       sanitized[key] = value;
     }
   }
@@ -134,19 +147,26 @@ export default async function handler(
         models?: string[];
         mergeBody?: Record<string, unknown>;
         enabled?: boolean;
+        type?: string;
       } = req.body;
       if (!body || typeof body !== "object") {
         res.status(400).json({ success: false, error: "请求格式错误" });
         return;
       }
 
-      const { name, description, models, mergeBody, enabled } = body;
+      const { name, description, models, mergeBody, enabled, type } = body;
 
       // 参数校验
       if (!name || typeof name !== "string" || name.trim().length === 0) {
         res.status(400).json({ success: false, error: "模板名称不能为空" });
         return;
       }
+
+      if (type !== undefined && type !== "chat" && type !== "responses") {
+        res.status(400).json({ success: false, error: "模板类型必须为 chat 或 responses" });
+        return;
+      }
+      const templateType: "chat" | "responses" = type === "responses" ? "responses" : "chat";
 
       // mergeBody 校验与 PUT 分支同款：null/空/非对象/数组均 400（数组此前会
       // 被 sanitizeMergeBody 静默过滤为空对象，与 PUT 行为分叉）
@@ -171,9 +191,10 @@ export default async function handler(
         name: name.trim(),
         description: typeof description === "string" ? description.trim() : "",
         models: Array.isArray(models) && models.length > 0 ? models : ["*"],
-        mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>),
+        mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>, templateType),
         // 创建时接受 enabled（表单开关），缺省保持默认启用
         enabled: enabled !== undefined ? Boolean(enabled) : true,
+        type: templateType,
       };
 
       templates.push(newTemplate);
@@ -198,17 +219,23 @@ export default async function handler(
         models?: string[];
         mergeBody?: Record<string, unknown>;
         enabled?: boolean;
+        type?: string;
       } = req.body;
       if (!body || typeof body !== "object") {
         res.status(400).json({ success: false, error: "请求格式错误" });
         return;
       }
 
-      const { id, name, description, models, mergeBody, enabled } = body;
+      const { id, name, description, models, mergeBody, enabled, type } = body;
 
       // 校验必填字段
       if (!id) {
         res.status(400).json({ success: false, error: "缺少模板 ID" });
+        return;
+      }
+
+      if (type !== undefined && type !== "chat" && type !== "responses") {
+        res.status(400).json({ success: false, error: "模板类型必须为 chat 或 responses" });
         return;
       }
 
@@ -252,7 +279,8 @@ export default async function handler(
           res.status(400).json({ success: false, error: "请求体内容不能为空" });
           return;
         }
-        templates[idx].mergeBody = sanitizeMergeBody(mergeBody);
+        const effectiveType = type ?? templates[idx].type ?? "chat";
+        templates[idx].mergeBody = sanitizeMergeBody(mergeBody, effectiveType as "chat" | "responses");
       }
       if (enabled !== undefined) {
         if (typeof enabled !== "boolean") {
@@ -260,6 +288,11 @@ export default async function handler(
           return;
         }
         templates[idx].enabled = enabled;
+      }
+      if (type !== undefined) {
+        templates[idx].type = type as "chat" | "responses";
+        // 切换类型后需按新白名单重新清洗已有 mergeBody，避免旧类型字段残留
+        templates[idx].mergeBody = sanitizeMergeBody(templates[idx].mergeBody, templates[idx].type as "chat" | "responses");
       }
 
       await saveTemplates(db, templates);

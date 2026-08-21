@@ -400,9 +400,10 @@ export async function proxyV1Request(
 
   // TPM 检查：用请求体中的 max_tokens 作为预估 token 数
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
+  // Responses API 使用 max_output_tokens 字段，Chat 使用 max_tokens/max_completion_tokens，兼容两者
   const estimatedTokens = Math.min(
     MAX_ESTIMATED_TOKENS,
-    Math.max(1, Number(body.max_tokens || body.max_completion_tokens) || 1)
+    Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
   );
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 estimatedTokens）
@@ -581,12 +582,15 @@ export async function proxyV1Request(
     // 构建上游请求体：模板先作用于原始 OpenAI 请求体。
     // Anthropic 分支随后转换——convertOpenAIRequest 白名单会剥离模板中的 OpenAI 专属字段
     // （stream_options/n/response_format 等），避免 Anthropic 严格后端 422 extra_forbidden
+    // Responses 与 Chat 分流：当下游使用 /v1/responses 时，仅应用 responses 类型模板（解锁高阶思维链 reasoning 等）；
+    // 普通 v1/chat 链路仅应用 chat 类型模板，互不干扰
     let upstreamBody: Record<string, unknown> = { ...body, model: currentTargetModel };
     // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
     if (!multipart) {
       try {
         const templates = await loadTemplates(env.DB, workerEnv);
-        const applicable = getApplicableTemplates(templates, requestedModel);
+        const templateType = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+        const applicable = getApplicableTemplates(templates, requestedModel, templateType);
         if (applicable.length > 0) {
           upstreamBody = applyTemplates(upstreamBody, applicable);
         }
@@ -615,7 +619,8 @@ export async function proxyV1Request(
     // 部分严格后端（Mistral 等 FastAPI/pydantic 校验）拒绝未知字段，返回 422 extra_forbidden
     // 用户可在平台管理页关闭此选项以兼容这类上游
     // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
-    if (effectiveIsStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic) {
+    // Responses 端点不注入 stream_options（Responses 的流式 usage 由独立事件携带，注入旧字段可能被严格后端拒绝）
+    if (effectiveIsStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic && config.upstreamPath !== "/responses") {
       upstreamBody.stream_options = { include_usage: true };
     }
 
