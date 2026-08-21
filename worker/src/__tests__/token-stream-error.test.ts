@@ -26,6 +26,7 @@ vi.mock("../platform-keys", () => ({
 vi.mock("../load-balancer", () => ({
   recordFailure: vi.fn(async () => {}),
   recordSuccess: vi.fn(async () => {}),
+  recordPlatform429: vi.fn(),
 }));
 
 function makePrisma() {

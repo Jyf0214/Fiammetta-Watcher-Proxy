@@ -7,7 +7,7 @@
 
 import { createDb } from "@/lib/prisma";
 import { proxyStatKey } from "@/lib/upstream-proxy";
-import { recordFailure } from "./load-balancer";
+import { recordFailure, recordPlatform429 } from "./load-balancer";
 import { banKey, recordKeyError, isPlatformWhitelisted } from "./platform-keys";
 import type { WorkerEnv } from "./config";
 
@@ -382,6 +382,9 @@ export function createUsageTransformer(params: {
         const keyErrorCode = streamError.code;
         try { await banKey(params.key, undefined, params.platformId, params.kv); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
+        // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
+        if (keyErrorCode === 429) recordPlatform429(params.platformId);
       }
 
       // 复用同一个 PrismaClient 完成所有 DB 操作

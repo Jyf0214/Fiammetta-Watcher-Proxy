@@ -11,7 +11,7 @@
  * Mock @/lib/prisma 的 createDb，避免真实数据库依赖
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock prisma — recordFailure/recordSuccess/sync 会调 updatePlatformStatus
 const mockUpdate = vi.fn(async () => {});
@@ -35,6 +35,10 @@ import {
   releaseHalfOpenPending,
   isHalfOpenProbeFull,
   resetCircuitBreaker,
+  isHighErrorRate,
+  recordPlatform429,
+  isPlatform429Cooldown,
+  resetPlatform429,
 } from "../load-balancer";
 import type { PlatformConfig } from "@/lib/types";
 
@@ -473,5 +477,192 @@ describe("resetCircuitBreaker（#10）", () => {
     resetCircuitBreaker("p1");
     expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
     expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("resetCircuitBreaker 同时清除高错误率窗口", async () => {
+    // 交替 6 败 4 胜（每 5 个采样里 3 败 2 胜）：连续失败未达阈值 5（成功穿插），
+    // 但窗口错误率 60% 超阈值
+    for (let i = 0; i < 10; i++) {
+      if (i % 5 < 3) await recordFailure("p1", mockDb);
+      else await recordSuccess("p1", mockDb);
+    }
+    expect(isHighErrorRate("p1")).toBe(true);
+
+    resetCircuitBreaker("p1");
+    expect(isHighErrorRate("p1")).toBe(false);
+  });
+});
+
+// ==================== 滑动窗口错误率（间歇故障降级） ====================
+
+describe("滑动窗口错误率", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanupStaleBreakers([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("间歇故障（成功穿插）→ 连续失败熔断不触发但高错误率降级（此前放行）", async () => {
+    // 交替 6 败 4 胜（每 5 个采样里 3 败 2 胜）：失败被成功穿插清零，
+    // failureCount 永远达不到连续 5 次阈值；窗口错误率 60% > 50%，
+    // 必须被调度层排除
+    for (let i = 0; i < 10; i++) {
+      if (i % 5 < 3) await recordFailure("p1", mockDb);
+      else await recordSuccess("p1", mockDb);
+    }
+
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+    expect(isHighErrorRate("p1")).toBe(true);
+    expect(selectPlatform([makePlatform({ id: "p1" })])).toBeNull();
+  });
+
+  it("仅连续失败（无成功穿插）→ 熔断优先触发，错误率窗口同时累积", async () => {
+    // 10 连败：第 5 次触发熔断（open），窗口同时累积 10 个样本
+    // （100% 失败率，达到最小样本数）→ 双通道均判定
+    for (let i = 0; i < 10; i++) await recordFailure("p1", mockDb);
+
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("open");
+    expect(isHighErrorRate("p1")).toBe(true);
+  });
+
+  it("样本不足（<10）不判定：3 败 2 胜不降级", async () => {
+    for (let i = 0; i < 3; i++) await recordFailure("p1", mockDb);
+    for (let i = 0; i < 2; i++) await recordSuccess("p1", mockDb);
+
+    expect(isHighErrorRate("p1")).toBe(false);
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("正常平台（10 胜）不降级", async () => {
+    for (let i = 0; i < 10; i++) await recordSuccess("p1", mockDb);
+
+    expect(isHighErrorRate("p1")).toBe(false);
+  });
+
+  it("窗口过期自动恢复参与调度（排除期间无新采样）", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 6; i++) await recordFailure("p1", mockDb);
+    for (let i = 0; i < 4; i++) await recordSuccess("p1", mockDb);
+    expect(selectPlatform([makePlatform({ id: "p1" })])).toBeNull();
+
+    // 推进 5 分钟 + 1s（ERROR_RATE_WINDOW_MS = 5*60_000）：窗口过期 → 视为正常，重新参与调度
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+    expect(isHighErrorRate("p1")).toBe(false);
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("半开恢复成功（recordSuccess half-open → closed）清空错误率窗口", async () => {
+    // 先熔断（5 连败），冷却过期转 half-open，再成功恢复
+    for (let i = 0; i < 5; i++) await recordFailure("p1", mockDb);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.advanceTimersByTime(61_000);
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("half-open");
+
+    await recordSuccess("p1", mockDb);
+    expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
+    // 恢复期成功也计入窗口样本，但恢复时已清空：仅 1 胜 0 败，样本不足不降级
+    expect(isHighErrorRate("p1")).toBe(false);
+  });
+
+  it("cleanupStaleBreakers 清理已删除平台的高错误率条目", async () => {
+    // 交替 6 败 4 胜（每 5 个采样里 3 败 2 胜）
+    for (let i = 0; i < 10; i++) {
+      if (i % 5 < 3) await recordFailure("p1", mockDb);
+      else await recordSuccess("p1", mockDb);
+    }
+    expect(isHighErrorRate("p1")).toBe(true);
+
+    cleanupStaleBreakers(["other-platform"]);
+    expect(isHighErrorRate("p1")).toBe(false);
+  });
+});
+
+// ==================== 平台级 429 冷却 ====================
+
+describe("平台级 429 冷却", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanupStaleBreakers([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("窗口内 4 次 429 未达阈值不触发冷却", () => {
+    for (let i = 0; i < 4; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("第 5 次 429 触发 30s 冷却，调度层排除该平台", () => {
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(true);
+    // 冷却中的平台被排除，其他平台正常承接
+    const p1 = makePlatform({ id: "p1" });
+    const p2 = makePlatform({ id: "p2" });
+    expect(selectPlatform([p1, p2])!.id).toBe("p2");
+  });
+
+  it("冷却过期自动恢复参与调度", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(selectPlatform([makePlatform({ id: "p1" })])).toBeNull();
+
+    // 推进 30s + 1s（PLATFORM_429_COOLDOWN_MS = 30_000）：冷却过期 → 恢复
+    vi.advanceTimersByTime(31_000);
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("冷却结束后窗口内仍有累计计数 → 再次 429 立即重新进入冷却", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    vi.advanceTimersByTime(31_000);
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+
+    // 冷却刚结束、60s 窗口未过期：再来一次 429 即重新冷却（持续过载）
+    recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(true);
+  });
+
+  it("60s 窗口过期后计数重建：4 次 429 不再触发冷却", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(true);
+
+    // 推进 60s + 1s（PLATFORM_429_WINDOW_MS = 60_000）：窗口重建，冷却也已过期
+    vi.advanceTimersByTime(61_000);
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+    for (let i = 0; i < 4; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+  });
+
+  it("cleanupStaleBreakers 清理已删除平台的 429 冷却记录", () => {
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(true);
+
+    cleanupStaleBreakers(["other-platform"]);
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+  });
+
+  it("resetCircuitBreaker 清除 429 冷却（解禁立即生效）", () => {
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(selectPlatform([makePlatform({ id: "p1" })])).toBeNull();
+
+    resetCircuitBreaker("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(false);
+    expect(selectPlatform([makePlatform({ id: "p1" })])!.id).toBe("p1");
+  });
+
+  it("resetPlatform429 直接清除冷却记录", () => {
+    for (let i = 0; i < 5; i++) recordPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(true);
+
+    resetPlatform429("p1");
+    expect(isPlatform429Cooldown("p1")).toBe(false);
   });
 });

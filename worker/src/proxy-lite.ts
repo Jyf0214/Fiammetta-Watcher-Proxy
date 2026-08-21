@@ -13,6 +13,7 @@
 import { routeRequestLite } from "./router-lite";
 import { getNextKey, recordKeyError, banKey } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus } from "./token";
+import { recordPlatform429 } from "./load-balancer";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
@@ -320,6 +321,9 @@ function createLiteUsageTransformer(params: {
         const keyErrorCode = streamError.code;
         try { await banKey(params.key, undefined, params.platformId); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
+        // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
+        if (keyErrorCode === 429) recordPlatform429(params.platformId);
       }
 
       try {
@@ -759,6 +763,9 @@ export async function proxyV1RequestLite(
   if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 402 || upstreamResponse.status === 403)) {
     ctx.waitUntil(banKey(currentKey, undefined, route.platform.id).catch(() => {}));
     ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
+    // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
+    // 与全量版 HTTP 429 路径对齐——lite 无重试，冷却由调度层（selectPlatform）生效
+    if (upstreamResponse.status === 429) recordPlatform429(route.platform.id);
   }
 
   try {

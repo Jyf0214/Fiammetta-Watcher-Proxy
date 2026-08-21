@@ -54,6 +54,7 @@ vi.mock("../../../worker/src/platform-keys", () => ({
 vi.mock("../../../worker/src/load-balancer", () => ({
   recordSuccess: vi.fn(async () => {}),
   recordFailure: vi.fn(async () => {}),
+  recordPlatform429: vi.fn(),
 }));
 
 vi.mock("@/lib/v1-rate-limit", () => ({

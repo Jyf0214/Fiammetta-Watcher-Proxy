@@ -30,6 +30,118 @@ const DEFAULT_FAILURE_THRESHOLD = 5;
 const DEFAULT_COOLDOWN_MS = 60_000;
 const DEFAULT_HALF_OPEN_MAX = 3;
 
+// ==================== 滑动窗口错误率 ====================
+
+/**
+ * 窗口错误率跟踪（独立于连续失败熔断）：
+ *
+ * 连续失败熔断只对"连败"敏感——recordSuccess 会清零 failureCount，失败只要有
+ * 成功穿插（如每 2 分钟抖一下）就永远达不到阈值，间歇性高错误率的平台评分
+ * 不降、负载均衡反复撞上它。错误率窗口用"滑动窗口内失败比例"判定：
+ * 样本足量且失败率超阈值 → 调度层排除（高错误率降级），窗口过期自动恢复。
+ *
+ * 与熔断器状态机的关系：并行独立，互不干扰。连续失败熔断负责突发故障的
+ * 快速响应（5 次即 open），错误率窗口负责慢速/间歇故障的持续降级。
+ */
+interface ErrorRateEntry {
+  windowStart: number;
+  failures: number;
+  successes: number;
+}
+
+const errorRates = new Map<string, ErrorRateEntry>();
+/** 错误率统计窗口：5 分钟（窗口过期即自动恢复参与调度，与冷却语义一致） */
+const ERROR_RATE_WINDOW_MS = 5 * 60_000;
+/** 窗口内最少样本数：低于此数不判定，避免小样本/单次偶发误伤 */
+const ERROR_RATE_MIN_SAMPLES = 10;
+/** 窗口内失败率阈值：超过则视为高错误率，调度层排除 */
+const ERROR_RATE_THRESHOLD = 0.5;
+
+/** 记录一次成功/失败样本（窗口过期则重建新窗口） */
+function recordErrorRateSample(platformId: string, isError: boolean): void {
+  const now = Date.now();
+  let entry = errorRates.get(platformId);
+  if (!entry || now - entry.windowStart >= ERROR_RATE_WINDOW_MS) {
+    entry = { windowStart: now, failures: 0, successes: 0 };
+    errorRates.set(platformId, entry);
+  }
+  if (isError) entry.failures++;
+  else entry.successes++;
+}
+
+/**
+ * 平台是否处于高错误率状态（窗口内失败率超阈值且样本足量）
+ *
+ * 窗口过期视为正常：排除期间无新请求采样，5 分钟后自动恢复参与调度，
+ * 若平台仍坏则新请求继续失败、窗口再次累积——自愈循环与熔断冷却一致。
+ */
+export function isHighErrorRate(platformId: string): boolean {
+  const entry = errorRates.get(platformId);
+  if (!entry) return false;
+  if (Date.now() - entry.windowStart >= ERROR_RATE_WINDOW_MS) return false;
+  const total = entry.failures + entry.successes;
+  if (total < ERROR_RATE_MIN_SAMPLES) return false;
+  return entry.failures / total > ERROR_RATE_THRESHOLD;
+}
+
+/** 清除平台错误率窗口（半开恢复成功、手动解禁、定时任务恢复时调用） */
+export function resetErrorRate(platformId: string): void {
+  errorRates.delete(platformId);
+}
+
+// ==================== 平台级 429 冷却 ====================
+
+/**
+ * 平台级 429 冷却（独立于 Key 封禁与错误率窗口）：
+ *
+ * 429 是平台过载信号。Key 封禁只换 Key 不换平台，重试策略 1 会持续重打同一
+ * 过载平台（最多 3 次）；错误率窗口要 ≥10 样本才判定，短时过载不会被快速识别。
+ * 平台 429 冷却用"60s 窗口内累计 ≥5 次 429 → 平台冷却 30s"的粗粒度信号，
+ * 过载平台在冷却期内被调度层排除（selectPlatform 不再选中），让上游有时间恢复；
+ * 冷却结束后窗口内计数仍达阈值（持续过载）→ 再次进入冷却。
+ */
+interface Platform429Entry {
+  windowStart: number;
+  count: number;
+  cooldownUntil: number;
+}
+
+const platform429s = new Map<string, Platform429Entry>();
+/** 429 统计窗口：60 秒（与上游限流窗口同量级） */
+const PLATFORM_429_WINDOW_MS = 60_000;
+/** 窗口内触发冷却的 429 次数阈值 */
+const PLATFORM_429_THRESHOLD = 5;
+/** 触发后的冷却时长：30 秒（仅排除调度，不影响熔断器状态） */
+const PLATFORM_429_COOLDOWN_MS = 30_000;
+
+/** 记录一次平台 429（窗口内累计达到阈值则进入冷却） */
+export function recordPlatform429(platformId: string): void {
+  const now = Date.now();
+  let entry = platform429s.get(platformId);
+  if (!entry || now - entry.windowStart >= PLATFORM_429_WINDOW_MS) {
+    entry = { windowStart: now, count: 0, cooldownUntil: 0 };
+    platform429s.set(platformId, entry);
+  }
+  entry.count++;
+  if (entry.count >= PLATFORM_429_THRESHOLD && now >= entry.cooldownUntil) {
+    entry.cooldownUntil = now + PLATFORM_429_COOLDOWN_MS;
+    console.log(
+      `[circuit-breaker] 平台 ${platformId} 60s 窗口内累计 ${entry.count} 次 429，进入 ${PLATFORM_429_COOLDOWN_MS / 1000}s 冷却`
+    );
+  }
+}
+
+/** 平台是否处于 429 冷却（冷却期内调度层排除） */
+export function isPlatform429Cooldown(platformId: string): boolean {
+  const entry = platform429s.get(platformId);
+  return !!entry && entry.cooldownUntil > Date.now();
+}
+
+/** 清除平台 429 冷却（手动解禁、定时任务恢复时调用） */
+export function resetPlatform429(platformId: string): void {
+  platform429s.delete(platformId);
+}
+
 /**
  * 检查并更新平台熔断器状态（具有副作用：open → half-open 转换）
  */
@@ -100,6 +212,11 @@ export async function recordSuccess(
   env?: WorkerEnv
 ): Promise<void> {
   const entry = breakers.get(platformId);
+  // 错误率窗口记录成功样本（与熔断状态机并行）：间歇故障的成功穿插计入窗口，
+  // 供 isHighErrorRate 以失败比例降级——不能因 success 清零 failureCount 就
+  // 抹掉窗口累积
+  recordErrorRateSample(platformId, false);
+
   if (!entry) return;
 
   if (entry.state === "half-open") {
@@ -109,6 +226,9 @@ export async function recordSuccess(
     entry.halfOpenAttempts = 0;
     entry.halfOpenPending = 0;
     console.log(`[circuit-breaker] 平台 ${platformId} 恢复为 closed`);
+
+    // 熔断恢复：清空错误率窗口（恢复期样本不代表稳态，避免恢复后立即再次降级）
+    resetErrorRate(platformId);
 
     // 更新数据库状态
     await updatePlatformStatus(platformId, "healthy", 0, null, db, env);
@@ -137,6 +257,10 @@ export async function recordFailure(
   env?: WorkerEnv
 ): Promise<void> {
   const now = Date.now();
+  // 错误率窗口记录失败样本（与熔断状态机并行）：供 isHighErrorRate 以失败
+  // 比例降级——间歇故障（成功穿插）不会触发连续失败熔断，但窗口能识别
+  recordErrorRateSample(platformId, true);
+
   let entry = breakers.get(platformId);
 
   if (!entry) {
@@ -299,6 +423,18 @@ export function cleanupStaleBreakers(activePlatformIds: string[]): void {
       breakers.delete(platformId);
     }
   }
+  // 同步清理已删除平台的错误率窗口，避免 Map 无限增长
+  for (const [platformId] of errorRates) {
+    if (!activeSet.has(platformId)) {
+      errorRates.delete(platformId);
+    }
+  }
+  // 同步清理已删除平台的 429 冷却记录
+  for (const [platformId] of platform429s) {
+    if (!activeSet.has(platformId)) {
+      platform429s.delete(platformId);
+    }
+  }
 }
 
 /**
@@ -310,6 +446,8 @@ export function cleanupStaleBreakers(activePlatformIds: string[]): void {
  */
 export function resetCircuitBreaker(platformId: string): void {
   breakers.delete(platformId);
+  resetErrorRate(platformId);
+  resetPlatform429(platformId);
 }
 
 /**
@@ -324,6 +462,10 @@ export function resetCircuitBreakerIfTripped(platformId: string): void {
   if (entry && entry.state !== "closed") {
     breakers.delete(platformId);
   }
+  // 平台恢复（定时任务）时错误率窗口一并清理，避免恢复后立即被旧窗口降级
+  resetErrorRate(platformId);
+  // 429 冷却一并清理：平台已恢复，不应继续被旧窗口排除
+  resetPlatform429(platformId);
 }
 
 /**
@@ -352,6 +494,14 @@ export function selectPlatform(
 
     // 检查冷却期（数据库 cooldownEnd 为 Unix 秒，需与 Date.now() 的毫秒对齐）
     if (p.cooldownEnd !== null && p.cooldownEnd * 1000 > now) return false;
+
+    // 高错误率降级（滑动窗口失败率）：间歇故障平台评分不降的问题由窗口识别，
+    // 排除期间无新采样、窗口过期自动恢复（与熔断冷却的自动恢复语义一致）
+    if (isHighErrorRate(p.id)) return false;
+
+    // 平台 429 冷却：窗口内累计达阈值后平台过载，冷却期内排除调度，
+    // 让上游限流窗口复位（区别于错误率窗口的"样本比例"判定，短时过载也能快速降权）
+    if (isPlatform429Cooldown(p.id)) return false;
 
     return true;
   });
