@@ -15,8 +15,9 @@
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import { getConfig } from "./config";
-import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
+import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
 import type { WorkerEnv } from "./config";
+import { loadApiMappings, getApplicableApiMapping, resolveTargetModel as resolveApiTargetModel } from "./api-mappings";
 
 // ==================== 缓存 ====================
 
@@ -245,19 +246,19 @@ export function selectPlatformLite(platforms: PlatformConfig[]): PlatformConfig 
  *
  * @param requestedModel - 客户端请求的模型名称
  * @param db - D1 数据库绑定
+ * @param sourceApi - 下游来源 API，默认 chat
  * @returns 路由决策（平台 + 目标模型名），无可用平台返回 null
  */
 export async function routeRequestLite(
   requestedModel: string,
   db: D1Database,
-  env?: WorkerEnv
+  env?: WorkerEnv,
+  sourceApi: ApiType = "chat"
 ): Promise<RouteDecision | null> {
   await refreshCacheLite(db, env);
 
   // 自动模型处理：解析为一个可用平台下的真实模型（lite 不做冻结/解冻）
   if (autoModelId !== null && requestedModel === autoModelId) {
-    // 先收集「存在入选模型」的候选平台，再按权重选平台（与全量版一致，
-    // 避免选中无入选模型的平台后无模型可用）
     const eligiblePlatforms: PlatformConfig[] = [];
     const modelByPlatform = new Map<string, string>();
     for (const platform of platformCache) {
@@ -275,14 +276,45 @@ export async function routeRequestLite(
     const autoPlatform = selectPlatformLite(eligiblePlatforms);
     if (!autoPlatform) return null;
 
-    return { platform: autoPlatform, targetModel: modelByPlatform.get(autoPlatform.id) as string };
+    return {
+      platform: autoPlatform,
+      targetModel: modelByPlatform.get(autoPlatform.id) as string,
+      sourceApi,
+      targetApi: sourceApi,
+      needsConversion: false,
+      apiMapping: null,
+    };
   }
 
-  // 普通模型：解析映射
-  const { targetModel, targetPlatformId } = resolveModelMapping(
-    requestedModel,
-    null
-  );
+  // 优先检查接口映射（API 转换）
+  let apiMapping: import("./api-mappings").ApiMapping | null = null;
+  let targetApi: ApiType = sourceApi;
+  let targetModelFromApi: string | null = null;
+  let targetPlatformIdFromApi: string | null = null;
+  try {
+    const apiMappings = await loadApiMappings(db, env);
+    const matched = getApplicableApiMapping(apiMappings, requestedModel, sourceApi);
+    if (matched) {
+      apiMapping = matched;
+      targetApi = matched.targetApi;
+      targetModelFromApi = resolveApiTargetModel(matched, requestedModel);
+      targetPlatformIdFromApi = matched.platformId ?? null;
+    }
+  } catch (e) {
+    console.error("[router-lite] 接口映射加载失败:", e);
+  }
+
+  let targetModel: string;
+  let targetPlatformId: string | null;
+  if (targetModelFromApi) {
+    targetModel = targetModelFromApi;
+    targetPlatformId = targetPlatformIdFromApi;
+  } else {
+    const resolved = resolveModelMapping(requestedModel, null);
+    targetModel = resolved.targetModel;
+    targetPlatformId = resolved.targetPlatformId;
+  }
+  const needsConversion = apiMapping ? apiMapping.sourceApi !== apiMapping.targetApi : false;
 
   // 选择平台
   let selectedPlatform: PlatformConfig | null;
@@ -313,7 +345,14 @@ export async function routeRequestLite(
 
   if (!selectedPlatform) return null;
 
-  return { platform: selectedPlatform, targetModel };
+  return {
+    platform: selectedPlatform,
+    targetModel,
+    sourceApi,
+    targetApi,
+    needsConversion,
+    apiMapping: apiMapping ? { id: apiMapping.id, pattern: apiMapping.pattern } : null,
+  };
 }
 
 /**

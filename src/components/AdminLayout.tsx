@@ -41,12 +41,13 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "keys", icon: Key, href: "/admin/keys", group: "manage", order: 3 },
   { key: "autoModel", icon: Zap, href: "/admin/auto-model", group: "manage", order: 4 },
   { key: "requestTemplates", icon: FileText, href: "/admin/request-templates", group: "manage", order: 5 },
-  { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor", order: 6 },
-  { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor", order: 7 },
-  { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor", order: 8 },
-  { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system", order: 9 },
-  { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 10 },
-  { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 11 },
+  { key: "apiMappings", icon: FileText, href: "/admin/api-mappings", group: "manage", order: 6 },
+  { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor", order: 7 },
+  { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor", order: 8 },
+  { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor", order: 9 },
+  { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system", order: 10 },
+  { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 11 },
+  { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 12 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）
@@ -212,6 +213,7 @@ function TopHeader({
     "/admin/keys": "keys",
     "/admin/auto-model": "autoModel",
     "/admin/request-templates": "requestTemplates",
+    "/admin/api-mappings": "apiMappings",
     "/admin/usage": "usage",
     "/admin/logs": "logs",
     "/admin/audit": "audit",

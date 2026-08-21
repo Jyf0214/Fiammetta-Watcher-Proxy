@@ -11,9 +11,10 @@
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import { selectPlatform, cleanupStaleBreakers, syncCircuitBreakersFromDatabase } from "./load-balancer";
-import type { PlatformConfig, RouteDecision, ModelMapConfig } from "@/lib/types";
+import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
 import { getConfig } from "./config";
 import type { WorkerEnv } from "./config";
+import { loadApiMappings, getApplicableApiMapping, resolveTargetModel as resolveApiTargetModel } from "./api-mappings";
 
 // ==================== 缓存 ====================
 
@@ -265,20 +266,19 @@ function resolveModelMapping(
  *
  * @param requestedModel - 客户端请求的模型名称
  * @param db - D1 数据库绑定
- * @returns 路由决策（平台 + 目标模型名），无可用平台返回 null
+ * @param sourceApi - 下游来源 API（由端点决定），默认 chat 兼容旧调用
+ * @returns 路由决策（平台 + 目标模型名 + API 转换信息），无可用平台返回 null
  */
 export async function routeRequest(
   requestedModel: string,
   db: D1Database,
-  env?: WorkerEnv
+  env?: WorkerEnv,
+  sourceApi: ApiType = "chat"
 ): Promise<RouteDecision | null> {
   await refreshCache(db, env);
 
-  // 自动模型处理
+  // 自动模型处理（暂不参与 API 转换映射，自动模型本身已是抽象 ID）
   if (autoModelId !== null && requestedModel === autoModelId) {
-    // 自动模型：先收集「存在入选且未冻结模型」的候选平台，再按优先级/权重选平台。
-    // 不能先 selectPlatform 再查该平台模型——选中平台无入选模型时即使其它平台
-    // 有可用模型也会 500「此模型不存在」
     const eligiblePlatforms: PlatformConfig[] = [];
     const modelByPlatform = new Map<string, string>();
     for (const platform of platformCache) {
@@ -296,14 +296,48 @@ export async function routeRequest(
     const autoPlatform = selectPlatform(eligiblePlatforms);
     if (!autoPlatform) return null;
 
-    return { platform: autoPlatform, targetModel: modelByPlatform.get(autoPlatform.id) as string };
+    return {
+      platform: autoPlatform,
+      targetModel: modelByPlatform.get(autoPlatform.id) as string,
+      sourceApi,
+      targetApi: sourceApi,
+      needsConversion: false,
+      apiMapping: null,
+    };
   }
 
-  // 普通模型：解析映射
-  const { targetModel, targetPlatformId } = resolveModelMapping(
-    requestedModel,
-    null
-  );
+  // 1. 优先检查接口映射（API 转换）：通配符匹配模型 + 来源 API
+  let apiMapping: import("./api-mappings").ApiMapping | null = null;
+  let targetApi: ApiType = sourceApi;
+  let targetModelFromApi: string | null = null;
+  let targetPlatformIdFromApi: string | null = null;
+  try {
+    const apiMappings = await loadApiMappings(db, env);
+    const matched = getApplicableApiMapping(apiMappings, requestedModel, sourceApi);
+    if (matched) {
+      apiMapping = matched;
+      targetApi = matched.targetApi;
+      targetModelFromApi = resolveApiTargetModel(matched, requestedModel);
+      targetPlatformIdFromApi = matched.platformId ?? null;
+    }
+  } catch (e) {
+    console.error("[router] 接口映射加载失败:", e);
+  }
+
+  // 2. 普通模型映射（若接口映射未命中或未指定目标模型，则回退到模型映射）
+  let targetModel: string;
+  let targetPlatformId: string | null;
+  if (targetModelFromApi) {
+    targetModel = targetModelFromApi;
+    targetPlatformId = targetPlatformIdFromApi;
+  } else {
+    const resolved = resolveModelMapping(requestedModel, null);
+    targetModel = resolved.targetModel;
+    targetPlatformId = resolved.targetPlatformId;
+  }
+
+  // 若接口映射命中但 sourceApi === targetApi，则无需转换，仍按正常模型映射的平台选择逻辑走
+  const needsConversion = apiMapping ? apiMapping.sourceApi !== apiMapping.targetApi : false;
 
   // 选择平台
   let selectedPlatform: PlatformConfig | null;
@@ -336,7 +370,14 @@ export async function routeRequest(
 
   if (!selectedPlatform) return null;
 
-  return { platform: selectedPlatform, targetModel };
+  return {
+    platform: selectedPlatform,
+    targetModel,
+    sourceApi,
+    targetApi,
+    needsConversion,
+    apiMapping: apiMapping ? { id: apiMapping.id, pattern: apiMapping.pattern } : null,
+  };
 }
 
 /**

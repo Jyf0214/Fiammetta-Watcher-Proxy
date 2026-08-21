@@ -19,6 +19,7 @@ import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } fr
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
+import { convertChatToResponses, convertResponsesToChat, convertResponsesToChatResponse, convertChatToResponsesResponse } from "../../../worker/src/chat-responses-converter";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -347,7 +348,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     return;
   }
   const requestedModel = modelName;
-  const route = await routeRequest(modelName, dummyDb, env);
+  const sourceApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+  const route = await routeRequest(modelName, dummyDb, env, sourceApi);
   if (!route) {
     // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "此模型不存在", db: dummyDb, env }); } catch {}
@@ -405,22 +407,44 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       sendV1Error(res, config, 500, `平台 "${cur.name}" 无可用 API Key`, "server_error"); return;
     }
 
+    // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
+    // 认证用 x-api-key + anthropic-version
+    const upstreamIsAnthropic = cur.type === "anthropic";
+    // 接口映射转换判定（Anthropic 协议不参与 API 转换）
+    const needsApiConversion = !upstreamIsAnthropic && route.needsConversion;
+    const effectiveTargetApi = needsApiConversion ? route.targetApi : (config.upstreamPath === "/responses" ? "responses" as const : "chat" as const);
+    const effectiveUpstreamPath = needsApiConversion
+      ? effectiveTargetApi === "responses" ? "/responses" : "/chat/completions"
+      : config.upstreamPath;
+
     // 模板先作用于原始 OpenAI 请求体；Anthropic 分支随后转换——转换白名单会剥离
     // 模板中的 OpenAI 专属字段（stream_options/n/response_format 等），避免严格后端 422
     // Responses 与 Chat 分流：responses 仅命中 responses 模板，chat 仅命中 chat 模板
+    // 若存在 API 转换，则上游使用目标 API 的模板池
     let upstreamBody: Record<string, unknown> = { ...body, model: tgt };
+    // API 结构转换（chat ↔ responses）：在模板应用前完成
+    if (needsApiConversion && !multipart) {
+      try {
+        if (route.sourceApi === "chat" && route.targetApi === "responses") {
+          upstreamBody = convertChatToResponses(upstreamBody, tgt);
+        } else if (route.sourceApi === "responses" && route.targetApi === "chat") {
+          upstreamBody = convertResponsesToChat(upstreamBody, tgt);
+        }
+      } catch (convErr) {
+        sendV1Error(res, config, 400, `API 转换失败: ${convErr instanceof Error ? convErr.message : String(convErr)}`, "invalid_request_error");
+        return;
+      }
+    }
     // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
     if (!multipart) {
       try {
         const t = await loadTemplates(dummyDb, env);
-        const templateType = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+        const templateType = effectiveTargetApi;
         const a = getApplicableTemplates(t, requestedModel, templateType);
         if (a.length > 0) upstreamBody = applyTemplates(upstreamBody, a);
       } catch {}
     }
-    // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
-    // 认证用 x-api-key + anthropic-version
-    const upstreamIsAnthropic = cur.type === "anthropic";
+    // 上游为 Anthropic 协议：请求体已在上方定义，此处无需重复定义
     if (upstreamIsAnthropic) {
       try {
         upstreamBody = convertOpenAIRequest(upstreamBody);
@@ -442,7 +466,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 用户可在平台管理页关闭此选项以兼容这类上游
     // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
     // Responses 端点不注入 stream_options（Responses 的流式 usage 由独立事件携带）
-    if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic && config.upstreamPath !== "/responses") upstreamBody.stream_options = { include_usage: true };
+    if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic && effectiveUpstreamPath !== "/responses") upstreamBody.stream_options = { include_usage: true };
 
     const fwd: Record<string, string> = {};
     // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），
@@ -456,7 +480,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
 
     const url = upstreamIsAnthropic
       ? `${cur.baseUrl.replace(/\/+$/, "")}/v1/messages`
-      : `${cur.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
+      : `${cur.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
     const check = isSafeUpstreamUrl(cur.baseUrl);
     if (!check.safe) {
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, db: dummyDb, env }).catch(() => {});
@@ -549,7 +573,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey);
+      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, needsApiConversion ? { needsConversion: true, sourceApi: route.sourceApi ?? "chat", targetApi: route.targetApi ?? "chat" } : undefined);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -651,7 +675,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, apiConversion?: { needsConversion: boolean; sourceApi: "chat" | "responses"; targetApi: "chat" | "responses" }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
@@ -779,7 +803,108 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
             for (const ol of outLines) {
               if (ol === "data: [DONE]") { sawDone = true; if (!streamer) await writeChunk(ol + "\n"); continue; }
               try {
-                const d = JSON.parse(ol.slice(6)) as any;
+                let d = JSON.parse(ol.slice(6)) as any;
+                // 接口映射流式转换：上游目标 API 事件 → 下游来源 API 事件
+                // 老客户端 chat → 上游 responses 时，上游为 responses 事件需转为 chat 供下游消费，否则下游会因无 content 触发空完成误判
+                if (apiConversion?.needsConversion) {
+                  if (apiConversion.sourceApi === "chat" && apiConversion.targetApi === "responses") {
+                    // 上游 responses → 下游 chat
+                    // 将 responses 的 delta/output_text/reasoning 等转为 chat 的 delta.content/reasoning_content
+                    let converted: any = null;
+                    if (typeof d.delta === "string" && d.delta.length > 0) {
+                      const isReasoning = d.type?.includes("reasoning");
+                      converted = {
+                        object: "chat.completion.chunk",
+                        choices: [{ delta: isReasoning ? { reasoning_content: d.delta } : { content: d.delta }, index: 0, finish_reason: null }],
+                      };
+                    } else if (typeof d.output_text === "string" && d.output_text.length > 0) {
+                      converted = { object: "chat.completion.chunk", choices: [{ delta: { content: d.output_text }, index: 0, finish_reason: null }] };
+                    } else if (d.type === "response.output_text.delta" && typeof d.delta === "string") {
+                      converted = { object: "chat.completion.chunk", choices: [{ delta: { content: d.delta }, index: 0, finish_reason: null }] };
+                    } else if (d.type?.includes("reasoning") && typeof d.delta === "string") {
+                      converted = { object: "chat.completion.chunk", choices: [{ delta: { reasoning_content: d.delta }, index: 0, finish_reason: null }] };
+                    } else if (d.type === "response.completed" || d.response?.status === "completed") {
+                      // 完成事件：透传 usage 并标记完成
+                      sawDone = true;
+                      if (d.response?.usage || d.usage) {
+                        const usageCandidate = (d as any).response?.usage ?? (d as any).usage;
+                        if (usageCandidate) {
+                          const ex = extractUsage(usageCandidate as Record<string, unknown>, est);
+                          tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens;
+                        }
+                      }
+                      // 发送 chat 的结束块
+                      const stopChunk = { object: "chat.completion.chunk", choices: [{ delta: {}, index: 0, finish_reason: "stop" }] };
+                      if (streamer) {
+                        await writeChunk(streamer.feedChunk(stopChunk));
+                      } else {
+                        await writeChunk(`data: ${JSON.stringify(stopChunk)}\n\n`);
+                      }
+                      await writeChunk("data: [DONE]\n\n");
+                      sawDone = true;
+                      continue;
+                    } else if (d.output || d.response?.output) {
+                      // 完整 output 块，尝试提取文本
+                      const out = d.output ?? d.response?.output;
+                      if (Array.isArray(out)) {
+                        for (const item of out) {
+                          if (item?.type === "message" && Array.isArray(item.content)) {
+                            for (const c of item.content) {
+                              if (c?.type === "output_text" && typeof c.text === "string" && c.text) {
+                                const chatChunk = { object: "chat.completion.chunk", choices: [{ delta: { content: c.text }, index: 0, finish_reason: null }] };
+                                if (streamer) await writeChunk(streamer.feedChunk(chatChunk));
+                                else await writeChunk(`data: ${JSON.stringify(chatChunk)}\n\n`);
+                                sawContent = true;
+                              }
+                            }
+                          }
+                        }
+                      }
+                      continue;
+                    }
+                    if (converted) {
+                      d = converted;
+                      //  fall through to normal chat handling for converted event
+                    } else {
+                      // 未识别的 responses 事件，若含 usage 则已处理，否则透传为 chat 的空块（避免空完成但不展示错误内容）
+                      if (d.choices || d.usage || d.error) {
+                        // 已为 chat 形态，直接处理
+                      } else {
+                        // 尝试提取 fallback 文本
+                        const fallback = d.text ?? d.output_text;
+                        if (typeof fallback === "string" && fallback) {
+                          const chatChunk = { object: "chat.completion.chunk", choices: [{ delta: { content: fallback }, index: 0, finish_reason: null }] };
+                          d = chatChunk;
+                        } else {
+                          // 无法转换的事件，跳过以免下游收到无法解析的 responses 原生事件
+                          continue;
+                        }
+                      }
+                    }
+                  } else if (apiConversion.sourceApi === "responses" && apiConversion.targetApi === "chat") {
+                    // 上游 chat → 下游 responses
+                    if (Array.isArray(d.choices)) {
+                      for (const choice of d.choices) {
+                        const delta = choice?.delta;
+                        if (typeof delta?.content === "string" && delta.content) {
+                          const respEvent = { type: "response.output_text.delta", delta: delta.content };
+                          await writeChunk(`data: ${JSON.stringify(respEvent)}\n\n`);
+                          sawContent = true;
+                        }
+                        if (typeof delta?.reasoning_content === "string" && delta.reasoning_content) {
+                          const respEvent = { type: "response.reasoning_summary_text.delta", delta: delta.reasoning_content };
+                          await writeChunk(`data: ${JSON.stringify(respEvent)}\n\n`);
+                          sawContent = true;
+                        }
+                      }
+                      if (d.usage) {
+                        const ex = extractUsage(d.usage as Record<string, unknown>, est);
+                        tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens;
+                      }
+                      continue;
+                    }
+                  }
+                }
                 // 空完成检测：记录是否收到过有效输出内容（content/reasoning_content
                 // 非空字符串；初始 role 占位 chunk 的 content 为空字符串不计）。
                 // tool_calls 增量同样计入：纯工具调用流（无文本）不得误判空完成
@@ -791,7 +916,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                     }
                   }
                 }
-                // Responses API 流式：delta/output_text 等即视为有效内容
+                // Responses API 流式：delta/output_text 等即视为有效内容（未转换时的兜底）
                 if (typeof d.delta === "string" && d.delta.length > 0) sawContent = true;
                 if (typeof d.output_text === "string" && d.output_text.length > 0) sawContent = true;
                 if (Array.isArray(d.output) && d.output.length > 0) sawContent = true;
@@ -806,7 +931,12 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
                   if (d.choices || d.usage) await writeChunk(streamer.feedChunk(d));
                 } else {
-                  await writeChunk(ol + "\n");
+                  // 若已为转换后的 chat 事件（apiConversion chat←responses），则 ol 已非原始，需用 d 构造新行
+                  if (apiConversion?.needsConversion && apiConversion.sourceApi === "chat" && apiConversion.targetApi === "responses") {
+                    await writeChunk(`data: ${JSON.stringify(d)}\n\n`);
+                  } else {
+                    await writeChunk(ol + "\n");
+                  }
                 }
               } catch {}
             }
@@ -943,6 +1073,26 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   if (proxyUrl) recordProxyTraffic(proxyUrl, upRes.status);
   void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }).catch(() => {});
   void recordSuccess(platform.id, dummyDb, env).catch(() => {});
+  // 接口映射转换：上游目标 API 响应 → 下游来源 API 响应
+  let finalBody: string;
+  if (apiConversion?.needsConversion) {
+    try {
+      const parsedForConvert = openaiBody ?? JSON.parse(body);
+      if (apiConversion.sourceApi === "chat" && apiConversion.targetApi === "responses") {
+        const converted = convertResponsesToChatResponse(parsedForConvert as Record<string, unknown>, model);
+        finalBody = JSON.stringify(converted);
+      } else if (apiConversion.sourceApi === "responses" && apiConversion.targetApi === "chat") {
+        const converted = convertChatToResponsesResponse(parsedForConvert as Record<string, unknown>, model);
+        finalBody = JSON.stringify(converted);
+      } else {
+        finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body;
+      }
+    } catch {
+      finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body;
+    }
+    res.status(upRes.status).send(finalBody);
+    return;
+  }
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
   res.status(upRes.status).send(upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body);

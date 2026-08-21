@@ -229,7 +229,7 @@ describe("Worker 全量版 proxyV1Request multipart", () => {
       ctx
     );
 
-    expect(routeRequest).toHaveBeenCalledWith("gpt-4o", env.DB, { DB_TYPE: "d1" });
+    expect(routeRequest).toHaveBeenCalledWith("gpt-4o", env.DB, { DB_TYPE: "d1" }, "chat");
     expectMultipartForwarded(vi.mocked(fetch), originalBody);
     // multipart 请求体无法注入 JSON 模板字段，跳过模板应用
     expect(loadTemplates).not.toHaveBeenCalled();
@@ -317,7 +317,7 @@ describe("lite 版 proxyV1RequestLite multipart", () => {
       ctx
     );
 
-    expect(routeRequestLite).toHaveBeenCalledWith("gpt-4o", env.DB, { DB_TYPE: "d1" });
+    expect(routeRequestLite).toHaveBeenCalledWith("gpt-4o", env.DB, { DB_TYPE: "d1" }, "chat");
     expectMultipartForwarded(vi.mocked(fetch), originalBody);
     expect(res.status).toBe(200);
   });
@@ -439,7 +439,7 @@ describe("Pages 版 v1 代理 multipart", () => {
     const res = makeRes();
     await handler(makeMultipartReq(originalBody, MULTIPART_CT), res);
 
-    expect(routeRequest).toHaveBeenCalledWith("gpt-4o", expect.anything(), expect.anything());
+    expect(routeRequest).toHaveBeenCalledWith("gpt-4o", expect.anything(), expect.anything(), "chat");
     expectMultipartForwarded(vi.mocked(fetch), originalBody);
     // multipart 请求体无法注入 JSON 模板字段，跳过模板应用
     expect(loadTemplates).not.toHaveBeenCalled();

@@ -36,6 +36,14 @@ import {
   convertAnthropicResponse,
   AnthropicToOpenAIStream,
 } from "@/lib/anthropic";
+import {
+  convertChatToResponses,
+  convertResponsesToChat,
+  convertResponsesToChatResponse,
+  convertChatToResponsesResponse,
+  createResponsesToChatStream,
+  createChatToResponsesStream,
+} from "./chat-responses-converter";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
 
@@ -320,7 +328,9 @@ export async function proxyV1Request(
     return v1ErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
   }
   const requestedModel = modelName;
-  const route = await routeRequest(modelName, env.DB, workerEnv);
+  // 根据端点判断下游来源 API：/responses 为 responses，其余按 chat 处理（与模板分类一致）
+  const sourceApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+  const route = await routeRequest(modelName, env.DB, workerEnv, sourceApi);
 
   if (!route) {
     // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
@@ -579,17 +589,38 @@ export async function proxyV1Request(
     // 请求体转回 /v1/messages 格式，URL 指向 /v1/messages，认证用 x-api-key + anthropic-version
     const upstreamIsAnthropic = currentPlatform.type === "anthropic";
 
+    // 接口映射转换判定：若命中 chat↔responses 映射且需转换，则以目标 API 为准
+    const needsApiConversion = !upstreamIsAnthropic && route.needsConversion;
+    const effectiveTargetApi = needsApiConversion ? route.targetApi : (config.upstreamPath === "/responses" ? "responses" as const : "chat" as const);
+    const effectiveUpstreamPath = needsApiConversion
+      ? effectiveTargetApi === "responses" ? "/responses" : "/chat/completions"
+      : config.upstreamPath;
+
     // 构建上游请求体：模板先作用于原始 OpenAI 请求体。
     // Anthropic 分支随后转换——convertOpenAIRequest 白名单会剥离模板中的 OpenAI 专属字段
     // （stream_options/n/response_format 等），避免 Anthropic 严格后端 422 extra_forbidden
     // Responses 与 Chat 分流：当下游使用 /v1/responses 时，仅应用 responses 类型模板（解锁高阶思维链 reasoning 等）；
     // 普通 v1/chat 链路仅应用 chat 类型模板，互不干扰
+    // 若存在 API 转换，则上游使用目标 API 的模板池（例如下游 chat 命中 responses 映射时，应用 responses 模板以注入 reasoning）
     let upstreamBody: Record<string, unknown> = { ...body, model: currentTargetModel };
+    // API 结构转换（chat ↔ responses）：在模板应用前完成，确保模板作用于转换后的目标结构
+    if (needsApiConversion && !multipart) {
+      try {
+        if (route.sourceApi === "chat" && route.targetApi === "responses") {
+          upstreamBody = convertChatToResponses(upstreamBody, currentTargetModel);
+        } else if (route.sourceApi === "responses" && route.targetApi === "chat") {
+          upstreamBody = convertResponsesToChat(upstreamBody, currentTargetModel);
+        }
+      } catch (convErr) {
+        console.error(`${logTag} API 转换失败:`, convErr);
+        return v1ErrorResponse(config, 400, `API 转换失败: ${convErr instanceof Error ? convErr.message : String(convErr)}`, "invalid_request_error");
+      }
+    }
     // multipart 请求体无法注入 JSON 模板字段（表单已定形），跳过模板应用
     if (!multipart) {
       try {
         const templates = await loadTemplates(env.DB, workerEnv);
-        const templateType = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
+        const templateType = effectiveTargetApi;
         const applicable = getApplicableTemplates(templates, requestedModel, templateType);
         if (applicable.length > 0) {
           upstreamBody = applyTemplates(upstreamBody, applicable);
@@ -620,7 +651,7 @@ export async function proxyV1Request(
     // 用户可在平台管理页关闭此选项以兼容这类上游
     // Anthropic 协议上游同样拒绝未知字段，且 convertOpenAIRequest 已白名单剥离
     // Responses 端点不注入 stream_options（Responses 的流式 usage 由独立事件携带，注入旧字段可能被严格后端拒绝）
-    if (effectiveIsStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic && config.upstreamPath !== "/responses") {
+    if (effectiveIsStream && currentPlatform.injectStreamOptions !== false && !upstreamIsAnthropic && effectiveUpstreamPath !== "/responses") {
       upstreamBody.stream_options = { include_usage: true };
     }
 
@@ -642,7 +673,7 @@ export async function proxyV1Request(
 
     const upstreamUrl = upstreamIsAnthropic
       ? `${currentPlatform.baseUrl.replace(/\/+$/, "")}/v1/messages`
-      : `${currentPlatform.baseUrl.replace(/\/+$/, "")}${config.upstreamPath}`;
+      : `${currentPlatform.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
 
     // SSRF 防护：校验上游 URL
     const urlCheck = isSafeUpstreamUrl(currentPlatform.baseUrl);
@@ -779,7 +810,8 @@ export async function proxyV1Request(
         anthropicInputEstimate,
         logTag,
         upstreamController,
-        upstreamTimeoutId
+        upstreamTimeoutId,
+        route.needsConversion ? { needsConversion: true, sourceApi: route.sourceApi ?? "chat", targetApi: route.targetApi ?? "chat" } : undefined
       );
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return handled;
       isEmptyResponse = true;
@@ -1152,12 +1184,15 @@ async function handleUpstreamResponse(
   anthropicInputEstimate: number,
   logTag: string,
   upstreamController: AbortController,
-  upstreamTimeoutId: ReturnType<typeof setTimeout>
+  upstreamTimeoutId: ReturnType<typeof setTimeout>,
+  apiConversion?: { needsConversion: boolean; sourceApi: "chat" | "responses"; targetApi: "chat" | "responses" }
 ): Promise<Response | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 提取 WorkerEnv 部分，供内部函数调用
   const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
+  // 接口映射转换：下游来源与上游目标不一致时需逆向转回下游格式
+  const needsApiConversion = !!apiConversion?.needsConversion && !upstreamIsAnthropic;
   // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;
@@ -1291,10 +1326,20 @@ async function handleUpstreamResponse(
       pipeline = pipeline.pipeThrough(createOpenAIStreamTransformer());
     }
     const pipedStream = pipeline.pipeThrough(transformer);
-    // Anthropic 协议：OpenAI SSE → Anthropic 事件流（在 usage 统计之后转换）
+    // 接口映射转换：上游目标 API 流 → 下游来源 API 流（在 usage 统计之后、Anthropic 转换之前）
+    // 例如下游 chat 命中 responses 映射时，上游为 responses 事件，需转为 chat 的 delta.content 供老客户端消费，同时透传推理头避免空完成误判
+    let apiConvertedStream: ReadableStream<Uint8Array> = pipedStream;
+    if (needsApiConversion) {
+      if (apiConversion!.sourceApi === "chat" && apiConversion!.targetApi === "responses") {
+        apiConvertedStream = pipedStream.pipeThrough(createResponsesToChatStream());
+      } else if (apiConversion!.sourceApi === "responses" && apiConversion!.targetApi === "chat") {
+        apiConvertedStream = pipedStream.pipeThrough(createChatToResponsesStream());
+      }
+    }
+    // Anthropic 协议：OpenAI SSE → Anthropic 事件流（在 usage 统计与 API 转换之后）
     const finalStream = config.protocol === "anthropic"
-      ? pipedStream.pipeThrough(createAnthropicStreamTransformer(requestedModel, anthropicInputEstimate))
-      : pipedStream;
+      ? apiConvertedStream.pipeThrough(createAnthropicStreamTransformer(requestedModel, anthropicInputEstimate))
+      : apiConvertedStream;
     // 不阻塞首字节：recordSuccess 在 half-open 恢复时会写库（TiDB/远端 DB 可达秒级），
     // 若在返回 Response 前 await，客户端 TTFB 会被拖到秒级（实测 9.95s）
     ctx.waitUntil(recordSuccess(platform.id, env.DB, env).catch(() => {}));
@@ -1573,8 +1618,27 @@ async function handleUpstreamResponse(
 
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
-  const finalBody =
-    upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
+  // 接口映射转换：上游目标 API 响应 → 下游来源 API 响应（透传思考头、防护空完成）
+  let finalBody: string;
+  if (needsApiConversion) {
+    try {
+      const parsedForConvert = openaiBody ?? JSON.parse(responseBody);
+      if (apiConversion!.sourceApi === "chat" && apiConversion!.targetApi === "responses") {
+        const converted = convertResponsesToChatResponse(parsedForConvert as Record<string, unknown>, requestedModel);
+        finalBody = JSON.stringify(converted);
+      } else if (apiConversion!.sourceApi === "responses" && apiConversion!.targetApi === "chat") {
+        const converted = convertChatToResponsesResponse(parsedForConvert as Record<string, unknown>, requestedModel);
+        finalBody = JSON.stringify(converted);
+      } else {
+        finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
+      }
+    } catch {
+      // 转换失败时回退原样透传，避免因转换异常导致下游收到 500 而触发熔断误判
+      finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
+    }
+  } else {
+    finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
+  }
   return new Response(finalBody, {
     status: upstreamResponse.status,
     headers: { "Content-Type": "application/json" },
