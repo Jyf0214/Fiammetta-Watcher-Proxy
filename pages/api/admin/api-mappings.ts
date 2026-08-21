@@ -90,10 +90,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         res.status(400).json({ success: false, error: "模型匹配模式不合法（支持 * 通配，限 200 字符）" });
         return;
       }
-      if (!targetModel || typeof targetModel !== "string" || !targetModel.trim()) {
-        res.status(400).json({ success: false, error: "目标模型不能为空" });
+      // targetModel 允许空（表示与下游同模，保持原模型名）；“*” 亦表示同模
+      if (targetModel !== undefined && targetModel !== null && typeof targetModel !== "string") {
+        res.status(400).json({ success: false, error: "目标模型必须为字符串" });
         return;
       }
+      const normalizedTargetModel = typeof targetModel === "string" ? targetModel.trim() : "";
       if (sourceApi !== "chat" && sourceApi !== "responses") {
         res.status(400).json({ success: false, error: "来源 API 必须为 chat 或 responses" });
         return;
@@ -116,7 +118,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         name: name.trim(),
         description: typeof description === "string" ? description.trim() : "",
         pattern: pattern.trim(),
-        targetModel: targetModel.trim(),
+        targetModel: normalizedTargetModel,
         sourceApi,
         targetApi,
         platformId: platformId || null,
@@ -165,8 +167,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         list[idx].pattern = pattern.trim();
       }
       if (targetModel !== undefined) {
-        if (typeof targetModel !== "string" || !targetModel.trim()) {
-          res.status(400).json({ success: false, error: "目标模型不能为空" });
+        if (typeof targetModel !== "string") {
+          res.status(400).json({ success: false, error: "目标模型必须为字符串" });
           return;
         }
         list[idx].targetModel = targetModel.trim();

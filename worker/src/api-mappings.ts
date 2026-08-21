@@ -20,7 +20,7 @@ export interface ApiMapping {
   description: string;
   /** 下游模型匹配模式，支持 * 通配（如 "old-model*"、"*"） */
   pattern: string;
-  /** 上游目标模型（可为通配符映射的目标，如命中 old-model-123 时取 targetModel + 后缀） */
+  /** 上游目标模型（可为通配符映射的目标，如命中 old-model-123 时取 targetModel + 后缀）；留空或 "*" 表示与下游同模（保持原模型名） */
   targetModel: string;
   /** 下游来源 API（客户端使用的协议） */
   sourceApi: ApiType;
@@ -103,15 +103,15 @@ export async function loadApiMappings(
 
     const parsed = JSON.parse(row.value);
     const raw = Array.isArray(parsed) ? parsed : [];
-    // 兼容旧数据：过滤非法条目，缺省字段补齐
+    // 兼容旧数据：过滤非法条目，缺省字段补齐（targetModel 允许空表示同模）
     mappingCache = raw
-      .filter((m: any) => m && typeof m.pattern === "string" && typeof m.targetModel === "string")
+      .filter((m: any) => m && typeof m.pattern === "string")
       .map((m: any) => ({
         id: String(m.id ?? crypto.randomUUID()),
         name: String(m.name ?? ""),
         description: String(m.description ?? ""),
         pattern: String(m.pattern),
-        targetModel: String(m.targetModel),
+        targetModel: typeof m.targetModel === "string" ? String(m.targetModel).trim() : "",
         sourceApi: m.sourceApi === "responses" ? "responses" : "chat",
         targetApi: m.targetApi === "responses" ? "responses" : "chat",
         platformId: m.platformId ?? null,
@@ -156,26 +156,24 @@ export function getApplicableApiMapping(
 }
 
 /**
- * 根据映射计算上游目标模型（支持通配后缀拼接）
+ * 根据映射计算上游目标模型（支持通配后缀拼接与同模）
  * 例如 pattern "old-*" + requested "old-123" + targetModel "new-" => "new-123"
- * 若 targetModel 不含通配逻辑，则直接返回 targetModel
+ * 若 targetModel 为空、"*" 或与下游同模（同名），则直接返回下游原模型名（保持同模）
  */
 export function resolveTargetModel(mapping: ApiMapping, requestedModel: string): string {
-  const suffix = extractSuffix(requestedModel, mapping.pattern);
-  // 若 pattern 为通配且 targetModel 以 * 结尾或需拼接，简单处理：targetModel + suffix
-  // 更复杂的通配目标（如 "new-*"）可按需扩展，当前实现为直接拼接
-  if (suffix && mapping.pattern.endsWith("*")) {
-    // 若 targetModel 本身以 * 结尾，则去掉 * 再拼接
-    if (mapping.targetModel.endsWith("*")) {
-      return mapping.targetModel.slice(0, -1) + suffix;
-    }
-    // 否则若 suffix 非空，直接拼接到 targetModel 后（适用于 old-* -> new-model 前缀共享场景的简化）
-    // 仅当 targetModel 为固定值时，不拼接 suffix，保持原 targetModel
-    // 为保持与 model_mappings 的 suffix 逻辑一致：仅当 alias 通配时，targetModel + suffix
-    // 此处若用户期望 old-* -> new-* 的完全替换，需配置 targetModel 为 "new-*"
-    return mapping.targetModel + suffix;
+  const target = (mapping.targetModel || "").trim();
+  // 同模：留空、"*"、"same" 或与 pattern 相同且无通配后缀时，保持下游原模型
+  if (!target || target === "*" || target.toLowerCase() === "same") {
+    return requestedModel;
   }
-  return mapping.targetModel;
+  const suffix = extractSuffix(requestedModel, mapping.pattern);
+  if (suffix && mapping.pattern.endsWith("*")) {
+    if (target.endsWith("*")) {
+      return target.slice(0, -1) + suffix;
+    }
+    return target + suffix;
+  }
+  return target;
 }
 
 // ==================== 辅助 ====================

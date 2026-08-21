@@ -49,7 +49,7 @@ export default function ApiMappingsPage() {
       targetApi: "responses",
       enabled: true,
       pattern: "old-model*",
-      targetModel: "gpt-5",
+      targetModel: "",
     });
     setModalOpen(true);
   };
@@ -204,7 +204,7 @@ export default function ApiMappingsPage() {
                       {!m.enabled && <span className="text-[10px] font-bold text-zinc-400">{t("common:disabled")}</span>}
                     </div>
                     {m.description && <p className="text-xs text-zinc-400 mb-1">{m.description}</p>}
-                    <p className="text-xs text-zinc-500 font-mono">{m.pattern} → {m.targetModel} {m.platformId ? `(${m.platformId})` : "(all platforms)"}</p>
+                    <p className="text-xs text-zinc-500 font-mono">{m.pattern} → {m.targetModel || t("apiMappingSameModel")} {m.platformId ? `(${m.platformId})` : "(all platforms)"}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Switch checked={m.enabled} loading={togglingId === m.id} onChange={() => handleToggle(m)} />
@@ -239,8 +239,8 @@ export default function ApiMappingsPage() {
               <Form.Item name="pattern" label={t("apiMappingPattern")} extra={t("apiMappingPatternExtra")} className="flex-1" rules={[{ required: true, message: t("validation:required") }]}>
                 <Input placeholder="old-model*" />
               </Form.Item>
-              <Form.Item name="targetModel" label={t("apiMappingTargetModel")} className="flex-1" rules={[{ required: true, message: t("validation:required") }]}>
-                <Input placeholder="gpt-5" />
+              <Form.Item name="targetModel" label={t("apiMappingTargetModel")} extra={t("apiMappingTargetModelExtra")} className="flex-1">
+                <Input placeholder={t("apiMappingTargetModelPlaceholder")} />
               </Form.Item>
             </div>
             <div className="flex gap-4">
