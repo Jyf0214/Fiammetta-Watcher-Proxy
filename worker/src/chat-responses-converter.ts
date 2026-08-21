@@ -40,28 +40,82 @@ export function convertChatToResponses(
       }
       continue;
     }
-    // tool / assistant / user 统一转为 input 项
-    // 若 content 为 string，直接放 content；若为数组，按 Responses 的 content 包装
+    // tool 角色特殊处理：Responses 中 tool 结果以 function_call_output 形态表示
     if (m.role === "tool") {
-      // chat tool 消息 → responses 的 input 中 role=tool? responses 暂无 tool 角色，按 user 包装并注明 tool_call_id
+      const toolOutput = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      // 包装为 responses 的 function_call_output 类型
       input.push({
-        role: "user",
-        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+        type: "function_call_output",
+        call_id: (m as any).tool_call_id || `call_${input.length}`,
+        output: toolOutput,
       });
       continue;
     }
-    const item: Record<string, unknown> = { role: m.role, content: m.content };
-    // 保留 tool_calls / tool_call_id 等（Responses 的 input 亦支持 tool 关联，采用相同字段）
+    // 统一处理 content：Responses 期望 content 为 string 或 input_text 数组
+    let content: unknown = m.content;
+    if (Array.isArray(m.content)) {
+      // chat 的 content 数组： [{type:"text", text:"hi"}, {type:"image_url", ...}] → responses 的 input_text / input_image
+      const converted: Array<Record<string, unknown>> = [];
+      for (const part of m.content as Array<any>) {
+        if (!part || typeof part.type !== "string") continue;
+        if (part.type === "text" && typeof part.text === "string") {
+          converted.push({ type: "input_text", text: part.text });
+        } else if (part.type === "image_url" && part.image_url?.url) {
+          converted.push({ type: "input_image", image_url: part.image_url.url, detail: part.image_url.detail ?? "auto" });
+        } else if (part.type === "input_text" && typeof part.text === "string") {
+          converted.push(part);
+        } else if (part.type === "input_image") {
+          converted.push(part);
+        } else if (typeof part.text === "string") {
+          converted.push({ type: "input_text", text: part.text });
+        }
+      }
+      content = converted.length > 0 ? converted : m.content;
+    } else if (typeof m.content === "string") {
+      // 保持字符串透传，Responses 同时支持 string 与 input_text 数组；
+      // 为兼容严格校验的上游，单条 user 文本可保持 string，若失败可改为 input_text 数组（上方已处理数组情况）
+      content = m.content;
+    }
+
+    const item: Record<string, unknown> = { role: m.role, content };
+    // 保留 tool_calls：Responses 中 assistant 的 tool 调用以 function_call 类型表示，但 input 侧暂保留原字段以兼容上游透传
     if (m.tool_calls) (item as any).tool_calls = m.tool_calls;
     if (m.tool_call_id) (item as any).tool_call_id = m.tool_call_id;
+    // 若为 assistant 且含 tool_calls，则需要将 content 置空或按 Responses 要求处理（Responses 的 assistant 输入可含 tool 调用）
+    if (m.role === "assistant" && (m as any).tool_calls) {
+      // assistant 带 tool_calls 时，content 可为空，Responses 侧会忽略
+      if (!content || (Array.isArray(content) && (content as any).length === 0)) {
+        (item as any).content = null;
+      }
+    }
     input.push(item);
+  }
+
+  // 兼容：部分严格上游对 input 数组中 content 为纯字符串的形态校验为“不支持类型”，需包装为 input_text 数组
+  // 将所有字符串 content 统一包装为 [{type:"input_text", text:...}] 以提高兼容性
+  const normalizedInput = input.map((item: any) => {
+    if (typeof item.content === "string") {
+      return { ...item, content: [{ type: "input_text", text: item.content }] };
+    }
+    return item;
+  });
+
+  let finalInput: unknown = normalizedInput;
+  // 单条 user 场景可直接透传字符串以兼容最简形态（部分上游对数组包装更严格）
+  if (normalizedInput.length === 1 && normalizedInput[0].role === "user") {
+    const c = (normalizedInput[0] as any).content;
+    if (Array.isArray(c) && c.length === 1 && c[0].type === "input_text" && typeof c[0].text === "string") {
+      // 保持数组形态亦合法，此处保留数组以支持多轮扩展；若仍遇 400，可改为 finalInput = c[0].text
+      finalInput = normalizedInput;
+      // 备选：finalInput = c[0].text; // 极简字符串形态
+    }
   }
 
   // 若 input为空且原 body 有 prompt 等，尝试从 input 字段兼容
   // 否则若仍为空，回退为单条 user 消息兜底，避免上游 400
   const out: Record<string, unknown> = {
     model: targetModel,
-    input: input.length > 0 ? input : (chatBody.input as unknown) ?? "",
+    input: (finalInput as any).length > 0 ? finalInput : (chatBody.input as unknown) ?? "",
   };
 
   if (instructions) out.instructions = instructions;
