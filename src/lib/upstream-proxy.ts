@@ -176,6 +176,8 @@ export type ProxyHealthMap = Record<string, ProxyHealthEntry>;
 export interface UpstreamProxySelection {
   dispatcher: Dispatcher | null;
   url: string | null;
+  /** 密钥级绑定代理全部不可用时的错误消息（仅 getUpstreamProxyForKey 返回） */
+  error?: string;
 }
 
 /** 单组拉取结果（管理页展示；error 非空 = 本次拉取失败/结果为空，沿用旧列表） */
@@ -1537,6 +1539,95 @@ export async function getUpstreamProxy(
     return availabilityWeight(proxyReqStats.get(u)) * latencyWeight(latency, minLatency);
   });
   return { dispatcher: await getAgent(url), url };
+}
+
+/**
+ * 密钥级代理选择：密钥绑定了代理 URL 时优先使用，否则回退平台级
+ *
+ * 优先级：密钥级绑定 > 出站代理指定（platformGroup） > 平台白名单 > 默认组
+ *
+ * @param keyProxyUrls 密钥绑定的代理 URL 数组（从 apiKeys JSON 的 proxyUrls 字段读取）
+ * @param strict 严格模式：绑定代理全部不可用时返回 error（502），否则回退平台级
+ */
+export async function getUpstreamProxyForKey(
+  db: D1Database | Database,
+  env?: WorkerEnv,
+  platformId?: string,
+  keyProxyUrls?: string[],
+  strict?: boolean
+): Promise<UpstreamProxySelection> {
+  // 无密钥级绑定：回退平台级选择（完全等价于 getUpstreamProxy）
+  if (!keyProxyUrls || keyProxyUrls.length === 0) {
+    return getUpstreamProxy(db, env, platformId);
+  }
+
+  // 非 Docker 部署：出站代理不可用，密钥绑定同样无效
+  if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) {
+    return strict !== false
+      ? { dispatcher: null, url: null, error: "出站代理不可用（非 Docker 部署或已全局禁用）" }
+      : { dispatcher: null, url: null };
+  }
+
+  const config = await readProxyConfig(db, env);
+  if (!config) {
+    return strict !== false
+      ? { dispatcher: null, url: null, error: "出站代理配置未初始化" }
+      : { dispatcher: null, url: null };
+  }
+
+  const pool = await readProxyPool(db, env);
+  const health = await readProxyHealth(db, env);
+
+  // 收集绑定代理的候选（去重 + 验证合法性）
+  const seen = new Set<string>();
+  const keyCandidates: string[] = [];
+  for (const url of keyProxyUrls) {
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    // 验证是否存在于当前配置的任意组内（防止绑定已删除的代理）
+    const inConfig = config.groups.some(
+      (g) => g.enabled && (g.urls.includes(url) || (pool[g.name] ?? []).includes(url))
+    );
+    if (inConfig) keyCandidates.push(url);
+  }
+
+  if (keyCandidates.length > 0) {
+    // 过滤不可用代理（健康检查失败 / 网络层连续失败黑名单 / 统计降权）
+    const available = keyCandidates.filter((url) => {
+      if (health[url]?.status === "fail" || unhealthyUrls.has(url)) return false;
+      const stat = proxyReqStats.get(url);
+      return stat ? !isProxyStatDegraded(stat) : true;
+    });
+
+    if (available.length > 0) {
+      // 多个可用代理时用加权轮询选一个（与平台级一致）
+      let minLatency = 0;
+      for (const u of available) {
+        const l = health[u]?.latencyMs ?? 0;
+        if (l > 0 && (minLatency === 0 || l < minLatency)) minLatency = l;
+      }
+      const url =
+        available.length === 1
+          ? available[0]
+          : pickWeightedProxy(available, (u) => {
+              const latency = health[u]?.latencyMs ?? 0;
+              return availabilityWeight(proxyReqStats.get(u)) * latencyWeight(latency, minLatency);
+            });
+      return { dispatcher: await getAgent(url), url };
+    }
+  }
+
+  // 绑定代理全部不可用（或不存在于配置中）
+  if (strict !== false) {
+    return {
+      dispatcher: null,
+      url: null,
+      error: `密钥绑定的代理全部不可用（共 ${keyProxyUrls.length} 个）`,
+    };
+  }
+
+  // 非严格模式：回退平台级代理
+  return getUpstreamProxy(db, env, platformId);
 }
 
 /**

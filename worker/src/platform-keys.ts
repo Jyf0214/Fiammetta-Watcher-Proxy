@@ -510,10 +510,32 @@ export function parseApiKeyObjects(raw: string | null | undefined): PlatformApiK
         whitelisted: k.whitelisted === true,
         enabled: k.enabled !== false,
         errorCount: typeof k.errorCount === "number" ? k.errorCount : 0,
+        proxyUrls: Array.isArray(k.proxyUrls)
+          ? (k.proxyUrls as unknown[]).filter((u): u is string => typeof u === "string").slice(0, 2)
+          : undefined,
+        proxyStrict: typeof k.proxyStrict === "boolean" ? k.proxyStrict : undefined,
       }));
   } catch {
     return [];
   }
+}
+
+/**
+ * 序列化密钥对象数组为 JSON 字符串（仅保留已定义字段，避免 undefined 污染 JSON）
+ *
+ * 多处「读 apiKeys → 修改 → 写回」共用，确保新字段（proxyUrls/proxyStrict）
+ * 在 recordKeyError/enableKey 等非编辑路径中不被静默丢弃
+ */
+function serializeKeyObjects(keys: PlatformApiKeyObject[]): string {
+  return JSON.stringify(keys.map((k) => {
+    const obj: Record<string, unknown> = { name: k.name, key: k.key };
+    if (k.whitelisted) obj.whitelisted = true;
+    if (k.enabled === false) obj.enabled = false;
+    if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
+    if (k.proxyUrls && k.proxyUrls.length > 0) obj.proxyUrls = k.proxyUrls;
+    if (k.proxyStrict === false) obj.proxyStrict = false;
+    return obj;
+  }));
 }
 
 // ==================== 密钥错误计数与自动禁用 ====================
@@ -590,13 +612,7 @@ export async function recordKeyError(
       }
 
       // 更新整个 apiKeys JSON 字段
-      const updatedJson = JSON.stringify(keys.map((k) => {
-        const obj: Record<string, unknown> = { name: k.name, key: k.key };
-        if (k.whitelisted) obj.whitelisted = true;
-        if (k.enabled === false) obj.enabled = false;
-        if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
-        return obj;
-      }));
+      const updatedJson = serializeKeyObjects(keys);
 
       await prisma.platforms.update({
         where: { id: platformId },
@@ -668,13 +684,7 @@ export async function enableKey(
       target.enabled = true;
       target.errorCount = 0;
 
-      const updatedJson = JSON.stringify(keys.map((k) => {
-        const obj: Record<string, unknown> = { name: k.name, key: k.key };
-        if (k.whitelisted) obj.whitelisted = true;
-        if (k.enabled === false) obj.enabled = false;
-        if (k.errorCount && k.errorCount > 0) obj.errorCount = k.errorCount;
-        return obj;
-      }));
+      const updatedJson = serializeKeyObjects(keys);
 
       await prisma.platforms.update({
         where: { id: platformId },

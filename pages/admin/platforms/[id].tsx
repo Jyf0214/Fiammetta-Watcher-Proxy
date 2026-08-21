@@ -93,6 +93,15 @@ export default function PlatformDetailPage() {
     return { banned, deprioritized, total: banned + deprioritized };
   }, [platform]);
 
+  // 可用代理 URL 列表（供密钥级代理绑定选择器）
+  const [availableProxyUrls, setAvailableProxyUrls] = useState<Array<{ url: string; group: string; enabled: boolean }>>([]);
+  useEffect(() => {
+    fetch("/api/admin/upstream-proxy/urls")
+      .then((r) => r.json())
+      .then((d: unknown) => { const r = d as { success: boolean; data?: Array<{ url: string; group: string; enabled: boolean }> }; if (r.success && Array.isArray(r.data)) setAvailableProxyUrls(r.data); })
+      .catch(() => {});
+  }, []);
+
   // 请求失败提示（401 已由 fetcher 统一提示并跳转登录页）
   useEffect(() => {
     if (listError && listError.message !== UNAUTHORIZED_MESSAGE) {
@@ -212,6 +221,18 @@ export default function PlatformDetailPage() {
     message.info(newState ? t("whitelistAdded") : t("whitelistRemoved"));
   };
 
+  const handleUpdateKeyProxyUrls = (index: number, urls: string[]) => {
+    const next = [...namedKeys];
+    next[index] = { ...next[index], proxyUrls: urls.length > 0 ? urls : undefined };
+    setNamedKeys(next);
+  };
+
+  const handleUpdateKeyProxyStrict = (index: number, strict: boolean) => {
+    const next = [...namedKeys];
+    next[index] = { ...next[index], proxyStrict: strict ? undefined : false };
+    setNamedKeys(next);
+  };
+
   const handleToggleKey = async (index: number, enabled: boolean) => {
     if (!id || isNew) return;
     const targetKey = namedKeys[index]?.key;
@@ -262,6 +283,8 @@ export default function PlatformDetailPage() {
             if (k.whitelisted) obj.whitelisted = true;
             if (k.enabled === false) obj.enabled = false;
             if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+            if (k.proxyUrls && k.proxyUrls.length > 0) obj.proxyUrls = k.proxyUrls;
+            if (k.proxyStrict === false) obj.proxyStrict = false;
             return obj;
           })
         );
@@ -516,6 +539,9 @@ export default function PlatformDetailPage() {
       onCopyKey={copyKeyValue}
       onToggleWhitelist={handleToggleWhitelist}
       onToggleKey={handleToggleKey}
+      onUpdateKeyProxyUrls={handleUpdateKeyProxyUrls}
+      onUpdateKeyProxyStrict={handleUpdateKeyProxyStrict}
+      availableProxyUrls={availableProxyUrls}
       onSubmit={handleSubmit}
       submitting={submitting}
       onDelete={handleDelete}

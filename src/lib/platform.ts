@@ -9,6 +9,10 @@ export interface NamedApiKey {
   whitelisted?: boolean;
   enabled?: boolean;
   errorCount?: number;
+  /** 密钥级代理绑定 URL 列表（最多 2 个） */
+  proxyUrls?: string[];
+  /** 严格绑定模式：true=绑定代理不可用时 502，false=回退平台级（默认 true） */
+  proxyStrict?: boolean;
 }
 
 /** 解析平台密钥列表（兼容 JSON 字符串与已解析数组两种形态）；namePrefix 为默认密钥名前缀 */
@@ -27,14 +31,19 @@ export function parseNamedKeys(platform: Platform | null, namePrefix = "Key"): N
   }
   if (Array.isArray(arr) && arr.length > 0) {
     if (typeof arr[0] === "object" && arr[0] !== null && "key" in arr[0]) {
-      arr.forEach((item: { name?: string; key: string; whitelisted?: boolean; enabled?: boolean; errorCount?: number }) => {
-        if (item && typeof item.key === "string" && item.key.trim()) {
+      arr.forEach((item: Record<string, unknown>) => {
+        if (item && typeof item.key === "string" && (item.key as string).trim()) {
+          const proxyUrls = Array.isArray(item.proxyUrls)
+            ? (item.proxyUrls as unknown[]).filter((u): u is string => typeof u === "string").slice(0, 2)
+            : undefined;
           parsed.push({
-            name: item.name || `${namePrefix}${parsed.length + 1}`,
-            key: item.key,
-            whitelisted: !!item.whitelisted,
+            name: (typeof item.name === "string" && item.name) || `${namePrefix}${parsed.length + 1}`,
+            key: (item.key as string).trim(),
+            whitelisted: item.whitelisted === true,
             enabled: item.enabled !== false,
             errorCount: typeof item.errorCount === "number" ? item.errorCount : 0,
+            proxyUrls: proxyUrls && proxyUrls.length > 0 ? proxyUrls : undefined,
+            proxyStrict: item.proxyStrict === false ? false : undefined,
           });
         }
       });

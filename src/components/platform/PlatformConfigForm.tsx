@@ -13,6 +13,8 @@ import {
   ClipboardPaste,
   AlertCircle,
   Settings,
+  Link2,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
@@ -33,6 +35,9 @@ export function PlatformConfigForm({
   onCopyKey,
   onToggleWhitelist,
   onToggleKey,
+  onUpdateKeyProxyUrls,
+  onUpdateKeyProxyStrict,
+  availableProxyUrls,
   onSubmit,
   submitting,
   onDelete,
@@ -54,6 +59,9 @@ export function PlatformConfigForm({
   onCopyKey: (k: string) => void;
   onToggleWhitelist: (i: number) => void;
   onToggleKey: (i: number, enabled: boolean) => void;
+  onUpdateKeyProxyUrls: (i: number, urls: string[]) => void;
+  onUpdateKeyProxyStrict: (i: number, strict: boolean) => void;
+  availableProxyUrls: Array<{ url: string; group: string; enabled: boolean }>;
   onSubmit: () => void;
   submitting: boolean;
   onDelete: () => void;
@@ -68,6 +76,7 @@ export function PlatformConfigForm({
 
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
+  const [expandedProxyIndex, setExpandedProxyIndex] = useState<number | null>(null);
 
   // 认证类/协议管控头禁止透传（与代理层 FORBIDDEN_FORWARD_HEADERS 双端一致，W7）：
   // 透传白名单可覆盖平台密钥，导致 401 封禁循环或 BYOK 绕过计费
@@ -300,7 +309,65 @@ export function PlatformConfigForm({
                         >
                           <Trash2 size={13} />
                         </button>
+                        {availableProxyUrls.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedProxyIndex(expandedProxyIndex === index ? null : index)}
+                            disabled={!namedKey.key}
+                            className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                              namedKey.proxyUrls && namedKey.proxyUrls.length > 0
+                                ? "text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30"
+                                : "text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                            }`}
+                            title={t("proxyBindTip")}
+                          >
+                            <Link2 size={14} className="inline" />
+                            <span className="hidden sm:inline ml-0.5">{t("proxyBind")}</span>
+                          </button>
+                        )}
                         </div>
+                      {/* 代理绑定面板（可折叠） */}
+                      {expandedProxyIndex === index && (
+                        <div className="mt-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-700/40 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyBindLabel")}</span>
+                            <Select
+                              mode="multiple"
+                              size="small"
+                              value={namedKey.proxyUrls ?? []}
+                              onChange={(v: string[]) => onUpdateKeyProxyUrls(index, v.slice(0, 2))}
+                              maxTagCount={2}
+                              placeholder={t("proxyBindPlaceholder")}
+                              className="flex-1"
+                              options={availableProxyUrls.map((p) => ({
+                                value: p.url,
+                                label: (
+                                  <span className="flex items-center gap-1.5 text-xs">
+                                    <span className="truncate max-w-[180px]">{p.url.replace(/^https?:\/\//, "").replace(/\/\/.*@/, "//***@")}</span>
+                                    <span className="text-[10px] text-zinc-400 shrink-0">{p.group}</span>
+                                    {!p.enabled && <span className="text-[10px] text-orange-400 shrink-0">off</span>}
+                                  </span>
+                                ),
+                              }))}
+                              disabled={!namedKey.key}
+                              maxTagPlaceholder={(omitted) => `+${omitted.length}`}
+                            />
+                          </div>
+                          {namedKey.proxyUrls && namedKey.proxyUrls.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyStrictLabel")}</span>
+                              <Switch
+                                checked={namedKey.proxyStrict !== false}
+                                onChange={(checked) => onUpdateKeyProxyStrict(index, checked)}
+                                className="!h-[18px] !w-[32px]"
+                              />
+                              <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                                {namedKey.proxyStrict !== false ? t("proxyStrictOn") : t("proxyStrictOff")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       </div>
                     ))}
                   </div>

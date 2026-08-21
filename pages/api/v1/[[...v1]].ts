@@ -11,12 +11,12 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
-import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending } from "../../../worker/src/load-balancer";
+import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "../../../worker/src/load-balancer";
 import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
-import { getUpstreamProxy, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
+import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
@@ -474,11 +474,18 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       headers.set("User-Agent", cur.customUserAgent);
     }
     // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
-    let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
+    let proxy: Awaited<ReturnType<typeof getUpstreamProxyForKey>> | null = null;
     try {
-      // 出站代理（仅 Docker 部署，DEPLOY_PLATFORM=docker）：上游请求经代理
-      // 服务器出网；其他部署形态返回 null（直连），边缘运行时不受影响
-      proxy = await getUpstreamProxy(dummyDb, env, cur.id);
+      // 密钥级代理绑定优先：从当前使用的上游密钥对象中读取 proxyUrls/proxyStrict，
+      // 有绑定时走 getUpstreamProxyForKey（优先使用密钥绑定代理），
+      // 无绑定时由 getUpstreamProxyForKey 内部回退到平台级代理选择
+      const keyObj = cur.apiKeyObjects?.find((o) => o.key === curKey);
+      proxy = await getUpstreamProxyForKey(dummyDb, env, cur.id, keyObj?.proxyUrls, keyObj?.proxyStrict);
+      if (proxy.error) {
+        clearTimeout(upstreamTimeoutId);
+        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: proxy.error, db: dummyDb, env }); } catch {}
+        sendV1Error(res, config, 502, proxy.error, "upstream_error"); return;
+      }
       upRes = await fetch(url, { method: "POST", headers, body: multipart ? new Uint8Array(multipart.raw) : JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}) });
     }
     catch (e) {
@@ -563,6 +570,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
     // 自动禁用阈值（5 次）被系统性稀释（与 Worker 版 proxy.ts 对齐）
     await banKey(curKey, undefined, cur.id, env?.KV);
+    // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
+    // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位
+    if (upRes.status === 429) recordPlatform429(cur.id);
     // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
     void recordKeyError(curKey, isEmptyResponse ? 502 : upRes.status, cur.id, dummyDb, env).catch(() => {});
     console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
@@ -577,7 +587,14 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       // 被 handleUpstreamResponsePages 消费过，此处 arrayBuffer 会 reject 被吞，安全）
       void upRes.arrayBuffer().catch(() => {});
       const nk = getRandomKeyExcept(cur, tried);
-      if (nk) { curKey = nk; continue; }
+      if (nk) {
+        // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
+        // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
+        // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）
+        const backoffMs = Math.min(250 * Math.pow(2, attempt), 2000) + Math.random() * 250;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        curKey = nk; continue;
+      }
       const ops = getPlatformsForModel(tgt, triedP);
       if (ops.length > 0) {
         // 复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择（与 Worker 版一致）
@@ -820,6 +837,9 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       if (platformKey && (streamError.code === 429 || streamError.code === 401 || streamError.code === 402 || streamError.code === 403)) {
         try { await banKey(platformKey, undefined, platform.id, env?.KV); } catch {}
         try { await recordKeyError(platformKey, streamError.code, platform.id, dummyDb, env); } catch {}
+        // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
+        if (streamError.code === 429) recordPlatform429(platform.id);
       }
       if (proxyUrl) recordProxyTraffic(proxyUrl, streamError.code);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, proxyUrl, db: dummyDb, env }).catch(() => {});

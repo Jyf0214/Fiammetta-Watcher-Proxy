@@ -345,6 +345,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                 if (k.whitelisted === true) obj.whitelisted = true;
                 if (k.enabled === false) obj.enabled = false;
                 if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+                if (Array.isArray(k.proxyUrls)) {
+                  const urls = (k.proxyUrls as unknown[]).filter((u): u is string => typeof u === "string" && u.trim().length > 0).slice(0, 2);
+                  if (urls.length > 0) obj.proxyUrls = urls;
+                }
+                if (k.proxyStrict === false) obj.proxyStrict = false;
                 return obj;
               });
             updateData.apiKeys = JSON.stringify(validKeys);

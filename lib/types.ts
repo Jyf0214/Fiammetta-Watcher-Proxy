@@ -50,6 +50,10 @@ export interface PlatformApiKeyObject {
   whitelisted?: boolean;
   enabled?: boolean;
   errorCount?: number;
+  /** 密钥级代理绑定：指定该密钥使用的出站代理 URL（最多 2 个） */
+  proxyUrls?: string[];
+  /** 严格绑定模式：true=绑定代理不可用时返回 502；false=回退平台级代理（默认 true） */
+  proxyStrict?: boolean;
 }
 
 // ==================== 模型映射类型 ====================
