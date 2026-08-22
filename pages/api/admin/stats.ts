@@ -82,40 +82,37 @@ export default async function handler(
     const now = Math.floor(Date.now() / 1000);
     const todayStart = now - (now % 86400);
 
-    // 历史（已归档）：daily_stats 全量行，在 JS 中累加。
-    // 行数 = 归档天数 × (keyId, model) 组合数，管理后台规模下为万级；
-    // 不直接用 SQL aggregate 是因为 avgTtft/avgDuration 是均值，
-    // 加权平均需要逐行取 avg × 样本数，SQL 无法表达乘积和
-    const histRows = await db.dailyStats.findMany({
-      select: {
-        totalRequests: true,
-        errorRequests: true,
-        totalTokens: true,
-        avgTtft: true,
-        avgDuration: true,
-        avgTps: true,
-      },
-    });
-
-    // 未归档明细下界：与 log-archiver 的归档截止天对齐（见文件头说明）。
-    // 归档从未跑（daily_stats 为空）时不做下界限制、全量扫描明细兜底，
-    // 避免统计永久缩水 RETENTION_DAYS 天（plan.md #26）
-    const detailSince = histRows.length > 0 ? todayStart - RETENTION_DAYS * 86400 : 0;
-
-    // 并行查询所有统计数据
+    // 并行查询历史与明细统计：histRows 与其他聚合无依赖，纳入同一 Promise.all
+    // 行为等价：detailSince 的计算依赖 histRows 是否为空，改为在 Promise 内用
+    // 已返回的 histRows 长度判断，不增加往返。
     const [
+      histRows,
       activePlatforms,
       totalKeys,
       activeKeys,
-      detailAgg,
-      perfAgg,
     ] = await Promise.all([
+      db.dailyStats.findMany({
+        select: {
+          totalRequests: true,
+          errorRequests: true,
+          totalTokens: true,
+          avgTtft: true,
+          avgDuration: true,
+          avgTps: true,
+        },
+      }),
       // 启用的平台数
       db.platforms.count({ where: { enabled: true } }),
       // API Key 总数
       db.apiKeys.count(),
       // 活跃 API Key 数
       db.apiKeys.count({ where: { status: "active" } }),
+    ]);
+    // 未归档明细下界：与 log-archiver 的归档截止天对齐（见文件头说明）。
+    const detailSince = histRows.length > 0 ? todayStart - RETENTION_DAYS * 86400 : 0;
+
+    // 明细聚合并行（2 个 aggregate）
+    const [detailAgg, perfAgg] = await Promise.all([
       // 明细（未归档，含今日）：请求总数 + 总 token（含错误请求）
       db.requestLogs.aggregate({
         where: { createdAt: { gte: detailSince } },

@@ -87,28 +87,32 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
     let resetCount = 0;
     const currentTime = Math.floor(Date.now() / 1000);
 
-    for (const key of keysToCheck) {
-      if (!needsReset(key)) continue;
-
-      await prisma.apiKeys.update({
-        where: { id: key.id },
-        data: {
-          // Next.js SWC 构建 target 低于 ES2020 不支持 0n 字面量；number 写入
-          // Prisma BigInt 字段自动转换，运行时读出仍为 bigint
-          usedTokens: 0,
-          updatedAt: currentTime,
-        },
-      });
-
-      // 保留期外日志的删除由 log-archiver 全权负责（聚合进 daily_stats 后
-      // 按 id 删除），此处不重复删除——archiver 未运行时直接删明细会造成
-      // 统计空洞（既不留在 request_logs 也不进 daily_stats）
-      resetCount++;
-      console.log(
-        `[key-reset] 已重置 Key "${key.name}" (${key.id.slice(0, 8)}...) ` +
-          `resetPeriod=${key.resetPeriod} usedTokens=${key.usedTokens}→0`
-      );
-    }
+    // 并行重置：串行 await 每 Key 一次往返，改为 Promise.allSettled 并行
+    const toReset = keysToCheck.filter(needsReset);
+    const results = await Promise.allSettled(
+      toReset.map(async (key) => {
+        try {
+          await prisma.apiKeys.update({
+            where: { id: key.id },
+            data: {
+              // Next.js SWC 构建 target 低于 ES2020 不支持 0n 字面量；number 写入
+              // Prisma BigInt 字段自动转换，运行时读出仍为 bigint
+              usedTokens: 0,
+              updatedAt: currentTime,
+            },
+          });
+          console.log(
+            `[key-reset] 已重置 Key "${key.name}" (${key.id.slice(0, 8)}...) ` +
+              `resetPeriod=${key.resetPeriod} usedTokens=${key.usedTokens}→0`
+          );
+          return true;
+        } catch (err: unknown) {
+          console.error(`[key-reset] 重置 Key ${key.id} 失败:`, err instanceof Error ? err.message : String(err));
+          return false;
+        }
+      })
+    );
+    resetCount = results.filter((r) => r.status === "fulfilled" && r.value).length;
 
     if (resetCount > 0) {
       console.log(`[key-reset] 本轮重置了 ${resetCount} 个 API Key 的用量`);
@@ -129,29 +133,29 @@ export async function handleScheduledReset(db: D1Database, env?: WorkerEnv): Pro
     });
 
     let restoredCount = 0;
-    for (const p of abnormalPlatforms) {
-      // cooldown 为空或已过期 → 恢复健康
-      if (!p.cooldownEnd || p.cooldownEnd <= now) {
-        await prisma.platforms.update({
-          where: { id: p.id },
-          data: {
-            status: "healthy",
-            failCount: 0,
-            cooldownEnd: null,
-            lastFailAt: null,
-          },
-        });
-        // 同步内存熔断态：DB healthy 但 breaker 仍 open/half-open 时路由继续
-        // 跳过该平台，造成"管理页显示 healthy 但请求全被熔断"的状态跳变
-        // （plan.md #24）。仅清熔断条目：closed 条目的失败计数是熔断阈值的
-        // 一部分，无条件清除会让慢速失败平台计数每小时归零、永远不熔断
-        resetCircuitBreakerIfTripped(p.id);
-        restoredCount++;
-        console.log(
-          `[key-reset] 平台 "${p.name}" (${p.id.slice(0, 8)}...) 状态恢复为 healthy`
-        );
-      }
-    }
+    const toRestore = abnormalPlatforms.filter((p) => !p.cooldownEnd || p.cooldownEnd <= now);
+    const restoreResults = await Promise.allSettled(
+      toRestore.map(async (p) => {
+        try {
+          await prisma.platforms.update({
+            where: { id: p.id },
+            data: {
+              status: "healthy",
+              failCount: 0,
+              cooldownEnd: null,
+              lastFailAt: null,
+            },
+          });
+          resetCircuitBreakerIfTripped(p.id);
+          console.log(`[key-reset] 平台 "${p.name}" (${p.id.slice(0, 8)}...) 状态恢复为 healthy`);
+          return true;
+        } catch (err: unknown) {
+          console.error(`[key-reset] 恢复平台 ${p.id} 失败:`, err instanceof Error ? err.message : String(err));
+          return false;
+        }
+      })
+    );
+    restoredCount = restoreResults.filter((r) => r.status === "fulfilled" && r.value).length;
 
     if (restoredCount > 0) {
       console.log(`[key-reset] 本轮恢复了 ${restoredCount} 个异常平台`);

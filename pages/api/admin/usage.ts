@@ -79,33 +79,30 @@ export default async function handler(
       where.keyId = keyId;
     }
 
-    // 用 groupBy 在数据库层面完成聚合，避免全量拉取日志到内存
-    // 注意：不能标注 any[]，否则会干扰 Prisma groupBy 泛型推断（参数被推断成 any[] 交叉类型）
-    const grouped = await orm.requestLogs.groupBy({
-      by: ["keyId"],
-      where,
-      _count: { id: true },
-      _sum: {
-        tokens: true,
-        promptTokens: true,
-        completionTokens: true,
-        ttft: true,
-        latency: true,
-      },
-      _min: { createdAt: true },
-      _max: { createdAt: true },
-    });
-
-    // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求。
-    // 错误请求的 latency/ttft 是真实耗时（非 0，超时最高 120s），若计入分母
-    // 会系统性抬高均值；请求总数/Token 仍取上方全量口径（与仪表盘 stats.ts 的
-    // perfAgg/detailAgg 双聚合一致）
-    const perfGrouped = await orm.requestLogs.groupBy({
-      by: ["keyId"],
-      where: { ...where, isError: false },
-      _count: { id: true },
-      _sum: { ttft: true, latency: true },
-    });
+    // 用 groupBy 在数据库层面完成聚合，并行化 2 路查询（行为等价，P95 从 2*RTT 降至 1*RTT）
+    const [grouped, perfGrouped] = await Promise.all([
+      orm.requestLogs.groupBy({
+        by: ["keyId"],
+        where,
+        _count: { id: true },
+        _sum: {
+          tokens: true,
+          promptTokens: true,
+          completionTokens: true,
+          ttft: true,
+          latency: true,
+        },
+        _min: { createdAt: true },
+        _max: { createdAt: true },
+      }),
+      // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求。
+      orm.requestLogs.groupBy({
+        by: ["keyId"],
+        where: { ...where, isError: false },
+        _count: { id: true },
+        _sum: { ttft: true, latency: true },
+      }),
+    ]);
     const perfMap = new Map<string, typeof perfGrouped[number]>(
       perfGrouped
         .filter((g: typeof perfGrouped[number]) => g.keyId != null)

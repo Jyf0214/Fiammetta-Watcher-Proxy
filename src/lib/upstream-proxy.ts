@@ -922,6 +922,79 @@ async function readProxyHealth(
   return cachedHealth ?? {};
 }
 
+/**
+ * 批量读取代理三态（配置/池/健康）——热路径优化
+ * 单次 findMany where key in [3] 替代 3 次串行 findFirst；
+ * TTL 内先做单次 value 批量比对命中则 0 额外往返，未命中再单次拉全量。
+ * 行为与三次独立 read* 完全等价：value 内容为失效信号、读失败保留旧缓存。
+ */
+async function readProxyStateBatch(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<{ config: ProxyConfig | null; pool: Record<string, string[]>; health: ProxyHealthMap }> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const now = Date.now();
+  const configFresh = lastConfigRefresh !== 0 && now - lastConfigRefresh < CACHE_TTL;
+  const poolFresh = lastPoolRefresh !== 0 && now - lastPoolRefresh < CACHE_TTL;
+  const healthFresh = lastHealthRefresh !== 0 && now - lastHealthRefresh < CACHE_TTL;
+  // 三者皆新鲜时用单次批量 value 比对（findMany 不可用时回退单键并行比对，兼容测试 mock）
+  // 配置为空（null）时仅校验配置键，避免无配置场景下无谓读取健康/池表（保持原行为）
+  if (configFresh && poolFresh && healthFresh) {
+    try {
+      const prismaAny = prisma as any;
+      const needFull = cachedConfig !== null;
+      if (typeof prismaAny.configs.findMany === "function") {
+        const keys = needFull ? [UPSTREAM_PROXY_CONFIG_KEY, UPSTREAM_PROXY_POOL_KEY, UPSTREAM_PROXY_HEALTH_KEY] : [UPSTREAM_PROXY_CONFIG_KEY];
+        const rows = await prismaAny.configs.findMany({
+          where: { key: { in: keys } },
+          select: { key: true, value: true },
+        });
+        const m = new Map(rows.map((r: any) => [r.key, r.value as string]));
+        const cv = (m.get(UPSTREAM_PROXY_CONFIG_KEY) ?? null) as string | null;
+        if (!needFull) {
+          if ((cv ?? null) === (cachedConfigValue ?? null)) {
+            return { config: cachedConfig, pool: cachedPool ?? {}, health: cachedHealth ?? {} };
+          }
+        } else {
+          const pv = (m.get(UPSTREAM_PROXY_POOL_KEY) ?? null) as string | null;
+          const hv = (m.get(UPSTREAM_PROXY_HEALTH_KEY) ?? null) as string | null;
+          // 行缺失时 Map 返回 undefined，归一 null 再比对
+          if ((cv ?? null) === (cachedConfigValue ?? null) && (pv ?? null) === (cachedPoolValue ?? null) && (hv ?? null) === (cachedHealthValue ?? null)) {
+            return { config: cachedConfig, pool: cachedPool ?? {}, health: cachedHealth ?? {} };
+          }
+        }
+      } else {
+        // 测试 mock 仅提供 findFirst，回退并行比对（行为等价）
+        if (!needFull) {
+          const cr = await prismaAny.configs.findFirst({ where: { key: UPSTREAM_PROXY_CONFIG_KEY }, select: { value: true } });
+          if ((cr?.value ?? null) === (cachedConfigValue ?? null)) {
+            return { config: cachedConfig, pool: cachedPool ?? {}, health: cachedHealth ?? {} };
+          }
+        } else {
+          const [cr, pr, hr] = await Promise.all([
+            prismaAny.configs.findFirst({ where: { key: UPSTREAM_PROXY_CONFIG_KEY }, select: { value: true } }),
+            prismaAny.configs.findFirst({ where: { key: UPSTREAM_PROXY_POOL_KEY }, select: { value: true } }),
+            prismaAny.configs.findFirst({ where: { key: UPSTREAM_PROXY_HEALTH_KEY }, select: { value: true } }),
+          ]);
+          if ((cr?.value ?? null) === (cachedConfigValue ?? null) && (pr?.value ?? null) === (cachedPoolValue ?? null) && (hr?.value ?? null) === (cachedHealthValue ?? null)) {
+            return { config: cachedConfig, pool: cachedPool ?? {}, health: cachedHealth ?? {} };
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[upstream-proxy] 三态批量失效检查失败，使用缓存:", err);
+      return { config: cachedConfig, pool: cachedPool ?? {}, health: cachedHealth ?? {} };
+    }
+  }
+  // 未命中批量比对：回退并行拉取（仍比串行快 3 倍），各自维护 TTL 与容错语义
+  const [config, pool, health] = await Promise.all([
+    readProxyConfig(db, env),
+    readProxyPool(db, env),
+    readProxyHealth(db, env),
+  ]);
+  return { config, pool, health };
+}
+
 /** 写入健康度记录并同步内存缓存 */
 async function writeProxyHealth(
   db: D1Database | Database,
@@ -980,11 +1053,15 @@ async function withHealthLock<T>(
  * socksDispatcher（undici Agent 子类，经 socks 连接后转发 HTTP 流量）。
  * 两者都实现 undici Dispatcher 接口，请求路径统一传 fetch 的 dispatcher 选项
  */
+// 缓存动态 import Promise，避免每请求一次 import 开销
+let socksImportPromise: Promise<any> | null = null;
+let undiciImportPromise: Promise<any> | null = null;
 async function getAgent(url: string): Promise<Dispatcher> {
-  let agent = proxyAgents.get(url);
+  let agent: Dispatcher | undefined = proxyAgents.get(url);
   if (!agent) {
     if (/^socks[45]:\/\//i.test(url)) {
-      const { socksDispatcher } = await import("fetch-socks");
+      socksImportPromise ??= import("fetch-socks");
+      const { socksDispatcher } = await socksImportPromise;
       const parsed = new URL(url);
       // WHATWG URL 对 userinfo 中畸形百分号序列不报错原样保留，decodeURIComponent
       // 会抛 URIError 使请求 500 且该代理无法被黑名单机制标记——解码失败回退原值
@@ -1008,19 +1085,20 @@ async function getAgent(url: string): Promise<Dispatcher> {
       ];
       agent = socksDispatcher(proxies) as unknown as Dispatcher;
     } else {
-      const { ProxyAgent } = await import("undici");
+      undiciImportPromise ??= import("undici");
+      const { ProxyAgent } = await undiciImportPromise;
       agent = new ProxyAgent(url);
     }
     // 并发创建竞态：另一请求可能已抢先注册同一 url（await import 是异步点），
     // 丢弃本实例避免孤儿代理泄漏
     const existing = proxyAgents.get(url);
     if (existing) {
-      void agent.close().catch(() => {});
+      void (agent as Dispatcher).close().catch(() => {});
       return existing;
     }
-    proxyAgents.set(url, agent);
+    proxyAgents.set(url, agent as Dispatcher);
   }
-  return agent;
+  return agent as Dispatcher;
 }
 
 /**
@@ -1445,7 +1523,8 @@ export async function getUpstreamProxy(
   // （all）时业务请求直连，不读配置、不建代理连接
   if (process.env.DEPLOY_PLATFORM !== "docker" || isUpstreamProxyDisabled()) return { dispatcher: null, url: null };
 
-  const config = await readProxyConfig(db, env);
+  // 热路径单次批量读取三态（TTL 命中时单次 findMany 比对，未命中并行 3 读）
+  const { config, pool, health } = await readProxyStateBatch(db, env);
   if (!config) {
     // 配置未配置或首次加载失败（读失败保留旧缓存，仅首次无缓存时降级直连）：
     // 回收全部连接（仅首次/重载时执行，热路径跳过）
@@ -1468,10 +1547,9 @@ export async function getUpstreamProxy(
   const group = resolveTargetGroup(config, platformId);
   if (!group) {
     // 目标组被禁用：返回直连，同时回收该组代理连接（keepUrls 不含禁用组）
-    await syncStaleAgentsOnce(config, await readProxyPool(db, env));
+    await syncStaleAgentsOnce(config, pool);
     return { dispatcher: null, url: null };
   }
-  const pool = await readProxyPool(db, env);
   const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
   if (groupUrls.length === 0) {
     // 组内无代理（如拉取尚未成功）：返回直连，同时保持代理池与其他组同步
@@ -1481,8 +1559,6 @@ export async function getUpstreamProxy(
 
   // 保持代理池与全部组配置集合同步（跨组复用连接）
   await syncStaleAgentsOnce(config, pool);
-
-  const health = await readProxyHealth(db, env);
   const candidates = groupUrls.filter(
     (url) => {
       // 黑名单（连续网络层失败达阈值）直接排除；统计降权（窗口内错误率过高，
@@ -1569,15 +1645,12 @@ export async function getUpstreamProxyForKey(
       : { dispatcher: null, url: null };
   }
 
-  const config = await readProxyConfig(db, env);
+  const { config, pool, health } = await readProxyStateBatch(db, env);
   if (!config) {
     return strict !== false
       ? { dispatcher: null, url: null, error: "出站代理配置未初始化" }
       : { dispatcher: null, url: null };
   }
-
-  const pool = await readProxyPool(db, env);
-  const health = await readProxyHealth(db, env);
 
   // 收集绑定代理的候选（去重 + 验证合法性）
   const seen = new Set<string>();

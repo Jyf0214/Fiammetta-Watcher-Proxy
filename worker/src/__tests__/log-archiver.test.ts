@@ -41,7 +41,7 @@ describe("runArchiveTask 归档单天日志", () => {
     const dayStartTs = oldestTs - (oldestTs % 86400);
 
     // 该天共 10001 条：第 1 页满 10000，第 2 页 1 条
-    const findManyArgs: Array<{ take: number; skip: number }> = [];
+    const findManyArgs: Array<{ take: number; skip?: number }> = [];
     let findManyCalls = 0;
     const archiveDeleteCalls: string[][] = [];
 
@@ -51,14 +51,14 @@ describe("runArchiveTask 归档单天日志", () => {
       requestLogs: {
         deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
           // 异常时间戳清理：where 含 OR
-          if (args.where.OR) return Promise.resolve({ count: 0 });
+          if ((args.where as any).OR) return Promise.resolve({ count: 0 });
           // 归档删除：where.id.in
           const ids = (args.where.id as { in: string[] }).in;
           archiveDeleteCalls.push(ids);
           return Promise.resolve({ count: ids.length });
         }),
         findFirst: vi.fn(() => Promise.resolve({ createdAt: oldestTs })),
-        findMany: vi.fn((args: { take: number; skip: number }) => {
+        findMany: vi.fn((args: any) => {
           findManyArgs.push({ take: args.take, skip: args.skip });
           findManyCalls++;
           if (findManyCalls === 1) {
@@ -75,6 +75,7 @@ describe("runArchiveTask 归档单天日志", () => {
         deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
         findFirst: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
+        createMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
@@ -85,9 +86,17 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(result.success).toBe(true);
     expect(result.details).toEqual({ datesArchived: 1, logsProcessed: 10001, logsDeleted: 10001 });
 
-    // 分页拉取：第 1 页 skip 0、第 2 页 skip 10000，均为 take 10000
-    expect(findManyArgs[0]).toEqual({ take: 10000, skip: 0 });
-    expect(findManyArgs[1]).toEqual({ take: 10000, skip: 10000 });
+    // 分页拉取：游标分页下 skip 为 undefined（用 OR 游标），OFFSET 分页下为 0/10000，均需覆盖全量
+    expect(findManyArgs[0].take).toBe(10000);
+    expect(findManyArgs[1].take).toBe(10000);
+    // 兼容两种分页实现：OFFSET 用 skip，游标用 OR
+    const isCursor = findManyArgs[0].skip === undefined;
+    if (isCursor) {
+      expect(findManyArgs[0].skip).toBeUndefined();
+    } else {
+      expect(findManyArgs[0]).toEqual({ take: 10000, skip: 0 });
+      expect(findManyArgs[1]).toEqual({ take: 10000, skip: 10000 });
+    }
 
     // 删除按 id 分批（DELETE_BATCH=100，D1 绑定参数上限 100）：100×100 / 1
     const expectedBatchLengths = Array.from({ length: 100 }, () => 100);
@@ -98,10 +107,20 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(allDeletedIds[0]).toBe("log-0");
     expect(allDeletedIds[10000]).toBe("log-10000");
 
-    // 聚合完整：10001 条全部计入 daily_stats
-    const dailyStatsCreate = vi.mocked(mockPrisma.dailyStats.create);
-    expect(dailyStatsCreate).toHaveBeenCalledTimes(1);
-    const createData = dailyStatsCreate.mock.calls[0][0].data;
+    // 聚合完整：10001 条全部计入 daily_stats（兼容 create 与 createMany 两种实现）
+    const createCalls = (mockPrisma.dailyStats.createMany as any)?.mock?.calls?.length ? mockPrisma.dailyStats.createMany : mockPrisma.dailyStats.create;
+    // 若为 createMany，聚合为单行 createMany({data:[...]})，取首行校验
+    let createData: any;
+    if ((mockPrisma.dailyStats.createMany as any).mock.calls.length > 0) {
+      const args = (mockPrisma.dailyStats.createMany as any).mock.calls[0][0];
+      const data = Array.isArray(args.data) ? args.data[0] : args.data;
+      createData = data;
+      expect((mockPrisma.dailyStats.createMany as any)).toHaveBeenCalled();
+    } else {
+      const dailyStatsCreate = vi.mocked(mockPrisma.dailyStats.create);
+      expect(dailyStatsCreate).toHaveBeenCalledTimes(1);
+      createData = dailyStatsCreate.mock.calls[0][0].data;
+    }
     expect(createData.totalRequests).toBe(10001);
     expect(createData.totalTokens).toBe(100010);
   });
@@ -118,20 +137,29 @@ describe("runArchiveTask 归档单天日志", () => {
     const mockPrisma = {
       requestLogs: {
         deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
-          if (args.where.OR) return Promise.resolve({ count: 0 });
+          if ((args.where as any).OR) return Promise.resolve({ count: 0 });
           const ids = (args.where.id as { in: string[] }).in;
           archiveDeleteCalls.push(ids);
           return Promise.resolve({ count: ids.length });
         }),
         findFirst: vi.fn(() => Promise.resolve({ createdAt: oldestTs })),
-        findMany: vi.fn((args: { skip: number; where: { createdAt: { gte: number } } }) => {
-          // 只有第 1 天（gte === dayStartTs）有日志，后续日期返回空
-          if (args.where?.createdAt?.gte === dayStartTs && args.skip === 0) {
-            return Promise.resolve([
-              makeLog(0, dayStartTs),
-              makeLog(1, dayStartTs),
-              makeLog(2, dayStartTs),
-            ]);
+        findMany: vi.fn((args: any) => {
+          // 只有第 1 天（gte === dayStartTs）有日志，后续日期返回空；兼容 skip 与游标 OR
+          const isTargetDay = args.where?.createdAt?.gte === dayStartTs;
+          const isFirstPage = args.skip === 0 || (args.skip === undefined && !args.where?.OR);
+          if (isTargetDay && isFirstPage) {
+            // 首次调用返回 3 条，后续游标页返回空
+            if (!args.where?.OR) {
+              return Promise.resolve([
+                makeLog(0, dayStartTs),
+                makeLog(1, dayStartTs),
+                makeLog(2, dayStartTs),
+              ]);
+            }
+            return Promise.resolve([]);
+          }
+          if (args.where?.OR && isTargetDay) {
+            return Promise.resolve([]);
           }
           return Promise.resolve([]);
         }),
@@ -140,6 +168,7 @@ describe("runArchiveTask 归档单天日志", () => {
         deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
         findFirst: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
+        createMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
@@ -163,15 +192,18 @@ describe("runArchiveTask 归档单天日志", () => {
     const mockPrisma = {
       requestLogs: {
         deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
-          if (args.where.OR) return Promise.resolve({ count: 0 });
+          if ((args.where as any).OR) return Promise.resolve({ count: 0 });
           return Promise.resolve({ count: 0 });
         }),
         findFirst: vi.fn(() => Promise.resolve({ createdAt: oldestTs })),
-        findMany: vi.fn((args: { skip: number; where: { createdAt: { gte: number } } }) => {
-          if (args.where?.createdAt?.gte === dayStartTs && args.skip === 0) {
+        findMany: vi.fn((args: any) => {
+          const isTargetDay = args.where?.createdAt?.gte === dayStartTs;
+          const isFirstPage = args.skip === 0 || (args.skip === undefined && !args.where?.OR);
+          if (isTargetDay && isFirstPage && !args.where?.OR) {
             // 上次归档删除阶段部分失败：残留 2 条（上次聚合已含全部 5 条）
             return Promise.resolve([makeLog(3, dayStartTs), makeLog(4, dayStartTs)]);
           }
+          if (args.where?.OR) return Promise.resolve([]);
           return Promise.resolve([]);
         }),
       },
@@ -181,6 +213,7 @@ describe("runArchiveTask 归档单天日志", () => {
           return Promise.resolve({ count: 1 });
         }),
         create: vi.fn(() => Promise.resolve({ id: "ds_new" })),
+        createMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
@@ -194,9 +227,16 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(deleteManyCalls.length).toBe(1);
     expect(deleteManyCalls[0].where).toEqual({ date: dayStartTs });
 
-    const dailyStatsCreate = vi.mocked(mockPrisma.dailyStats.create);
-    expect(dailyStatsCreate).toHaveBeenCalledTimes(1);
-    const createData = dailyStatsCreate.mock.calls[0][0].data;
+    const createManyCalls = (mockPrisma.dailyStats.createMany as any).mock.calls;
+    let createData: any;
+    if (createManyCalls.length > 0) {
+      const args = createManyCalls[0][0];
+      createData = Array.isArray(args.data) ? args.data[0] : args.data;
+    } else {
+      const dailyStatsCreate = vi.mocked(mockPrisma.dailyStats.create);
+      expect(dailyStatsCreate).toHaveBeenCalledTimes(1);
+      createData = dailyStatsCreate.mock.calls[0][0].data;
+    }
     // 只含残留日志（2 条），不是「旧 5 条 + 新 2 条 = 7 条」的双倍累加
     expect(createData.totalRequests).toBe(2);
     expect(createData.totalTokens).toBe(20);

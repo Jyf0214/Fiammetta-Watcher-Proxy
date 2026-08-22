@@ -63,13 +63,18 @@ function resolveDbKind(env?: Record<string, unknown>): DbKind {
  * 只要能从 @opennextjs/cloudflare 拿到 env 就认为是 Pages 环境，
  * 不再硬编码检查 env.DB（Hyperdrive 模式下没有 D1 binding）。
  */
+let cfImportPromise: Promise<any> | null = null;
+let cachedPagesEnv: Record<string, unknown> | null = null;
 async function detectEnvironment(): Promise<{ kind: "pages" | "worker"; pagesEnv?: Record<string, unknown> }> {
-  // 尝试 Pages 环境（@opennextjs/cloudflare）
+  if (cachedPagesEnv) return { kind: "pages", pagesEnv: cachedPagesEnv };
+  // 尝试 Pages 环境（@opennextjs/cloudflare）——缓存 import Promise 与已解析 env，避免每请求一次动态 import
   try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    cfImportPromise ??= import("@opennextjs/cloudflare");
+    const { getCloudflareContext } = await cfImportPromise;
     const ctx = await getCloudflareContext({ async: true });
     const env = ctx.env as Record<string, unknown>;
     if (env && Object.keys(env).length > 0) {
+      cachedPagesEnv = env;
       return { kind: "pages", pagesEnv: env };
     }
   } catch {
@@ -151,8 +156,8 @@ async function createPrismaInstance(
 
       const pool = new Pool({
         connectionString: url,
-        // 256MB 容器下限制连接数，每连接约 2-4MB buffer
-        max: 3,
+        // 容器内存 256MB 时每连接 2-4MB，默认 3 连接；高并发生产可通过 PG_POOL_MAX=10 提升至 10（约 20-40MB，需同步调高 PGlite maxConnections）
+        max: Number(process.env.PG_POOL_MAX ?? 3),
         // 空闲连接 30 秒后自动关闭回收内存
         idleTimeoutMillis: 30_000,
         // 连接建立超时
@@ -189,7 +194,7 @@ async function createPrismaInstance(
         throw new Error("HYPERDRIVE binding 未配置（请检查 Cloudflare 绑定的名称是否叫 HYPERDRIVE）");
       }
 
-      const pool = new Pool({ connectionString: resolved.connectionString, max: 1 });
+      const pool = new Pool({ connectionString: resolved.connectionString, max: Number(process.env.PG_POOL_MAX ?? 1) });
       // 同直连分支：空闲连接错误必须显式消费，否则进程崩溃
       pool.on("error", (err) => {
         console.error("[prisma] Hyperdrive 连接池错误（空闲连接断开）:", err.message);
@@ -255,11 +260,22 @@ export async function getDbKind(
  *
  * @returns 类型化的 PrismaClient（三个方言 API 完全一致）
  */
+/** D1 binding 对应的稳定自增 id（避免 String({}) 均为 "[object Object]" 导致缓存串扰） */
+const d1BindingIds = new WeakMap<object, number>();
+let nextD1BindingId = 1;
 function getBindingKey(env: Record<string, unknown> | undefined, dbKind: DbKind): string {
   if (!env) return "no-env";
   if (dbKind === "d1") {
-    const b = (env as any).DB;
-    return b ? `d1:${String((b as any).__bindingId ?? (b as any).id ?? b)}` : "d1:no-binding";
+    const b = (env as any).DB as object | undefined;
+    if (!b) return "d1:no-binding";
+    const explicit = (b as any).__bindingId ?? (b as any).id;
+    if (explicit != null) return `d1:${String(explicit)}`;
+    if (typeof b === "object") {
+      let id = d1BindingIds.get(b);
+      if (!id) { id = nextD1BindingId++; d1BindingIds.set(b, id); }
+      return `d1:obj#${id}`;
+    }
+    return `d1:${String(b)}`;
   }
   if (dbKind === "hyperdrive") {
     const hd = (env as any).HYPERDRIVE as { connectionString?: string } | undefined;

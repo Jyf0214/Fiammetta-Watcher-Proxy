@@ -36,6 +36,7 @@ export interface AdminPayload {
 /** JWT_SECRET 最小长度（防止弱密钥被暴力破解） */
 const MIN_JWT_SECRET_LENGTH = 32;
 
+const jwtSecretCache = new Map<string, Uint8Array>();
 function resolveJwtSecret(
   secretOrEnv?: string | { JWT_SECRET?: string }
 ): Uint8Array {
@@ -61,7 +62,12 @@ function resolveJwtSecret(
     );
   }
 
-  return new TextEncoder().encode(secret);
+  const cached = jwtSecretCache.get(secret);
+  if (cached) return cached;
+  const encoded = new TextEncoder().encode(secret);
+  // 仅缓存少量密钥（正常仅 1 个），防止 Map 无限增长
+  if (jwtSecretCache.size < 10) jwtSecretCache.set(secret, encoded);
+  return encoded;
 }
 
 // ==================== JWT 生成/验证 ====================

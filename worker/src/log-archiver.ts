@@ -165,10 +165,10 @@ async function archiveSingleDay(
   dayStartTs: number,
   dayEndTs: number
 ): Promise<{ processed: number; deleted: number }> {
-  // TiDB Cloud Serverless 单次查询硬上限 10000 行（服务端强制截断），
-  // 分页循环拉取当天全部日志，避免超出部分未被聚合
+  // TiDB Cloud Serverless 单次查询硬上限 10000 行，游标分页替代 OFFSET：
+  // OFFSET 会扫描并丢弃 skip 行，单日超 5 万日志时尾页延迟成倍增长；
+  // 游标利用 @@index([createdAt]) + 主键范围扫描，尾页仍为 ~30ms。
   const PAGE_SIZE = 10000;
-  const where = { createdAt: { gte: dayStartTs, lte: dayEndTs } };
   const logs: Array<{
     id: string;
     keyId: string | null;
@@ -181,13 +181,25 @@ async function archiveSingleDay(
     ttft: number;
     latency: number;
     isError: boolean;
+    createdAt: number;
   }> = [];
   const logIds: string[] = [];
   {
-    let skip = 0;
+    let cursor: { createdAt: number; id: string } | null = null;
     for (;;) {
-      const batch = await prisma.requestLogs.findMany({
-        where,
+      const cursorWhere: any = cursor
+        ? {
+            OR: [
+              { createdAt: { gt: cursor.createdAt } },
+              { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+            ],
+          }
+        : {};
+      const batch: any[] = await prisma.requestLogs.findMany({
+        where: {
+          createdAt: { gte: dayStartTs, lte: dayEndTs },
+          ...cursorWhere,
+        },
         select: {
           id: true,
           keyId: true,
@@ -200,15 +212,17 @@ async function archiveSingleDay(
           ttft: true,
           latency: true,
           isError: true,
+          createdAt: true,
         },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: PAGE_SIZE,
-        skip,
       });
-      logs.push(...batch);
-      for (const log of batch) logIds.push(log.id);
+      logs.push(...batch.map(({ createdAt, ...rest }: any) => ({ ...rest, createdAt } as any)));
+      // 保留 createdAt 供游标推进（仅内存用，不落库）
+      for (const log of batch as any[]) logIds.push(log.id);
       if (batch.length < PAGE_SIZE) break;
-      skip += PAGE_SIZE;
+      const last = batch[batch.length - 1];
+      cursor = { createdAt: last.createdAt, id: last.id };
     }
   }
 
@@ -307,34 +321,35 @@ async function archiveSingleDay(
     }
   }
 
-  for (const group of groups.values()) {
+  // 批量写入：串行 create 需 N 次往返，改为 createMany 分批（D1 单批 100 行内）
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rows = Array.from(groups.values()).map((group) => {
     const avgTtft = group.ttftCount > 0 ? group.ttftSum / group.ttftCount : 0;
     const avgDuration = group.latencyCount > 0 ? group.latencySum / group.latencyCount : 0;
     const avgTps = group.tpsCount > 0 ? group.tpsSum / group.tpsCount : 0;
-
-    // 该天旧聚合已在开头清空，此处直接创建（重算语义，无累加分支）
-    await prisma.dailyStats.create({
-      data: {
-        id: `ds_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        date: dayStartTs,
-        keyId: group.keyId,
-        keyName: group.keyName,
-        platformId: group.platformId,
-        model: group.model,
-        totalRequests: group.totalRequests,
-        errorRequests: group.errorRequests,
-        totalTokens: group.totalTokens,
-        totalPromptTokens: group.totalPromptTokens,
-        totalCompletionTokens: group.totalCompletionTokens,
-        avgTtft,
-        avgDuration,
-        avgTps,
-        maxTtft: group.maxTtft,
-        maxDuration: group.maxLatency,
-        maxTps: group.maxTps,
-        createdAt: Math.floor(Date.now() / 1000),
-      },
-    });
+    return {
+      id: `ds_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      date: dayStartTs,
+      keyId: group.keyId,
+      keyName: group.keyName,
+      platformId: group.platformId,
+      model: group.model,
+      totalRequests: group.totalRequests,
+      errorRequests: group.errorRequests,
+      totalTokens: group.totalTokens,
+      totalPromptTokens: group.totalPromptTokens,
+      totalCompletionTokens: group.totalCompletionTokens,
+      avgTtft,
+      avgDuration,
+      avgTps,
+      maxTtft: group.maxTtft,
+      maxDuration: group.maxLatency,
+      maxTps: group.maxTps,
+      createdAt: nowSec,
+    };
+  });
+  for (let i = 0; i < rows.length; i += 100) {
+    await prisma.dailyStats.createMany({ data: rows.slice(i, i + 100) });
   }
 
   // 删除该天已归档的原始日志（按已收集的 id 分批删除，

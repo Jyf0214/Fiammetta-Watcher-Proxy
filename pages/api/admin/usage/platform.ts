@@ -66,38 +66,36 @@ export default async function handler(
       orderBy: { createdAt: "desc" },
     });
 
-    // 用 groupBy 在数据库层面完成聚合，避免分页拉取全表日志到内存。
-    // 注意：不能标注 any[]，否则会干扰 Prisma groupBy 泛型推断。
-    const grouped = await orm.requestLogs.groupBy({
-      by: ["platformId"],
-      where,
-      _count: { id: true },
-      _sum: {
-        tokens: true,
-        promptTokens: true,
-        completionTokens: true,
-        ttft: true,
-        latency: true,
-      },
-      _min: { createdAt: true },
-      _max: { createdAt: true },
-    });
-    // 错误请求数：groupBy 的 _count 不支持带 where 过滤，需单独按 isError 聚合一次
-    const errorGrouped = await orm.requestLogs.groupBy({
-      by: ["platformId"],
-      where: { ...where, isError: true },
-      _count: { id: true },
-    });
-
-    // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求。
-    // 错误请求的 latency/ttft 是真实耗时（非 0，超时最高 120s），若计入分母会
-    // 系统性抬高均值（与 usage.ts 的 perfGrouped / 仪表盘 stats.ts perfAgg 口径一致）
-    const perfGrouped = await orm.requestLogs.groupBy({
-      by: ["platformId"],
-      where: { ...where, isError: false },
-      _count: { id: true },
-      _sum: { ttft: true, latency: true },
-    });
+    // 用 groupBy 在数据库层面完成聚合，并行化 3 路查询（行为等价，P95 从 3*RTT 降至 1*RTT）
+    const [grouped, errorGrouped, perfGrouped] = await Promise.all([
+      orm.requestLogs.groupBy({
+        by: ["platformId"],
+        where,
+        _count: { id: true },
+        _sum: {
+          tokens: true,
+          promptTokens: true,
+          completionTokens: true,
+          ttft: true,
+          latency: true,
+        },
+        _min: { createdAt: true },
+        _max: { createdAt: true },
+      }),
+      // 错误请求数：groupBy 的 _count 不支持带 where 过滤，需单独按 isError 聚合一次
+      orm.requestLogs.groupBy({
+        by: ["platformId"],
+        where: { ...where, isError: true },
+        _count: { id: true },
+      }),
+      // 性能统计（仅非错误请求）单独聚合：TTFT/耗时的平均分母只计非错误请求。
+      orm.requestLogs.groupBy({
+        by: ["platformId"],
+        where: { ...where, isError: false },
+        _count: { id: true },
+        _sum: { ttft: true, latency: true },
+      }),
+    ]);
 
     const statsMap = new Map<string | null, typeof grouped[number]>(
       grouped.map((g) => [g.platformId, g])
