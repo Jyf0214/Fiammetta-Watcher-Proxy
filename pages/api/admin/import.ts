@@ -896,6 +896,14 @@ async function importApiKeys(
     }
   }
 
+  // 导入密钥后清空认证缓存，使新密钥对代理端立即生效
+  if (imported > 0) {
+    try {
+      const { invalidateApiKeyCache } = await import("../../../worker/src/auth");
+      invalidateApiKeyCache();
+    } catch { /* 非关键：缓存最多5秒自然过期 */ }
+  }
+
   return { imported, skipped, skipReasons };
 }
 

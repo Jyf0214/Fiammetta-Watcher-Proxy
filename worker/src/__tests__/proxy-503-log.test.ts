@@ -14,17 +14,21 @@ import type { PlatformConfig } from "@/lib/types";
 import type { WorkerEnv } from "../config";
 
 // 流内 error 端到端测试需要真实 createUsageTransformer：其 flush 通过
-// createDb 直接写 DB，因此用 spy prisma 捕获日志参数（recordRequestLog mock
-// 只覆盖 proxy.ts 直接调用处：5xx 透传、空响应、空闲超时）
-const { prismaSpy } = vi.hoisted(() => ({
-  prismaSpy: {
-    apiKeys: { update: vi.fn(async () => ({})) },
-    requestLogs: { create: vi.fn(async (_args: { data: any }) => ({})) },
-  },
+// batched-writer 缓冲日志，因此用 bufferRequestLog mock 捕获日志参数
+// （recordRequestLog mock 只覆盖 proxy.ts 直接调用处：5xx 透传、空响应、空闲超时）
+const mockBufferRequestLog = vi.fn();
+vi.mock("../batched-writer", () => ({
+  bufferKeyUsage: vi.fn(),
+  bufferRequestLog: (...args: any[]) => mockBufferRequestLog(...args),
+  initBatchedWriter: vi.fn(),
+}));
+
+vi.mock("../auth", () => ({
+  incrementCallLimitCount: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  createDb: vi.fn(async () => prismaSpy),
+  createDb: vi.fn(async () => ({})),
 }));
 
 vi.mock("../router", () => ({
@@ -142,6 +146,7 @@ function buildRequest(body: Record<string, unknown>): Request {
 
 describe("上游 503 时日志记录状态码重现", () => {
   beforeEach(() => {
+    mockBufferRequestLog.mockClear();
     vi.clearAllMocks();
     vi.mocked(routeRequest).mockResolvedValue({
       platform: makePlatform(),
@@ -268,9 +273,8 @@ describe("上游 503 时日志记录状态码重现", () => {
     while (!chunk.done) chunk = await reader.read();
     // 真实 transformer flush 按 error.code 记录失败日志：503+isError=true+tokens=0，
     // 且不计入 Key 用量（修复前记录 200+isError=false）
-    expect(prismaSpy.apiKeys.update).not.toHaveBeenCalled();
-    expect(prismaSpy.requestLogs.create).toHaveBeenCalledTimes(1);
-    const logData = prismaSpy.requestLogs.create.mock.calls[0][0].data;
+    expect(mockBufferRequestLog).toHaveBeenCalledTimes(1);
+    const logData = mockBufferRequestLog.mock.calls[0][0];
     expect(logData.status).toBe(503);
     expect(logData.isError).toBe(true);
     expect(logData.tokens).toBe(0);

@@ -33,8 +33,16 @@ let autoModelId: string | null = null;
 /** 自动模型分流白名单（system:auto_model_selected 配置的模型 ID 集合）；null 表示未配置（全部参与） */
 let autoModelSelected: Set<string> | null = null;
 let lastRefresh = 0;
-const CACHE_TTL = 30_000;
+/** 路由缓存 TTL：模型映射和平台配置极少变化，延长至 120 秒减少 DB 查询 */
+const CACHE_TTL = 120_000;
 const EMPTY_CACHE_RETRY = 5_000;
+
+/**
+ * 主动失效路由缓存（管理后台保存平台/模型映射/自动模型配置后调用）
+ */
+export function invalidateRouterCache(): void {
+  lastRefresh = 0;
+}
 
 // ==================== 自动模型冻结机制 ====================
 

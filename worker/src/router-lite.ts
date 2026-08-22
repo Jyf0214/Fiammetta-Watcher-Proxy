@@ -28,7 +28,7 @@ let autoModelId: string | null = null;
 // 自动模型分流白名单（system:auto_model_selected 配置的模型 ID 集合）；null 表示未配置（全部参与）
 let autoModelSelected: Set<string> | null = null;
 let lastRefresh = 0;
-const CACHE_TTL = 30_000;
+const CACHE_TTL = 120_000;
 const EMPTY_CACHE_RETRY = 5_000;
 
 // ==================== 缓存刷新 ====================

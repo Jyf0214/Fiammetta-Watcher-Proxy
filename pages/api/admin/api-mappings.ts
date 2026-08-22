@@ -16,6 +16,8 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { invalidateApiMappingsCache } from "../../../worker/src/api-mappings";
+import { invalidateRouterCache } from "../../../worker/src/router";
 
 const CONFIG_KEY = "system:api_mappings";
 
@@ -55,6 +57,8 @@ async function saveMappings(db: Awaited<ReturnType<typeof createDb>>, list: ApiM
   } else {
     await db.configs.create({ data: { id: crypto.randomUUID(), key: CONFIG_KEY, value: JSON.stringify(list), updatedAt: now } });
   }
+  invalidateApiMappingsCache();
+  invalidateRouterCache();
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {

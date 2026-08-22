@@ -8,6 +8,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
+import { invalidateRouterCache } from "../../../../worker/src/router";
+import { invalidateApiKeyCache } from "../../../../worker/src/auth";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
@@ -395,6 +397,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     }
 
     await db.platforms.update({ where: { id }, data: updateData });
+    invalidateRouterCache();
+    invalidateApiKeyCache();
 
     // 审计日志（脱敏处理：密钥只记录数量，绝不记录任何内容）
     const sanitized = { ...body };
@@ -482,6 +486,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 
     // 删除平台本身
     await db.platforms.delete({ where: { id } });
+    invalidateRouterCache();
 
     // 审计日志
     const now = Math.floor(Date.now() / 1000);

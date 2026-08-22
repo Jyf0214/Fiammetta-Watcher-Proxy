@@ -49,7 +49,8 @@ const whitelistedPlatforms = new Set<string>();
  * 无需重启进程。刷新为后台触发（isKeyWhitelisted/isPlatformWhitelisted 是
  * 同步函数，无法阻塞等待），本次调用继续用旧集合，刷新完成后后续调用生效。
  */
-const WHITELIST_REFRESH_MS = 60 * 1000;
+/** 白名单刷新间隔：白名单修改频率极低，延长至 5 分钟减少 DB 查询 */
+const WHITELIST_REFRESH_MS = 5 * 60 * 1000;
 
 /** 白名单上次成功加载时间（0 = 从未成功加载，首载由入口懒加载负责） */
 let whitelistLastLoadedAt = 0;

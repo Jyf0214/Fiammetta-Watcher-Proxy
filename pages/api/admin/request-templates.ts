@@ -16,6 +16,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { invalidateTemplatesCache } from "../../../worker/src/request-templates";
 
 // Config 表中的存储键
 const CONFIG_KEY = "system:request_templates";
@@ -115,6 +116,7 @@ async function saveTemplates(
       },
     });
   }
+  invalidateTemplatesCache();
 }
 
 export default async function handler(

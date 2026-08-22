@@ -5,10 +5,10 @@
  * 更新 API Key 已用 token 数，记录请求日志。
  */
 
-import { createDb } from "@/lib/prisma";
 import { proxyStatKey } from "@/lib/upstream-proxy";
 import { recordFailure, recordPlatform429 } from "./load-balancer";
 import { banKey, recordKeyError, isPlatformWhitelisted } from "./platform-keys";
+import { bufferKeyUsage, bufferRequestLog, initBatchedWriter } from "./batched-writer";
 import type { WorkerEnv } from "./config";
 
 /**
@@ -71,7 +71,7 @@ export function extractUsage(
 }
 
 /**
- * 更新 API Key 的已用 token 数
+ * 更新 API Key 的已用 token 数（批量缓冲，定期 flush）
  */
 export async function updateKeyUsage(
   apiKeyId: string,
@@ -80,20 +80,8 @@ export async function updateKeyUsage(
   env?: WorkerEnv
 ): Promise<void> {
   if (tokenCount <= 0) return;
-
-  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
-  try {
-    await prisma.apiKeys.update({
-      where: { id: apiKeyId },
-      data: {
-        usedTokens: { increment: tokenCount },
-        callUsed: { increment: 1 },
-        updatedAt: Math.floor(Date.now() / 1000),
-      },
-    });
-  } catch (err) {
-    console.error("[token] 更新 Key 用量失败:", err instanceof Error ? err.message : String(err));
-  }
+  initBatchedWriter(db, env);
+  bufferKeyUsage(apiKeyId, tokenCount);
 }
 
 /** 节点名称最大显示宽度：中文等全角字符按 2 计、ASCII 按 1，上限 20（纯中文 10 字、纯英文 20 字） */
@@ -187,39 +175,27 @@ export async function recordRequestLog(params: {
   db: D1Database;
   env?: WorkerEnv;
 }): Promise<void> {
-  const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
-  try {
-    await prisma.requestLogs.create({
-      data: {
-        id: crypto.randomUUID(),
-        keyId: params.keyId,
-        keyName: params.keyName,
-        platformId: params.platformId,
-        model: params.model,
-        endpoint: params.endpoint,
-        method: params.method,
-        status: params.status,
-        latency: params.duration,
-        tokens: params.tokens,
-        promptTokens: params.promptTokens,
-        completionTokens: params.completionTokens,
-        ttft: params.ttft,
-        isError: params.isError,
-        errorMessage: params.errorMessage ?? null,
-        // 落库前转为代理级统计键：无凭据地址为 host:port（与历史键兼容），
-        // 带凭据地址带账号指纹后缀（host:port#<hash>），同 host:port 不同账号
-        // 独立成键，stats 聚合与前端查表一致；凭据明文不进入日志表（指纹为
-        // 不可逆哈希，历史 ***@host:port 键在聚合侧同样归一化并入裸 host:port）
-        proxyUrl: params.proxyUrl ? proxyStatKey(params.proxyUrl) : null,
-        ipAddress: params.ipAddress ?? null,
-        userAgent: params.userAgent ?? null,
-        nodeName: resolveNodeName(params.env),
-        createdAt: Math.floor(Date.now() / 1000),
-      },
-    });
-  } catch (err) {
-    console.error("[token] 记录请求日志失败:", err instanceof Error ? err.message : String(err));
-  }
+  initBatchedWriter(params.db, params.env);
+  bufferRequestLog({
+    keyId: params.keyId,
+    keyName: params.keyName,
+    platformId: params.platformId,
+    model: params.model,
+    endpoint: params.endpoint,
+    method: params.method,
+    status: params.status,
+    latency: params.duration,
+    tokens: params.tokens,
+    promptTokens: params.promptTokens,
+    completionTokens: params.completionTokens,
+    ttft: params.ttft,
+    isError: params.isError,
+    errorMessage: params.errorMessage ?? null,
+    proxyUrl: params.proxyUrl ? proxyStatKey(params.proxyUrl) : null,
+    nodeName: resolveNodeName(params.env),
+    ipAddress: params.ipAddress ?? null,
+    userAgent: params.userAgent ?? null,
+  });
 }
 
 /**
@@ -412,49 +388,32 @@ export function createUsageTransformer(params: {
       }
 
       // 复用同一个 PrismaClient 完成所有 DB 操作
-      const prisma = await createDb({ DB: params.db, DB_TYPE: params.env?.DB_TYPE });
-      try {
-        // 流内 error / 截断 / 空完成均视为失败请求：不计入 Key 用量/次数
-        if (!streamError && !truncated && !emptyCompletion && totalTokens > 0) {
-          await prisma.apiKeys.update({
-            where: { id: params.keyId },
-            data: {
-              usedTokens: { increment: totalTokens },
-              callUsed: { increment: 1 },
-              updatedAt: Math.floor(Date.now() / 1000),
-            },
-          });
-        }
-
-        await prisma.requestLogs.create({
-          data: {
-            id: crypto.randomUUID(),
-            keyId: params.keyId,
-            keyName: params.keyName,
-            platformId: params.platformId,
-            model: params.model,
-            // 与 Pages 版一致：endpoint 落上游真实路径（此前硬编码 "stream"，
-            // 后台按端点过滤统计时两部署形态结果不一致）
-            endpoint: params.endpoint,
-            method: "POST",
-            status: streamError ? streamError.code : truncated || emptyCompletion ? 502 : 200,
-            latency: duration,
-            tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
-            promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
-            completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
-            ttft,
-            isError: !!streamError || truncated || emptyCompletion,
-            errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
-            nodeName: resolveNodeName(params.env),
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        });
-      } catch (err) {
-        console.error(
-          "[token] 流式响应 DB 写入失败:",
-          err instanceof Error ? err.message : String(err)
-        );
+      initBatchedWriter(params.db, params.env);
+      // 流内 error / 截断 / 空完成均视为失败请求：不计入 Key 用量/次数
+      if (!streamError && !truncated && !emptyCompletion && totalTokens > 0) {
+        bufferKeyUsage(params.keyId, totalTokens);
       }
+
+      bufferRequestLog({
+        keyId: params.keyId,
+        keyName: params.keyName,
+        platformId: params.platformId,
+        model: params.model,
+        endpoint: params.endpoint,
+        method: "POST",
+        status: streamError ? streamError.code : truncated || emptyCompletion ? 502 : 200,
+        latency: duration,
+        tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
+        promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
+        completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
+        ttft,
+        isError: !!streamError || truncated || emptyCompletion,
+        errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
+        nodeName: resolveNodeName(params.env),
+        proxyUrl: null,
+        ipAddress: null,
+        userAgent: null,
+      });
     },
   });
 }

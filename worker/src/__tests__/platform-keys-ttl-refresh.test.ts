@@ -3,7 +3,7 @@
  *
  * A2：白名单集合加载后，管理后台勾选/取消「白名单」需在运行期生效——
  * isKeyWhitelisted / isPlatformWhitelisted 每次调用前检查上次加载时间，
- * 超过 60s 触发后台 reload（单飞复用同一 promise，失败保留旧集合继续用）。
+ * 超过 5 分钟触发后台 reload（单飞复用同一 promise，失败保留旧集合继续用）。
  * W10：loadWhitelist / loadKeyStatusFromKV 成功返回 true、失败返回 false，
  * 供入口懒加载"成功后才置位 loaded 标志"（失败下次请求重试）决策。
  */
@@ -60,15 +60,15 @@ describe("白名单 TTL 自动刷新（A2）", () => {
     prismaMocks.queue = [];
   });
 
-  it("TTL 到期后 isKeyWhitelisted 触发后台刷新，白名单修改 60s 内生效", async () => {
+  it("TTL 到期后 isKeyWhitelisted 触发后台刷新，白名单修改 5 分钟内生效", async () => {
     // 初始加载：未勾选白名单
     prismaMocks.queue.push([platformRow(false)]);
     expect(await loadWhitelist({} as D1Database, { DB_TYPE: "d1" })).toBe(true);
     expect(isKeyWhitelisted("sk-x")).toBe(false);
 
-    // 管理后台勾选白名单；推进 60s 使 TTL 过期
+    // 管理后台勾选白名单；推进 5 分钟使 TTL 过期
     prismaMocks.queue.push([platformRow(true)]);
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(300_001);
 
     // 本次调用触发后台刷新（fire-and-forget，旧集合仍生效）
     expect(isKeyWhitelisted("sk-x")).toBe(false);
@@ -84,7 +84,7 @@ describe("白名单 TTL 自动刷新（A2）", () => {
     expect(isPlatformWhitelisted("p1")).toBe(false);
 
     prismaMocks.queue.push([{ id: "p1", apiKeys: null, whitelisted: true }]);
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(300_001);
 
     isPlatformWhitelisted("p1");
     await flushMicrotasks();
@@ -92,14 +92,14 @@ describe("白名单 TTL 自动刷新（A2）", () => {
     expect(isPlatformWhitelisted("p1")).toBe(true);
   });
 
-  it("TTL 未到期时不触发刷新（60s 内保持内存集合）", async () => {
+  it("TTL 未到期时不触发刷新（5 分钟内保持内存集合）", async () => {
     prismaMocks.queue.push([platformRow(false)]);
     expect(await loadWhitelist({} as D1Database, { DB_TYPE: "d1" })).toBe(true);
 
     prismaMocks.queue.push([platformRow(true)]);
-    vi.advanceTimersByTime(59_999);
+    vi.advanceTimersByTime(299_999);
 
-    // 未过 60s：不触发刷新，仍读旧集合
+    // 未过 5 分钟：不触发刷新，仍读旧集合
     isKeyWhitelisted("sk-x");
     await flushMicrotasks();
     expect(isKeyWhitelisted("sk-x")).toBe(false);
@@ -111,7 +111,7 @@ describe("白名单 TTL 自动刷新（A2）", () => {
     expect(await loadWhitelist({} as D1Database, { DB_TYPE: "d1" })).toBe(true);
 
     prismaMocks.queue.push([platformRow(true)]);
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(300_001);
 
     // 3 次触发共享同一后台刷新
     isKeyWhitelisted("sk-x");
@@ -129,9 +129,9 @@ describe("白名单 TTL 自动刷新（A2）", () => {
     expect(await loadWhitelist({} as D1Database, { DB_TYPE: "d1" })).toBe(true);
     expect(isKeyWhitelisted("sk-x")).toBe(true);
 
-    // 推进 60s 后首次刷新失败（DB 故障）
+    // 推进 5 分钟后首次刷新失败（DB 故障）
     prismaMocks.queue.push(null);
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(300_001);
     isKeyWhitelisted("sk-x");
     await flushMicrotasks();
     // 失败：旧集合保留，不抛错

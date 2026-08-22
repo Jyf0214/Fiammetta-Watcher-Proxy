@@ -27,7 +27,15 @@ export interface RequestTemplate {
 let templateCache: RequestTemplate[] | null = null;
 let lastRefresh = 0;
 let cachedUpdatedAt: number | null = null;
-const CACHE_TTL = 30_000;
+/** 请求模板缓存 TTL：模板极少变化，延长至 120 秒 */
+const CACHE_TTL = 120_000;
+
+/**
+ * 主动失效模板缓存（管理后台保存模板后调用）
+ */
+export function invalidateTemplatesCache(): void {
+  lastRefresh = 0;
+}
 
 // ==================== 深度合并 ====================
 

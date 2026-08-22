@@ -18,6 +18,7 @@ import { checkCsrfOrigin } from "@/lib/admin-security";
 import { keyFingerprint } from "@/lib/key-status";
 import { enableKey, markKeyDisabled } from "../../../../../worker/src/platform-keys";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { invalidateApiKeyCache } from "../../../../../worker/src/auth";
 
 /** 生成唯一 ID（cuid 风格） */
 function newId(prefix = "c"): string {
@@ -91,6 +92,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       markKeyDisabled(targetKey, id);
     }
+    invalidateApiKeyCache(targetKey);
 
     // 审计日志（密钥只记录指纹，绝不记录内容）
     await db.auditLogs.create({

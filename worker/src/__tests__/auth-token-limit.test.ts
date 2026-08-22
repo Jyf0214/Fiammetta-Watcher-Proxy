@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { validateApiKey } from "../auth";
+import { validateApiKey, invalidateApiKeyCache, resetCallLimitCounters } from "../auth";
 import type { WorkerEnv } from "../config";
 
 vi.mock("@/lib/prisma", () => ({
@@ -44,6 +44,9 @@ const env = { DB_TYPE: "d1" } as WorkerEnv;
 
 beforeEach(() => {
   vi.mocked(createDb).mockReset();
+  // 清除 API Key 验证缓存和 callLimit 计数器缓存，避免跨用例缓存污染
+  invalidateApiKeyCache();
+  resetCallLimitCounters();
 });
 
 describe("validateApiKey tokenLimit 检查", () => {

@@ -99,7 +99,8 @@ export function isScheduledProxyHealthDisabled(): boolean {
 }
 
 /** 缓存有效期：与 request-templates 的模板缓存一致（30s + updatedAt 失效检查） */
-const CACHE_TTL = 30_000;
+/** 出站代理配置/池/健康缓存 TTL：代理配置极少变化，延长至 120 秒 */
+const CACHE_TTL = 120_000;
 /** 健康检查单次超时（毫秒） */
 const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 /** 代理列表拉取单次超时（毫秒） */

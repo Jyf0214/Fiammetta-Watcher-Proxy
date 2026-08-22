@@ -36,8 +36,16 @@ export interface ApiMapping {
 let mappingCache: ApiMapping[] | null = null;
 let lastRefresh = 0;
 let cachedUpdatedAt: number | null = null;
-const CACHE_TTL = 30_000;
+/** 接口映射缓存 TTL：映射规则极少变化，延长至 120 秒 */
+const CACHE_TTL = 120_000;
 const CONFIG_KEY = "system:api_mappings";
+
+/**
+ * 主动失效接口映射缓存（管理后台保存映射后调用）
+ */
+export function invalidateApiMappingsCache(): void {
+  lastRefresh = 0;
+}
 
 // ==================== 通配符匹配 ====================
 

@@ -11,6 +11,7 @@ import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { getClientIp } from "./auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { invalidateRouterCache } from "../../../worker/src/router";
 import {
   UPSTREAM_PROXY_CONFIG_KEY,
   UPSTREAM_PROXY_HEALTH_KEY,
@@ -168,6 +169,8 @@ export default async function handler(
           updatedAt: now,
         },
       });
+      // auto_model_id / auto_model_selected 等系统配置变更后主动刷新路由缓存
+      invalidateRouterCache();
 
       res.status(200).json({ success: true, message: "配置已更新" });
       return;
