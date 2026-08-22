@@ -131,17 +131,15 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
     platformModelCache = newPlatformModelCache;
     autoModelId = autoConfigValue;
     // 解析分流白名单：键不存在 / 非法 JSON / 非数组 → null（全部参与，兼容旧配置）；
-    // 显式空数组 → 空集合（UI 全部关闭 = 无模型参与）；
-    // 数组元素全非法（如 [1,2]）→ 过滤后为空且原始非空数组 → 降级为全部参与
+    // 显式空数组或全非法元素 → 空集合（无模型参与，fail-closed）
     try {
       const parsed = autoSelectedValue ? JSON.parse(autoSelectedValue) : null;
-      const filtered = Array.isArray(parsed)
-        ? parsed.filter((m): m is string => typeof m === "string")
-        : [];
-      autoModelSelected =
-        Array.isArray(parsed) && (filtered.length > 0 || parsed.length === 0)
-          ? new Set(filtered)
-          : null;
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((m): m is string => typeof m === "string");
+        autoModelSelected = new Set(filtered);
+      } else {
+        autoModelSelected = null;
+      }
     } catch {
       autoModelSelected = null;
     }
@@ -214,7 +212,7 @@ function resolveModelMapping(
  * 按权重加权随机选择平台（lite 专用）
  *
  * 与全量版 selectPlatform 的区别：
- * - 不按优先级分组（不知道优先级）
+ * - 按优先级分组（与全量版一致，仅按权重轮询）
  * - 不读性能评分（不知道评分）
  * - 不检查熔断器状态（不维护熔断器）
  * - 仅被动跳过冷却期内的平台（cooldownEnd 只读）
@@ -227,16 +225,18 @@ export function selectPlatformLite(platforms: PlatformConfig[]): PlatformConfig 
   );
   if (available.length === 0) return null;
 
-  const totalWeight = available.reduce((sum, p) => sum + Math.max(1, p.weight), 0);
-  if (totalWeight <= 0) return available[0] ?? null;
+  const maxPriority = Math.max(...available.map((p) => p.priority));
+  const topPriority = available.filter((p) => p.priority === maxPriority);
+
+  const totalWeight = topPriority.reduce((sum, p) => sum + p.weight, 0);
+  if (totalWeight <= 0) return topPriority[0] ?? null;
 
   let random = Math.random() * totalWeight;
-  for (const p of available) {
-    random -= Math.max(1, p.weight);
+  for (const p of topPriority) {
+    random -= p.weight;
     if (random <= 0) return p;
   }
-
-  return available[available.length - 1] ?? null;
+  return topPriority[topPriority.length - 1] ?? null;
 }
 
 // ==================== 路由入口 ====================

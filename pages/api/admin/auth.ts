@@ -140,9 +140,9 @@ export function getClientIp(req: NextApiRequest): string | null {
     if (first) return normalizeIp(first);
   }
 
-  // EdgeOne 部署：采信边缘强制注入的专属头（仅当 DEPLOY_PLATFORM=edgeone，
+  // EdgeOne 部署：采信边缘强制注入的专属头（大小写不敏感，仅当 DEPLOY_PLATFORM=edgeone，
   // 防止其他部署方案因伪造 EdgeOne 头绕过限流）
-  if (process.env.DEPLOY_PLATFORM === "edgeone") {
+  if ((process.env.DEPLOY_PLATFORM ?? "").toLowerCase() === "edgeone") {
     const eoIp =
       firstHeaderValue(req.headers["eo-client-ip"]) ??
       firstHeaderValue(req.headers["eo-connecting-ip"]);
@@ -161,8 +161,8 @@ export function getClientIp(req: NextApiRequest): string | null {
   // （不转发外部 IP，防 IP 伪造），并注入同值的 x-vercel-forwarded-for /
   // x-real-ip。x-vercel-forwarded-for 为 Vercel 专属头（上层代理覆盖 XFF 时
   // 仍保留真实值），优先采信。仅当 DEPLOY_PLATFORM=vercel 时采信，防止
-  // 其他部署方案因伪造这些头绕过限流
-  if (process.env.DEPLOY_PLATFORM === "vercel") {
+  // 其他部署方案因伪造这些头绕过限流（大小写不敏感）
+  if ((process.env.DEPLOY_PLATFORM ?? "").toLowerCase() === "vercel") {
     const vercelIp =
       firstHeaderValue(req.headers["x-vercel-forwarded-for"]) ??
       firstHeaderValue(req.headers["x-forwarded-for"]) ??
@@ -388,12 +388,14 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
   }
 
   try {
-    const clientIp = getClientIp(req);
+    // getClientIp 可能返回 null（如无可信代理头），用 remoteAddress 兜底，
+    // 两者都不可得时用 "unknown" 确保限流始终生效，防止暴力破解
+    const clientIp = getClientIp(req) || req.socket?.remoteAddress || "unknown";
 
     // 数据库限流预检：已超限的 IP 直接拒绝（不写入，避免超限后仍持续写库）；
     // 权威判定在失败分支的"先写后查"（registerDbLoginAttempt），并发突刺
     // 即使穿过预检也会在写后计数处被统一拦截
-    if (clientIp) {
+    {
       const preCheck = await readDbLoginFailInfo(clientIp);
       if (preCheck.count >= LOGIN_MAX_ATTEMPTS) {
         return res.status(429).json({
@@ -415,20 +417,14 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
     const passwordMatch = timingSafeStringEqual(password, env.ADMIN_PASSWORD);
     if (!usernameMatch || !passwordMatch) {
       // 先写后查（占位记录即审计日志），超限返回 429；
-      // IP 不可得（极端环境）时仅写审计、限流放行，不归入共享桶
-      if (clientIp) {
-        const dbLimit = await registerDbLoginAttempt(clientIp, username, "用户名或密码错误");
-        if (dbLimit.limited) {
-          return res.status(429).json({
-            success: false,
-            error: `登录尝试次数过多（${LOGIN_MAX_ATTEMPTS} 次/${LOGIN_WINDOW_MS / 60000} 分钟），请稍后再试`,
-            resetAt: dbLimit.resetAt,
-          });
-        }
-      } else {
-        // IP 不可得多为代理配置错误（可信代理未设 XFF/X-Real-IP），打日志避免限流静默失效
-        console.warn("[auth] 无法确定客户端 IP，本次限流跳过（请检查代理配置）");
-        await writeAuditLog("login_failed", { username, reason: "用户名或密码错误" }, null, "unknown").catch(() => {});
+      // clientIp 在入口处已做 remoteAddress / "unknown" 兜底，永非空
+      const dbLimit = await registerDbLoginAttempt(clientIp, username, "用户名或密码错误");
+      if (dbLimit.limited) {
+        return res.status(429).json({
+          success: false,
+          error: `登录尝试次数过多（${LOGIN_MAX_ATTEMPTS} 次/${LOGIN_WINDOW_MS / 60000} 分钟），请稍后再试`,
+          resetAt: dbLimit.resetAt,
+        });
       }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
     }
@@ -436,9 +432,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
     // 登录成功 → 清空该 IP 的进程内失败计数（审计失败记录保持 append-only，
     // 不再 deleteMany 物理删除——审计表承担展示职责，不被当作计数表复用；
     // DB 记录靠 30 分钟滑动窗口自然过期）+ 审计
-    if (clientIp) {
-      clearMemoryFails(clientIp);
-    }
+    clearMemoryFails(clientIp);
     await writeAuditLog("login_success", { username: env.ADMIN_USERNAME }, clientIp, "env-admin").catch(() => {});
 
     const isProd = env.ENVIRONMENT === "production";

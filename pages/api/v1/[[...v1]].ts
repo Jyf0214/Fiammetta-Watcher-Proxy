@@ -88,8 +88,19 @@ function extractUpstreamErrorMessage(text: string): string {
   }
 }
 
+/**
+ * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
+ * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
+ */
+function sanitizeMessage(original: string, status: number): string {
+  if (status === 403) return "上游访问被拒绝（HTTP 403）";
+  if (status === 401) return "上游认证失败（HTTP 401）";
+  if (status === 429) return "上游请求过多（HTTP 429）";
+  return original;
+}
+
 function sanitizeUpstreamError(text: string, status: number): string {
-  return JSON.stringify({ error: { message: extractUpstreamErrorMessage(text), type: "upstream_error", upstream_status: status } });
+  return JSON.stringify({ error: { message: sanitizeMessage(extractUpstreamErrorMessage(text), status), type: "upstream_error", upstream_status: status } });
 }
 
 /**
@@ -572,7 +583,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
-        res.status(upRes.status).json(formatAnthropicError(upRes.status, extractUpstreamErrorMessage(errText)));
+        res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
       } else {
         res.status(upRes.status).send(sanitizeUpstreamError(errText, upRes.status));
       }
@@ -611,17 +622,26 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       }
       const ops = getPlatformsForModel(tgt, triedP);
       if (ops.length > 0) {
-        // 复用 selectPlatform 过滤熔断 open 平台并按优先级/权重选择（与 Worker 版一致）
-        const nextPlatform = selectPlatform(ops);
-        if (nextPlatform) {
+        // 逐个尝试候选平台直到找到有可用 Key 的（与 Worker 版对齐：
+        // 选中平台 Key 全部封禁时若直接放弃，会漏掉其余候选直接返回错误）
+        const candidates = [...ops];
+        let switched = false;
+        while (candidates.length > 0 && !switched) {
+          const nextPlatform = selectPlatform(candidates);
+          if (!nextPlatform) break;
           const nextKey = getNextKey(nextPlatform);
           if (nextKey) {
-            cur = nextPlatform; curKey = nextKey; continue;
+            cur = nextPlatform; curKey = nextKey; switched = true;
+          } else {
+            // 该平台无可用 Key：剔除后继续尝试下一个候选。
+            // 同时释放半开探测配额：选中但无 Key（Key 常处于封禁冷却，
+            // 熔断 open 60 秒先解除）时若不释放，探测槽位被无 Key
+            // 候选占满后该平台被排除，直到缓存重建才恢复
+            releaseHalfOpenPending(nextPlatform.id);
+            candidates.splice(candidates.indexOf(nextPlatform), 1);
           }
-          // 选中但无可用 Key（如仅剩封禁冷却中的 Key）：释放半开探测配额，
-          // 否则探测槽位被占满后该平台被排除，直到缓存重建才恢复（与 Worker 版一致）
-          releaseHalfOpenPending(nextPlatform.id);
         }
+        if (switched) continue;
       }
     }
 
@@ -649,7 +669,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     }
     res.setHeader("Content-Type", "application/json");
     if (config.protocol === "anthropic") {
-      res.status(upRes.status).json(formatAnthropicError(upRes.status, extractUpstreamErrorMessage(errText)));
+      res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
     } else {
       res.status(upRes.status).send(sanitizeUpstreamError(errText, upRes.status));
     }
@@ -926,7 +946,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   try {
     const p = JSON.parse(body) as Record<string, unknown>;
     openaiBody = upstreamIsAnthropic ? convertAnthropicResponse(p, model) : p;
-    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {}); }
+    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; }
   } catch {}
   res.setHeader("Content-Type", "application/json");
   if (config.protocol === "anthropic") {
@@ -935,6 +955,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       if (!openaiBody) throw new Error("unparseable");
       const converted = JSON.stringify(convertOpenAIResponse(openaiBody, model));
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
+      if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }).catch(() => {});
       void recordSuccess(platform.id, dummyDb, env).catch(() => {});

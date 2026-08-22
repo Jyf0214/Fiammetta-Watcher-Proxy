@@ -67,6 +67,13 @@ function recordErrorRateSample(platformId: string, isError: boolean): void {
   }
   if (isError) entry.failures++;
   else entry.successes++;
+
+  // 惰性清理：Map 条目超过阈值时删除过期窗口，防止无限增长
+  if (errorRates.size > 1000) {
+    for (const [pid, e] of errorRates) {
+      if (now - e.windowStart >= ERROR_RATE_WINDOW_MS) errorRates.delete(pid);
+    }
+  }
 }
 
 /**
@@ -78,7 +85,10 @@ function recordErrorRateSample(platformId: string, isError: boolean): void {
 export function isHighErrorRate(platformId: string): boolean {
   const entry = errorRates.get(platformId);
   if (!entry) return false;
-  if (Date.now() - entry.windowStart >= ERROR_RATE_WINDOW_MS) return false;
+  if (Date.now() - entry.windowStart >= ERROR_RATE_WINDOW_MS) {
+    errorRates.delete(platformId);
+    return false;
+  }
   const total = entry.failures + entry.successes;
   if (total < ERROR_RATE_MIN_SAMPLES) return false;
   return entry.failures / total > ERROR_RATE_THRESHOLD;
@@ -134,7 +144,12 @@ export function recordPlatform429(platformId: string): void {
 /** 平台是否处于 429 冷却（冷却期内调度层排除） */
 export function isPlatform429Cooldown(platformId: string): boolean {
   const entry = platform429s.get(platformId);
-  return !!entry && entry.cooldownUntil > Date.now();
+  if (!entry) return false;
+  if (Date.now() - entry.windowStart >= PLATFORM_429_WINDOW_MS && entry.cooldownUntil <= Date.now()) {
+    platform429s.delete(platformId);
+    return false;
+  }
+  return entry.cooldownUntil > Date.now();
 }
 
 /** 清除平台 429 冷却（手动解禁、定时任务恢复时调用） */

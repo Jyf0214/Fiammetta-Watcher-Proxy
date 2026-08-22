@@ -52,10 +52,10 @@ export function extractUsage(
     Number(usage.total_tokens) || promptTokens + completionTokens;
 
   // 某些上游只返回 total_tokens，不返回 prompt/completion 分项
-  // 此时将 total_tokens 同时记入两个字段，确保日志不丢失信息
+  // 此时仅填充 promptTokens，completionTokens 保持 0，避免翻倍计入
   if (totalTokens > 0 && promptTokens === 0 && completionTokens === 0) {
     promptTokens = totalTokens;
-    completionTokens = totalTokens;
+    completionTokens = 0;
   }
 
   // 防止上游篡改 token 计数绕过配额：usage 为 0 时使用请求体预估值

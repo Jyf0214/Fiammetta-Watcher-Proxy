@@ -1036,6 +1036,30 @@ export function toUnixSeconds(value: unknown): number {
 }
 
 /**
+ * 合法的审计日志 action 枚举（与前端 ACTION_LABELS 保持一致）
+ * 不在白名单内的 action 会在导入时被拒绝，防止注入伪造的审计记录
+ */
+const VALID_AUDIT_ACTIONS = new Set([
+  "login",
+  "login_success",
+  "login_failed",
+  "logout",
+  "create_platform",
+  "update_platform",
+  "delete_platform",
+  "update_config",
+  "create_api_key",
+  "update_api_key",
+  "delete_api_key",
+  "toggle_platform_key",
+  "create_system_key",
+  "update_system_key",
+  "delete_system_key",
+  "import_data",
+  "export_data",
+]);
+
+/**
  * 导入审计日志
  *
  * 无外键依赖（audit_logs.admin_id 无 @relation 约束），使用 createMany 批量执行；
@@ -1053,8 +1077,12 @@ async function importAuditLogs(
   // 分离有效和无效记录，逐条记录跳过原因
   const validLogs: Array<Record<string, unknown>> = [];
   for (const log of logs) {
-    if (!log.action) {
+    const action = log.action as string | undefined;
+    if (!action) {
       skipReasons["缺少 action 字段"] = (skipReasons["缺少 action 字段"] || 0) + 1;
+      skipped++;
+    } else if (!VALID_AUDIT_ACTIONS.has(action)) {
+      skipReasons["非法 action 类型"] = (skipReasons["非法 action 类型"] || 0) + 1;
       skipped++;
     } else {
       validLogs.push(log);

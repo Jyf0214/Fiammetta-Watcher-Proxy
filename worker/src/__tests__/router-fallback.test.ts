@@ -289,7 +289,7 @@ describe("routeRequest 自动模型分流白名单", () => {
     expect(route).toBeNull();
   });
 
-  it("白名单数组元素全非法时降级为全部参与（垃圾数据容错）", async () => {
+  it("白名单数组元素全非法时 fail-closed（空集合，无模型参与）", async () => {
     mockCreateDb.mockResolvedValue(
       makeFakePrisma(
         [makePlatform("p-a", "A")],
@@ -301,9 +301,9 @@ describe("routeRequest 自动模型分流白名单", () => {
     );
     await forceRefreshRouterCache(dummyDb, env);
 
+    // 全非法元素 → 空集合（fail-closed），无模型参与，路由返回 null
     const route = await routeRequest(AUTO, dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.targetModel).toBe("gpt-4o");
+    expect(route).toBeNull();
   });
 
   it("高优先级平台无入选模型时路由到有入选模型的平台（不 500）", async () => {

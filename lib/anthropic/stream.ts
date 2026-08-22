@@ -181,6 +181,13 @@ export class OpenAIToAnthropicStream {
       delta: { stop_reason: mapFinishReason(this.finishReason), stop_sequence: null },
       usage: { output_tokens: this.outputTokens },
     });
+    // usage 事件：提供完整的 token 使用统计（input + output），
+    // Anthropic SDK 客户端依赖此事件获取真实的 input_tokens 覆盖 message_start 中的估算值
+    out += sseEvent("usage", {
+      type: "usage",
+      input_tokens: this.inputTokens,
+      output_tokens: this.outputTokens,
+    });
     out += sseEvent("message_stop", { type: "message_stop" });
     this.finished = true;
     return out;

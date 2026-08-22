@@ -136,9 +136,17 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   const localhostAllowed = !isProd && isLocalhost(sourceHost) && isLocalhost(reqHost);
 
   // 环境变量白名单：逗号分隔的域名列表（CDN 前置代理场景）
+  // 归一化：允许用户配置带端口或带协议的域名
   const allowedOrigins = (process.env.CSRF_ALLOWED_ORIGINS ?? "")
     .split(",")
-    .map((d) => d.trim().toLowerCase())
+    .map((d) => {
+      const raw = d.trim().toLowerCase();
+      if (!raw) return "";
+      try {
+        if (raw.includes("://")) return new URL(raw).hostname.toLowerCase();
+      } catch {}
+      return raw.split(":")[0].split("/")[0];
+    })
     .filter(Boolean);
 
   if (

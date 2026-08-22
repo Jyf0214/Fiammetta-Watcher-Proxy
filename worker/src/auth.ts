@@ -43,7 +43,15 @@ export async function validateApiKey(
   db: D1Database,
   env?: WorkerEnv
 ): Promise<{ apiKey: ApiKeyRecord } | { error: Response }> {
-  const apiKeyStr = authorizationHeader?.replace("Bearer ", "");
+  let apiKeyStr: string | null = null;
+  if (authorizationHeader) {
+    const trimmed = authorizationHeader.trim();
+    if (trimmed.startsWith("Bearer ")) {
+      apiKeyStr = trimmed.slice(7).trim();
+    } else {
+      apiKeyStr = "";
+    }
+  }
 
   if (!apiKeyStr) {
     return {

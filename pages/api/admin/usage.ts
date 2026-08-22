@@ -14,6 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb, type Prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 /**
  * 掩码处理密钥值
@@ -34,6 +35,8 @@ export default async function handler(
     res.status(401).json({ success: false, error: "未授权" });
     return;
   }
+  // 速率限制：防止 JWT 泄露后高频轮询枚举
+  if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
   try {
     const orm = await createDb();

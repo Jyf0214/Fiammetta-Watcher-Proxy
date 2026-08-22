@@ -4,7 +4,7 @@
  * 职责：
  * - /v1/* 路径 → handleV1Route（API 代理）
  * - 其他路径 → 404
- * - scheduled 事件 → Cron 任务分发（模型发现、Key 重置、日志归档）
+ * - scheduled 事件 → Cron 任务分发（模型发现、Key 重置、日志归档、代理健康检查、代理列表拉取）
  *
  * D1 和 KV 通过 Wrangler Bindings 注入。
  */
@@ -15,6 +15,7 @@ import { fetchAllPlatformModels } from "./model-fetcher";
 import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
 import { loadWhitelist, loadKeyStatusFromKV } from "./platform-keys";
+import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 import { syncWorkerEnv } from "./env-sync";
 import { formatAnthropicError } from "@/lib/anthropic";
 import type { WorkerEnv } from "./config";
@@ -111,6 +112,8 @@ export default {
    * 模型发现（每 6 小时）
    * Key 用量重置（每小时）
    * 日志归档（每天凌晨 3 点）
+   * 出站代理健康检查（每 5 分钟，仅 Docker 部署且未禁用时生效）
+   * 出站代理列表拉取（每分钟触发，按组内部周期判定是否到期）
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // 与 fetch 入口一致，先同步环境变量（Cron 触发时同样需要正确的数据库连接）
@@ -127,6 +130,22 @@ export default {
         break;
       case "log-archive":
         ctx.waitUntil(runArchiveTask(env.DB, env));
+        break;
+      case "proxy-health":
+        // 设备级禁用（UPSTREAM_PROXY_DISABLED=all/health）时跳过，与 Pages Cron 行为一致
+        if (isScheduledProxyHealthDisabled()) {
+          console.log("[cron] proxy-health 已跳过（设备级禁用）");
+        } else {
+          ctx.waitUntil(runProxyHealthCheck(env.DB, env));
+        }
+        break;
+      case "proxy-pull":
+        // 设备级整体禁用（UPSTREAM_PROXY_DISABLED=all）时跳过，与 Pages Cron 行为一致
+        if (isUpstreamProxyDisabled()) {
+          console.log("[cron] proxy-pull 已跳过（设备级禁用）");
+        } else {
+          ctx.waitUntil(pullProxyGroups(env.DB, env));
+        }
         break;
       default:
         console.warn(`[cron] 未知的 cron 表达式: ${event.cron}`);

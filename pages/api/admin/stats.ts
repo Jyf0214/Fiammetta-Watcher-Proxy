@@ -24,6 +24,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { RETENTION_DAYS } from "../../../worker/src/log-archiver";
 
 /**
@@ -64,6 +65,8 @@ export default async function handler(
     res.status(401).json({ success: false, error: "未授权" });
     return;
   }
+  // 速率限制：防止 JWT 泄露后高频轮询枚举
+  if (!await checkAdminRateLimit(admin.adminId, res)) return;
 
   try {
     // 命中缓存直接返回，不查库（平台数/Key 数等小表查询也一并跳过）

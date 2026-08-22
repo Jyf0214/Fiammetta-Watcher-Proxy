@@ -70,16 +70,21 @@ afterEach(() => {
 });
 
 describe("selectPlatformLite 纯负载均衡", () => {
-  it("仅按权重随机：不按优先级分组（低优先级高权重仍会被选中）", () => {
-    const lowPriority = makePlatform({ id: "p-low", priority: 1, weight: 1 });
-    const highPriority = makePlatform({ id: "p-high", priority: 10, weight: 99 });
+  it("按优先级分组：仅在最高优先级中按权重随机", () => {
+    const lowPriority = makePlatform({ id: "p-low", priority: 1, weight: 99 });
+    const highPriority = makePlatform({ id: "p-high", priority: 10, weight: 1 });
 
-    // random 接近 0 → 命中权重顺序中的第一个候选（lowPriority 在前，weight 1）
+    // 不同优先级时，无论权重如何，始终选中高优先级平台
     vi.spyOn(Math, "random").mockReturnValue(0);
-    expect(selectPlatformLite([lowPriority, highPriority])?.id).toBe("p-low");
-    // random 接近 1 → 落到权重区间的末端（highPriority 占 99/100，必被命中）
+    expect(selectPlatformLite([lowPriority, highPriority])?.id).toBe("p-high");
     vi.spyOn(Math, "random").mockReturnValue(0.99);
     expect(selectPlatformLite([lowPriority, highPriority])?.id).toBe("p-high");
+
+    // 同优先级时按权重轮询：highPriority weight=99 占 99/100
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    expect(selectPlatformLite([highPriority, lowPriority])?.id).toBe("p-high");
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
+    expect(selectPlatformLite([highPriority, lowPriority])?.id).toBe("p-high");
   });
 
   it("过滤未启用平台", () => {

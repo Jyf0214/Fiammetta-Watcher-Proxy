@@ -66,12 +66,23 @@ function extractUpstreamErrorMessage(text: string): string {
 }
 
 /**
+ * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
+ * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
+ */
+function sanitizeMessage(original: string, status: number): string {
+  if (status === 403) return "上游访问被拒绝（HTTP 403）";
+  if (status === 401) return "上游认证失败（HTTP 401）";
+  if (status === 429) return "上游请求过多（HTTP 429）";
+  return original;
+}
+
+/**
  * 脱敏上游错误响应，仅提取错误消息
  */
 function sanitizeUpstreamError(errorText: string, upstreamStatus: number): string {
   return JSON.stringify({
     error: {
-      message: extractUpstreamErrorMessage(errorText),
+      message: sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamStatus),
       type: "upstream_error",
       upstream_status: upstreamStatus,
     },
@@ -137,6 +148,15 @@ const FORBIDDEN_FORWARD_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
   "expect",
+  // 下游伪造 x-forwarded-* 可污染日志 IP 与可信代理判定，统一禁止透传
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "x-forwarded-host",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "eo-client-ip",
+  "eo-connecting-ip",
+  "x-vercel-forwarded-for",
 ]);
 
 /**
@@ -838,7 +858,7 @@ export async function proxyV1Request(
 
       if (config.protocol === "anthropic") {
         return Response.json(
-          formatAnthropicError(upstreamResponse.status, extractUpstreamErrorMessage(errorText)),
+          formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
           { status: upstreamResponse.status }
         );
       }
@@ -1022,7 +1042,7 @@ export async function proxyV1Request(
 
     if (config.protocol === "anthropic") {
       return Response.json(
-        formatAnthropicError(upstreamResponse.status, extractUpstreamErrorMessage(errorText)),
+        formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
         { status: upstreamResponse.status }
       );
     }
@@ -1310,7 +1330,8 @@ async function handleUpstreamResponse(
       status: 200,
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        // no-transform 防止中间代理/网关对 SSE 流做 gzip 缓冲
+        "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
       },
     });
@@ -1475,12 +1496,6 @@ async function handleUpstreamResponse(
       responseTokens = extracted.totalTokens;
       responsePromptTokens = extracted.promptTokens;
       responseCompletionTokens = extracted.completionTokens;
-
-      if (extracted.totalTokens > 0) {
-        const { updateKeyUsage } = await import("./token");
-        // 不阻塞响应：用量更新是独立写库，后置到 waitUntil（与流式分支一致）
-        ctx.waitUntil(updateKeyUsage(apiKey.id, extracted.totalTokens, env.DB, workerEnv).catch(() => {}));
-      }
     }
   } catch {
     // JSON 解析失败不影响响应
@@ -1493,7 +1508,11 @@ async function handleUpstreamResponse(
       const converted = JSON.stringify(
         convertOpenAIResponse(openaiBody, requestedModel)
       );
-      // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
+      // 转换成功后才更新用量/记成功日志，避免转换失败时 key usage 虚增
+      if (responseTokens > 0) {
+        const { updateKeyUsage } = await import("./token");
+        ctx.waitUntil(updateKeyUsage(apiKey.id, responseTokens, env.DB, workerEnv).catch(() => {}));
+      }
       // 不阻塞响应：成功日志/熔断记录后置到 waitUntil（与流式分支一致）
       ctx.waitUntil(
         recordRequestLog({

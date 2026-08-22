@@ -160,7 +160,7 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.status).toBe(429);
     expect(logParams.isError).toBe(true);
     // 密钥类错误：封禁 Key + 累加错误计数（#13，与流内 error 路径/全量版一致）
-    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform");
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", env.KV);
     expect(recordKeyError).toHaveBeenCalledWith(
       "sk-key1",
       429,
@@ -194,7 +194,7 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.status).toBe(402);
     expect(logParams.isError).toBe(true);
     // 402 属密钥类错误（errorIncrement +5 立即达阈值禁用）：封禁 Key + 计数
-    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform");
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", env.KV);
     expect(recordKeyError).toHaveBeenCalledWith(
       "sk-key1",
       402,
@@ -416,7 +416,8 @@ describe("proxyV1RequestLite 流内 error 密钥级处理", () => {
       if (done) break;
     }
 
-    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform");
+    // 流内 error 路径传入的是 workerEnv（仅含 DB_TYPE），无 KV 字段
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", undefined);
     expect(recordKeyError).toHaveBeenCalledWith(
       "sk-key1",
       429,

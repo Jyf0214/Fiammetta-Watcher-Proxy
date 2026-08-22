@@ -10,7 +10,15 @@
 
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
-import { selectPlatform, cleanupStaleBreakers, syncCircuitBreakersFromDatabase } from "./load-balancer";
+import {
+  selectPlatform,
+  cleanupStaleBreakers,
+  syncCircuitBreakersFromDatabase,
+  checkAndUpdateCircuitBreakerState,
+  isHighErrorRate,
+  isPlatform429Cooldown,
+  isHalfOpenProbeFull,
+} from "./load-balancer";
 import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
 import { getConfig } from "./config";
 import type { WorkerEnv } from "./config";
@@ -180,17 +188,15 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
     platformModelCache = newPlatformModelCache;
     autoModelId = autoConfigValue;
     // 解析分流白名单：键不存在 / 非法 JSON / 非数组 → null（全部参与，兼容旧配置）；
-    // 显式空数组 → 空集合（UI 全部关闭 = 无模型参与）；
-    // 数组元素全非法（如 [1,2]）→ 过滤后为空且原始非空数组 → 降级为全部参与
+    // 显式空数组或全非法元素 → 空集合（无模型参与，fail-closed）
     try {
       const parsed = autoSelectedValue ? JSON.parse(autoSelectedValue) : null;
-      const filtered = Array.isArray(parsed)
-        ? parsed.filter((m): m is string => typeof m === "string")
-        : [];
-      autoModelSelected =
-        Array.isArray(parsed) && (filtered.length > 0 || parsed.length === 0)
-          ? new Set(filtered)
-          : null;
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((m): m is string => typeof m === "string");
+        autoModelSelected = new Set(filtered);
+      } else {
+        autoModelSelected = null;
+      }
     } catch {
       autoModelSelected = null;
     }
@@ -343,11 +349,31 @@ export async function routeRequest(
   let selectedPlatform: PlatformConfig | null;
 
   if (targetPlatformId) {
-    // 映射指定了平台
-    selectedPlatform =
-      platformCache.find(
-        (p) => p.id === targetPlatformId && p.enabled
-      ) ?? null;
+    // 映射指定了平台，但仍需检查熔断器状态，避免绕过保护机制
+    const candidate = platformCache.find(
+      (p) => p.id === targetPlatformId && p.enabled
+    ) ?? null;
+
+    if (candidate) {
+      const breakerState = checkAndUpdateCircuitBreakerState(candidate.id);
+      if (breakerState === "open") {
+        // 熔断器打开状态：平台不可用，回退到 selectPlatform 负载均衡
+        selectedPlatform = null;
+      } else if (breakerState === "half-open" && isHalfOpenProbeFull(candidate.id)) {
+        // 半开状态且探测配额已满：不再新开探测，回退到负载均衡
+        selectedPlatform = null;
+      } else if (isHighErrorRate(candidate.id)) {
+        // 高错误率降级：滑动窗口失败率超阈值，回退到负载均衡
+        selectedPlatform = null;
+      } else if (isPlatform429Cooldown(candidate.id)) {
+        // 429 冷却期：平台过载，回退到负载均衡
+        selectedPlatform = null;
+      } else {
+        selectedPlatform = candidate;
+      }
+    } else {
+      selectedPlatform = null;
+    }
   } else {
     // 收集所有支持该模型的平台，做负载均衡
     // 用 targetModel 匹配：模型映射的别名（如 my-deepseek）不在平台模型缓存中，

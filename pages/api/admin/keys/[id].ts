@@ -2,7 +2,7 @@
  * API Key 管理 — 单个 Key 操作
  *
  * GET    /api/admin/keys/[id] — 获取单个 Key 的完整密钥（列表接口只返回掩码，
- *        复制功能需要先经此端点取明文；管理员认证即可，读操作无 CSRF 风险）
+ *        复制功能需要先经此端点取明文；管理员认证 + CSRF 来源校验）
  * PUT    /api/admin/keys/[id] — 更新 API Key 属性
  * DELETE /api/admin/keys/[id] — 删除 API Key（级联删除关联日志与每日统计）
  *
@@ -51,6 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 /** 获取单个 Key 的完整密钥（列表/更新接口均只返回掩码） */
 async function handleGetSecret(req: NextApiRequest, res: NextApiResponse, id: string) {
+  if (!checkCsrfOrigin(req, res)) return;
   try {
     const db = await createDb();
     const existing = await db.apiKeys.findFirst({ where: { id } });

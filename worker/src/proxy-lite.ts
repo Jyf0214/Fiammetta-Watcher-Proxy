@@ -52,12 +52,23 @@ function extractUpstreamErrorMessage(text: string): string {
 }
 
 /**
+ * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
+ * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
+ */
+function sanitizeMessage(original: string, status: number): string {
+  if (status === 403) return "上游访问被拒绝（HTTP 403）";
+  if (status === 401) return "上游认证失败（HTTP 401）";
+  if (status === 429) return "上游请求过多（HTTP 429）";
+  return original;
+}
+
+/**
  * 脱敏上游错误响应，仅提取错误消息
  */
 function sanitizeUpstreamError(errorText: string, upstreamStatus: number): string {
   return JSON.stringify({
     error: {
-      message: extractUpstreamErrorMessage(errorText),
+      message: sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamStatus),
       type: "upstream_error",
       upstream_status: upstreamStatus,
     },
@@ -112,6 +123,15 @@ const FORBIDDEN_FORWARD_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
   "expect",
+  // 下游伪造 x-forwarded-* 可污染日志 IP 与可信代理判定，统一禁止透传
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "x-forwarded-host",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "eo-client-ip",
+  "eo-connecting-ip",
+  "x-vercel-forwarded-for",
 ]);
 
 // ==================== 请求体解析 ====================
@@ -229,6 +249,8 @@ function createLiteUsageTransformer(params: {
   key?: string;
   /** 上游真实端点路径（如 /chat/completions）：请求日志 endpoint 字段落库值 */
   endpoint: string;
+  /** max_tokens 预估值：上游未返回 usage 时兜底，供 lite 日志与后续计费一致性 */
+  maxTokensEstimate?: number;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -310,7 +332,7 @@ function createLiteUsageTransformer(params: {
 
     async flush() {
       const { promptTokens, completionTokens, totalTokens } =
-        extractUsage(lastUsage);
+        extractUsage(lastUsage, params.maxTokensEstimate);
       const duration = Date.now() - params.startTime;
 
       // 上游流被截断：EOF 但未收到 [DONE]（lite 不触发熔断，只如实记失败日志）。
@@ -331,7 +353,8 @@ function createLiteUsageTransformer(params: {
           (streamError.code === 429 || streamError.code === 401 ||
            streamError.code === 402 || streamError.code === 403)) {
         const keyErrorCode = streamError.code;
-        try { await banKey(params.key, undefined, params.platformId); } catch {}
+        // workerEnv 不含 KV 字段，流内 error 路径封禁仅内存态（与 lite 设计一致）
+        try { await banKey(params.key, undefined, params.platformId, (params.env as any).KV); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
         // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
         // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
@@ -774,10 +797,10 @@ export async function proxyV1RequestLite(
 
   // 密钥类状态码（429/401/402/403）：封禁 Key + 累加错误计数（达 5 次自动禁用；
   // 402 = Payment Required 计数 +5 立即禁用，与全量版 RETRYABLE_UPSTREAM_STATUSES
-  // 及流内 error 路径对齐——此前只计数不封禁，两条路径行为分叉；banKey 不传 KV
-  // 与流内路径一致，lite 封禁态为内存级）
+  // 及流内 error 路径对齐——此前只计数不封禁，两条路径行为分叉；banKey 传入
+  // KV 使封禁态持久化，避免 Worker 冷启动后丢失）
   if (currentKey && (upstreamResponse.status === 429 || upstreamResponse.status === 401 || upstreamResponse.status === 402 || upstreamResponse.status === 403)) {
-    ctx.waitUntil(banKey(currentKey, undefined, route.platform.id).catch(() => {}));
+    ctx.waitUntil(banKey(currentKey, undefined, route.platform.id, env.KV).catch(() => {}));
     ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
     // 与全量版 HTTP 429 路径对齐——lite 无重试，冷却由调度层（selectPlatform）生效
@@ -809,7 +832,7 @@ export async function proxyV1RequestLite(
 
   if (config.protocol === "anthropic") {
     return Response.json(
-      formatAnthropicError(upstreamResponse.status, extractUpstreamErrorMessage(errorText)),
+      formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
       { status: upstreamResponse.status }
     );
   }
@@ -993,7 +1016,8 @@ async function handleUpstreamResponseLite(
       status: 200,
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        // no-transform 防止中间代理/网关对 SSE 流做 gzip 缓冲
+        "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
       },
     });

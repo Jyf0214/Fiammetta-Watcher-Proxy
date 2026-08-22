@@ -2,7 +2,7 @@
  * 单个系统 API Key 操作
  *
  * GET    /api/admin/system-keys/[id] — 获取单个系统 Key 的完整密钥（列表接口只返回掩码，
- *        复制功能需要先经此端点取明文；管理员认证即可，读操作无 CSRF 风险）
+ *        复制功能需要先经此端点取明文；管理员认证 + CSRF 来源校验）
  * DELETE /api/admin/system-keys/[id] — 删除系统 Key
  * PATCH  /api/admin/system-keys/[id] — 启用/禁用系统 Key
  */
@@ -46,6 +46,8 @@ async function handleGetSecret(req: NextApiRequest, res: NextApiResponse, id: st
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+
+  if (!checkCsrfOrigin(req, res)) return;
 
   try {
     const db = await createDb();

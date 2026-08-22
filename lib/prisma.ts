@@ -27,6 +27,7 @@ export type DbKind = "d1" | "tidb" | "mysql" | "mariadb" | "pg" | "hyperdrive";
 /** 全局 PrismaClient 实例缓存（Worker 生命周期内复用） */
 let cachedPrisma: any = null;
 let cachedDbKind: DbKind | null = null;
+let cachedBindingKey: string | null = null;
 
 // ==================== 环境检测 ====================
 
@@ -254,15 +255,54 @@ export async function getDbKind(
  *
  * @returns 类型化的 PrismaClient（三个方言 API 完全一致）
  */
+function getBindingKey(env: Record<string, unknown> | undefined, dbKind: DbKind): string {
+  if (!env) return "no-env";
+  if (dbKind === "d1") {
+    const b = (env as any).DB;
+    return b ? `d1:${String((b as any).__bindingId ?? (b as any).id ?? b)}` : "d1:no-binding";
+  }
+  if (dbKind === "hyperdrive") {
+    const hd = (env as any).HYPERDRIVE as { connectionString?: string } | undefined;
+    const cs = hd?.connectionString ?? (process.env.HYPERDRIVE ? (()=>{ try{ return JSON.parse(process.env.HYPERDRIVE!).connectionString }catch{return ""}})() : "");
+    return `hyperdrive:${cs ?? ""}`;
+  }
+  if (dbKind === "pg") {
+    const url = (env as any).PG_URL ?? (env as any).DATABASE_URL ?? process.env.PG_URL ?? process.env.DATABASE_URL ?? "";
+    return `pg:${url}`;
+  }
+  if (dbKind === "tidb") {
+    const url = (env as any).TIDB_URL ?? (env as any).DATABASE_URL ?? process.env.TIDB_URL ?? process.env.DATABASE_URL ?? "";
+    return `tidb:${url}`;
+  }
+  if (dbKind === "mariadb") {
+    const url = (env as any).MARIADB_URL ?? (env as any).DATABASE_URL ?? process.env.MARIADB_URL ?? process.env.DATABASE_URL ?? "";
+    return `mariadb:${url}`;
+  }
+  if (dbKind === "mysql") {
+    const url = (env as any).MYSQL_URL ?? (env as any).DATABASE_URL ?? process.env.MYSQL_URL ?? process.env.DATABASE_URL ?? "";
+    return `mysql:${url}`;
+  }
+  return `${dbKind}:unknown`;
+}
+
 export async function createDb(
   env?: Record<string, unknown> | { DB: unknown }
 ): Promise<Database> {
   const effectiveEnv = await resolveEffectiveEnv(env);
   const dbKind = resolveDbKind(effectiveEnv);
+  const bindingKey = getBindingKey(effectiveEnv as Record<string, unknown> | undefined, dbKind);
 
-  // 命中缓存则直接复用
-  if (cachedPrisma && cachedDbKind === dbKind) {
+  // 命中缓存则直接复用（需同时校验 DbKind 与绑定身份，避免同一进程内不同 DB 实例复用错误连接）
+  if (cachedPrisma && cachedDbKind === dbKind && cachedBindingKey === bindingKey) {
     return cachedPrisma;
+  }
+
+  // 绑定或类型变化时若已有缓存，先优雅断开旧连接（避免 pg Pool 泄漏）
+  if (cachedPrisma && (cachedDbKind !== dbKind || cachedBindingKey !== bindingKey)) {
+    try { await cachedPrisma.$disconnect(); } catch {}
+    cachedPrisma = null;
+    cachedDbKind = null;
+    cachedBindingKey = null;
   }
 
   // 创建新实例
@@ -270,6 +310,7 @@ export async function createDb(
 
   cachedPrisma = prisma;
   cachedDbKind = dbKind;
+  cachedBindingKey = bindingKey;
 
   return prisma;
 }
@@ -284,6 +325,7 @@ export async function disconnectDb(): Promise<void> {
     await cachedPrisma.$disconnect();
     cachedPrisma = null;
     cachedDbKind = null;
+    cachedBindingKey = null;
   }
 }
 

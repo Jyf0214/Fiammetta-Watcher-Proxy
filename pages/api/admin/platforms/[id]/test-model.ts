@@ -16,6 +16,9 @@ import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
 /** 测试超时（毫秒） */
 const TEST_TIMEOUT_MS = 30_000;
 
+/** 单次测试最大密钥数量，防止大量密钥导致请求长时间阻塞 */
+const MAX_TEST_KEYS = 20;
+
 interface TestResult {
   name: string;
   keyMasked: string;
@@ -100,10 +103,21 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
 
-    const keys = parseNamedKeyList(platform.apiKeys);
+    let keys = parseNamedKeyList(platform.apiKeys);
     if (keys.length === 0) {
       // 未配置密钥或全部已禁用（enabled=false）时无可用测试对象
       return res.status(400).json({ success: false, error: "平台未配置可用密钥" });
+    }
+
+    // 限制测试密钥数量，防止大量密钥串行请求导致长时间阻塞（每个密钥含 30s 超时）
+    const totalKeyCount = keys.length;
+    if (totalKeyCount > MAX_TEST_KEYS) {
+      // 随机抽样：相比取前 N 个，抽样能更均匀地覆盖不同批次的密钥
+      for (let i = keys.length - 1; i > keys.length - 1 - MAX_TEST_KEYS; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+      }
+      keys = keys.slice(keys.length - MAX_TEST_KEYS);
     }
 
     const urlCheck = await isSafeUrl(platform.baseUrl);
@@ -193,7 +207,12 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
       }
     }
 
-    return res.status(200).json({ success: true, data: results });
+    return res.status(200).json({
+      success: true,
+      data: results,
+      // 若抽样过，返回总量信息便于前端提示
+      ...(totalKeyCount > MAX_TEST_KEYS ? { totalKeys: totalKeyCount, sampledKeys: MAX_TEST_KEYS } : {}),
+    });
   } catch (err) {
     console.error("[POST /api/admin/platforms/[id]/test-model] 模型测试失败:", err);
     return res.status(500).json({ success: false, error: "模型测试失败" });

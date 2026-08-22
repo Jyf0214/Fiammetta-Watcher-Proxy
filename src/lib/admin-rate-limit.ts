@@ -26,6 +26,9 @@ function getKvKey(adminId: string): string {
  */
 const memoryWindows = new Map<string, number[]>();
 
+/** KV 降级告警标记：仅首次降级时输出 warn，避免刷屏 */
+let kvFallbackWarned = false;
+
 /** 进程内窗口检查：true 表示放行，false 表示已发送 429 */
 function checkMemoryWindow(adminId: string, res: NextApiResponse): boolean {
   const now = Date.now();
@@ -68,6 +71,10 @@ export async function checkAdminRateLimit(
 
   if (!kv) {
     // 非 Cloudflare 平台：进程内滑动窗口兜底（原来直接放行 → 无限流）
+    if (!kvFallbackWarned) {
+      kvFallbackWarned = true;
+      console.warn("[admin-rate-limit] KV 不可用，限流降级到进程内模式；多实例部署时限流失效，仅提供基本防护");
+    }
     return checkMemoryWindow(adminId, res);
   }
 
@@ -100,6 +107,10 @@ export async function checkAdminRateLimit(
     return true;
   } catch {
     // KV 异常时降级为进程内窗口，避免限流完全失效（fail-open → 内存兜底）
+    if (!kvFallbackWarned) {
+      kvFallbackWarned = true;
+      console.warn("[admin-rate-limit] KV 操作异常，限流降级到进程内模式；多实例部署时限流失效，仅提供基本防护");
+    }
     return checkMemoryWindow(adminId, res);
   }
 }

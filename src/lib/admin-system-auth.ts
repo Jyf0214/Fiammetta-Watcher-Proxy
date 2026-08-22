@@ -12,6 +12,20 @@
 import type { NextApiRequest } from "next";
 import { createDb } from "@/lib/prisma";
 
+/** 常量时间字符串比较，防止时序侧信道攻击 */
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  // 不等长时也做完整异或遍历，避免提前短路泄露长度信息
+  const maxLen = Math.max(bufA.length, bufB.length);
+  let result = bufA.length ^ bufB.length;
+  for (let i = 0; i < maxLen; i++) {
+    result |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  }
+  return result === 0;
+}
+
 /** 系统 Key 认证结果 */
 export interface SystemAuthResult {
   systemKeyId: string;
@@ -35,12 +49,22 @@ export async function validateSystemApiKey(
 
   try {
     const db = await createDb();
+
+    // 按 key 查找记录（数据库层按 key 字段精确匹配）
     const row = await db.systemApiKeys.findFirst({
       where: { key },
-      select: { id: true, name: true, enabled: true },
+      select: { id: true, key: true, name: true, enabled: true },
     });
 
-    if (!row || !row.enabled) return null;
+    // 用常量时间比较确认 key 匹配，防止时序侧信道：
+    // 即使数据库查询结果已区分「有记录/无记录」，
+    // 此处对两种情况都执行一次 timingSafeStringEqual，
+    // 使攻击者无法通过响应时间差异推断"记录不存在"vs"密钥错误"。
+    const dummyKey = "0000000000000000000000000000000000000000000000000000000000000000";
+    const keyToCompare = row?.key ?? dummyKey;
+    const keyValid = timingSafeStringEqual(key, keyToCompare);
+
+    if (!keyValid || !row?.enabled) return null;
 
     // 更新 last_used_at：必须 await——CF Pages 边缘运行时在响应返回后不保证
     // 未完成的异步 promise 继续执行（fire-and-forget 可能被直接丢弃，
