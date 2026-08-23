@@ -182,7 +182,11 @@ async function flushNow(): Promise<void> {
               `[batched-writer] Key ${keyId} 用量更新失败:`,
               err instanceof Error ? err.message : String(err)
             );
-            failedKeyUsages.set(keyId, usage);
+            // P2025（记录不存在，Key 在缓冲期间被删除）直接丢弃：
+            // 回滚重试会形成每 5 秒失败循环直到进程重启
+            if ((err as { code?: string })?.code !== "P2025") {
+              failedKeyUsages.set(keyId, usage);
+            }
           })
       );
     }
