@@ -231,6 +231,7 @@
     "forwardHeadersDesc": "每行一个请求头名称，透传到上游请求",
     "forwardHeadersPlaceholder": "每行一个 Header 名称\nX-Thinking-Mode\nX-Reasoning-Effort",
     "forwardHeadersForbidden": "以下请求头禁止透传（会覆盖平台认证）: {names}",
+    "extraHeadersInvalid": "第 {lines} 行格式无效（应为 Key: Value），保存时将被静默丢弃，请修正",
     "injectStreamOptions": "注入 stream_options",
     "injectStreamOptionsDesc": "流式请求时发送 stream_options:{include_usage:true}；对严格校验后端的平台（如 Mistral）请关闭，避免 422 extra_forbidden",
     "reuseUserAgent": "覆盖 User-Agent",

@@ -27,6 +27,7 @@ vi.mock("../load-balancer", () => ({
   recordFailure: vi.fn(async () => {}),
   recordSuccess: vi.fn(async () => {}),
   recordPlatform429: vi.fn(),
+  releaseHalfOpenPending: vi.fn(() => {}),
 }));
 
 // 批量写入缓冲器 mock（替代直接 prisma 写入）

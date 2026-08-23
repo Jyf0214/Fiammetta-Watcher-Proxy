@@ -344,6 +344,10 @@ export async function routeRequest(
       } else if (isPlatform429Cooldown(candidate.id)) {
         // 429 冷却期：平台过载，回退到负载均衡
         selectedPlatform = null;
+      } else if (candidate.cooldownEnd !== null && candidate.cooldownEnd * 1000 > Date.now()) {
+        // 管理员/系统设置的持久化冷却期未到（库中为 Unix 秒）：与 selectPlatform
+        // 的冷却过滤对齐，避免指定路由绕过解禁时间把请求打进已知故障平台
+        selectedPlatform = null;
       } else {
         selectedPlatform = candidate;
       }

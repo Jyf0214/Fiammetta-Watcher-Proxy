@@ -27,6 +27,7 @@ vi.mock("../load-balancer", () => ({
   recordFailure: vi.fn(async () => {}),
   recordSuccess: vi.fn(async () => {}),
   proxyStatKey: vi.fn(() => "stat-key"),
+  releaseHalfOpenPending: vi.fn(() => {}),
 }));
 
 vi.mock("../platform-keys", () => ({

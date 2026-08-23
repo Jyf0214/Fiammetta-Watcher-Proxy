@@ -6,7 +6,9 @@ import { useRouter } from "next/router";
 
 /** 根据路由路径选择骨架屏 variant */
 function getVariant(pathname: string): SurfaceSkeletonVariant {
-  if (pathname.startsWith("/admin/platforms")) return "grid";
+  // 平台管理页为紧凑分组行列表（max-w-2xl），非卡片网格——骨架按 list 渲染
+  // 避免加载完成时从满宽三列大卡跳变为窄列表
+  if (pathname.startsWith("/admin/platforms")) return "list";
   if (pathname.startsWith("/admin/keys") || pathname.startsWith("/admin/system-keys")) return "list";
   if (pathname.startsWith("/admin/request-templates")) return "list";
   if (pathname.startsWith("/admin/auto-model")) return "list";

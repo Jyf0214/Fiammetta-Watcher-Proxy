@@ -67,7 +67,14 @@ export function extractUsage(
     };
   }
 
-  return { promptTokens, completionTokens, totalTokens };
+  // requestLogs 三个 token 列为 Int32（上限 2^31-1）：上游返回/恶意构造的
+  // 超界值会让批量写入的 createMany 整批失败，同批合法日志一并丢失——统一钳制
+  const INT32_MAX = 2_147_483_647;
+  return {
+    promptTokens: Math.min(promptTokens, INT32_MAX),
+    completionTokens: Math.min(completionTokens, INT32_MAX),
+    totalTokens: Math.min(totalTokens, INT32_MAX),
+  };
 }
 
 /**

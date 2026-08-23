@@ -434,11 +434,15 @@ export async function proxyV1Request(
 
   // TPM 检查：用请求体中的 max_tokens 作为预估 token 数
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
-  // Responses API 使用 max_output_tokens 字段，Chat 使用 max_tokens/max_completion_tokens，兼容两者
-  const estimatedTokens = Math.min(
-    MAX_ESTIMATED_TOKENS,
-    Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
-  );
+  // Responses API 使用 max_output_tokens 字段，Chat 使用 max_tokens/max_completion_tokens，兼容两者。
+  // multipart（图片/音频）请求体无 token 字段且实际消耗达数千至数万 token，
+  // 按上限预扣（与 Pages 版 [[...v1]].ts 对齐），防止 TPM 配额被以 1 token 名义绕过
+  const estimatedTokens = multipart
+    ? MAX_ESTIMATED_TOKENS
+    : Math.min(
+        MAX_ESTIMATED_TOKENS,
+        Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
+      );
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 estimatedTokens）
   const anthropicInputEstimate =
@@ -943,6 +947,9 @@ export async function proxyV1Request(
     // 封禁与错误计数对每一轮（含最后一轮）都执行：此前只封禁可重试的中间轮次，
     // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
     // 自动禁用阈值（5 次）被系统性稀释
+    // 该平台可能经 selectPlatform 占用了半开探测槽位；本路径不走
+    // recordSuccess/recordFailure（二者内部会清零 pending），必须显式归还
+    releaseHalfOpenPending(currentPlatform.id);
     await banKey(currentKey, undefined, currentPlatform.id, env.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
     // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位

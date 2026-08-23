@@ -255,7 +255,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
           const displayVal = display ? display.value : formatCompactNumber(card.value, t);
           const suffix = display?.suffix ?? card.suffix;
           return (
-            <ProCard key={card.key} className="bg-white border-zinc-200" padding="p-3">
+            <ProCard key={card.key} className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800" padding="p-3">
               <div className="flex items-center gap-2.5">
                 <div
                   className={`h-8 w-8 ${card.bgColor} rounded-lg flex items-center justify-center shrink-0`}
@@ -263,11 +263,11 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
                   <span className={`${card.iconColor} text-sm`}>{card.icon}</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-zinc-500 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
-                  <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 leading-tight tabular-nums whitespace-nowrap`}>
+                  <p className="text-zinc-500 dark:text-zinc-400 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
+                  <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 dark:text-zinc-100 leading-tight tabular-nums whitespace-nowrap`}>
                     {displayVal}
                     {suffix && (
-                      <span className="text-sm font-normal text-zinc-400 ml-1">
+                      <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500 ml-1">
                         {suffix}
                       </span>
                     )}

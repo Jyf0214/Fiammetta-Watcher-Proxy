@@ -62,13 +62,17 @@ async function decCount(store: Map<string, CounterEntry>, prefix: string, id: st
  *
  * 调用顺序为「先扣平台、后扣 Key」，Key 级拒绝时平台侧已扣的计数若不归还，
  * 会被与该客户端无关的后续请求白白消耗。rpmLimit 与扣减时一致传入：
- * 为 null 时 checkPlatformRpm 从未扣减，此处也必须跳过（否则误减他人计数）；
- * 窗口翻转后回滚落在旧窗口键上，随 cleanup 过期，无副作用。
+ * 为 null 时 checkPlatformRpm 从未扣减，此处也必须跳过（否则误减他人计数）。
+ *
+ * ws 应传 checkPlatformRpm 返回的 windowStart（扣减时刻的窗口键）：跨分钟
+ * 边界回滚时按当前时刻取窗口会误减新窗口计数（凭空放行下一窗口配额）。
+ * 未传时退化为按当前窗口计算——新窗口键不存在则 no-op（旧扣减浪费但无害），
+ * 存在则误减，调用方应尽量传入。
  */
-export async function releasePlatformRpm(platformId: string, rpmLimit: number | null): Promise<void> {
+export async function releasePlatformRpm(platformId: string, rpmLimit: number | null, ws?: number): Promise<void> {
   if (rpmLimit === null) return;
-  const ws = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
-  await decCount(rpmCounters, RATE_PREFIX, platformId, ws);
+  const window = ws ?? Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  await decCount(rpmCounters, RATE_PREFIX, platformId, window);
 }
 
 /**
@@ -76,11 +80,12 @@ export async function releasePlatformRpm(platformId: string, rpmLimit: number | 
  *
  * est 必须与 checkPlatformTpm 扣减时的预估 token 数一致，否则归还量错位。
  * tpmLimit 为 null 或 est <= 0 时 checkPlatformTpm 从未扣减，跳过。
+ * ws 语义同 releasePlatformRpm：应传扣减时刻的 windowStart。
  */
-export async function releasePlatformTpm(platformId: string, tpmLimit: number | null, est: number): Promise<void> {
+export async function releasePlatformTpm(platformId: string, tpmLimit: number | null, est: number, ws?: number): Promise<void> {
   if (tpmLimit === null || est <= 0) return;
-  const ws = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
-  await decCount(tpmCounters, TPM_PREFIX, platformId, ws, est);
+  const window = ws ?? Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  await decCount(tpmCounters, TPM_PREFIX, platformId, window, est);
 }
 
 export async function checkPlatformRpm(platformId: string, rpmLimit: number | null): Promise<RateLimitResult> {
@@ -90,7 +95,7 @@ export async function checkPlatformRpm(platformId: string, rpmLimit: number | nu
   const c = await getCount(rpmCounters, RATE_PREFIX, platformId, ws);
   if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(rpmCounters, RATE_PREFIX, platformId, ws);
-  return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS };
+  return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
 
 export async function checkPlatformTpm(platformId: string, tpmLimit: number | null, est: number): Promise<RateLimitResult> {
@@ -100,7 +105,7 @@ export async function checkPlatformTpm(platformId: string, tpmLimit: number | nu
   const c = await getCount(tpmCounters, TPM_PREFIX, platformId, ws);
   if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
   await incCount(tpmCounters, TPM_PREFIX, platformId, ws, est);
-  return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS };
+  return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
 
 export async function checkApiKeyRpm(apiKeyId: string, rpmLimit: number | null): Promise<RateLimitResult> {

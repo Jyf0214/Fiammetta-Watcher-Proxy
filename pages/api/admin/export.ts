@@ -15,6 +15,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { getClientIp } from "./auth";
 
 /** 导出类型 */
@@ -36,6 +37,9 @@ export default async function handler(
       res.status(401).json({ success: false, error: "未授权" });
       return;
     }
+    // 与 stats/audit/logs 等读端点对齐：全量导出是最重的查询（多表 + 近30天日志），
+    // 凭据泄露时若无速率约束可反复拉取整库明文并构成 DB 全表扫描 DoS
+    if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
     const rawExportType = (req.query.type as string) || "all";
     const VALID_EXPORT_TYPES = ["system", "data", "all"];

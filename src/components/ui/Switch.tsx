@@ -52,6 +52,7 @@ export default function Switch({
       className={`
         group relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer items-center
         rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out
+        before:absolute before:-inset-y-[10px] before:-inset-x-[6px] before:content-['']
         focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-400
         ${checked
           ? "bg-zinc-900 dark:bg-zinc-100"

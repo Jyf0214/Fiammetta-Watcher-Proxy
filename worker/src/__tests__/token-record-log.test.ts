@@ -25,6 +25,7 @@ vi.mock("../batched-writer", () => ({
 vi.mock("../load-balancer", () => ({
   recordFailure: vi.fn(async () => {}),
   recordPlatform429: vi.fn(),
+  releaseHalfOpenPending: vi.fn(() => {}),
 }));
 
 vi.mock("../platform-keys", () => ({

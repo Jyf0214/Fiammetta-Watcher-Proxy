@@ -389,20 +389,27 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const kRpm = await checkApiKeyRpm(apiKey.id, apiKey.rpmLimit);
   if (!kRpm.allowed) {
     releaseHalfOpenPending(route.platform.id);
-    // Key 级拒绝时平台 RPM 已扣：不归还则配额被与该客户端无关的请求白白消耗
-    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit);
+    // Key 级拒绝时平台 RPM 已扣：不归还则配额被与该客户端无关的请求白白消耗；
+    // 传扣减时刻的窗口键，跨分钟边界回滚不会误减新窗口计数
+    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
     sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return;
   }
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
-  // Responses 使用 max_output_tokens，Chat 使用 max_tokens/max_completion_tokens
-  const est = Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1));
+  // Responses 使用 max_output_tokens，Chat 使用 max_tokens/max_completion_tokens。
+  // multipart（图片/音频）请求体无 token 字段且实际消耗达数千至数万 token，
+  // 按上限预扣，防止 TPM 配额被以 1 token 的名义绕过
+  const est = multipart
+    ? MAX_ESTIMATED_TOKENS
+    : Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1));
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 est）
   const anthropicInputEstimate = config.protocol === "anthropic" ? estimateInputTokens(rawBody) : est;
   const pTpm = await checkPlatformTpm(route.platform.id, route.platform.tpmLimit, est);
   if (!pTpm.allowed) {
-    // 请求未发出：释放半开探测配额
+    // 请求未发出：释放半开探测配额；平台 RPM 已扣同样归还（与 kRpm/kTpm
+    // 拒绝分支同一理由——不归则会配额被无关请求白白消耗，放大后续 429）
     releaseHalfOpenPending(route.platform.id);
+    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台 Token 速率超限", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台 Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((pTpm.resetAt - Date.now()) / 1000) }); return;
@@ -410,9 +417,10 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const kTpm = await checkApiKeyTpm(apiKey.id, apiKey.tpmLimit, est);
   if (!kTpm.allowed) {
     releaseHalfOpenPending(route.platform.id);
-    // Key 级拒绝时平台 RPM/TPM 均已扣：一并归还，est 与扣减时保持同一预估值
-    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit);
-    await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, est);
+    // Key 级拒绝时平台 RPM/TPM 均已扣：一并归还，est 与扣减时保持同一预估值，
+    // 窗口键传扣减时刻的 windowStart 防跨窗口误减
+    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
+    await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, est, pTpm.windowStart);
     sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return;
   }
 
@@ -422,6 +430,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const tried = new Set<string>(), triedP = new Set<string>();
 
   if (!curKey) {
+    // selectPlatform 可能已为该 half-open 平台占用探测槽位；因无可用 Key
+    // 放弃它必须归还（与 Worker 版 proxy.ts 同路径对齐），否则恢复探测被饿死
+    releaseHalfOpenPending(cur.id);
     triedP.add(cur.id);
     for (const p of getPlatformsForModel(tgt, triedP)) { const k = getNextKey(p); if (k) { cur = p; curKey = k; break; } }
     if (!curKey) {
@@ -633,6 +644,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 封禁与错误计数对每一轮（含最后一轮）都执行：此前仅封禁可重试的中间轮次，
     // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
     // 自动禁用阈值（5 次）被系统性稀释（与 Worker 版 proxy.ts 对齐）
+    // 该平台可能经 selectPlatform 占用了半开探测槽位；本路径不走
+    // recordSuccess/recordFailure，必须显式归还（与 Worker 版同路径对齐）
+    releaseHalfOpenPending(cur.id);
     await banKey(curKey, undefined, cur.id, env?.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
     // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位

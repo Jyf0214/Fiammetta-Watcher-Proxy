@@ -118,6 +118,27 @@ export function PlatformConfigForm({
     return Promise.resolve();
   };
 
+  // extraHeaders 序列化器会静默跳过格式非法的行（缺冒号/空值），保存后配置
+  // 无声丢失且无报错可排查——提交前显式校验并列出非法行号
+  const validateExtraHeaders = (_: unknown, value: string | undefined): Promise<void> => {
+    if (!value || value.trim() === "") return Promise.resolve();
+    const invalidLines: number[] = [];
+    value.split("\n").forEach((line, i) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const idx = trimmed.indexOf(":");
+      const key = idx > 0 ? trimmed.slice(0, idx).trim() : "";
+      const val = idx > 0 ? trimmed.slice(idx + 1).trim() : "";
+      if (idx <= 0 || !key || !val) invalidLines.push(i + 1);
+    });
+    if (invalidLines.length > 0) {
+      return Promise.reject(
+        new Error(t("extraHeadersInvalid", { lines: invalidLines.join(", ") }))
+      );
+    }
+    return Promise.resolve();
+  };
+
   // 响应式读取：条件渲染 customUserAgent 必须用 useWatch——
   // getFieldValue 是快照读取，不会触发重渲染（开关切换后输入框不出现/不消失）
   const formReuseUserAgent = Form.useWatch("reuseUserAgent", form);
@@ -497,6 +518,7 @@ export function PlatformConfigForm({
                     label={t("extraHeaders")}
                     extra={<span className={itemDesc}>{t("extraHeadersDesc")}</span>}
                     className="!mb-0"
+                    rules={[{ validator: validateExtraHeaders }]}
                   >
                     <Input.TextArea
                       rows={3}

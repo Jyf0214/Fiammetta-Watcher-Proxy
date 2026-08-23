@@ -86,10 +86,12 @@ interface ImportPreview {
  *  platformKeysMasked：平台密钥脱敏/缺失检测，镜像后端 normalizePlatformKeys 判定 */
 const PREVIEW_RULES: Record<
   string,
-  { required: string[]; unique?: string; masked?: string; platformKeysMasked?: boolean }
+  { required: string[]; unique?: string | string[]; masked?: string; platformKeysMasked?: boolean }
 > = {
   platforms: { required: ["name", "baseUrl"], unique: "name", platformKeysMasked: true },
-  modelMaps: { required: ["alias"], unique: "alias" },
+  // 与后端 @@unique([alias, platformId]) 对齐：同一别名映射到不同平台是合法数据，
+  // 按 alias 单字段全局去重会把正常导出误标为重复异常
+  modelMaps: { required: ["alias"], unique: ["alias", "platformId"] },
   configs: { required: ["key", "value"], unique: "key" },
   apiKeys: { required: ["key"], unique: "key", masked: "key" },
   auditLogs: { required: ["action"] },
@@ -164,10 +166,13 @@ function analyzeImportData(data: Record<string, unknown>): ImportPreview {
       // 平台密钥整条缺失或含脱敏标记：导入时该平台将被跳过，预览提前计入
       const platformMasked = !!rule.platformKeysMasked && isPlatformKeyMasked(rec);
       let duplicated = false;
-      if (rule.unique && typeof rec[rule.unique] === "string") {
-        const key = rec[rule.unique] as string;
-        duplicated = seen.has(key);
-        seen.add(key);
+      if (rule.unique) {
+        const uniqueFields = Array.isArray(rule.unique) ? rule.unique : [rule.unique];
+        if (uniqueFields.every((f) => typeof rec[f] === "string")) {
+          const key = uniqueFields.map((f) => rec[f] as string).join("\u0000");
+          duplicated = seen.has(key);
+          seen.add(key);
+        }
       }
       if (missing || masked || duplicated || platformMasked) issues++;
     }

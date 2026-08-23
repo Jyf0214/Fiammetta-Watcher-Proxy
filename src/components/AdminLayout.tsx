@@ -277,23 +277,30 @@ export default function AdminLayout({
     if (isLoginPage) return;
 
     const controller = new AbortController();
+    // 401 踢出携带当前深链，登录成功后回跳原页面（login 页仅接受 /admin 站内路径）。
+    // 用 window.location 而非 router.pathname：后者在动态路由页返回 "/admin/platforms/[id]"
+    // 字面量，回跳会落在 id="[id]" 的无效详情页
+    const loginWithReturn = () => {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      router.push(`/admin/login?redirect=${encodeURIComponent(returnTo)}`);
+    };
     const checkAuth = async () => {
       try {
         const res = await fetch("/api/admin/auth", { signal: controller.signal });
         if (!res.ok) {
-          router.push("/admin/login");
+          loginWithReturn();
           return;
         }
         const data: Record<string, any> = await res.json();
         if (data.success && data.data?.username) {
           setUsername(data.data.username);
         } else {
-          router.push("/admin/login");
+          loginWithReturn();
         }
       } catch (err) {
         // 忽略 AbortError，其他错误才跳转
         if (err instanceof DOMException && err.name === "AbortError") return;
-        router.push("/admin/login");
+        loginWithReturn();
       }
     };
 

@@ -84,6 +84,9 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetAt: number;
+  /** 扣减所在窗口起点（毫秒）。Pages 内存限流器返回，供拒绝回滚定位原窗口键；
+   *  Worker KV 版不返回（无回滚能力） */
+  windowStart?: number;
 }
 
 // ==================== 熔断器类型 ====================

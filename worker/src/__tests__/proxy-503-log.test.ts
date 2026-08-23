@@ -54,6 +54,7 @@ vi.mock("../platform-keys", () => ({
 vi.mock("../load-balancer", () => ({
   recordSuccess: vi.fn(async () => {}),
   recordFailure: vi.fn(async () => {}),
+  releaseHalfOpenPending: vi.fn(() => {}),
 }));
 
 vi.mock("../rate-limiter", () => ({

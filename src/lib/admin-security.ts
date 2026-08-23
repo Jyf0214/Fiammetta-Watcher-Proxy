@@ -95,6 +95,15 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
     if (isProd) {
       // 生产环境：POST/PUT/DELETE 请求必须有 Origin 或 Referer
       if (req.method && ["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+        // Bearer 程序化调用（系统 Key 的 CI/运维脚本）不发送 Origin/Referer。
+        // CSRF 的攻击面是浏览器自动附带的凭据：跨站请求无法携带自定义
+        // Authorization 头（被 CORS 预检拦截），也无法抑制自动附带的 Cookie——
+        // 因此「有 Bearer 且无 Cookie」的组合不存在 CSRF 攻击面，豁免校验，
+        // 保证文档承诺的导入导出/日志归档等自动化集成在生产可用
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith("Bearer ") && !req.headers.cookie) {
+          return true;
+        }
         res.status(403).json({ success: false, error: "请求缺少来源标识" });
         return false;
       }

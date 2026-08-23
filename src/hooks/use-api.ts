@@ -56,10 +56,12 @@ export async function apiFetcher<T = unknown>(url: string): Promise<T> {
   }
 
   if (res.status === 401) {
-    // 登录态失效：统一提示 + 硬跳转登录页（清空内存登录态，避免停留失效会话）
+    // 登录态失效：统一提示 + 硬跳转登录页（清空内存登录态，避免停留失效会话）；
+    // 携带当前深链，登录成功后回跳原页面（login 页消费 ?redirect=）
     message.warning(i18n.t("auth:unauthorized"));
     if (typeof window !== "undefined") {
-      window.location.replace("/admin/login");
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      window.location.replace(`/admin/login?redirect=${encodeURIComponent(returnTo)}`);
     }
     throw new Error(UNAUTHORIZED_MESSAGE);
   }

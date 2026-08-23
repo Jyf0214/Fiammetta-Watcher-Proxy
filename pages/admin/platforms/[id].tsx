@@ -139,7 +139,9 @@ export default function PlatformDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSyncedForNew(true);
     form.resetFields();
-    form.setFieldsValue({ type: "openai", priority: 0, weight: 1 });
+    // injectStreamOptions 必须显式初始化为 true（与后端 POST 缺省一致）：
+    // 留空时开关渲染为关、落库却是开，表单展示与实际生效值相反
+    form.setFieldsValue({ type: "openai", priority: 0, weight: 1, injectStreamOptions: true });
     setNamedKeys([{ name: defaultKeyName(1), key: "" }]);
   }, [isNew, syncedForNew, form, defaultKeyName]);
 
