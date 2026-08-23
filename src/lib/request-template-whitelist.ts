@@ -2,8 +2,9 @@
  * 请求模板 mergeBody 字段白名单（单一来源）
  *
  * 由服务端清洗（pages/api/admin/request-templates.ts 的 sanitizeMergeBody）
- * 与前端提示（pages/admin/request-templates.tsx）共同引用，
- * 避免两处各维护一份导致漂移。
+ * 与运行时代理清洗（worker/src/request-templates.ts，Worker 全量/lite 与
+ * Pages v1 共用）共同引用；前端提示消费的是保存接口返回的 droppedKeys，
+ * 不直接引用本文件。
  */
 
 /** chat 模板白名单 */

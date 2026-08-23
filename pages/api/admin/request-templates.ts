@@ -164,7 +164,7 @@ export default async function handler(
       // models 元素类型校验与 PUT 一致：非字符串元素会让运行时通配符匹配抛
       // TypeError 且被静默吞掉，导致全站请求模板失效
       if (!Array.isArray(models) || !models.every((m) => typeof m === "string")) {
-        res.status(400).json({ success: false, error: "模型匹配列表必须为字符串数组" });
+        res.status(400).json({ success: false, error: "模板模型列表必须为字符串数组" });
         return;
       }
 

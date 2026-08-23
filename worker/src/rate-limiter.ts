@@ -138,9 +138,15 @@ export async function checkApiKeyRpm(
  *
  * 与 Pages 内存版 releasePlatformRpm 对齐：先扣平台后扣 Key 的顺序下，
  * Key 级拒绝需归还已扣的平台计数，避免平台共享配额被无关请求消耗。
- * KV 无原子操作，尽力而为；归还失败仅影响配额精度，不阻塞请求。
+ * limit 为 null 时 checkPlatformRpm 从未扣减，直接跳过（防止窗口中途
+ * 管理员改为不限流后误扣新键）。KV 无原子操作，尽力而为。
  */
-export async function releasePlatformRpm(platformId: string, kv: KVNamespace): Promise<void> {
+export async function releasePlatformRpm(
+  platformId: string,
+  rpmLimit: number | null,
+  kv: KVNamespace
+): Promise<void> {
+  if (rpmLimit === null) return;
   const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
   const key = `${RATE_PREFIX}platform:${platformId}:${windowStart}`;
   try {
@@ -159,10 +165,11 @@ export async function releasePlatformRpm(platformId: string, kv: KVNamespace): P
  */
 export async function releasePlatformTpm(
   platformId: string,
+  tpmLimit: number | null,
   tokenCount: number,
   kv: KVNamespace
 ): Promise<void> {
-  if (tokenCount <= 0) return;
+  if (tpmLimit === null || tokenCount <= 0) return;
   const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
   const key = `${TPM_PREFIX}platform:${platformId}:${windowStart}`;
   try {

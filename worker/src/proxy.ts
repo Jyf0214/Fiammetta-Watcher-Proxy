@@ -426,7 +426,7 @@ export async function proxyV1Request(
     releaseHalfOpenPending(route.platform.id);
     // Key 级拒绝时归还已扣的平台 RPM 计数（与 Pages 版 v1-rate-limit 行为对齐）：
     // 先扣平台后扣 Key 的顺序下不归还会让平台共享配额被无关请求白白消耗
-    try { await releasePlatformRpm(route.platform.id, env.KV); } catch {}
+    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
     return v1ErrorResponse(config, 429, "API Key 请求频率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyRpm.resetAt - Date.now()) / 1000),
     });
@@ -491,8 +491,9 @@ export async function proxyV1Request(
   );
   if (!keyTpm.allowed) {
     releaseHalfOpenPending(route.platform.id);
-    // 同上：归还已扣的平台 TPM 计数（按预估值归还，与扣减口径一致）
-    try { await releasePlatformTpm(route.platform.id, estimatedTokens, env.KV); } catch {}
+    // 与 Pages v1 对齐：keyTpm 拒绝时平台 RPM 与 TPM 均已扣减，需一并归还
+    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
+    try { await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, estimatedTokens, env.KV); } catch {}
     return v1ErrorResponse(config, 429, "API Key Token 速率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyTpm.resetAt - Date.now()) / 1000),
     });

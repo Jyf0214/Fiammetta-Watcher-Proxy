@@ -44,6 +44,9 @@ export default function UsagePage() {
   const [period, setPeriod] = useState<string>("month");
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<string>("key");
+  // 挂载时固化当日序号：避免渲染期（useMemo 内）调用非纯 Date.now()，
+  // 也保证同一次挂载内 streak 的「今天」口径不随重渲染漂移
+  const [todaySeq] = useState(() => Math.floor(Date.now() / 86400000));
 
   // 趋势数据：key 含 period，切换周期时 SWR 自动重新请求
   const {
@@ -136,7 +139,6 @@ export default function UsagePage() {
     // 当前连续：必须锚定「今天」——最新活跃日为今天（今日已请求）或
     // 昨天（今日尚未请求但连击未断）才从尾部回推，更早则视为中断归零，
     // 否则停用一个多月后仍会沿用历史旧连击
-    const todaySeq = Math.floor(Date.now() / 86400000);
     const latestDay = daySeq[daySeq.length - 1];
     let currentStreak = 0;
     if (latestDay === todaySeq || latestDay === todaySeq - 1) {
@@ -147,7 +149,7 @@ export default function UsagePage() {
     }
 
     return { totalRequests, totalTokens, avgTps, peakTokens, currentStreak, longestStreak };
-  }, [trendData]);
+  }, [trendData, todaySeq]);
 
   const tabItems = [
     {
