@@ -23,7 +23,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/ui";
+import { cn, copyToClipboard } from "@/lib/ui";
 import { MODEL_TYPE_CONFIG, type ModelItem } from "@/lib/platform";
 import { ModelIcon } from "@/components/platform/ModelIcon";
 
@@ -110,11 +110,11 @@ export function ModelsPanel({
     { key: "video", label: t(MODEL_TYPE_CONFIG.video.labelKey), icon: Video },
   ].filter((tab) => tab.key === "all" || (typeCounts[tab.key] && typeCounts[tab.key] > 0));
 
-  const copyModelId = (modelId: string) => {
-    navigator.clipboard
-      .writeText(modelId)
-      .then(() => message.success(t("modelIdCopied")))
-      .catch(() => message.error(t("common:copyFailed")));
+  // 统一走共享剪贴板工具：HTTP 部署下 navigator.clipboard 为 undefined，直调同步抛错且 .catch 接不住
+  const copyModelId = async (modelId: string) => {
+    const ok = await copyToClipboard(modelId);
+    if (ok) message.success(t("modelIdCopied"));
+    else message.error(t("common:copyFailed"));
   };
 
   const renderModelRow = (model: ModelItem) => {

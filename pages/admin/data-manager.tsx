@@ -82,12 +82,13 @@ interface ImportPreview {
   types: Record<string, ImportPreviewType>;
 }
 
-/** 各类型必填字段与去重键（与后端 import.ts 校验规则对应的轻量提示） */
+/** 各类型必填字段与去重键（与后端 import.ts 校验规则对应的轻量提示）
+ *  platformKeysMasked：平台密钥脱敏/缺失检测，镜像后端 normalizePlatformKeys 判定 */
 const PREVIEW_RULES: Record<
   string,
-  { required: string[]; unique?: string; masked?: string }
+  { required: string[]; unique?: string; masked?: string; platformKeysMasked?: boolean }
 > = {
-  platforms: { required: ["name", "baseUrl"], unique: "name" },
+  platforms: { required: ["name", "baseUrl"], unique: "name", platformKeysMasked: true },
   modelMaps: { required: ["alias"], unique: "alias" },
   configs: { required: ["key", "value"], unique: "key" },
   apiKeys: { required: ["key"], unique: "key", masked: "key" },
@@ -96,6 +97,44 @@ const PREVIEW_RULES: Record<
   dailyStats: { required: ["date", "model"] },
   platformModels: { required: ["platformId", "modelId"] },
 };
+
+/**
+ * 平台密钥脱敏/缺失检测：镜像后端 import.ts 的 normalizePlatformKeys 判定——
+ * apiKeys JSON 字符串（兼容字符串数组 / {name,key} 对象数组两种格式）与旧版
+ * apiKey 主字段合并后无任何有效密钥，或任一密钥含脱敏标记（***），导入时整条
+ * 平台将以"缺少 API 密钥或已脱敏"跳过。预览阶段提前标出该数量，避免
+ * "预览 0 问题、导入却跳过"的矛盾。
+ */
+function isPlatformKeyMasked(rec: Record<string, unknown>): boolean {
+  const candidates: string[] = [];
+  const raw = typeof rec.apiKeys === "string" ? rec.apiKeys : "";
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string") {
+            if (item.trim()) candidates.push(item.trim());
+          } else if (
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as Record<string, unknown>).key === "string" &&
+            ((item as Record<string, unknown>).key as string).trim()
+          ) {
+            candidates.push(((item as Record<string, unknown>).key as string).trim());
+          }
+        }
+      }
+    } catch {
+      // 与后端一致：无效 JSON 视为无密钥，交由下方空列表判定
+    }
+  }
+  // 旧导出格式的 apiKey 主字段并入候选列表（与后端 unshift 主密钥同语义）
+  const legacyKey = typeof rec.apiKey === "string" ? rec.apiKey.trim() : "";
+  if (legacyKey && !candidates.includes(legacyKey)) candidates.push(legacyKey);
+
+  return candidates.length === 0 || candidates.some((k) => k.includes("***"));
+}
 
 /** 解析导入文件，统计各类型条数与可疑记录（缺必填字段/重复/脱敏） */
 function analyzeImportData(data: Record<string, unknown>): ImportPreview {
@@ -122,13 +161,15 @@ function analyzeImportData(data: Record<string, unknown>): ImportPreview {
         !!rule.masked &&
         typeof rec[rule.masked] === "string" &&
         (rec[rule.masked] as string).includes("***");
+      // 平台密钥整条缺失或含脱敏标记：导入时该平台将被跳过，预览提前计入
+      const platformMasked = !!rule.platformKeysMasked && isPlatformKeyMasked(rec);
       let duplicated = false;
       if (rule.unique && typeof rec[rule.unique] === "string") {
         const key = rec[rule.unique] as string;
         duplicated = seen.has(key);
         seen.add(key);
       }
-      if (missing || masked || duplicated) issues++;
+      if (missing || masked || duplicated || platformMasked) issues++;
     }
 
     types[type] = { count: arr.length, issues };
@@ -415,25 +456,34 @@ export default function DataManagerPage() {
     setPendingImport(null);
   }, []);
 
+  /** 导入文件校验：扩展名与大小两条都查；点击选择与拖放共用，堵住拖放路径绕过大小校验的口子 */
+  const validateImportFile = useCallback(
+    (file: File): boolean => {
+      const isJson = file.type === "application/json" || file.name.endsWith(".json");
+      if (!isJson) {
+        message.error(t("dmErrJsonOnly"));
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        message.error(t("dmErrFileTooLarge"));
+        return false;
+      }
+      return true;
+    },
+    [t]
+  );
+
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      const isJson = file.type === "application/json" || file.name.endsWith(".json");
-      if (!isJson) {
-        message.error(t("dmErrJsonOnly"));
-        return;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        message.error(t("dmErrFileTooLarge"));
-        return;
-      }
+      if (!validateImportFile(file)) return;
 
       processImportFile(file);
       e.target.value = "";
     },
-    [processImportFile, t]
+    [processImportFile, validateImportFile]
   );
 
   const handleDrop = useCallback(
@@ -443,13 +493,10 @@ export default function DataManagerPage() {
       const file = e.dataTransfer.files?.[0];
       if (!file) return;
 
-      if (!file.name.endsWith(".json")) {
-        message.error(t("dmErrJsonOnly"));
-        return;
-      }
+      if (!validateImportFile(file)) return;
       processImportFile(file);
     },
-    [processImportFile, t]
+    [processImportFile, validateImportFile]
   );
 
   /** 渲染导入进度 */

@@ -44,11 +44,9 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/admin-auth", () => ({
   getAdminFromRequest: mocks.getAdmin,
-  // 与真实实现一致：system-key / env-admin 虚拟 ID 返回 null（不落管理员外键）
+  // 与真实实现一致：system-key 返回 null；JWT env-admin 原样落库供审计页归属操作者
   getAuditAdminId: (admin: any) =>
-    admin?.authMethod === "system-key" || admin?.adminId === "env-admin"
-      ? null
-      : admin?.adminId ?? null,
+    admin?.authMethod === "system-key" ? null : admin?.adminId ?? null,
 }));
 
 vi.mock("@/lib/admin-security", () => ({
@@ -324,8 +322,8 @@ describe("PUT /api/admin/config 审计日志（A9）", () => {
     expect(mocks.auditCreate).toHaveBeenCalledTimes(1);
     const data = mocks.auditCreate.mock.calls[0][0].data;
     expect(data.action).toBe("update_config");
-    // env-admin 为 JWT 登录虚拟 ID，不落管理员外键（getAuditAdminId 返回 null）
-    expect(data.adminId).toBeNull();
+    // env-admin 经 getAuditAdminId 原样落库（无外键），供审计页归属「系统管理员」
+    expect(data.adminId).toBe("env-admin");
     expect(data.createdAt).toBe(1_784_000_000);
     // 请求无 x-forwarded-for → ip 为 null
     expect(data.ip).toBeNull();

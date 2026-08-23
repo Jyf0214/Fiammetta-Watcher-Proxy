@@ -32,7 +32,7 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 |------|------|--------|
 | `PORT` | 监听端口 | `3000` |
 | `NODE_ENV` | 运行环境 | `production` |
-| `ENVIRONMENT` | 环境标识：`production` 时登录 Cookie 附加 `Secure`、CSRF 走严格校验分支；Docker 镜像已内置 `production`，其他平台未设置时按非生产处理 | `production`（Docker） |
+| `ENVIRONMENT` | 环境标识：`production` 时登录 Cookie 附加 `Secure`、CSRF 走严格校验分支。Docker 镜像已内置；其他部署形态未设置时按构建环境自动判定（生产构建自动启用）。注意：生产判定生效后，通过 HTTP 明文地址访问管理后台将无法保持登录，请使用 HTTPS 或 localhost；脚本调用管理 API 写接口需携带与站点同源的 Origin 头 | `production`（Docker） |
 
 ## Cron 认证（必须）
 

@@ -12,7 +12,7 @@
 
 import { routeRequestLite } from "./router-lite";
 import { getNextKey, recordKeyError, banKey } from "./platform-keys";
-import { recordRequestLog, extractUsage, resolveStreamErrorStatus } from "./token";
+import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClientInfo } from "./token";
 import { recordPlatform429 } from "./load-balancer";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
@@ -251,8 +251,14 @@ function createLiteUsageTransformer(params: {
   endpoint: string;
   /** max_tokens 预估值：上游未返回 usage 时兜底，供 lite 日志与后续计费一致性 */
   maxTokensEstimate?: number;
+  /** 客户端真实 IP（从下游请求头提取，随流式日志落库；不传写 null） */
+  ipAddress?: string;
+  /** 客户端 User-Agent（从下游请求头提取，随流式日志落库；不传写 null） */
+  userAgent?: string;
   db: D1Database;
   env?: WorkerEnv;
+  /** KV 命名空间：流内密钥类错误时持久化封禁（不传仅内存态，重启丢失） */
+  kv?: KVNamespace;
 }): TransformStream<Uint8Array, Uint8Array> {
   let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
@@ -353,8 +359,9 @@ function createLiteUsageTransformer(params: {
           (streamError.code === 429 || streamError.code === 401 ||
            streamError.code === 402 || streamError.code === 403)) {
         const keyErrorCode = streamError.code;
-        // workerEnv 不含 KV 字段，流内 error 路径封禁仅内存态（与 lite 设计一致）
-        try { await banKey(params.key, undefined, params.platformId, (params.env as any).KV); } catch {}
+        // 经 params.kv 传完整 KV 持久化封禁：同文件 HTTP 非 2xx 路径已持久化，
+        // 此前误传 workerEnv（不含 KV 字段）导致流内封禁重启即失效，两路径语义分叉
+        try { await banKey(params.key, undefined, params.platformId, params.kv); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
         // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
         // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
@@ -378,6 +385,8 @@ function createLiteUsageTransformer(params: {
           duration,
           isError: !!streamError || truncated || emptyCompletion,
           errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : undefined),
+          ipAddress: params.ipAddress,
+          userAgent: params.userAgent,
           db: params.db,
           env: params.env,
         });
@@ -501,6 +510,9 @@ export async function proxyV1RequestLite(
   const startTime = Date.now();
   const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
 
+  // 客户端 IP/UA：所有请求日志（含错误分支）统一携带，日志页与导出的来源列依赖此值
+  const clientInfo = extractClientInfo(request);
+
   // ── 1. 解析请求体 ──
   const parseResult = await parseRequestBody<Record<string, unknown>>(request);
   if ("error" in parseResult) {
@@ -569,6 +581,8 @@ export async function proxyV1RequestLite(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: "此模型不存在",
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -599,6 +613,8 @@ export async function proxyV1RequestLite(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: `平台 "${route.platform.name}" 无可用 API Key`,
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -680,6 +696,8 @@ export async function proxyV1RequestLite(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: `上游 URL 不安全: ${urlCheck.reason}`,
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -754,6 +772,8 @@ export async function proxyV1RequestLite(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage,
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -782,7 +802,8 @@ export async function proxyV1RequestLite(
       upstreamController,
       upstreamTimeoutId,
       anthropicInputEstimate,
-      currentKey
+      currentKey,
+      clientInfo
     );
   }
 
@@ -794,6 +815,37 @@ export async function proxyV1RequestLite(
     // 读取错误体失败（如 signal 超时），保留空错误体
   }
   clearTimeout(upstreamTimeoutId);
+
+  // 上游 3xx（redirect:"manual" 不跟随）：重定向目标未经 SSRF 校验，裸 3xx
+  // 对客户端无意义，属平台 baseUrl 配置错误而非平台故障。与全量版及 Pages v1
+  // 对齐转 502 明确提示（lite 无熔断器，不计失败）
+  if (upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
+    try {
+      await recordRequestLog({
+        keyId: apiKey.id,
+        keyName: apiKey.name,
+        platformId: route.platform.id,
+        model: requestedModel,
+        endpoint: config.upstreamPath,
+        method: "POST",
+        status: upstreamResponse.status,
+        tokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        ttft: 0,
+        duration: Date.now() - startTime,
+        isError: true,
+        errorMessage: `上游返回重定向（HTTP ${upstreamResponse.status}），请检查平台 baseUrl 配置`,
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
+        db: env.DB,
+        env: workerEnv,
+      });
+    } catch (logError) {
+      console.error("[proxy-lite] 日志写入失败:", logError);
+    }
+    return liteErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
+  }
 
   // 密钥类状态码（429/401/402/403）：封禁 Key + 累加错误计数（达 5 次自动禁用；
   // 402 = Payment Required 计数 +5 立即禁用，与全量版 RETRYABLE_UPSTREAM_STATUSES
@@ -823,6 +875,8 @@ export async function proxyV1RequestLite(
       duration: Date.now() - startTime,
       isError: true,
       errorMessage: extractUpstreamErrorMessage(errorText).substring(0, 1000),
+      ipAddress: clientInfo.ipAddress,
+      userAgent: clientInfo.userAgent,
       db: env.DB,
       env: workerEnv,
     });
@@ -864,7 +918,9 @@ async function handleUpstreamResponseLite(
   upstreamController: AbortController,
   upstreamTimeoutId: ReturnType<typeof setTimeout>,
   anthropicInputEstimate: number,
-  currentKey: string
+  currentKey: string,
+  /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */
+  clientInfo?: { ipAddress?: string; userAgent?: string }
 ): Promise<Response> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
@@ -909,6 +965,8 @@ async function handleUpstreamResponseLite(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: "上游返回空响应",
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -963,8 +1021,11 @@ async function handleUpstreamResponseLite(
       // 流内密钥类错误（429/401/402/403）时封禁+计数（与 HTTP 透传路径对齐）
       key: currentKey,
       endpoint: config.upstreamPath,
+      ipAddress: clientInfo?.ipAddress,
+      userAgent: clientInfo?.userAgent,
       db: env.DB,
       env: workerEnv,
+      kv: env.KV,
     });
 
     // 空闲超时置于 transformer 之前，直接包装上游流：只有上游真正无数据时才切断，
@@ -992,6 +1053,8 @@ async function handleUpstreamResponseLite(
             duration: Date.now() - startTime,
             isError: true,
             errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+            ipAddress: clientInfo?.ipAddress,
+            userAgent: clientInfo?.userAgent,
             db: env.DB,
             env: workerEnv,
           }).catch((logError) => {
@@ -1065,6 +1128,8 @@ async function handleUpstreamResponseLite(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: "上游返回空响应",
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -1096,6 +1161,8 @@ async function handleUpstreamResponseLite(
         ttft: 0,
         duration: Date.now() - startTime,
         isError: false,
+        ipAddress: clientInfo?.ipAddress,
+        userAgent: clientInfo?.userAgent,
         db: env.DB,
         env: workerEnv,
       }).catch((logError) => {
@@ -1191,6 +1258,8 @@ async function handleUpstreamResponseLite(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: "上游返回空响应",
+        ipAddress: clientInfo?.ipAddress,
+        userAgent: clientInfo?.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -1251,6 +1320,8 @@ async function handleUpstreamResponseLite(
           ttft: 0,
           duration: Date.now() - startTime,
           isError: false,
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
           db: env.DB,
           env: workerEnv,
         }).catch((logError) => {
@@ -1283,6 +1354,8 @@ async function handleUpstreamResponseLite(
       ttft: 0,
       duration: Date.now() - startTime,
       isError: false,
+      ipAddress: clientInfo?.ipAddress,
+      userAgent: clientInfo?.userAgent,
       db: env.DB,
       env: workerEnv,
     }).catch((logError) => {

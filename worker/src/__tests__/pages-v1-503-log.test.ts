@@ -76,6 +76,7 @@ vi.mock("../../../worker/src/token", () => ({
   recordRequestLog: vi.fn(async () => {}),
   extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
   updateKeyUsage: vi.fn(async () => {}),
+  extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
 }));
 
 vi.mock("../../../worker/src/forward-headers", () => ({

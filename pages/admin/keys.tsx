@@ -14,6 +14,7 @@ import { ImperativeModal, createModal } from "@/components/ui/ImperativeModal";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime, formatDate } from "@/lib/timezone";
+import { copyToClipboard as writeClipboard } from "@/lib/ui";
 import { useApi } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -24,6 +25,7 @@ interface ApiKeyItem {
   usedTokens: number;
   tokenLimit: number | null;
   callLimit: number | null;
+  callUsed: number;
   rpmLimit: number | null;
   tpmLimit: number | null;
   status: string;
@@ -39,12 +41,14 @@ function ApiKeyCard({
   togglingId,
   onToggle,
   onEdit,
+  onCopy,
   onDelete,
 }: {
   apiKey: ApiKeyItem;
   togglingId: string | null;
   onToggle: (item: ApiKeyItem) => void;
   onEdit: (item: ApiKeyItem) => void;
+  onCopy: (item: ApiKeyItem) => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation("apikey");
@@ -80,6 +84,10 @@ function ApiKeyCard({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("callUsed")}</span>
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{apiKey.callUsed.toLocaleString()}</span>
+        </div>
+        <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("common:createdAt")}</span>
           <span className="text-[11px] text-zinc-600 dark:text-zinc-300">{createdDate}</span>
         </div>
@@ -104,6 +112,13 @@ function ApiKeyCard({
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
         >
           <Pencil size={13} /> {t("common:edit")}
+        </button>
+        <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
+        <button
+          onClick={() => onCopy(apiKey)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <Copy size={13} /> {t("common:copy")}
         </button>
         <div className="w-px bg-zinc-100 dark:bg-zinc-800" />
         <Popconfirm title={t("common:confirmDelete")} onConfirm={() => onDelete(apiKey.id)} okText={t("common:confirm")} cancelText={t("common:cancel")}>
@@ -215,7 +230,7 @@ export default function KeysPage() {
           setModalOpen(false);
           mutate();
         } else {
-          message.error(data.error?.message);
+          message.error(data.error?.message || t("common:operationFailed"));
         }
       } else {
         const res = await fetch("/api/admin/keys", {
@@ -253,7 +268,7 @@ export default function KeysPage() {
           keyModal.open();
           mutate();
         } else {
-          message.error(data.error?.message);
+          message.error(data.error?.message || t("common:operationFailed"));
         }
       }
     } catch (err) {
@@ -280,11 +295,13 @@ export default function KeysPage() {
     }
   };
 
+  // 剪贴板写入统一走共享工具：优先 navigator.clipboard，HTTP 环境降级
+  // document.execCommand("copy")，全部失败返回 false 后提示复制失败
   const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await writeClipboard(text);
+    if (ok) {
       message.success(t("common:copied"));
-    } catch {
+    } else {
       message.error(t("common:copyFailed"));
     }
   };
@@ -332,20 +349,30 @@ export default function KeysPage() {
       responsive: ["md" as const],
     },
     {
+      // 累计成功调用次数：后端每次请求累加但此前无任何界面展示
+      title: t("callUsed"),
+      dataIndex: "callUsed",
+      key: "callUsed",
+      width: 120,
+      align: "right" as const,
+      render: (v: number) => v.toLocaleString(),
+      responsive: ["md" as const],
+    },
+    {
       title: t("common:status"),
       dataIndex: "status",
       key: "status",
-      width: 100,
+      width: 160,
       align: "center" as const,
-      render: (v: string) => {
-        // 状态仅 active/disabled 两态（全项目无 expired 写入方），未知值回退 default 标签
-        const colorMap: Record<string, string> = { active: "green", disabled: "red" };
-        const textMap: Record<string, string> = {
-          active: t("statusActive"),
-          disabled: t("statusDisabled"),
-        };
-        return <Tag color={colorMap[v] || "default"}>{textMap[v] || v}</Tag>;
-      },
+      render: (v: string, item: ApiKeyItem) => (
+        // 桌面端提供启停开关：应急停用泄露 Key 不再只能走不可逆删除（与移动端卡片、system-keys 页对齐）
+        <div className="flex items-center justify-center gap-1.5">
+          <Switch checked={v === "active"} loading={togglingId === item.id} onChange={() => handleToggle(item)} />
+          <Tag color={v === "active" ? "green" : "red"} className="!m-0">
+            {v === "active" ? t("statusActive") : t("statusDisabled")}
+          </Tag>
+        </div>
+      ),
     },
     {
       title: t("common:createdAt"),
@@ -455,6 +482,7 @@ export default function KeysPage() {
                 togglingId={togglingId}
                 onToggle={handleToggle}
                 onEdit={openEdit}
+                onCopy={copyApiKey}
                 onDelete={handleDelete}
               />
             ))

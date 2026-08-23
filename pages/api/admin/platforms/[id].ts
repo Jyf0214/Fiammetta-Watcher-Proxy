@@ -134,6 +134,26 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
+    if (body.rpmLimit !== undefined && body.rpmLimit !== null) {
+      if (
+        typeof body.rpmLimit !== "number" ||
+        !Number.isFinite(body.rpmLimit) ||
+        body.rpmLimit < 0
+      ) {
+        errors.push("RPM 限制必须是非负数");
+      }
+    }
+
+    if (body.tpmLimit !== undefined && body.tpmLimit !== null) {
+      if (
+        typeof body.tpmLimit !== "number" ||
+        !Number.isFinite(body.tpmLimit) ||
+        body.tpmLimit < 0
+      ) {
+        errors.push("TPM 限制必须是非负数");
+      }
+    }
+
     // SSRF 防护（含 DNS Rebinding 检测）
     if (body.baseUrl !== undefined) {
       if (

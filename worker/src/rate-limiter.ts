@@ -134,6 +134,51 @@ export async function checkApiKeyRpm(
 }
 
 /**
+ * 归还平台级 RPM 配额（Key 级限流拒绝时调用）
+ *
+ * 与 Pages 内存版 releasePlatformRpm 对齐：先扣平台后扣 Key 的顺序下，
+ * Key 级拒绝需归还已扣的平台计数，避免平台共享配额被无关请求消耗。
+ * KV 无原子操作，尽力而为；归还失败仅影响配额精度，不阻塞请求。
+ */
+export async function releasePlatformRpm(platformId: string, kv: KVNamespace): Promise<void> {
+  const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  const key = `${RATE_PREFIX}platform:${platformId}:${windowStart}`;
+  try {
+    const current = await kv.get(key, { type: "text" });
+    const count = current ? parseInt(current, 10) : 0;
+    if (count > 0) {
+      await kv.put(key, String(count - 1), { expirationTtl: 120 });
+    }
+  } catch {
+    // 尽力而为：忽略归还失败
+  }
+}
+
+/**
+ * 归还平台级 TPM 配额（Key 级限流拒绝时调用，按扣减时的预估值归还）
+ */
+export async function releasePlatformTpm(
+  platformId: string,
+  tokenCount: number,
+  kv: KVNamespace
+): Promise<void> {
+  if (tokenCount <= 0) return;
+  const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  const key = `${TPM_PREFIX}platform:${platformId}:${windowStart}`;
+  try {
+    const current = await kv.get(key, { type: "text" });
+    const currentTokens = current ? parseInt(current, 10) : 0;
+    if (currentTokens > 0) {
+      await kv.put(key, String(Math.max(0, currentTokens - tokenCount)), {
+        expirationTtl: 120,
+      });
+    }
+  } catch {
+    // 尽力而为：忽略归还失败
+  }
+}
+
+/**
  * 检查 API Key 级 TPM 限制
  */
 export async function checkApiKeyTpm(

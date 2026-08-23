@@ -19,13 +19,15 @@ export const ProCard = memo<ProCardProps>(({
   className,
   bodyClassName,
   hoverable = false,
-  bordered: _bordered = true,
+  bordered = true,
   padding = "p-5",
 }) => {
   return (
     <div
       className={cn(
-        "bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200/80 dark:border-zinc-800 transition-all duration-200",
+        "bg-white dark:bg-zinc-900 rounded-xl transition-all duration-200",
+        // bordered=false 时不渲染边框（无边框卡片用于嵌入已有分栏等场景）
+        bordered && "border border-zinc-200/80 dark:border-zinc-800",
         hoverable && "hover:border-zinc-300 dark:hover:border-zinc-700",
         className,
       )}

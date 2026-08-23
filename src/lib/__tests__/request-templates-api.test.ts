@@ -164,9 +164,9 @@ describe("PUT /api/admin/request-templates", () => {
     expect(saved[0].enabled).toBe(false);
   });
 
-  it("models 空数组合法（空数组属于合法字符串数组）", async () => {
+  it("models 空数组归一化为通配符（与 POST 一致，避免落库死模板）", async () => {
     const { res } = await call("PUT", { id: "t1", models: [] });
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.models).toEqual([]);
+    expect(res.body.data.models).toEqual(["*"]);
   });
 });

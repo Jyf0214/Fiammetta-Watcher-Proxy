@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/lib/i18n";
@@ -12,6 +13,13 @@ export function LanguageToggle() {
   const currentLang = i18n.language?.startsWith("en") ? "en" : "zh";
   const nextLang = currentLang === "zh" ? "en" : "zh";
   const label = currentLang === "zh" ? t("langEn") : t("langZh");
+
+  // html lang 属性跟随界面语言（en/zh-CN）；挂载时同步一次，
+  // 之后随 i18n.language 变化更新（useTranslation 订阅 languageChanged 触发重渲染）。
+  // SSR 初始值 zh-CN 由 _document 提供，此处仅负责客户端切换后的同步。
+  useEffect(() => {
+    document.documentElement.lang = currentLang === "en" ? "en" : "zh-CN";
+  }, [currentLang]);
 
   return (
     <button

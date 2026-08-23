@@ -104,6 +104,8 @@ export default function AdminLoginPage() {
     }
 
     setLoading(true);
+    // 成功路径保持 loading 直至跳转发生：防止 800ms 空窗期内按钮解禁被重复提交
+    let loginSucceeded = false;
     try {
       const res = await fetch("/api/admin/auth", {
         method: "POST",
@@ -114,6 +116,7 @@ export default function AdminLoginPage() {
       const data: Record<string, any> = await res.json();
 
       if (data.success) {
+        loginSucceeded = true;
         setSuccess(data.message || t("loginSuccess"));
         const hide = message.loading(t("redirecting"), 1.5);
         // 401 踢出前的深链恢复：仅接受 /admin 开头的站内路径（防开放重定向，// 开头视为外链）
@@ -140,7 +143,8 @@ export default function AdminLoginPage() {
         : t("loginFailed");
       setError(msg);
     } finally {
-      setLoading(false);
+      // 仅失败路径恢复按钮；成功路径保持 loading 直到 800ms 后跳转（timer 卸载清理逻辑不受影响）
+      if (!loginSucceeded) setLoading(false);
     }
   };
 

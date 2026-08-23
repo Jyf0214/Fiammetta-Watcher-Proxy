@@ -77,6 +77,13 @@ describe("runArchiveTask 归档单天日志", () => {
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
         createMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
+      // 归档互斥锁依赖：findFirst 无锁行 → create 成功即持有
+      configs: {
+        findFirst: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(() => Promise.resolve({})),
+        updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
+        deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
+      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -108,7 +115,6 @@ describe("runArchiveTask 归档单天日志", () => {
     expect(allDeletedIds[10000]).toBe("log-10000");
 
     // 聚合完整：10001 条全部计入 daily_stats（兼容 create 与 createMany 两种实现）
-    const createCalls = (mockPrisma.dailyStats.createMany as any)?.mock?.calls?.length ? mockPrisma.dailyStats.createMany : mockPrisma.dailyStats.create;
     // 若为 createMany，聚合为单行 createMany({data:[...]})，取首行校验
     let createData: any;
     if ((mockPrisma.dailyStats.createMany as any).mock.calls.length > 0) {
@@ -170,6 +176,13 @@ describe("runArchiveTask 归档单天日志", () => {
         create: vi.fn(() => Promise.resolve({ id: "ds_1" })),
         createMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
+      // 归档互斥锁依赖：findFirst 无锁行 → create 成功即持有
+      configs: {
+        findFirst: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(() => Promise.resolve({})),
+        updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
+        deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
+      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -214,6 +227,13 @@ describe("runArchiveTask 归档单天日志", () => {
         }),
         create: vi.fn(() => Promise.resolve({ id: "ds_new" })),
         createMany: vi.fn(() => Promise.resolve({ count: 1 })),
+      },
+      // 归档互斥锁依赖：findFirst 无锁行 → create 成功即持有
+      configs: {
+        findFirst: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(() => Promise.resolve({})),
+        updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
+        deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);

@@ -48,6 +48,41 @@ async function incCount(store: Map<string, CounterEntry>, prefix: string, id: st
   else store.set(k, { count: inc, windowStart: ws });
 }
 
+/** 与 incCount 对称的递减：条目不存在或计数不足时不产生负数（防御性，直接忽略） */
+async function decCount(store: Map<string, CounterEntry>, prefix: string, id: string, ws: number, dec = 1): Promise<void> {
+  const k = `${prefix}${id}:${ws}`;
+  const e = store.get(k);
+  if (!e || e.windowStart !== ws) return;
+  if (e.count <= dec) store.delete(k);
+  else e.count -= dec;
+}
+
+/**
+ * 回滚一次平台级 RPM 扣减（Key 级 RPM 拒绝时调用）
+ *
+ * 调用顺序为「先扣平台、后扣 Key」，Key 级拒绝时平台侧已扣的计数若不归还，
+ * 会被与该客户端无关的后续请求白白消耗。rpmLimit 与扣减时一致传入：
+ * 为 null 时 checkPlatformRpm 从未扣减，此处也必须跳过（否则误减他人计数）；
+ * 窗口翻转后回滚落在旧窗口键上，随 cleanup 过期，无副作用。
+ */
+export async function releasePlatformRpm(platformId: string, rpmLimit: number | null): Promise<void> {
+  if (rpmLimit === null) return;
+  const ws = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  await decCount(rpmCounters, RATE_PREFIX, platformId, ws);
+}
+
+/**
+ * 回滚一次平台级 TPM 扣减（Key 级 TPM 拒绝时调用）
+ *
+ * est 必须与 checkPlatformTpm 扣减时的预估 token 数一致，否则归还量错位。
+ * tpmLimit 为 null 或 est <= 0 时 checkPlatformTpm 从未扣减，跳过。
+ */
+export async function releasePlatformTpm(platformId: string, tpmLimit: number | null, est: number): Promise<void> {
+  if (tpmLimit === null || est <= 0) return;
+  const ws = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  await decCount(tpmCounters, TPM_PREFIX, platformId, ws, est);
+}
+
 export async function checkPlatformRpm(platformId: string, rpmLimit: number | null): Promise<RateLimitResult> {
   if (rpmLimit === null) return { allowed: true, remaining: Infinity, resetAt: Date.now() + WINDOW_MS };
   cleanup();

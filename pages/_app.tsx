@@ -21,7 +21,8 @@ export default function App({ Component, pageProps }: AppProps) {
 
   useEffect(() => {
     const handleStart = (url: string) => {
-      if (url.startsWith("/admin")) setRouteLoading(true)
+      // 登录页无管理后台布局，切换时不需要骨架屏遮罩
+      if (url.startsWith("/admin") && !url.startsWith("/admin/login")) setRouteLoading(true)
     }
     const handleDone = () => setRouteLoading(false)
 

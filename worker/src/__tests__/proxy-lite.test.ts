@@ -416,8 +416,8 @@ describe("proxyV1RequestLite 流内 error 密钥级处理", () => {
       if (done) break;
     }
 
-    // 流内 error 路径传入的是 workerEnv（仅含 DB_TYPE），无 KV 字段
-    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", undefined);
+    // 流内 error 路径与 HTTP 非 2xx 路径一致：传完整 env.KV 持久化封禁
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", env.KV);
     expect(recordKeyError).toHaveBeenCalledWith(
       "sk-key1",
       429,

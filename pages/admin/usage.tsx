@@ -112,14 +112,16 @@ export default function UsagePage() {
     // 单日/单小时真实峰值（而非汇总求和）
     const peakTokens = data.reduce((m, d) => Math.max(m, d.tokens), 0);
 
-    // 连续活跃统计：按日期（YYYY-MM-DD 前缀）单调序号判断相邻相差 1 天，
-    // 避免 Date 解析的时区歧义（daily 为 UTC 午夜、hourly 为本地时间）；
+    // 连续活跃统计：按日期（YYYY-MM-DD 前缀）取真实日历日序号判断相邻相差
+    // 1 天，避免 Date 解析的时区歧义（daily 为 UTC 午夜、hourly 为本地时间）；
+    // y/m/dd 取自字符串分量经 Date.UTC 编码——原 y*372+m*31+dd 近似编码在
+    // Feb28→Mar1（差4）及 30 天月边界（差2）误判不连续，导致跨月 streak 错误归零；
     // 先按日去重再算连续——同一自然日多条记录（如 hourly）不得重置 streak
     const daySeq = Array.from(
       new Set(
         data.map((d) => {
           const [y, m, dd] = d.date.slice(0, 10).split("-").map(Number);
-          return y * 372 + m * 31 + dd;
+          return Math.floor(Date.UTC(y, m - 1, dd) / 86400000);
         })
       )
     ).sort((a, b) => a - b);
@@ -131,11 +133,17 @@ export default function UsagePage() {
       if (run > longestStreak) longestStreak = run;
       prevDay = day;
     }
-    // 当前连续：从最新一个有数据的日期回推
+    // 当前连续：必须锚定「今天」——最新活跃日为今天（今日已请求）或
+    // 昨天（今日尚未请求但连击未断）才从尾部回推，更早则视为中断归零，
+    // 否则停用一个多月后仍会沿用历史旧连击
+    const todaySeq = Math.floor(Date.now() / 86400000);
+    const latestDay = daySeq[daySeq.length - 1];
     let currentStreak = 0;
-    for (let i = daySeq.length - 1; i >= 0; i--) {
-      if (i < daySeq.length - 1 && daySeq[i] !== daySeq[i + 1] - 1) break;
-      currentStreak += 1;
+    if (latestDay === todaySeq || latestDay === todaySeq - 1) {
+      for (let i = daySeq.length - 1; i >= 0; i--) {
+        if (i < daySeq.length - 1 && daySeq[i] !== daySeq[i + 1] - 1) break;
+        currentStreak += 1;
+      }
     }
 
     return { totalRequests, totalTokens, avgTps, peakTokens, currentStreak, longestStreak };

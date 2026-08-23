@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m } from "motion/react";
 import {
   Zap,
   Globe,
@@ -117,16 +117,16 @@ export default function HomePage() {
       {/* Hero 区域 */}
       <section className="pt-24 sm:pt-32 pb-16 sm:pb-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <motion.div
+          <m.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center gap-2 text-zinc-400 font-black text-[10px] uppercase tracking-[0.2em] mb-6"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-zinc-900 dark:bg-zinc-100 animate-pulse" />
             <span>{t("heroTagline")}</span>
-          </motion.div>
+          </m.div>
 
-          <motion.h1
+          <m.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -136,18 +136,18 @@ export default function HomePage() {
             <div className="text-zinc-300 dark:text-zinc-600 -mt-2 sm:-mt-4 md:-mt-6">
               {t("common:brandSub")}
             </div>
-          </motion.h1>
+          </m.h1>
 
-          <motion.p
+          <m.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
             className="text-base sm:text-lg text-zinc-500 dark:text-zinc-400 max-w-2xl mb-8 sm:mb-10 leading-relaxed"
           >
             {t("heroDesc")}
-          </motion.p>
+          </m.p>
 
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
@@ -169,14 +169,14 @@ export default function HomePage() {
               <GitFork size={18} />
               {t("github")}
             </Link>
-          </motion.div>
+          </m.div>
         </div>
       </section>
 
       {/* 功能特性 */}
       <section id="features" className="py-16 sm:py-20 px-4 sm:px-6 bg-zinc-50 dark:bg-zinc-900/50">
         <div className="max-w-6xl mx-auto">
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
@@ -188,11 +188,11 @@ export default function HomePage() {
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
               {t("sectionCoreFeaturesDesc")}
             </p>
-          </motion.div>
+          </m.div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, i) => (
-              <motion.div
+              <m.div
                 key={feature.title}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -209,7 +209,7 @@ export default function HomePage() {
                 <p className="text-zinc-500 dark:text-zinc-400 text-sm leading-relaxed">
                   {feature.desc}
                 </p>
-              </motion.div>
+              </m.div>
             ))}
           </div>
         </div>
@@ -218,7 +218,7 @@ export default function HomePage() {
       {/* 快速开始 */}
       <section id="quickstart" className="py-16 sm:py-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
@@ -230,9 +230,9 @@ export default function HomePage() {
             <p className="text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto">
               {t("sectionQuickStartDesc")}
             </p>
-          </motion.div>
+          </m.div>
 
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -249,7 +249,7 @@ export default function HomePage() {
             <pre className="text-xs sm:text-sm text-zinc-300 font-mono leading-relaxed whitespace-pre overflow-x-auto">
               <code>{quickStartCode}</code>
             </pre>
-          </motion.div>
+          </m.div>
 
           {/* 部署步骤 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
@@ -270,7 +270,7 @@ export default function HomePage() {
                 desc: t("stepGetStartedDesc"),
               },
             ].map((item, i) => (
-              <motion.div
+              <m.div
                 key={item.step}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -289,7 +289,7 @@ export default function HomePage() {
                     {item.desc}
                   </p>
                 </div>
-              </motion.div>
+              </m.div>
             ))}
           </div>
         </div>

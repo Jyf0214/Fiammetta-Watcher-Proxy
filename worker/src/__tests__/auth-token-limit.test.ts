@@ -119,10 +119,11 @@ describe("validateApiKey callLimit 检查（含 daily_stats 归档部分）", ()
     const result = await validateApiKey("Bearer sk-test", {} as D1Database, env);
     expect("apiKey" in result).toBe(true);
 
-    // never 周期 periodStart = 0（追溯到最早），date 过滤条件必须带上
+    // never 周期 periodStart = 0（追溯到最早），date 过滤条件必须带上；
+    // 校准口径为成功请求：聚合同时取 totalRequests 与 errorRequests（相减抵扣错误数）
     expect(dailyStatsAggregate).toHaveBeenCalledWith({
       where: { keyId: "key-id", date: { gte: 0 } },
-      _sum: { totalRequests: true },
+      _sum: { totalRequests: true, errorRequests: true },
     });
   });
 

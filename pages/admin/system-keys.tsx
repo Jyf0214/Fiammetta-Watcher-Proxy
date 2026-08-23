@@ -18,6 +18,7 @@ import { ImperativeModal, createModal } from "@/components/ui/ImperativeModal";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
+import { copyToClipboard as writeClipboard } from "@/lib/ui";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 
@@ -58,6 +59,7 @@ export default function SystemKeysPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [keyModal] = useState(() =>
     createModal({
@@ -136,6 +138,8 @@ export default function SystemKeysPage() {
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {
+    // loading 防重：请求期间 Switch 转圈且不可重复触发（与 keys.tsx togglingId 同模式）
+    setTogglingId(id);
     try {
       const res = await fetch(`/api/admin/system-keys/${id}`, {
         method: "PATCH",
@@ -151,14 +155,20 @@ export default function SystemKeysPage() {
       }
     } catch {
       message.error(t("sysKeyOperationFailed"));
+    } finally {
+      setTogglingId(null);
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(
-      () => message.success(t("sysKeyCopied")),
-      () => message.error(t("sysKeyCopyFailed"))
-    );
+  // 剪贴板写入统一走共享工具：navigator.clipboard 在 HTTP 环境为 undefined，
+  // 直接 .then() 会同步抛 TypeError 且无 catch 捕获（表现为死按钮），降级路径在此收口
+  const copyToClipboard = async (text: string) => {
+    const ok = await writeClipboard(text);
+    if (ok) {
+      message.success(t("sysKeyCopied"));
+    } else {
+      message.error(t("sysKeyCopyFailed"));
+    }
   };
 
   // 列表接口只返回脱敏掩码，复制前先经 GET /api/admin/system-keys/[id] 取完整密钥
@@ -217,6 +227,7 @@ export default function SystemKeysPage() {
           <Switch
             checked={enabled}
             size="small"
+            loading={togglingId === record.id}
             onChange={(checked) => handleToggle(record.id, checked)}
           />
           <span className="text-xs text-zinc-500 dark:text-zinc-400">

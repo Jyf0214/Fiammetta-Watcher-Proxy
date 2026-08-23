@@ -667,8 +667,8 @@ describe("DELETE /api/admin/auth — 登出", () => {
     });
     expect(log).not.toBeNull();
     expect(JSON.parse(log!.detail!)).toEqual({ username: ADMIN_USERNAME });
-    // env-admin 为虚拟 ID，不落 adminId（兼容早期外键方言）
-    expect(log!.adminId).toBeNull();
+    // env-admin 经 getAuditAdminId 原样落库，供审计页归属「系统管理员」
+    expect(log!.adminId).toBe("env-admin");
   });
 
   it("无 Cookie 登出：仍返回 200 并清除 Cookie，不写审计", async () => {

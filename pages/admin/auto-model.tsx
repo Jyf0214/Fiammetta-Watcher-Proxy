@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
 import { formatDateTime } from "@/lib/timezone";
+import { copyToClipboard } from "@/lib/ui";
 import useSWR from "swr";
 import { useApi, apiFetcher, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import { type Platform } from "@/components/platform/PlatformList";
@@ -166,19 +167,18 @@ export default function AutoModelPage() {
     }
   };
 
-  const copyAutoModelId = () => {
-    if (autoModelId) {
-      navigator.clipboard.writeText(autoModelId).then(
-        () => {
-          setCopied(true);
-          if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-          copiedTimerRef.current = setTimeout(() => {
-            copiedTimerRef.current = null;
-            setCopied(false);
-          }, 2000);
-        },
-        () => message.error(t("common:copyFailed"))
-      );
+  // 统一走共享剪贴板工具：HTTP 部署下 navigator.clipboard 为 undefined，直调同步抛错且 .then 接不住
+  const copyAutoModelId = async () => {
+    if (!autoModelId) return;
+    if (await copyToClipboard(autoModelId)) {
+      setCopied(true);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
+    } else {
+      message.error(t("common:copyFailed"));
     }
   };
 

@@ -18,8 +18,10 @@ import {
   checkPlatformTpm,
   checkApiKeyRpm,
   checkApiKeyTpm,
+  releasePlatformRpm,
+  releasePlatformTpm,
 } from "./rate-limiter";
-import { createUsageTransformer, recordRequestLog } from "./token";
+import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
@@ -287,6 +289,9 @@ export async function proxyV1Request(
   // 提取 WorkerEnv 部分，供内部函数调用（避免 { DB, KV } & WorkerEnv 赋值给 WorkerEnv 的类型错误）
   const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
 
+  // 客户端 IP/UA：所有请求日志（含错误分支）统一携带，日志页与导出的来源列依赖此值
+  const clientInfo = extractClientInfo(request);
+
   // ── 1. 解析请求体 ──
   const parseResult = await parseRequestBody<Record<string, unknown>>(request);
   if ("error" in parseResult) {
@@ -362,6 +367,8 @@ export async function proxyV1Request(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: "此模型不存在",
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -397,6 +404,8 @@ export async function proxyV1Request(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: "上游平台请求频率超限",
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -415,6 +424,9 @@ export async function proxyV1Request(
   );
   if (!keyRpm.allowed) {
     releaseHalfOpenPending(route.platform.id);
+    // Key 级拒绝时归还已扣的平台 RPM 计数（与 Pages 版 v1-rate-limit 行为对齐）：
+    // 先扣平台后扣 Key 的顺序下不归还会让平台共享配额被无关请求白白消耗
+    try { await releasePlatformRpm(route.platform.id, env.KV); } catch {}
     return v1ErrorResponse(config, 429, "API Key 请求频率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyRpm.resetAt - Date.now()) / 1000),
     });
@@ -458,6 +470,8 @@ export async function proxyV1Request(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: "上游平台 Token 速率超限",
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -477,6 +491,8 @@ export async function proxyV1Request(
   );
   if (!keyTpm.allowed) {
     releaseHalfOpenPending(route.platform.id);
+    // 同上：归还已扣的平台 TPM 计数（按预估值归还，与扣减口径一致）
+    try { await releasePlatformTpm(route.platform.id, estimatedTokens, env.KV); } catch {}
     return v1ErrorResponse(config, 429, "API Key Token 速率超限", "rate_limit_error", {
       retry_after: Math.ceil((keyTpm.resetAt - Date.now()) / 1000),
     });
@@ -546,6 +562,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: "所有平台均无可用 API Key",
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -588,6 +606,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: `平台 "${currentPlatform.name}" 无可用 API Key`,
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -601,8 +621,8 @@ export async function proxyV1Request(
     // 请求体转回 /v1/messages 格式，URL 指向 /v1/messages，认证用 x-api-key + anthropic-version
     const upstreamIsAnthropic = currentPlatform.type === "anthropic";
 
-    // 接口映射转换判定：chat↔responses 互转已移除（行业共识认为语义不可转换），
-    // 下游端点与上游端点原样透传，不做强制转码。
+    // chat↔responses 互转已移除（语义不可转换）：下游端点与上游端点原样透传，
+    // effectiveTargetApi 仅用于选择命中的模板类型（responses 端点只命中 responses 模板）
     const effectiveTargetApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
     const effectiveUpstreamPath = config.upstreamPath;
 
@@ -690,6 +710,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: `上游 URL 不安全: ${urlCheck.reason}`,
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -772,6 +794,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage,
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -806,7 +830,8 @@ export async function proxyV1Request(
         anthropicInputEstimate,
         logTag,
         upstreamController,
-        upstreamTimeoutId
+        upstreamTimeoutId,
+        clientInfo
       );
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return handled;
       isEmptyResponse = true;
@@ -816,6 +841,46 @@ export async function proxyV1Request(
     // 此前流式分支硬编码 200 透传任何非 429 状态，401/403/5xx 被伪装成成功，
     // 下游收到"200 + 空响应"，熔断器与 Key 封禁机制被完全架空。
     if (!isEmptyResponse && !RETRYABLE_UPSTREAM_STATUSES.has(upstreamResponse.status)) {
+      // 上游 3xx（redirect:"manual" 不跟随）：重定向目标未经过 SSRF 校验，
+      // 且 Location 头通常不会透传给下游，裸 3xx 对客户端无意义。这属于
+      // 平台 baseUrl 配置错误而非平台故障，不计熔断失败，直接 502 明确提示
+      if (upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
+        // 消费响应体释放连接（keep-alive 连接泄漏防护，与其他错误分支一致）
+        try {
+          await upstreamResponse.text();
+        } catch {
+          // 读取失败不影响流程
+        }
+        clearTimeout(upstreamTimeoutId);
+        // selectPlatform 可能已占用半开探测槽位；3xx 属配置错误不计熔断，
+        // 但槽位必须归还，否则连续占用后平台恢复探测被饿死
+        releaseHalfOpenPending(currentPlatform.id);
+        try {
+          await recordRequestLog({
+            keyId: apiKey.id,
+            keyName: apiKey.name,
+            platformId: currentPlatform.id,
+            model: requestedModel,
+            endpoint: config.upstreamPath,
+            method: "POST",
+            status: upstreamResponse.status,
+            tokens: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            ttft: 0,
+            duration: Date.now() - startTime,
+            isError: true,
+            errorMessage: `上游返回重定向（HTTP ${upstreamResponse.status}），请检查平台 baseUrl 配置`,
+            ipAddress: clientInfo.ipAddress,
+            userAgent: clientInfo.userAgent,
+            db: env.DB,
+            env: workerEnv,
+          });
+        } catch (logError) {
+          console.error(`${logTag} 日志写入失败:`, logError);
+        }
+        return v1ErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
+      }
       let errorText = "";
       try {
         errorText = await upstreamResponse.text();
@@ -849,6 +914,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: errorText.substring(0, 1000),
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -903,6 +970,8 @@ export async function proxyV1Request(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upstreamResponse.status}（已封禁该 Key 并重试切换）`,
+          ipAddress: clientInfo.ipAddress,
+          userAgent: clientInfo.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -1009,6 +1078,8 @@ export async function proxyV1Request(
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: isEmptyResponse ? "上游返回空响应" : errorText.substring(0, 1000),
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         db: env.DB,
         env: workerEnv,
       });
@@ -1179,7 +1250,9 @@ async function handleUpstreamResponse(
   anthropicInputEstimate: number,
   logTag: string,
   upstreamController: AbortController,
-  upstreamTimeoutId: ReturnType<typeof setTimeout>
+  upstreamTimeoutId: ReturnType<typeof setTimeout>,
+  /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */
+  clientInfo?: { ipAddress?: string; userAgent?: string }
 ): Promise<Response | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 提取 WorkerEnv 部分，供内部函数调用
   const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
@@ -1267,6 +1340,8 @@ async function handleUpstreamResponse(
       // 流内密钥类错误封禁时同步写 KV 持久化（CF 部署管理后台可见、冷启动恢复），
       // 与 HTTP 429 路径 banKey(..., env.KV) 键结构一致
       kv: env.KV,
+      ipAddress: clientInfo?.ipAddress,
+      userAgent: clientInfo?.userAgent,
       db: env.DB,
       env: workerEnv,
     });
@@ -1303,6 +1378,8 @@ async function handleUpstreamResponse(
             duration: Date.now() - startTime,
             isError: true,
             errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+            ipAddress: clientInfo?.ipAddress,
+            userAgent: clientInfo?.userAgent,
             db: env.DB,
             env: workerEnv,
           }).catch((logError) => {
@@ -1387,6 +1464,8 @@ async function handleUpstreamResponse(
         ttft: 0,
         duration: Date.now() - startTime,
         isError: false,
+        ipAddress: clientInfo?.ipAddress,
+        userAgent: clientInfo?.userAgent,
         db: env.DB,
         env: workerEnv,
       }).catch((logError) => {
@@ -1440,6 +1519,8 @@ async function handleUpstreamResponse(
               duration: Date.now() - startTime,
               isError: true,
               errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+              ipAddress: clientInfo?.ipAddress,
+              userAgent: clientInfo?.userAgent,
               db: env.DB,
               env: workerEnv,
             }).catch((logError) => {
@@ -1529,6 +1610,8 @@ async function handleUpstreamResponse(
           ttft: 0,
           duration: Date.now() - startTime,
           isError: false,
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
           db: env.DB,
           env: workerEnv,
         }).catch((logError) => {
@@ -1562,6 +1645,8 @@ async function handleUpstreamResponse(
           duration: Date.now() - startTime,
           isError: true,
           errorMessage: "上游响应格式错误",
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
           db: env.DB,
           env: workerEnv,
         });
@@ -1573,6 +1658,11 @@ async function handleUpstreamResponse(
   }
 
   // 不阻塞响应：成功日志/熔断记录后置到 waitUntil（与流式分支一致）
+  // 非流式直通成功记账：与 anthropic 转换分支对齐，此前缺失导致 stream:false
+  // 请求绕过 tokenLimit/callUsed 扣减（计费漏洞）
+  if (responseTokens > 0) {
+    ctx.waitUntil(updateKeyUsage(apiKey.id, responseTokens, env.DB, workerEnv).catch(() => {}));
+  }
   ctx.waitUntil(
     recordRequestLog({
       keyId: apiKey.id,
@@ -1588,6 +1678,8 @@ async function handleUpstreamResponse(
       ttft: 0,
       duration: Date.now() - startTime,
       isError: false,
+      ipAddress: clientInfo?.ipAddress,
+      userAgent: clientInfo?.userAgent,
       db: env.DB,
       env: workerEnv,
     }).catch((logError) => {

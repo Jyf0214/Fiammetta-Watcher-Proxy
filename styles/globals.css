@@ -482,6 +482,13 @@ select:focus-visible,
 .dark .ant-pagination .ant-pagination-item a {
   color: var(--color-text-secondary);
 }
+/* 激活页码恢复主色：上方通用规则会无差别覆盖 active 项的边框/文字 */
+.dark .ant-pagination .ant-pagination-item-active {
+  border-color: var(--color-primary);
+}
+.dark .ant-pagination .ant-pagination-item-active a {
+  color: var(--color-primary);
+}
 .dark .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
 .dark .ant-pagination .ant-pagination-next .ant-pagination-item-link {
   background: var(--color-bg-container);

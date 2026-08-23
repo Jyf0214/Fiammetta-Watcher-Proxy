@@ -259,9 +259,14 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
               where: { platformId: platform.id, source: "auto" },
             });
 
-            // 批量插入新模型，保留已有模型的 enabled 状态
+            // 批量插入新模型，保留已有模型的 enabled 状态。
+            // 手动添加的模型未被上方 deleteMany 删除、仍占用 (platformId, modelId)
+            // 唯一约束位，必须跳过——否则 createMany 整批失败（D1 无事务，
+            // auto 已删无法回滚，导致该平台自动发现模型被清空）。
             if (models.length > 0) {
-              const values = models.map((m) => {
+              const values = models
+                .filter((m) => existingMap.get(m.id)?.source !== "manual")
+                .map((m) => {
                 const existing = existingMap.get(m.id);
                 return {
                   id: crypto.randomUUID(),

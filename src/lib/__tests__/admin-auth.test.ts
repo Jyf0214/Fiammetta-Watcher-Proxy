@@ -5,7 +5,7 @@
  * - Cookie+JWT：有效 / 过期 / 篡改 payload / 其他密钥签发 / 无 token
  * - Bearer system-api-key：有效 / 无效 Key / 被禁用 Key / JWT 优先于 Bearer
  * - JWT_SECRET 未配置时不抛错（返回 null，走 Bearer 分支）
- * - getAuditAdminId 虚拟 ID 归一化（env-admin / system-key → null）
+ * - getAuditAdminId 归一化（system-key → null；env-admin 原样落库供审计归属）
  *
  * Bearer 分支走真实 PGlite 内存 PostgreSQL（system_api_keys 表），不 mock 数据库。
  */
@@ -203,9 +203,9 @@ describe("getAdminFromRequest — Bearer system-api-key 路径", () => {
 });
 
 describe("getAuditAdminId — 虚拟 ID 归一化", () => {
-  it("JWT env-admin（虚拟 ID）返回 null", () => {
+  it("JWT env-admin（虚拟 ID）原样落库供审计页归属操作者", () => {
     const admin: AuthResult = { adminId: "env-admin", username: "admin", authMethod: "jwt" };
-    expect(getAuditAdminId(admin)).toBeNull();
+    expect(getAuditAdminId(admin)).toBe("env-admin");
   });
 
   it("system-key 认证返回 null", () => {

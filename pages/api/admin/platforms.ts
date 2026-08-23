@@ -183,13 +183,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
               } else if (typeof k === "object" && k !== null && typeof k.key === "string") {
                 if (k.key.trim().length > 0 && k.key.length <= 500) {
-                  const obj: { name: string; key: string; whitelisted?: boolean; enabled?: boolean; errorCount?: number } = {
+                  const obj: { name: string; key: string; whitelisted?: boolean; enabled?: boolean; errorCount?: number; proxyUrls?: string[]; proxyStrict?: boolean } = {
                     name: typeof k.name === "string" && k.name.trim() ? k.name.trim() : `密钥${parsedApiKeys.length + 1}`,
                     key: k.key.trim(),
                   };
                   if (k.whitelisted === true) obj.whitelisted = true;
                   if (k.enabled === false) obj.enabled = false;
                   if (typeof k.errorCount === "number" && k.errorCount > 0) obj.errorCount = k.errorCount;
+                  // 与 PUT 分支对齐：密钥级出站代理绑定与严格模式在创建时同样落库，
+                  // 否则新建平台时绑定的代理静默丢失且返回 200 假成功
+                  if (Array.isArray(k.proxyUrls)) {
+                    const urls = (k.proxyUrls as unknown[]).filter((u): u is string => typeof u === "string" && u.trim().length > 0).slice(0, 2);
+                    if (urls.length > 0) obj.proxyUrls = urls;
+                  }
+                  if (k.proxyStrict === false) obj.proxyStrict = false;
                   parsedApiKeys.push(obj);
                 } else {
                   invalidCount++;

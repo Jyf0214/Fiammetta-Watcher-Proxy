@@ -141,14 +141,21 @@ async function getApproximateCallCount(
   ) {
     const [recentCount, archivedAgg] = await Promise.all([
       prisma.requestLogs.count({
-        where: { keyId, createdAt: { gte: periodStart } },
+        // 仅计成功请求：与内存增量（incrementCallLimitCount 仅成功路径调用）及
+        // apiKeys.callUsed 权威字段口径一致，避免失败多的 Key 限额被系统性提前耗尽
+        where: { keyId, createdAt: { gte: periodStart }, isError: false },
       }),
       prisma.dailyStats.aggregate({
         where: { keyId, date: { gte: periodStart } },
-        _sum: { totalRequests: true },
+        _sum: { totalRequests: true, errorRequests: true },
       }),
     ]);
-    const dbCount = recentCount + Number(archivedAgg._sum.totalRequests ?? 0);
+    // 归档聚合的 totalRequests 含错误请求，减去 errorRequests 对齐成功口径
+    // （旧归档行 errorRequests 可能为 0，仅造成保守方向的高估，随保留期滚动消失）
+    const dbCount =
+      recentCount +
+      Number(archivedAgg._sum.totalRequests ?? 0) -
+      Number(archivedAgg._sum.errorRequests ?? 0);
     entry = {
       calibratedCount: dbCount,
       calibratedPeriodStart: periodStart,

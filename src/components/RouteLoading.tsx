@@ -26,13 +26,16 @@ export default function RouteLoading() {
   const router = useRouter();
   const variant = getVariant(router.pathname);
 
+  // z-20 低于桌面侧边栏(z-30)/顶栏(z-40)/移动抽屉(z-50)：
+  // 导航过渡期间侧边栏与顶栏保持稳定可见，仅内容区被骨架屏覆盖；
+  // 内部的假顶栏骨架会被真顶栏（z-40）覆盖，无视觉冲突
   return (
     <m.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-[200] bg-zinc-50 dark:bg-zinc-950 overflow-hidden"
+      className="fixed inset-0 z-20 bg-zinc-50 dark:bg-zinc-950 overflow-hidden"
       role="status"
       aria-label={t("loading")}
     >

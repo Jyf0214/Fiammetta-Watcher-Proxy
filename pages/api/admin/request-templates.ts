@@ -16,6 +16,10 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import {
+  CHAT_MERGEBODY_ALLOWED_KEYS,
+  RESPONSES_MERGEBODY_ALLOWED_KEYS,
+} from "@/lib/request-template-whitelist";
 import { invalidateTemplatesCache } from "../../../worker/src/request-templates";
 
 // Config 表中的存储键
@@ -34,35 +38,22 @@ export interface RequestTemplate {
   type?: "chat" | "responses";
 }
 
-/** chat 模板白名单 */
-const CHAT_MERGEBODY_ALLOWED_KEYS = new Set([
-  "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
-  "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
-  "n", "logprobs", "top_logprobs", "response_format", "seed",
-  // 思考控制类参数（deepseek/qwen 等厂商透传）
-  "reasoning_effort", "chat_template_kwargs", "extra_body",
-]);
-
-/** responses 模板白名单：基于 OpenAI Responses API 规范，解锁高阶思维链 reasoning */
-const RESPONSES_MERGEBODY_ALLOWED_KEYS = new Set([
-  "instructions", "reasoning", "max_output_tokens", "truncation", "text", "tools", "tool_choice",
-  "parallel_tool_calls", "store", "include", "metadata", "service_tier", "prompt_cache_key",
-  "safety_identifier", "background", "previous_response_id",
-  "temperature", "top_p", "top_logprobs", "stream", "seed",
-  "frequency_penalty", "presence_penalty", "stop", "n", "logprobs", "response_format",
-  "reasoning_effort", "chat_template_kwargs", "extra_body",
-]);
-
-/** 校验 mergeBody 字段，按类型过滤不在白名单中的键 */
-function sanitizeMergeBody(body: Record<string, unknown>, type: "chat" | "responses" = "chat"): Record<string, unknown> {
+/** 校验 mergeBody 字段，按类型过滤不在白名单中的键；被丢弃的键收集进 droppedKeys 一并返回，供响应透出提示前端 */
+function sanitizeMergeBody(
+  body: Record<string, unknown>,
+  type: "chat" | "responses" = "chat"
+): { sanitized: Record<string, unknown>; droppedKeys: string[] } {
   const allowed = type === "responses" ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
   const sanitized: Record<string, unknown> = {};
+  const droppedKeys: string[] = [];
   for (const [key, value] of Object.entries(body)) {
     if (allowed.has(key)) {
       sanitized[key] = value;
+    } else {
+      droppedKeys.push(key);
     }
   }
-  return sanitized;
+  return { sanitized, droppedKeys };
 }
 
 /** 从 configs 表读取所有模板 */
@@ -170,6 +161,13 @@ export default async function handler(
       }
       const templateType: "chat" | "responses" = type === "responses" ? "responses" : "chat";
 
+      // models 元素类型校验与 PUT 一致：非字符串元素会让运行时通配符匹配抛
+      // TypeError 且被静默吞掉，导致全站请求模板失效
+      if (!Array.isArray(models) || !models.every((m) => typeof m === "string")) {
+        res.status(400).json({ success: false, error: "模型匹配列表必须为字符串数组" });
+        return;
+      }
+
       // mergeBody 校验与 PUT 分支同款：null/空/非对象/数组均 400（数组此前会
       // 被 sanitizeMergeBody 静默过滤为空对象，与 PUT 行为分叉）
       if (!mergeBody || typeof mergeBody !== "object" || Array.isArray(mergeBody)) {
@@ -187,13 +185,20 @@ export default async function handler(
       // 读取现有模板
       const templates = await loadTemplates(db);
 
+      // 白名单清洗：白名单外的键仍被丢弃（保持既有安全语义），但键名收集进
+      // droppedKeys 随响应透出，避免"保存成功却静默丢字段"无任何提示
+      const { sanitized: cleanMergeBody, droppedKeys } = sanitizeMergeBody(
+        mergeBody as Record<string, unknown>,
+        templateType
+      );
+
       // 创建新模板
       const newTemplate: RequestTemplate = {
         id: crypto.randomUUID(),
         name: name.trim(),
         description: typeof description === "string" ? description.trim() : "",
         models: Array.isArray(models) && models.length > 0 ? models : ["*"],
-        mergeBody: sanitizeMergeBody(mergeBody as Record<string, unknown>, templateType),
+        mergeBody: cleanMergeBody,
         // 创建时接受 enabled（表单开关），缺省保持默认启用
         enabled: enabled !== undefined ? Boolean(enabled) : true,
         type: templateType,
@@ -206,6 +211,7 @@ export default async function handler(
         success: true,
         data: newTemplate,
         message: "模板创建成功",
+        ...(droppedKeys.length > 0 ? { droppedKeys } : {}),
       });
       return;
     }
@@ -249,6 +255,10 @@ export default async function handler(
         return;
       }
 
+      // 白名单外被丢弃的键收集（mergeBody 重清洗 + 切换类型重清洗两条路径），
+      // 响应透出给前端提示；Set 去重防止同键在两条路径中被计入两次
+      const droppedKeys = new Set<string>();
+
       // 更新字段（仅更新传入的字段）；name/description 非字符串时
       // trim() 会抛 TypeError → 500，先做类型校验
       if (name !== undefined) {
@@ -272,7 +282,8 @@ export default async function handler(
           res.status(400).json({ success: false, error: "模板模型列表必须为字符串数组" });
           return;
         }
-        templates[idx].models = models;
+        // 与 POST 同款归一化：清空即通配所有模型，避免落库空数组成为永不匹配的死模板
+        templates[idx].models = models.length > 0 ? models : ["*"];
       }
       if (mergeBody !== undefined) {
         // 与 POST 分支同款校验：null/非对象/数组 → 400（合法对象才调用
@@ -282,7 +293,9 @@ export default async function handler(
           return;
         }
         const effectiveType = type ?? templates[idx].type ?? "chat";
-        templates[idx].mergeBody = sanitizeMergeBody(mergeBody, effectiveType as "chat" | "responses");
+        const result = sanitizeMergeBody(mergeBody, effectiveType as "chat" | "responses");
+        templates[idx].mergeBody = result.sanitized;
+        for (const key of result.droppedKeys) droppedKeys.add(key);
       }
       if (enabled !== undefined) {
         if (typeof enabled !== "boolean") {
@@ -294,7 +307,9 @@ export default async function handler(
       if (type !== undefined) {
         templates[idx].type = type as "chat" | "responses";
         // 切换类型后需按新白名单重新清洗已有 mergeBody，避免旧类型字段残留
-        templates[idx].mergeBody = sanitizeMergeBody(templates[idx].mergeBody, templates[idx].type as "chat" | "responses");
+        const result = sanitizeMergeBody(templates[idx].mergeBody, templates[idx].type as "chat" | "responses");
+        templates[idx].mergeBody = result.sanitized;
+        for (const key of result.droppedKeys) droppedKeys.add(key);
       }
 
       await saveTemplates(db, templates);
@@ -303,6 +318,7 @@ export default async function handler(
         success: true,
         data: templates[idx],
         message: "模板更新成功",
+        ...(droppedKeys.size > 0 ? { droppedKeys: Array.from(droppedKeys) } : {}),
       });
       return;
     }

@@ -210,15 +210,17 @@ describe("fetchAllPlatformModels", () => {
   it("已有模型保留 enabled 状态", async () => {
     const platform = makePlatform();
     mockFindMany.mockResolvedValueOnce([platform]); // platforms
-    // 已有模型，其中 gpt-4o 被手动禁用
+    // 已有模型：gpt-4o 为手动添加（被禁用），gpt-4-turbo 为自动发现（被禁用）
     mockFindMany.mockResolvedValueOnce([
       { modelId: "gpt-4o", enabled: false, source: "manual" },
+      { modelId: "gpt-4-turbo", enabled: false, source: "auto" },
     ]);
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(makeModelResponse([
         { id: "gpt-4o", owned_by: "openai" },
         { id: "gpt-4o-mini", owned_by: "openai" },
+        { id: "gpt-4-turbo", owned_by: "openai" },
       ])), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -229,9 +231,13 @@ describe("fetchAllPlatformModels", () => {
 
     expect(mockCreateMany).toHaveBeenCalled();
     const createCall = mockCreateMany.mock.calls[0][0];
-    // gpt-4o 保留 disabled 状态
+    // gpt-4o 为手动添加：未被 deleteMany 删除且占用唯一约束位，跳过插入
+    // （库中 manual 记录原样保留 disabled 状态；重插会撞 @@unique 整批失败）
     const gpt4o = createCall.data.find((m: any) => m.modelId === "gpt-4o");
-    expect(gpt4o.enabled).toBe(false);
+    expect(gpt4o).toBeUndefined();
+    // gpt-4-turbo 为自动发现：删除后重插，保留 disabled 状态
+    const gpt4Turbo = createCall.data.find((m: any) => m.modelId === "gpt-4-turbo");
+    expect(gpt4Turbo.enabled).toBe(false);
     // gpt-4o-mini 是新模型，默认启用
     const gpt4oMini = createCall.data.find((m: any) => m.modelId === "gpt-4o-mini");
     expect(gpt4oMini.enabled).toBe(true);

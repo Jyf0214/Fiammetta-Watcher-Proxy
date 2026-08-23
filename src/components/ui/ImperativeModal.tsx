@@ -71,6 +71,8 @@ export function createModal(config: ModalConfig): ModalInstance {
  */
 export function ImperativeModal({ instance }: { instance: ModalInstance }) {
   const [, forceUpdate] = useState(0);
+  // 异步 onOk 执行中标记：期间禁用确定按钮并拦截重入，防止重复提交
+  const [okPending, setOkPending] = useState(false);
 
   const triggerUpdate = useCallback(() => forceUpdate((n) => n + 1), []);
 
@@ -91,14 +93,21 @@ export function ImperativeModal({ instance }: { instance: ModalInstance }) {
   // （antd 受控 Modal 的 handleOk 只调 onOk?.() 后调 onClose?.()，而 onClose 仅在
   // closable 为非布尔对象时定义，因此不传 onOk 时点「确定」什么都不发生）
   const handleOk = async () => {
+    if (okPending) return;
     const result = config.onOk?.();
-    let shouldClose = true;
     if (result instanceof Promise) {
-      shouldClose = (await result) !== false;
-    } else if (result === false) {
-      shouldClose = false;
+      setOkPending(true);
+      try {
+        const shouldClose = (await result) !== false;
+        if (shouldClose) instance.close();
+      } finally {
+        // 无论 resolve 还是 reject 都复位等待态（reject 时保持原有不关闭行为）
+        setOkPending(false);
+      }
+      return;
     }
-    if (shouldClose) instance.close();
+    if (result === false) return;
+    instance.close();
   };
 
   return (
@@ -110,7 +119,7 @@ export function ImperativeModal({ instance }: { instance: ModalInstance }) {
       onOk={handleOk}
       okText={config.okText}
       cancelText={config.cancelText}
-      loading={config.loading}
+      loading={config.loading || okPending}
       onCancel={() => {
         config.onCancel?.();
         instance.close();

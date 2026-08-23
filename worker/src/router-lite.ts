@@ -17,7 +17,6 @@ import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import { getConfig } from "./config";
 import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
 import type { WorkerEnv } from "./config";
-import { loadApiMappings, getApplicableApiMapping, resolveTargetModel as resolveApiTargetModel } from "./api-mappings";
 
 // ==================== 缓存 ====================
 
@@ -280,41 +279,13 @@ export async function routeRequestLite(
       platform: autoPlatform,
       targetModel: modelByPlatform.get(autoPlatform.id) as string,
       sourceApi,
-      targetApi: sourceApi,
-      needsConversion: false,
-      apiMapping: null,
     };
   }
 
-  // 优先检查接口映射（API 转换）
-  let apiMapping: import("./api-mappings").ApiMapping | null = null;
-  let targetApi: ApiType = sourceApi;
-  let targetModelFromApi: string | null = null;
-  let targetPlatformIdFromApi: string | null = null;
-  try {
-    const apiMappings = await loadApiMappings(db, env);
-    const matched = getApplicableApiMapping(apiMappings, requestedModel, sourceApi);
-    if (matched) {
-      apiMapping = matched;
-      targetApi = matched.targetApi;
-      targetModelFromApi = resolveApiTargetModel(matched, requestedModel);
-      targetPlatformIdFromApi = matched.platformId ?? null;
-    }
-  } catch (e) {
-    console.error("[router-lite] 接口映射加载失败:", e);
-  }
-
-  let targetModel: string;
-  let targetPlatformId: string | null;
-  if (targetModelFromApi) {
-    targetModel = targetModelFromApi;
-    targetPlatformId = targetPlatformIdFromApi;
-  } else {
-    const resolved = resolveModelMapping(requestedModel, null);
-    targetModel = resolved.targetModel;
-    targetPlatformId = resolved.targetPlatformId;
-  }
-  const needsConversion = apiMapping ? apiMapping.sourceApi !== apiMapping.targetApi : false;
+  // 模型映射（别名 → 目标模型）
+  const resolved = resolveModelMapping(requestedModel, null);
+  const targetModel = resolved.targetModel;
+  const targetPlatformId = resolved.targetPlatformId;
 
   // 选择平台
   let selectedPlatform: PlatformConfig | null;
@@ -349,9 +320,6 @@ export async function routeRequestLite(
     platform: selectedPlatform,
     targetModel,
     sourceApi,
-    targetApi,
-    needsConversion,
-    apiMapping: apiMapping ? { id: apiMapping.id, pattern: apiMapping.pattern } : null,
   };
 }
 

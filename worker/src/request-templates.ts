@@ -6,6 +6,10 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import {
+  CHAT_MERGEBODY_ALLOWED_KEYS,
+  RESPONSES_MERGEBODY_ALLOWED_KEYS,
+} from "@/lib/request-template-whitelist";
 import type { WorkerEnv } from "./config";
 
 // ==================== 类型 ====================
@@ -39,32 +43,10 @@ export function invalidateTemplatesCache(): void {
 
 // ==================== 深度合并 ====================
 
-/** chat 模板允许合并的字段白名单，防止注入 model/messages/tools 等危险字段。
- *  字段按 OpenAI 请求语义编写；对 anthropic 上游平台，模板在转换前应用，
- *  OpenAI 专属字段（stream_options/n/response_format 等）会被转换白名单剥离，
- *  仅 system/temperature/top_p/top_k/max_tokens/stop/tools/tool_choice 生效。 */
-const CHAT_MERGEBODY_ALLOWED_KEYS = new Set([
-  "system", "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
-  "frequency_penalty", "presence_penalty", "stop", "stream", "stream_options",
-  "n", "logprobs", "top_logprobs", "response_format", "seed",
-  // 思考控制类参数（deepseek/qwen 等厂商透传），与管理后台 API 白名单保持一致
-  "reasoning_effort", "chat_template_kwargs", "extra_body",
-]);
-
-/** responses 模板允许合并的字段白名单：以 OpenAI Responses API 规范为基准
- *  包含 instructions / reasoning（高阶思维链）/ max_output_tokens 等专有字段，
- *  同时保留通用采样参数。model/input/previous_response_id 等路由关键字段禁止注入。 */
-const RESPONSES_MERGEBODY_ALLOWED_KEYS = new Set([
-  // Responses 专属
-  "instructions", "reasoning", "max_output_tokens", "truncation", "text", "tools", "tool_choice",
-  "parallel_tool_calls", "store", "include", "metadata", "service_tier", "prompt_cache_key",
-  "safety_identifier", "background", "previous_response_id",
-  // 通用采样/控制参数（Responses 同样支持）
-  "temperature", "top_p", "top_logprobs", "stream", "seed",
-  "frequency_penalty", "presence_penalty", "stop", "n", "logprobs", "response_format",
-  // 兼容思考透传
-  "reasoning_effort", "chat_template_kwargs", "extra_body",
-]);
+// mergeBody 字段白名单统一从 @/lib/request-template-whitelist 引入（单一来源），
+// 与管理后台 API 清洗共用同一集合。anthropic 上游平台模板在转换前应用，
+// OpenAI 专属字段（stream_options/n/response_format 等）会被转换白名单剥离，
+// 仅 system/temperature/top_p/top_k/max_tokens/stop/tools/tool_choice 生效。
 
 /**
  * 判断模板是否为 responses 类型（缺省兼容为 chat）
@@ -78,20 +60,6 @@ function isResponsesTemplate(t: RequestTemplate): boolean {
  */
 function getAllowedKeysForTemplate(t: RequestTemplate): Set<string> {
   return isResponsesTemplate(t) ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
-}
-
-/**
- * 根据模板类型过滤 mergeBody 中不在白名单中的键
- */
-function sanitizeMergeBody(body: Record<string, unknown>, type?: "chat" | "responses"): Record<string, unknown> {
-  const allowed = type === "responses" ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (allowed.has(key)) {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
 }
 
 /**
@@ -109,18 +77,17 @@ function sanitizeMergeBodyForTemplate(body: Record<string, unknown>, template: R
 }
 
 /**
- * 深度合并两个对象。数组整体替换，不合并元素。
- * 仅允许白名单中的键参与合并（按模板类型选择白名单）。
+ * 纯结构递归合并：白名单只在入口处过滤一次（仅约束顶层键名），
+ * 嵌套层不得重复过滤，否则 response_format.type 等子键会被误删，
+ * 导致模板对客户端已有字段的覆盖静默失效。数组整体替换，不合并元素。
  */
-function deepMerge(
+function mergeSanitized(
   target: Record<string, unknown>,
-  source: Record<string, unknown>,
-  type?: "chat" | "responses"
+  source: Record<string, unknown>
 ): Record<string, unknown> {
-  const sanitized = sanitizeMergeBody(source, type);
   const result = { ...target };
-  for (const key of Object.keys(sanitized)) {
-    const srcVal = sanitized[key];
+  for (const key of Object.keys(source)) {
+    const srcVal = source[key];
     const tgtVal = result[key];
     if (
       srcVal !== null &&
@@ -130,10 +97,9 @@ function deepMerge(
       typeof tgtVal === "object" &&
       !Array.isArray(tgtVal)
     ) {
-      result[key] = deepMerge(
+      result[key] = mergeSanitized(
         tgtVal as Record<string, unknown>,
-        srcVal as Record<string, unknown>,
-        type
+        srcVal as Record<string, unknown>
       );
     } else {
       result[key] = srcVal;
@@ -149,29 +115,7 @@ function deepMergeForTemplate(
   target: Record<string, unknown>,
   template: RequestTemplate
 ): Record<string, unknown> {
-  const sanitized = sanitizeMergeBodyForTemplate(template.mergeBody, template);
-  const result = { ...target };
-  for (const key of Object.keys(sanitized)) {
-    const srcVal = sanitized[key];
-    const tgtVal = result[key];
-    if (
-      srcVal !== null &&
-      typeof srcVal === "object" &&
-      !Array.isArray(srcVal) &&
-      tgtVal !== null &&
-      typeof tgtVal === "object" &&
-      !Array.isArray(tgtVal)
-    ) {
-      result[key] = deepMerge(
-        tgtVal as Record<string, unknown>,
-        srcVal as Record<string, unknown>,
-        template.type
-      );
-    } else {
-      result[key] = srcVal;
-    }
-  }
-  return result;
+  return mergeSanitized(target, sanitizeMergeBodyForTemplate(template.mergeBody, template));
 }
 
 // ==================== 模型通配符匹配 ====================

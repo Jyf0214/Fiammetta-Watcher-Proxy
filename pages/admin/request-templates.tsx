@@ -18,6 +18,7 @@ import {
   Check,
 } from "lucide-react";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
+import { copyToClipboard } from "@/lib/ui";
 import AdminLayout from "@/components/AdminLayout";
 
 interface RequestTemplate {
@@ -185,6 +186,12 @@ export default function RequestTemplatesPage() {
       const data = await res.json() as Record<string, any>;
       if (data.success) {
         message.success(editingTemplate ? t("rtUpdateSuccess") : t("rtCreateSuccess"));
+        // 服务端白名单清洗会丢弃白名单外字段（如 chat 模板里的 tools），此处透出提示，
+        // 避免"保存成功但部分字段被静默忽略"无任何感知
+        const dropped = Array.isArray(data.droppedKeys) ? (data.droppedKeys as string[]) : [];
+        if (dropped.length > 0) {
+          message.warning(t("rtDroppedFieldsWarning", { fields: dropped.join(", ") }), 6);
+        }
         setModalOpen(false);
         mutate();
       } else {
@@ -235,7 +242,7 @@ export default function RequestTemplatesPage() {
             message.success(t("rtDeleteSuccess"));
             mutate();
           } else {
-            message.error(data.error);
+            message.error(typeof data.error === "string" ? data.error : t("common:error"));
           }
         } catch {
           message.error(t("rtDeleteFailed"));
@@ -244,8 +251,13 @@ export default function RequestTemplatesPage() {
     });
   };
 
-  const handleCopyBody = (tpl: RequestTemplate) => {
-    navigator.clipboard.writeText(JSON.stringify(tpl.mergeBody, null, 2));
+  const handleCopyBody = async (tpl: RequestTemplate) => {
+    // 复制统一走共享工具（HTTP 环境降级 execCommand），失败时给出明确反馈
+    const ok = await copyToClipboard(JSON.stringify(tpl.mergeBody, null, 2));
+    if (!ok) {
+      message.error(t("common:copyFailed"));
+      return;
+    }
     setCopiedId(tpl.id);
     setTimeout(() => setCopiedId(null), 1500);
   };

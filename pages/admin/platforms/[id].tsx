@@ -24,6 +24,7 @@ import {
   type ModelItem,
   type NamedApiKey,
 } from "@/lib/platform";
+import { copyToClipboard } from "@/lib/ui";
 
 export default function PlatformDetailPage() {
   const { t } = useTranslation("platform");
@@ -206,11 +207,12 @@ export default function PlatformDetailPage() {
     setNamedKeys(keys);
   };
 
-  const copyKeyValue = (key: string) => {
-    navigator.clipboard
-      .writeText(key)
-      .then(() => message.success(t("common:copied")))
-      .catch(() => message.error(t("common:copyFailed")));
+  // 统一走共享剪贴板工具：HTTP（非 localhost）部署下 navigator.clipboard 不存在，
+  // 直调会同步抛 TypeError 且 .catch 接不住，按钮表现为"点了没反应"
+  const copyKeyValue = async (key: string) => {
+    const ok = await copyToClipboard(key);
+    if (ok) message.success(t("common:copied"));
+    else message.error(t("common:copyFailed"));
   };
 
   const handleToggleWhitelist = (index: number) => {
@@ -686,6 +688,17 @@ export default function PlatformDetailPage() {
                   testLoading={testLoading}
                   testResults={testResults}
                 />
+              </div>
+            ) : detailError ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-24 text-sm text-zinc-500 dark:text-zinc-400">
+                <span>{t("common:error")}</span>
+                <button
+                  type="button"
+                  onClick={() => mutateDetail()}
+                  className="px-4 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  {t("common:retry")}
+                </button>
               </div>
             ) : null}
           </div>

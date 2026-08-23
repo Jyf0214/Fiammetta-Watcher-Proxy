@@ -22,7 +22,6 @@ import {
 import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
 import { getConfig } from "./config";
 import type { WorkerEnv } from "./config";
-import { loadApiMappings, getApplicableApiMapping, resolveTargetModel as resolveApiTargetModel } from "./api-mappings";
 
 // ==================== 缓存 ====================
 
@@ -281,7 +280,7 @@ function resolveModelMapping(
  * @param requestedModel - 客户端请求的模型名称
  * @param db - D1 数据库绑定
  * @param sourceApi - 下游来源 API（由端点决定），默认 chat 兼容旧调用
- * @returns 路由决策（平台 + 目标模型名 + API 转换信息），无可用平台返回 null
+ * @returns 路由决策（平台 + 目标模型名），无可用平台返回 null
  */
 export async function routeRequest(
   requestedModel: string,
@@ -314,44 +313,13 @@ export async function routeRequest(
       platform: autoPlatform,
       targetModel: modelByPlatform.get(autoPlatform.id) as string,
       sourceApi,
-      targetApi: sourceApi,
-      needsConversion: false,
-      apiMapping: null,
     };
   }
 
-  // 1. 优先检查接口映射（API 转换）：通配符匹配模型 + 来源 API
-  let apiMapping: import("./api-mappings").ApiMapping | null = null;
-  let targetApi: ApiType = sourceApi;
-  let targetModelFromApi: string | null = null;
-  let targetPlatformIdFromApi: string | null = null;
-  try {
-    const apiMappings = await loadApiMappings(db, env);
-    const matched = getApplicableApiMapping(apiMappings, requestedModel, sourceApi);
-    if (matched) {
-      apiMapping = matched;
-      targetApi = matched.targetApi;
-      targetModelFromApi = resolveApiTargetModel(matched, requestedModel);
-      targetPlatformIdFromApi = matched.platformId ?? null;
-    }
-  } catch (e) {
-    console.error("[router] 接口映射加载失败:", e);
-  }
-
-  // 2. 普通模型映射（若接口映射未命中或未指定目标模型，则回退到模型映射）
-  let targetModel: string;
-  let targetPlatformId: string | null;
-  if (targetModelFromApi) {
-    targetModel = targetModelFromApi;
-    targetPlatformId = targetPlatformIdFromApi;
-  } else {
-    const resolved = resolveModelMapping(requestedModel, null);
-    targetModel = resolved.targetModel;
-    targetPlatformId = resolved.targetPlatformId;
-  }
-
-  // 若接口映射命中但 sourceApi === targetApi，则无需转换，仍按正常模型映射的平台选择逻辑走
-  const needsConversion = apiMapping ? apiMapping.sourceApi !== apiMapping.targetApi : false;
+  // 模型映射（别名 → 目标模型）
+  const resolved = resolveModelMapping(requestedModel, null);
+  const targetModel = resolved.targetModel;
+  const targetPlatformId = resolved.targetPlatformId;
 
   // 选择平台
   let selectedPlatform: PlatformConfig | null;
@@ -408,9 +376,6 @@ export async function routeRequest(
     platform: selectedPlatform,
     targetModel,
     sourceApi,
-    targetApi,
-    needsConversion,
-    apiMapping: apiMapping ? { id: apiMapping.id, pattern: apiMapping.pattern } : null,
   };
 }
 

@@ -14,7 +14,6 @@ import {
   AlertCircle,
   Settings,
   Link2,
-  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
@@ -93,6 +92,15 @@ export function PlatformConfigForm({
     "transfer-encoding",
     "upgrade",
     "expect",
+    // 与代理层 FORBIDDEN_FORWARD_HEADERS 三端（Worker 全量/lite/Pages v1）一致
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "eo-client-ip",
+    "eo-connecting-ip",
+    "x-vercel-forwarded-for",
   ];
 
   const validateForwardHeaders = (_: unknown, value: string | undefined): Promise<void> => {

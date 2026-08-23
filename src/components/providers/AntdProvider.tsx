@@ -5,6 +5,7 @@ import { ConfigProvider, App } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useTranslation } from "react-i18next";
+import { useThemeMode } from "@/hooks/use-theme-mode";
 
 /**
  * antd 全局配置 Provider — 统一 locale（中/英）和 theme token
@@ -15,16 +16,20 @@ import { useTranslation } from "react-i18next";
  */
 export function AntdProvider({ children }: { children: ReactNode }) {
   const { i18n } = useTranslation();
+  const { isDark } = useThemeMode();
 
   const locale = i18n.language?.startsWith("en") ? enUS : zhCN;
 
   const theme = useMemo(
     () => ({
       token: {
-        colorPrimary: "#1a1a1a",
-        colorLink: "#1a1a1a",
-        colorLinkHover: "#27272a",
-        colorLinkActive: "#1a1a1a",
+        // antd TinyColor 无法解析 CSS var()（实测 colorPrimary 变纯黑、colorLink
+        // 回退默认蓝），必须按主题传直接色值；固定 #1a1a1a 在深色下与卡片背景
+        // 几乎同色，导致 Switch 选中态更暗、Pagination 激活页无法辨认
+        colorPrimary: isDark ? "#f4f4f5" : "#1a1a1a",
+        colorLink: isDark ? "#f4f4f5" : "#1a1a1a",
+        colorLinkHover: isDark ? "#e4e4e7" : "#27272a",
+        colorLinkActive: isDark ? "#f4f4f5" : "#1a1a1a",
         colorBgContainer: "var(--color-bg-container)",
         colorBgElevated: "var(--color-bg-elevated)",
         colorBgLayout: "var(--color-bg-layout)",
@@ -77,7 +82,7 @@ export function AntdProvider({ children }: { children: ReactNode }) {
         },
       },
     }),
-    [],
+    [isDark],
   );
 
   return (

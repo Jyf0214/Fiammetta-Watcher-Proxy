@@ -159,8 +159,11 @@ async function flushNow(): Promise<void> {
       return;
     }
 
-    // 并行写入 Key 用量和请求日志
+    // 并行写入 Key 用量和请求日志；写失败的条目收集后放回缓冲下次重试，
+    // 兑现文件头"flush 失败数据保留"承诺（此前仅打日志、数据静默丢失）
     const writePromises: Promise<unknown>[] = [];
+    const failedKeyUsages = new Map<string, PendingKeyUsage>();
+    let logsWriteFailed = false;
 
     // Key 用量：按 keyId 聚合后逐条 UPDATE（Prisma 不支持批量 UPDATE）
     for (const [keyId, usage] of keyUsages) {
@@ -179,6 +182,7 @@ async function flushNow(): Promise<void> {
               `[batched-writer] Key ${keyId} 用量更新失败:`,
               err instanceof Error ? err.message : String(err)
             );
+            failedKeyUsages.set(keyId, usage);
           })
       );
     }
@@ -193,11 +197,16 @@ async function flushNow(): Promise<void> {
               `[batched-writer] 请求日志批量写入失败 (${logs.length} 条):`,
               err instanceof Error ? err.message : String(err)
             );
+            logsWriteFailed = true;
           })
       );
     }
 
     await Promise.allSettled(writePromises);
+
+    if (failedKeyUsages.size > 0 || logsWriteFailed) {
+      rollbackBuffers(failedKeyUsages, logsWriteFailed ? logs : []);
+    }
   } catch (err) {
     console.error(
       "[batched-writer] flush 异常:",

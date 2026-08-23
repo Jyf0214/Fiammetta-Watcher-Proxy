@@ -86,7 +86,11 @@ export function checkCsrfOrigin(req: NextApiRequest, res: NextApiResponse): bool
   const referer = (req.headers.referer as string) || "";
 
   // 非生产环境：无 Origin 且无 Referer 时放行（本地开发 curl 等工具不发送这些头）
-  const isProd = process.env.ENVIRONMENT === "production";
+  // ENVIRONMENT 未设置时回退 NODE_ENV：next build/start 的运行时恒为 production，
+  // 避免生产部署漏配 ENVIRONMENT 导致 Secure Cookie 与 CSRF 严格分支静默失效
+  const isProd =
+    process.env.ENVIRONMENT === "production" ||
+    (process.env.ENVIRONMENT === undefined && process.env.NODE_ENV === "production");
   if (!origin && !referer) {
     if (isProd) {
       // 生产环境：POST/PUT/DELETE 请求必须有 Origin 或 Referer

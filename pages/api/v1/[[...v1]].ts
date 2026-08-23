@@ -12,10 +12,10 @@ import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "../../../worker/src/load-balancer";
-import { extractUsage, updateKeyUsage, recordRequestLog } from "../../../worker/src/token";
+import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
-import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm } from "@/lib/v1-rate-limit";
+import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
@@ -69,6 +69,16 @@ const FORBIDDEN_FORWARD_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
   "expect",
+  // 与 Worker 版 proxy.ts / proxy-lite.ts 保持同一黑名单：下游伪造
+  // x-forwarded-* / cf-connecting-ip 等可污染日志 IP 与上游侧来源判定
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "x-forwarded-host",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "eo-client-ip",
+  "eo-connecting-ip",
+  "x-vercel-forwarded-for",
 ]);
 
 /** 提取上游错误体中的可读消息 */
@@ -314,6 +324,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const startTime = Date.now();
   const env = await createPagesEnv();
   const logTag = `[v1-proxy:${config.upstreamPath}]`;
+  // 客户端 IP/UA：所有请求日志（含错误分支）统一携带，日志页与导出的来源列依赖此值
+  const clientInfo = extractClientInfo(req);
 
   const parseResult = await parseRequestBody<Record<string, unknown>>(req);
   if ("error" in parseResult) { sendV1Error(res, config, parseResult.statusCode ?? 400, parseResult.error, "invalid_request_error"); return; }
@@ -362,7 +374,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const route = await routeRequest(modelName, dummyDb, env, sourceApi);
   if (!route) {
     // 路由失败（模型不存在/无平台支持）：platformId 未知记 null，补全请求失败记录
-    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "此模型不存在", db: dummyDb, env }); } catch {}
+    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "此模型不存在", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 500, "此模型不存在", "server_error"); return;
   }
 
@@ -371,11 +383,16 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 请求未发出：释放半开探测配额（否则被门禁拒绝的探测槽位永远不归还）
     releaseHalfOpenPending(route.platform.id);
     // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
-    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台请求频率超限", db: dummyDb, env }); } catch {}
+    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台请求频率超限", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台请求频率超限", "rate_limit_error", { retry_after: Math.ceil((pRpm.resetAt - Date.now()) / 1000) }); return;
   }
   const kRpm = await checkApiKeyRpm(apiKey.id, apiKey.rpmLimit);
-  if (!kRpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return; }
+  if (!kRpm.allowed) {
+    releaseHalfOpenPending(route.platform.id);
+    // Key 级拒绝时平台 RPM 已扣：不归还则配额被与该客户端无关的请求白白消耗
+    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit);
+    sendV1Error(res, config, 429, "API Key 请求频率超限", "rate_limit_error", { retry_after: Math.ceil((kRpm.resetAt - Date.now()) / 1000) }); return;
+  }
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
   // Responses 使用 max_output_tokens，Chat 使用 max_tokens/max_completion_tokens
   const est = Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1));
@@ -387,11 +404,17 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 请求未发出：释放半开探测配额
     releaseHalfOpenPending(route.platform.id);
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
-    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台 Token 速率超限", db: dummyDb, env }); } catch {}
+    try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台 Token 速率超限", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台 Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((pTpm.resetAt - Date.now()) / 1000) }); return;
   }
   const kTpm = await checkApiKeyTpm(apiKey.id, apiKey.tpmLimit, est);
-  if (!kTpm.allowed) { releaseHalfOpenPending(route.platform.id); sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return; }
+  if (!kTpm.allowed) {
+    releaseHalfOpenPending(route.platform.id);
+    // Key 级拒绝时平台 RPM/TPM 均已扣：一并归还，est 与扣减时保持同一预估值
+    await releasePlatformRpm(route.platform.id, route.platform.rpmLimit);
+    await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, est);
+    sendV1Error(res, config, 429, "API Key Token 速率超限", "rate_limit_error", { retry_after: Math.ceil((kTpm.resetAt - Date.now()) / 1000) }); return;
+  }
 
   const MAX_UPSTREAM_RETRIES = 3;
   let cur = route.platform; const tgt = route.targetModel;
@@ -403,7 +426,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     for (const p of getPlatformsForModel(tgt, triedP)) { const k = getNextKey(p); if (k) { cur = p; curKey = k; break; } }
     if (!curKey) {
       // 全部平台无可用 Key：平台维度未知记 null（配置问题，不计入任何平台评分）
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "所有平台均无可用 API Key", db: dummyDb, env }); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "所有平台均无可用 API Key", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
       sendV1Error(res, config, 500, "所有平台均无可用 API Key", "server_error"); return;
     }
   }
@@ -413,7 +436,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     triedP.add(cur.id);
     if (!curKey) {
       // 当前平台 Key 耗尽（同平台换 Key 失败）：计入该平台错误统计
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `平台 "${cur.name}" 无可用 API Key`, db: dummyDb, env }); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `平台 "${cur.name}" 无可用 API Key`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
       sendV1Error(res, config, 500, `平台 "${cur.name}" 无可用 API Key`, "server_error"); return;
     }
 
@@ -476,7 +499,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       : `${cur.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
     const check = isSafeUpstreamUrl(cur.baseUrl);
     if (!check.safe) {
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }).catch(() => {});
       sendV1Error(res, config, 400, `上游 URL 不安全: ${check.reason}`, "invalid_request_error"); return;
     }
 
@@ -508,7 +531,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       proxy = await getUpstreamProxyForKey(dummyDb, env, cur.id, keyObj?.proxyUrls, keyObj?.proxyStrict);
       if (proxy.error) {
         clearTimeout(upstreamTimeoutId);
-        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: proxy.error, db: dummyDb, env }); } catch {}
+        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: proxy.error, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
         sendV1Error(res, config, 502, proxy.error, "upstream_error"); return;
       }
       upRes = await fetch(url, { method: "POST", headers, body: multipart ? new Uint8Array(multipart.raw) : JSON.stringify(upstreamBody), signal: upstreamController.signal, redirect: "manual", ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}) });
@@ -521,7 +544,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         // 与 Worker 全量版 catch 分支行为对齐）
         void recordFailure(cur.id, dummyDb, env).catch(() => {});
         if (proxy?.url) recordProxyTraffic(proxy.url, 504);
-        void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游请求超时", proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+        void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游请求超时", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
         sendV1Error(res, config, 504, "上游请求超时", "timeout_error"); return;
       }
       // 网络层失败（非超时）：回标记当前代理，连续失败达阈值后轮询跳过；
@@ -552,6 +575,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         duration: Date.now() - startTime,
         isError: true,
         errorMessage: e instanceof Error ? e.message : String(e),
+        ipAddress: clientInfo.ipAddress,
+        userAgent: clientInfo.userAgent,
         proxyUrl: proxy?.url ?? undefined,
         db: dummyDb,
         env,
@@ -566,7 +591,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey);
+      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -575,12 +600,26 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 此前流式分支硬编码 200 透传任何非 429 状态，401/403/5xx 被伪装成成功，
     // 下游收到"200 + 空响应"，熔断器与 Key 封禁机制被完全架空。
     if (!isEmptyResponse && !RETRYABLE_UPSTREAM_STATUSES.has(upRes.status)) {
+      // 上游 3xx（redirect:"manual" 不跟随）：重定向目标未经过 SSRF 校验，
+      // 且 Location 头通常不会透传给下游，裸 3xx 对客户端无意义。这属于
+      // 平台 baseUrl 配置错误而非平台故障，不计熔断失败，直接 502 明确提示
+      if (upRes.status >= 300 && upRes.status < 400) {
+        // 消费响应体释放连接（keep-alive 连接泄漏防护，与其他错误分支一致）
+        void upRes.arrayBuffer().catch(() => {});
+        clearTimeout(upstreamTimeoutId);
+        // selectPlatform 可能已占用半开探测槽位；3xx 属配置错误不计熔断，
+        // 但槽位必须归还，否则连续占用后平台恢复探测被饿死
+        releaseHalfOpenPending(cur.id);
+        if (proxy?.url) recordProxyTraffic(proxy.url, upRes.status);
+        void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游返回重定向（HTTP ${upRes.status}），请检查平台 baseUrl 配置`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+        sendV1Error(res, config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error"); return;
+      }
       let errText = "";
       try { errText = await upRes.text(); } catch { /* 读取错误体失败（如 signal 超时） */ }
       clearTimeout(upstreamTimeoutId);
       try { await recordFailure(cur.id, dummyDb, env); } catch {}
       if (proxy?.url) recordProxyTraffic(proxy.url, upRes.status);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
         res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
@@ -604,7 +643,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (attempt < MAX_UPSTREAM_RETRIES) {
       // 本次尝试失败（429/401/403/空响应）独立记日志：被重试覆盖的错误平台也必须进入
       // 平台错误统计，否则评分只见最终成功平台、错误率被严重低估
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upRes.status}（已封禁该 Key 并重试切换）`, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应（重试切换）" : `上游 ${upRes.status}（已封禁该 Key 并重试切换）`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
       if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);
@@ -652,7 +691,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     try { await recordFailure(cur.id, dummyDb, env); } catch {}
     // 日志 status 记录实际返回下游的状态：空响应耗尽时下游收到 502，
     // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
-    void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+    void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
     if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
     // 自动模型冻结：冻结实际发送的目标模型（tgt）——冻结 requestedModel（自动模型 ID）
     // 与 routeRequest 检查的候选具体模型名不相等，冻结机制从未命中
@@ -677,7 +716,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
@@ -868,7 +907,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 负载均衡反复撞上同一坏平台（此前只补日志不打分，熔断机制被架空）
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 504);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else if (streamError) {
       // 流内 error：HTTP 头无法反映失败（下游实际收到 200 + error 流），
       // 按错误码记失败日志（不计 Key 用量）并触发平台熔断——此前只记日志不打分，
@@ -886,7 +925,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         if (streamError.code === 429) recordPlatform429(platform.id);
       }
       if (proxyUrl) recordProxyTraffic(proxyUrl, streamError.code);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else if (!sawDone && !clientClosed) {
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
@@ -894,7 +933,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 客户端主动断开时不走此分支（流未读完是断开所致，非上游失败，不应触发熔断）
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断", ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else if (sawDone && !sawContent && !clientClosed) {
       // 空完成：上游 200 + 流正常 [DONE] 收尾，但全程无有效内容（无 content/
       // reasoning_content）。免费模型排队超时或上游对代理 IP 降级时常返回这种
@@ -909,11 +948,11 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         try { await recordFailure(platform.id, dummyDb, env); } catch {}
       }
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游返回空完成（200 + 流内无有效内容）", proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游返回空完成（200 + 流内无有效内容）", ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
     }
     try { res.end(); } catch { /* 客户端已断开，忽略结束写入错误 */ }
     return;
@@ -926,7 +965,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 空响应：空 multipart 视为空响应，交由调用方重试
     if (ab.byteLength === 0) return EMPTY_UPSTREAM_RESPONSE;
     // 不阻塞响应：写库后置为 fire-and-forget（与流式分支一致）
-    void recordSuccess(platform.id, dummyDb, env).catch(() => {}); if (proxyUrl) recordProxyTraffic(proxyUrl, 200); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }).catch(() => {});
+    void recordSuccess(platform.id, dummyDb, env).catch(() => {}); if (proxyUrl) recordProxyTraffic(proxyUrl, 200); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     res.setHeader("Content-Type", ct); res.status(200).send(Buffer.from(ab)); return;
   }
   let body: string;
@@ -957,19 +996,22 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
       if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
       void recordSuccess(platform.id, dummyDb, env).catch(() => {});
       res.status(200).send(converted);
     } catch {
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: "上游响应格式错误", proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: true, errorMessage: "上游响应格式错误", ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
       res.status(502).json(formatAnthropicError(502, "上游响应格式错误"));
     }
     return;
   }
   if (proxyUrl) recordProxyTraffic(proxyUrl, upRes.status);
-  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, proxyUrl, db: dummyDb, env }).catch(() => {});
+  // 非流式直通成功记账：与流式分支（tt>0）和 anthropic 转换分支（rt>0）对齐，
+  // 此前缺失导致 stream:false 请求绕过 tokenLimit/callUsed 扣减（计费漏洞）
+  if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
+  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
   void recordSuccess(platform.id, dummyDb, env).catch(() => {});
   // chat↔responses 互转已移除，非流式响应原样透传
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败

@@ -27,6 +27,67 @@ const BATCH_SIZE = 7;
 const MIN_VALID_TS = 1704067200;
 
 /**
+ * 归档互斥锁（configs 表租约）：cron 与手动归档并发进入时，后到者会抹掉
+ * 先到者刚写入的聚合、重读「正在被删除」的日志，产生永久偏小的 daily_stats
+ * 且日志删空后无法重算——拿不到锁必须跳过本次执行
+ */
+const ARCHIVE_LOCK_KEY = "system:log_archive_lock";
+const ARCHIVE_LOCK_TTL_SEC = 30 * 60;
+
+interface ArchiveLock {
+  owner: string;
+  expiresAt: number;
+}
+
+async function acquireArchiveLock(
+  prisma: Awaited<ReturnType<typeof createDb>>
+): Promise<string | null> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const owner = crypto.randomUUID();
+  const value = JSON.stringify({ owner, expiresAt: nowSec + ARCHIVE_LOCK_TTL_SEC } satisfies ArchiveLock);
+  try {
+    const existing = await prisma.configs.findFirst({ where: { key: ARCHIVE_LOCK_KEY } });
+    if (existing) {
+      let held: ArchiveLock | null = null;
+      try { held = JSON.parse(existing.value) as ArchiveLock; } catch { held = null; }
+      // 他人持有且未过期：跳过本次（TTL 兜底持有者崩溃后的死锁）
+      if (held && held.expiresAt > nowSec) return null;
+      // 过期/损坏行：CAS 抢占（where value 精确匹配旧值，防双抢）
+      const res = await prisma.configs.updateMany({
+        where: { key: ARCHIVE_LOCK_KEY, value: existing.value },
+        data: { value, updatedAt: nowSec },
+      });
+      return res.count === 1 ? owner : null;
+    }
+    await prisma.configs.create({
+      data: { id: crypto.randomUUID(), key: ARCHIVE_LOCK_KEY, value, updatedAt: nowSec },
+    });
+    return owner;
+  } catch (err) {
+    // 创建锁行撞唯一约束 = 并发实例刚创建并持有；其余 DB 异常同样按拿不到锁处理
+    console.warn("[log-archiver] 获取归档锁失败:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+async function releaseArchiveLock(
+  prisma: Awaited<ReturnType<typeof createDb>>,
+  owner: string
+): Promise<void> {
+  try {
+    const existing = await prisma.configs.findFirst({ where: { key: ARCHIVE_LOCK_KEY } });
+    if (!existing) return;
+    let held: ArchiveLock | null = null;
+    try { held = JSON.parse(existing.value) as ArchiveLock; } catch { held = null; }
+    // 已易主（超时被抢占）则不动新持有者的锁
+    if (held?.owner !== owner) return;
+    await prisma.configs.deleteMany({ where: { key: ARCHIVE_LOCK_KEY, value: existing.value } });
+  } catch (err) {
+    console.error("[log-archiver] 释放归档锁失败:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
  * 执行日志归档任务
  *
  * 将超过保留期的 request_logs 记录聚合为 daily_stats 后删除原始记录。
@@ -44,6 +105,14 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
   const cutoffTs = now - RETENTION_DAYS * 86400;
 
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+
+  // 并发互斥：拿不到锁直接跳过（cron 与手动触发撞车会永久损坏该天统计）
+  const lockOwner = await acquireArchiveLock(prisma);
+  if (!lockOwner) {
+    console.warn("[log-archiver] 已有归档任务进行中，跳过本次执行");
+    return { success: false, message: "已有归档任务进行中，本次跳过（防并发重算损坏统计）" };
+  }
+
   try {
     // 清理异常时间戳日志（如导入备份带入的 2009 年测试数据）：
     // 不聚合不保留，避免污染 daily_stats 统计
@@ -116,6 +185,8 @@ export async function runArchiveTask(db: D1Database, env?: WorkerEnv): Promise<{
       success: false,
       message: `归档失败: ${err instanceof Error ? err.message : String(err)}`,
     };
+  } finally {
+    await releaseArchiveLock(prisma, lockOwner);
   }
 }
 

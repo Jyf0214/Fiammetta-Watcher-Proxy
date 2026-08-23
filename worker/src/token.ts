@@ -203,17 +203,28 @@ export async function recordRequestLog(params: {
  *
  * Worker 部署由 Cloudflare 注入 cf-connecting-ip；其他部署回退
  * X-Forwarded-For 首项（取最左客户端项）。
+ *
+ * 同时兼容两类下游请求对象：
+ * - Workers Request（headers 为 Headers 实例，Worker 全量版/lite 版入口使用）
+ * - Pages NextApiRequest（headers 为 IncomingHttpHeaders 普通对象，键为小写、
+ *   值可能为数组），Pages v1 入口据此接入日志的 ipAddress/userAgent 列
  */
 export function extractClientInfo(
-  request: Request
+  request: Request | { headers: Record<string, string | string[] | undefined> }
 ): { ipAddress?: string; userAgent?: string } {
+  const get = (name: string): string | undefined => {
+    const headers = request.headers as unknown;
+    if (headers instanceof Headers) return headers.get(name) ?? undefined;
+    const v = (request.headers as Record<string, string | string[] | undefined>)[name];
+    return Array.isArray(v) ? v[0] : v || undefined;
+  };
   const ipAddress =
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    get("cf-connecting-ip") ||
+    get("x-forwarded-for")?.split(",")[0]?.trim() ||
     undefined;
   return {
     ipAddress,
-    userAgent: request.headers.get("user-agent") || undefined,
+    userAgent: get("user-agent") || undefined,
   };
 }
 
@@ -264,6 +275,10 @@ export function createUsageTransformer(params: {
    * 非 Cloudflare 部署（无 KV）可不传，封禁只写内存 + DB 错误计数。
    */
   kv?: KVNamespace;
+  /** 客户端真实 IP（从下游请求头提取，随流式日志落库；不传写 null） */
+  ipAddress?: string;
+  /** 客户端 User-Agent（从下游请求头提取，随流式日志落库；不传写 null） */
+  userAgent?: string;
   db: D1Database;
   env?: WorkerEnv;
 }): TransformStream<Uint8Array, Uint8Array> {
@@ -411,8 +426,8 @@ export function createUsageTransformer(params: {
         errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),
         nodeName: resolveNodeName(params.env),
         proxyUrl: null,
-        ipAddress: null,
-        userAgent: null,
+        ipAddress: params.ipAddress ?? null,
+        userAgent: params.userAgent ?? null,
       });
     },
   });

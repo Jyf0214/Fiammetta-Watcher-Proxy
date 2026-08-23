@@ -41,7 +41,6 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "keys", icon: Key, href: "/admin/keys", group: "manage", order: 3 },
   { key: "autoModel", icon: Zap, href: "/admin/auto-model", group: "manage", order: 4 },
   { key: "requestTemplates", icon: FileText, href: "/admin/request-templates", group: "manage", order: 5 },
-  { key: "apiMappings", icon: FileText, href: "/admin/api-mappings", group: "manage", order: 6 },
   { key: "usage", icon: BarChart3, href: "/admin/usage", group: "monitor", order: 7 },
   { key: "logs", icon: FileText, href: "/admin/logs", group: "monitor", order: 8 },
   { key: "audit", icon: ScrollText, href: "/admin/audit", group: "monitor", order: 9 },
@@ -77,10 +76,10 @@ function SidebarItem({
     <Link
       href={item.href}
       onClick={onClick}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group relative ${
+      className={`flex items-center gap-3 border-l-2 px-3 py-2 rounded-lg transition-colors group relative ${
         isActive
-          ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium"
-          : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+          ? "border-zinc-900 dark:border-zinc-400 bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium"
+          : "border-transparent text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
       }`}
     >
       <Icon className="w-[18px] h-[18px] shrink-0" />
@@ -213,7 +212,6 @@ function TopHeader({
     "/admin/keys": "keys",
     "/admin/auto-model": "autoModel",
     "/admin/request-templates": "requestTemplates",
-    "/admin/api-mappings": "apiMappings",
     "/admin/usage": "usage",
     "/admin/logs": "logs",
     "/admin/audit": "audit",

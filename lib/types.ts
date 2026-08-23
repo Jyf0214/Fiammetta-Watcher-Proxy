@@ -76,15 +76,6 @@ export interface RouteDecision {
   targetModel: string;
   /** 下游来源 API（由请求端点决定） */
   sourceApi?: ApiType;
-  /** 上游目标 API（可能经接口映射转换） */
-  targetApi?: ApiType;
-  /** 是否需要进行 API 结构转换（sourceApi !== targetApi） */
-  needsConversion?: boolean;
-  /** 命中的接口映射（若有） */
-  apiMapping?: {
-    id: string;
-    pattern: string;
-  } | null;
 }
 
 // ==================== 速率限制类型 ====================

@@ -435,7 +435,11 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
     clearMemoryFails(clientIp);
     await writeAuditLog("login_success", { username: env.ADMIN_USERNAME }, clientIp, "env-admin").catch(() => {});
 
-    const isProd = env.ENVIRONMENT === "production";
+    // ENVIRONMENT 未设置时回退 NODE_ENV：生产构建运行时恒为 production，
+    // 避免漏配 ENVIRONMENT 导致登录 Cookie 丢失 Secure 属性
+    const isProd =
+      env.ENVIRONMENT === "production" ||
+      (env.ENVIRONMENT === undefined && process.env.NODE_ENV === "production");
     const token = await generateToken({ adminId: "env-admin", username: env.ADMIN_USERNAME! }, env);
     setAuthCookie(res, token, isProd);
 
