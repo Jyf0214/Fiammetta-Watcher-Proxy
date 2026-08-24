@@ -39,12 +39,16 @@ export default defineConfig({
                 { text: '系统 API Key', link: '/guide/system-key' },
                 { text: '请求模板', link: '/guide/request-templates' },
                 { text: '自动分流', link: '/guide/auto-model' },
+                { text: '成本核算', link: '/guide/cost' },
+                { text: '告警通知', link: '/guide/notifications' },
+                { text: '出站代理', link: '/guide/upstream-proxy' },
               ]
             },
             {
               text: '管理后台',
               items: [
                 { text: '使用说明', link: '/guide/usage' },
+                { text: '调试台与失败排查', link: '/guide/playground' },
               ]
             },
           ],
@@ -116,12 +120,16 @@ export default defineConfig({
                 { text: 'System API Key', link: '/en/guide/system-key' },
                 { text: 'Request Templates', link: '/en/guide/request-templates' },
                 { text: 'Auto Routing', link: '/en/guide/auto-model' },
+                { text: 'Cost Tracking', link: '/en/guide/cost' },
+                { text: 'Alert Notifications', link: '/en/guide/notifications' },
+                { text: 'Outbound Proxy', link: '/en/guide/upstream-proxy' },
               ]
             },
             {
               text: 'Admin Panel',
               items: [
                 { text: 'Usage Guide', link: '/en/guide/usage' },
+                { text: 'Playground & Debugging', link: '/en/guide/playground' },
               ]
             },
           ],

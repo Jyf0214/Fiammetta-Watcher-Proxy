@@ -15,8 +15,12 @@ LLM API proxy with multi-platform load balancing, circuit breaker recovery, and 
 - **Multi-platform load balancing** — Routes across upstream API platforms by priority, weight, and health status
 - **Circuit breaker recovery** — Auto-failover on platform failure, auto-recovery when healthy
 - **SSE streaming** — Full support for streaming responses from major LLM platforms
-- **Admin dashboard** — Visual management for platforms, keys, model mappings, logs, and audit trails
-- **Scheduled tasks** — Auto-reset key usage, auto-discover platform models, auto-archive logs
+- **Cost tracking** — Upstream-reported costs trusted first, price-table estimation as fallback; per-day/key/platform cost reports
+- **Alert notifications** — Webhook push for key bans, circuit breaker trips, outages, and quota warnings
+- **Outbound proxy** — Bulk subscription pulls, grouped health checks, platform/key-level binding (HTTP/SOCKS)
+- **Admin dashboard** — Visual management for platforms, keys, model mappings, logs, and audit trails, with a built-in Playground debugger and failed-request traces
+- **Two-factor verification** — Optional TOTP login protection with encrypted secret storage
+- **Scheduled tasks** — Auto-reset key usage, auto-discover platform models, auto-archive logs, daily encrypted backup push
 - **Multi-database support** — D1 / TiDB Cloud / MariaDB / PostgreSQL, runtime auto-switching
 
 ## Architecture

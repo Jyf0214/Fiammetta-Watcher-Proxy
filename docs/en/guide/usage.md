@@ -157,12 +157,15 @@ Model discovery calls the OpenAI-compatible `/models` endpoint — **Anthropic-t
 **Trend Charts**:
 - View request and token usage trends by month/week/day
 - Single-day hourly granularity supported
+- Trend summary shows total cost within the window
 
 **Key Usage Tab**:
-- Requests, token usage, average TTFT per API Key
+- Requests, token usage, cost, average TTFT per API Key
 
 **Platform Usage Tab**:
-- Request distribution, token consumption, performance comparison per platform
+- Request distribution, token consumption, cost, performance comparison per platform
+
+Cost semantics are covered in [Cost Tracking](/en/guide/cost): upstream-reported costs trusted first, price-table estimation as fallback.
 
 ### Request Logs
 
@@ -175,16 +178,19 @@ Every API request is logged with:
 | Model | Requested model |
 | Status Code | HTTP response code |
 | Token Usage | Total tokens (prompt + completion) |
+| Cost | Per-request cost (see the pricing note above) |
 | TTFT | Time to first token (streaming only) |
 | Duration | Total request duration |
 | Error Message | Error details on failure |
 
 Supports filtering by date range, API Key, status code (200/400/401/402/429/500/502/503) and error/normal state.
 
+**Failed request traces**: error rows carry a "View" action showing the original request body and upstream response snippet with one-click copy. See [Playground & Failure Debugging](/en/guide/playground).
+
 ### Log Archival
 
 - Detailed logs older than 30 days are automatically aggregated into daily statistics
-- Aggregation dimensions: date + API Key + model (records carry their platform info), including request count, error count, token counts and average TTFT/duration/TPS
+- Aggregation dimensions: date + API Key + model (records carry their platform info), including request count, error count, token counts, cost totals and average TTFT/duration/TPS
 - Manual archival trigger available
 
 ### Audit Logs
@@ -194,6 +200,9 @@ Records all admin operations:
 - Platform create/update/delete
 - API Key create/update/delete
 - Data import/export
+- Price table and notification config changes
+- 2FA enable/disable
+- Playground calls
 
 Each entry includes operator, action type, details, and client IP.
 
@@ -217,9 +226,33 @@ Import previously exported JSON files for:
 
 Import uses a **preview-then-confirm** flow: it shows per-type counts and issues (missing required fields, duplicate unique keys, masked values), then imports in dependency order after confirmation. Import **only adds, never deletes** existing data; each type has a count cap — split into batches if exceeded. The result shows imported and skipped counts per data type (with skip reasons).
 
+### Scheduled Backup
+
+Beyond manual export, a daily automatic backup pushes a config snapshot (platforms, model maps, system config, API Keys) AES-GCM-encrypted to your own receiver at 3:17 AM. Requires the `BACKUP_WEBHOOK_URL` and `BACKUP_ENCRYPTION_KEY` environment variables — see [Environment Variables → Backup Push](/en/deployment/env#backup-push-optional).
+
 ## System Settings
 
-The "System" group contains three pages: Data Manager, System Keys, and Outbound Proxy (the latter is only available on Docker deployments). The database type and connection status are shown in the sidebar status bar (from `/api/health`, admin auth required).
+The System Settings page centralizes system-level configuration in three cards:
+
+### Model Pricing
+
+Maintain per-model input/output prices (USD per million tokens) for cost tracking, with manual editing and one-click LiteLLM community import — see [Cost Tracking](/en/guide/cost).
+
+### Alert Notifications
+
+Configure webhook receivers and subscribed event types (key bans, circuit breaker trips, outages, etc.) — see [Alert Notifications](/en/guide/notifications).
+
+### Two-Factor Authentication (2FA)
+
+When enabled, login requires a 6-digit authenticator code on top of the password:
+
+1. Click "Enable with Authenticator App" and add the shown secret to your authenticator app (Google Authenticator, Aegis, etc.)
+2. Enter the app's current 6-digit code to confirm enrollment
+3. Disabling requires the current valid code (prevents a hijacked session from turning 2FA off)
+
+::: warning Secret Rotation Note
+The 2FA secret is encrypted bound to `JWT_SECRET`. Disable 2FA before rotating `JWT_SECRET`; if already locked out, see [Environment Variables → 2FA Lockout Recovery](/en/deployment/env#two-factor-authentication-2fa-lockout-recovery).
+:::
 
 ## Related Docs
 
