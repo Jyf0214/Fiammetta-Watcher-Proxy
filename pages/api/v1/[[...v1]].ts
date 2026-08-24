@@ -301,9 +301,21 @@ async function handleModelsList(res: NextApiResponse): Promise<void> {
   await refreshCache(dummyDb, env);
   const models: Array<{ id: string; object: string; owned_by: string }> = [];
   const pc = getPlatformCache(), pm = getPlatformModelCache();
-  for (const [pid, ms] of pm) {
+  // 同名模型多平台重复：按平台优先级（priority 小者优先）取最优归属去重，
+  // 避免客户端模型下拉出现大量同名条目
+  const seen = new Set<string>();
+  const orderedPids = [...pm.keys()].sort((a, b) => {
+    const pa = pc.find(x => x.id === a)?.priority ?? Number.MAX_SAFE_INTEGER;
+    const pb = pc.find(x => x.id === b)?.priority ?? Number.MAX_SAFE_INTEGER;
+    return pa - pb;
+  });
+  for (const pid of orderedPids) {
     const p = pc.find(x => x.id === pid);
-    for (const mid of ms) models.push({ id: mid, object: "model", owned_by: p?.name ?? "unknown" });
+    for (const mid of pm.get(pid) ?? []) {
+      if (seen.has(mid)) continue;
+      seen.add(mid);
+      models.push({ id: mid, object: "model", owned_by: p?.name ?? "unknown" });
+    }
   }
   res.status(200).json({ object: "list", data: models });
 }

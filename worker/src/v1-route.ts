@@ -116,11 +116,22 @@ async function handleModelsList(db: D1Database, env?: WorkerEnv): Promise<Respon
   const platformCache = getPlatformCache();
   const platformModelCache = getPlatformModelCache();
 
-  for (const [platformId, modelSet] of platformModelCache) {
+  // 同名模型多平台重复：按平台优先级（priority 小者优先）取最优归属去重，
+  // 避免客户端模型下拉出现大量同名条目
+  const seen = new Set<string>();
+  const orderedPids = [...platformModelCache.keys()].sort((a, b) => {
+    const pa = platformCache.find((p) => p.id === a)?.priority ?? Number.MAX_SAFE_INTEGER;
+    const pb = platformCache.find((p) => p.id === b)?.priority ?? Number.MAX_SAFE_INTEGER;
+    return pa - pb;
+  });
+
+  for (const platformId of orderedPids) {
     const platform = platformCache.find((p) => p.id === platformId);
     const ownedBy = platform?.name ?? "unknown";
 
-    for (const modelId of modelSet) {
+    for (const modelId of platformModelCache.get(platformId) ?? []) {
+      if (seen.has(modelId)) continue;
+      seen.add(modelId);
       models.push({ id: modelId, object: "model", owned_by: ownedBy });
     }
   }

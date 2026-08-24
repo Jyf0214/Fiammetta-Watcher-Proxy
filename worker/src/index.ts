@@ -16,6 +16,7 @@ import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
 import { loadWhitelist, loadKeyStatusFromKV } from "./platform-keys";
 import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
+import { runBackupTask } from "@/lib/backup";
 import { syncWorkerEnv } from "./env-sync";
 import { formatAnthropicError } from "@/lib/anthropic";
 import type { WorkerEnv } from "./config";
@@ -146,6 +147,17 @@ export default {
         } else {
           ctx.waitUntil(pullProxyGroups(env.DB, env));
         }
+        break;
+      case "backup":
+        // Env 为 wrangler 生成的具体接口（无索引签名），此处仅按键名读取
+        // BACKUP_* 变量，显式放宽为通用记录
+        ctx.waitUntil(
+          runBackupTask(env.DB, env as unknown as Record<string, unknown>).then((r) => {
+            if (!r.success) console.error(`[cron] backup 失败: ${r.skipped}`);
+            else if (r.skipped) console.log(`[cron] backup 跳过: ${r.skipped}`);
+            else console.log(`[cron] backup 已推送 ${r.sizeBytes} 字节`);
+          })
+        );
         break;
       default:
         console.warn(`[cron] 未知的 cron 表达式: ${event.cron}`);

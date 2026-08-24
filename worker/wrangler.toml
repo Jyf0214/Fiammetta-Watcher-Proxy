@@ -38,9 +38,10 @@ id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
 # 每天凌晨 3 点：日志归档
 # 每 5 分钟：出站代理健康检查（仅 Docker 部署且未禁用时生效）
 # 每分钟：出站代理列表拉取（按组内部周期判定是否到期，非每分钟都实际拉取）
+# 每天 3:17：加密配置备份推送（需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY，未配置自动跳过）
 [observability]
 enabled = true
 head_sampling_rate = 1
 
 [triggers]
-crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *", "*/5 * * * *", "* * * * *"]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *", "*/5 * * * *", "* * * * *", "17 3 * * *"]

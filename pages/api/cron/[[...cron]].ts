@@ -7,6 +7,7 @@
  *   GET/POST /api/cron/log-archive  → 归档过期日志
  *   GET/POST /api/cron/proxy-health → 出站代理健康检查（仅 Docker 部署有代理配置时生效）
  *   GET/POST /api/cron/proxy-pull   → 出站代理列表拉取（仅 Docker 部署配置了拉取源的组生效）
+ *   GET/POST /api/cron/backup       → 加密配置备份推送（需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY）
  *
  * 认证：必须配置 CRON_SECRET 环境变量并携带 Authorization: Bearer <CRON_SECRET>；
  * 未配置 CRON_SECRET 时端点禁用（403），防止无鉴权触发定时任务。
@@ -17,6 +18,7 @@ import { fetchAllPlatformModels } from "../../../worker/src/model-fetcher";
 import { handleScheduledReset } from "../../../worker/src/key-reset";
 import { runArchiveTask } from "../../../worker/src/log-archiver";
 import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
+import { runBackupTask } from "@/lib/backup";
 
 const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) => Promise<unknown>> = {
   "model-fetch": fetchAllPlatformModels,
@@ -32,6 +34,9 @@ const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) =
     isUpstreamProxyDisabled()
       ? Promise.resolve({ success: true, disabled: true })
       : pullProxyGroups(db, env),
+  // 备份推送目标/加密钥来自 BACKUP_WEBHOOK_URL / BACKUP_ENCRYPTION_KEY 环境变量；
+  // 未配置时返回 skipped 而非失败，外部调度器不会误判重试
+  "backup": (db, env) => runBackupTask(db, env),
 };
 
 /** 常量时间字符串比较，防止通过响应时差枚举 CRON_SECRET（与 auth.ts 实现一致） */
