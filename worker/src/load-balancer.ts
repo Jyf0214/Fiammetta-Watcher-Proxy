@@ -9,6 +9,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import { sendNotification } from "@/lib/notifier";
 import type { WorkerEnv } from "./config";
 import type { PlatformConfig, CircuitBreakerState } from "@/lib/types";
 
@@ -306,6 +307,13 @@ export async function recordFailure(
     );
 
     await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
+    // 告警：半开探测失败回到熔断（旁路发送，失败静默）
+    void sendNotification(
+      "platform_open",
+      `平台熔断（半开失败）: ${platformId}`,
+      `平台 ${platformId} 半开探测失败，重新进入熔断，冷却至 ${new Date(entry.cooldownEnd).toISOString()}`,
+      { db, env, eventKey: platformId }
+    );
   } else if (
     entry.state === "closed" &&
     entry.failureCount >= DEFAULT_FAILURE_THRESHOLD
@@ -318,11 +326,25 @@ export async function recordFailure(
     );
 
     await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
+    // 告警：连续失败达到阈值触发熔断
+    void sendNotification(
+      "platform_open",
+      `平台熔断: ${platformId}`,
+      `平台 ${platformId} 连续失败 ${entry.failureCount} 次达到阈值，熔断至 ${new Date(entry.cooldownEnd).toISOString()}`,
+      { db, env, eventKey: platformId }
+    );
   } else if (entry.state === "closed") {
     // closed 未达阈值 → 渐进降级：写 DB degraded（管理后台可见，不打断请求），
     // 与 key-reset 的恢复逻辑对称（degraded 无冷却，cooldownEnd 为空，
     // 平台恢复后由 recordSuccess 或每小时 key-reset 写回 healthy）
     await updatePlatformStatus(platformId, "degraded", entry.failureCount, null, db, env);
+    // 告警：渐进降级（默认关闭，可在通知配置中启用）
+    void sendNotification(
+      "platform_degraded",
+      `平台降级: ${platformId}`,
+      `平台 ${platformId} 失败 ${entry.failureCount} 次，进入 degraded 状态`,
+      { db, env, eventKey: platformId }
+    );
   }
 }
 

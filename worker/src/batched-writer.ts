@@ -14,6 +14,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
+import { sendNotification } from "@/lib/notifier";
 import type { WorkerEnv } from "./config";
 import { incrementCallLimitCount } from "./auth";
 
@@ -107,6 +108,47 @@ export function bufferRequestLog(entry: Omit<PendingLogEntry, "id" | "createdAt"
 
 // ==================== 内部实现 ====================
 
+/** 已触发过 80% 配额告警的 Key（进程生命周期去重，重启后最多重报一次） */
+const quotaNotifiedKeys = new Set<string>();
+
+/**
+ * 配额阈值检测：tokenLimit 或 callLimit 用量达 80% 时触发一次配额告警。
+ * 行数据来自 flush 的 update 回读，零额外查询；未设限额的维度跳过。
+ */
+function checkQuotaThreshold(row: {
+  id: string;
+  name?: string | null;
+  tokenLimit?: number | null;
+  usedTokens?: number | bigint;
+  callLimit?: number | null;
+  callUsed?: number;
+}): void {
+  try {
+    if (quotaNotifiedKeys.has(row.id)) return;
+    const tokenRatio =
+      row.tokenLimit && row.tokenLimit > 0
+        ? Number(row.usedTokens ?? 0) / row.tokenLimit
+        : 0;
+    const callRatio =
+      row.callLimit && row.callLimit > 0
+        ? (row.callUsed ?? 0) / row.callLimit
+        : 0;
+    if (tokenRatio < 0.8 && callRatio < 0.8) return;
+    quotaNotifiedKeys.add(row.id);
+    const parts: string[] = [];
+    if (tokenRatio >= 0.8) parts.push(`Token ${Math.round(tokenRatio * 100)}%`);
+    if (callRatio >= 0.8) parts.push(`调用次数 ${Math.round(callRatio * 100)}%`);
+    void sendNotification(
+      "quota_threshold",
+      `API Key 用量预警: ${row.name ?? row.id}`,
+      `Key "${row.name ?? row.id}" 已用 ${parts.join("、")}，接近配置上限`,
+      { eventKey: row.id }
+    );
+  } catch {
+    // 阈值检测异常不影响用量写入主流程
+  }
+}
+
 function scheduleFlush(): void {
   if (flushTimer || isFlushing) return;
   flushTimer = setTimeout(() => {
@@ -179,6 +221,9 @@ async function flushNow(): Promise<void> {
               updatedAt: Math.floor(Date.now() / 1000),
             },
           })
+          // 配额阈值告警：update 回读整行，token/call 任一达 80% 即边沿触发
+          // （进程内 Set 去重，重启后最多重报一次）；失败路径不影响原 catch
+          .then((row) => checkQuotaThreshold(row))
           .catch((err) => {
             console.error(
               `[batched-writer] Key ${keyId} 用量更新失败:`,
@@ -249,4 +294,15 @@ export function getBatchedWriterStats(): {
     pendingKeyUsages: pendingKeyUsages.size,
     pendingLogs: pendingLogs.length,
   };
+}
+
+/**
+ * 获取最近一次初始化绑定的 DB/环境（只读快照）
+ *
+ * 供无 db/env 入参的旁路模块（如告警通知）复用请求路径已建立的绑定——
+ * 所有代理入口在记录日志前都会经 initBatchedWriter 初始化，因此
+ * 熔断/封禁等事件触发时该绑定必然可用；未初始化时返回 null。
+ */
+export function getBatchedWriterBindings(): { db: D1Database; env?: WorkerEnv } | null {
+  return flushDb ? { db: flushDb, env: flushEnv } : null;
 }

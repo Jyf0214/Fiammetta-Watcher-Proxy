@@ -28,6 +28,7 @@ import {
   validateUpstreamProxyConfig,
 } from "@/lib/upstream-proxy";
 import { MODEL_PRICING_CONFIG_KEY } from "@/lib/model-pricing";
+import { NOTIFICATIONS_CONFIG_KEY } from "@/lib/notifier";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -931,6 +932,8 @@ const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
   // 模型价格表：与 config.ts PROTECTED_CONFIG_KEYS 同源——导入备份若携带
   // 未 strict 校验的价格快照会绕过 /api/admin/pricing 的专属校验与审计
   MODEL_PRICING_CONFIG_KEY,
+  // 告警通知配置：同源保护，防止导入注入任意 webhook URL
+  NOTIFICATIONS_CONFIG_KEY,
 ]);
 const IMPORT_CONFIG_PREFIX = "system:";
 

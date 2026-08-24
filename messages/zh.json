@@ -417,7 +417,8 @@
     "actionDeleteSystemKey": "删除系统密钥",
     "actionImportData": "导入数据",
     "actionExportData": "导出数据",
-    "actionUpdateModelPricing": "更新模型价格表"
+    "actionUpdateModelPricing": "更新模型价格表",
+    "actionUpdateNotifications": "更新通知配置"
   },
   "system": {
     "autoModelTitle": "自动模型",
@@ -622,6 +623,26 @@
     "pricingImportSuccess": "已导入 {imported} 个模型，共 {total} 条",
     "pricingErrorEmptyModel": "模型名不能为空",
     "pricingErrorInvalidPrice": "模型 {model} 的价格无效：必须是非负数字",
-    "pricingErrorDuplicate": "模型重复：{model}"
+    "pricingErrorDuplicate": "模型重复：{model}",
+    "notifTitle": "告警通知",
+    "notifDesc": "将 Key 封禁、平台熔断、服务不可用与配额预警推送到 Webhook 通道（兼容 Telegram Bot / Bark / Server酱）。",
+    "notifEnabled": "启用通知",
+    "notifEvents": "推送事件",
+    "notifEventKeyBanned": "API Key 被封禁",
+    "notifEventPlatformOpen": "平台熔断",
+    "notifEventPlatformDegraded": "平台降级",
+    "notifEventAllUnavailable": "全平台不可用",
+    "notifEventQuotaThreshold": "Key 用量达 80%",
+    "notifChannels": "Webhook 通道",
+    "notifChannelName": "名称",
+    "notifNoChannels": "尚未配置通道。",
+    "notifAddChannel": "添加通道",
+    "notifCooldown": "同类事件冷却：",
+    "notifCooldownUnit": "分钟",
+    "notifSaving": "保存中...",
+    "notifSaved": "通知配置已保存",
+    "notifErrorNoChannel": "启用通知至少需要一条通道",
+    "notifErrorBadUrl": "通道 {name} 的 URL 必须以 http:// 或 https:// 开头",
+    "notifErrorCooldown": "冷却时间必须是 1-1440 的整数"
   }
 }

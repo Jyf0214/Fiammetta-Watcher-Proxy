@@ -14,6 +14,7 @@ import { routeRequestLite } from "./router-lite";
 import { getNextKey, recordKeyError, banKey } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClientInfo } from "./token";
 import { recordPlatform429 } from "./load-balancer";
+import { sendNotification } from "@/lib/notifier";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
@@ -622,6 +623,13 @@ export async function proxyV1RequestLite(
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
+    // 告警：lite 部署单平台即全部——平台无可用 Key 等价服务不可用
+    void sendNotification(
+      "all_unavailable",
+      `平台无可用 API Key: ${route.platform.name}`,
+      `模型 ${requestedModel} 的请求无可用 Key，已返回 500`,
+      { db: env.DB, env: workerEnv }
+    );
     return liteErrorResponse(config, 500, `平台 "${route.platform.name}" 无可用 API Key`, "server_error");
   }
 

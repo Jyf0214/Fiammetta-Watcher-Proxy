@@ -8,6 +8,7 @@
 import type { PlatformConfig, PlatformApiKeyObject } from "@/lib/types";
 import type { WorkerEnv } from "./config";
 import { keyFingerprint, readPlatformKeyStatus, writePlatformKeyStatus, removePlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
+import { sendNotification } from "@/lib/notifier";
 
 /** 命名密钥格式 */
 export interface NamedApiKey {
@@ -198,6 +199,14 @@ export async function banKey(
   if (platformId && kv) {
     await writePlatformKeyStatus(kv, platformId, fp, { status: "banned", expireAt });
   }
+  // 告警：Key 被封禁（旁路发送，失败静默）。只携带指纹前缀，绝不回显密钥明文；
+  // db/env 缺省时由 notifier 复用 batched-writer 捕获的请求路径绑定
+  void sendNotification(
+    "key_banned",
+    `API Key 被封禁${platformId ? `: ${platformId}` : ""}`,
+    `密钥指纹 ${fp} 在平台 ${platformId ?? "(未指定)"} 上被封禁 ${Math.round(durationMs / 60000)} 分钟`,
+    { eventKey: platformId ?? "" }
+  );
 }
 
 /**

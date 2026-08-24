@@ -417,7 +417,8 @@
     "actionDeleteSystemKey": "Delete System Key",
     "actionImportData": "Import Data",
     "actionExportData": "Export Data",
-    "actionUpdateModelPricing": "Update Model Pricing"
+    "actionUpdateModelPricing": "Update Model Pricing",
+    "actionUpdateNotifications": "Update Notification Config"
   },
   "system": {
     "autoModelTitle": "Auto Model",
@@ -622,6 +623,26 @@
     "pricingImportSuccess": "Imported {imported} models, {total} in total",
     "pricingErrorEmptyModel": "Model name cannot be empty",
     "pricingErrorInvalidPrice": "Invalid price for \"{model}\": must be non-negative numbers",
-    "pricingErrorDuplicate": "Duplicate model: \"{model}\""
+    "pricingErrorDuplicate": "Duplicate model: \"{model}\"",
+    "notifTitle": "Alert Notifications",
+    "notifDesc": "Push key bans, circuit breaker trips, service outages and quota warnings to your webhook channels (Telegram Bot / Bark / ServerChan compatible).",
+    "notifEnabled": "Enable notifications",
+    "notifEvents": "Events",
+    "notifEventKeyBanned": "API Key banned",
+    "notifEventPlatformOpen": "Platform circuit breaker tripped",
+    "notifEventPlatformDegraded": "Platform degraded",
+    "notifEventAllUnavailable": "All platforms unavailable",
+    "notifEventQuotaThreshold": "Key quota at 80%",
+    "notifChannels": "Webhook Channels",
+    "notifChannelName": "Name",
+    "notifNoChannels": "No channels configured.",
+    "notifAddChannel": "Add Channel",
+    "notifCooldown": "Duplicate event cooldown:",
+    "notifCooldownUnit": "minutes",
+    "notifSaving": "Saving...",
+    "notifSaved": "Notification config saved",
+    "notifErrorNoChannel": "Enable notifications requires at least one channel",
+    "notifErrorBadUrl": "Channel \"{name}\" URL must start with http:// or https://",
+    "notifErrorCooldown": "Cooldown must be an integer between 1 and 1440"
   }
 }

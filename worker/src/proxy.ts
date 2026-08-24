@@ -11,6 +11,7 @@
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
+import { sendNotification } from "@/lib/notifier";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
@@ -575,6 +576,13 @@ export async function proxyV1Request(
       } catch (logError) {
         console.error(`${logTag} 日志写入失败:`, logError);
       }
+      // 告警：所有平台均无可用 Key（服务已不可用，最高优先级事件）
+      void sendNotification(
+        "all_unavailable",
+        "所有平台均无可用 API Key",
+        `模型 ${requestedModel} 的请求无任何可用平台/Key，已返回 500`,
+        { db: env.DB, env: workerEnv }
+      );
       return v1ErrorResponse(config, 500, "所有平台均无可用 API Key", "server_error");
     }
   }

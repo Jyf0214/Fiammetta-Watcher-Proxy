@@ -38,6 +38,9 @@ const PROTECTED_CONFIG_KEYS = new Set<string>([
   // 模型价格表：有专属校验端点 /api/admin/pricing（strict 逐条校验 + LiteLLM
   // 导入），直写可注入负数/非法 JSON，请求路径只能静默丢弃或计 0 成本
   "system:model_pricing",
+  // 告警通知配置：有专属端点 /api/admin/notifications，直写可注入任意
+  // webhook URL（引流）或破坏事件开关结构
+  "system:notifications",
 ]);
 
 /**

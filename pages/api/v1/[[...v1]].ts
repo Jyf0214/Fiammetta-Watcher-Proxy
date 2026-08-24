@@ -18,6 +18,7 @@ import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
+import { sendNotification } from "@/lib/notifier";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
 
@@ -438,6 +439,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     if (!curKey) {
       // 全部平台无可用 Key：平台维度未知记 null（配置问题，不计入任何平台评分）
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "所有平台均无可用 API Key", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
+      // 告警：所有平台均无可用 Key（服务已不可用，最高优先级事件）
+      void sendNotification("all_unavailable", "所有平台均无可用 API Key", `模型 ${requestedModel} 的请求无任何可用平台/Key，已返回 500`, { db: dummyDb, env });
       sendV1Error(res, config, 500, "所有平台均无可用 API Key", "server_error"); return;
     }
   }

@@ -46,6 +46,7 @@ const ACTION_LABELS: Record<string, string> = {
   export_data: "actionExportData",
   update_model_pricing: "actionUpdateModelPricing",
   import_model_pricing: "actionUpdateModelPricing",
+  update_notifications: "actionUpdateNotifications",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -70,6 +71,7 @@ const ACTION_COLOR: Record<string, string> = {
   export_data: "purple",
   update_model_pricing: "orange",
   import_model_pricing: "purple",
+  update_notifications: "orange",
 };
 
 // ==================== 页面组件 ====================
