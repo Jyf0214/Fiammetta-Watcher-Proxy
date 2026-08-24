@@ -31,6 +31,8 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  /** 片内成本合计（美元）：上游实时计价优先 + 价格表估算，仅供参考 */
+  cost: number;
   /** 累计耗时（毫秒）：请求数/TPS 口径统一后的 TPS 用整体除法（输出Token/耗时秒） */
   latencyMs: number;
 }
@@ -110,6 +112,7 @@ export default async function handler(
         existing.tokens += point.tokens;
         existing.promptTokens += point.promptTokens;
         existing.completionTokens += point.completionTokens;
+        existing.cost = Math.round((existing.cost + point.cost) * 1e6) / 1e6;
         existing.latencyMs += point.latencyMs;
       } else {
         groups.set(dateKey, { ...point });
@@ -143,6 +146,7 @@ export default async function handler(
           totalTokens: true,
           totalPromptTokens: true,
           totalCompletionTokens: true,
+          totalCost: true,
           avgDuration: true,
         },
       });
@@ -157,6 +161,7 @@ export default async function handler(
           tokens: row.totalTokens,
           promptTokens: row.totalPromptTokens,
           completionTokens: row.totalCompletionTokens,
+          cost: row.totalCost ?? 0,
           latencyMs: row.avgDuration > 0 ? row.avgDuration * perfCount : 0,
         });
       }
@@ -191,6 +196,7 @@ export default async function handler(
             tokens: true,
             promptTokens: true,
             completionTokens: true,
+            cost: true,
             latency: true,
             isError: true,
             createdAt: true,
@@ -204,6 +210,7 @@ export default async function handler(
             tokens: log.tokens ?? 0,
             promptTokens: log.promptTokens ?? 0,
             completionTokens: log.completionTokens ?? 0,
+            cost: log.cost ?? 0,
             // 错误请求不计耗时：tokens 恒 0 但 latency 是真实耗时，计入会
             // 拉大 TPS 分母稀释均值（与 stats.ts perfAgg / 历史部分口径一致）
             latencyMs: log.isError ? 0 : log.latency,
@@ -224,6 +231,7 @@ export default async function handler(
         tokens: data.tokens,
         promptTokens: data.promptTokens,
         completionTokens: data.completionTokens,
+        cost: data.cost,
         // TPS 整体除法口径（与仪表盘 stats.ts 明细部分一致）：
         // 片内输出 Token 总和 / 片内耗时秒数总和，而非每请求 TPS 的算术平均
         tps: data.latencyMs > 0 ? Math.round((data.completionTokens / (data.latencyMs / 1000)) * 100) / 100 : 0,

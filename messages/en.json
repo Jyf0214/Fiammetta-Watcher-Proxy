@@ -23,6 +23,7 @@
     "reset": "Reset",
     "copy": "Copy",
     "copied": "Copied to clipboard",
+    "costDisclaimer": "Costs are derived from upstream-reported usage or estimated via the model price table — for reference only; actual billing is determined by your provider.",
     "copyFailed": "Copy failed",
     "unlimited": "Unlimited",
     "pagination": "{count} total",
@@ -88,6 +89,7 @@
     "requestTemplates": "Request Templates",
     "upstreamProxy": "Upstream Proxy",
     "dataManager": "Data Manager",
+    "settings": "Settings",
     "dataManagerDesc": "Export and import system data for backup and migration",
     "systemKeys": "System API Keys",
     "logout": "Logout",
@@ -347,6 +349,8 @@
     "status": "Status",
     "totalRequests": "Total Requests",
     "totalTokens": "Total Tokens",
+    "totalCost": "Total Cost",
+    "windowCost": "Window Cost",
     "activeKeys": "Active Keys",
     "promptTokens": "Input Tokens",
     "promptTokensDesc": "Total input tokens across all requests",
@@ -385,6 +389,7 @@
     "avgTps": "TPS",
     "totalRequests": "Total Requests",
     "totalTokens": "Total Tokens",
+    "totalCost": "Total Cost",
     "activeKeys": "Active Keys",
     "activePlatforms": "Active Platforms",
     "title": "Dashboard",
@@ -411,7 +416,8 @@
     "actionUpdateSystemKey": "Update System Key",
     "actionDeleteSystemKey": "Delete System Key",
     "actionImportData": "Import Data",
-    "actionExportData": "Export Data"
+    "actionExportData": "Export Data",
+    "actionUpdateModelPricing": "Update Model Pricing"
   },
   "system": {
     "autoModelTitle": "Auto Model",
@@ -597,5 +603,25 @@
     "stepStartServiceDesc": "docker-compose up -d for one-click startup with automatic database initialization",
     "stepGetStartedTitle": "Get Started",
     "stepGetStartedDesc": "Add upstream platforms and API Keys in the admin panel, modify base_url in your SDK to connect"
+  },
+  "settings": {
+    "title": "System Settings",
+    "desc": "Model pricing, notifications and other system-level configuration",
+    "pricingTitle": "Model Pricing",
+    "pricingUnitHint": "Prices are in USD per million tokens (input / output). Upstream-reported costs always take precedence; this table is used for estimation only.",
+    "pricingModel": "Model",
+    "pricingModelPlaceholder": "model-id, e.g. gpt-4o",
+    "pricingInputPrice": "Input $/M",
+    "pricingOutputPrice": "Output $/M",
+    "pricingAddModel": "Add Model",
+    "pricingImportLiteLLM": "Import from LiteLLM",
+    "pricingImporting": "Importing...",
+    "pricingSaving": "Saving...",
+    "pricingSaved": "Pricing table saved",
+    "pricingEmpty": "No pricing entries. Add manually or import from LiteLLM.",
+    "pricingImportSuccess": "Imported {imported} models, {total} in total",
+    "pricingErrorEmptyModel": "Model name cannot be empty",
+    "pricingErrorInvalidPrice": "Invalid price for \"{model}\": must be non-negative numbers",
+    "pricingErrorDuplicate": "Duplicate model: \"{model}\""
   }
 }

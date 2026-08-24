@@ -18,6 +18,7 @@ import {
   Grid,
   List,
   Gauge,
+  CircleDollarSign,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
@@ -45,6 +46,8 @@ interface Stats {
   activeKeys: number;
   totalRequests: number;
   totalTokens: number;
+  /** 累计成本（美元）：上游实时计价优先 + 价格表估算，仅供参考 */
+  totalCost: number;
   avgTtft: number;
   avgDuration: number;
   avgTps: number;
@@ -183,6 +186,16 @@ function DashboardContent() {
       iconColor: "text-amber-500",
     },
     {
+      key: "totalCost",
+      title: t("totalCost"),
+      // 成本展示为精确金额（$X.XX），不用紧凑数字（1.2K 美元无意义）
+      value: stats?.totalCost ?? 0,
+      icon: <CircleDollarSign />,
+      color: "bg-yellow-50 dark:bg-yellow-900/20",
+      iconColor: "text-yellow-500",
+      get display() { return { value: `$${(this.value).toFixed(2)}`, suffix: "" }; },
+    },
+    {
       key: "avgTtft",
       title: t("avgTtft"),
       value: stats?.avgTtft ?? 0,
@@ -217,6 +230,7 @@ function DashboardContent() {
       keys: "#10b981",
       requests: "#64748b",
       tokens: "#f59e0b",
+      totalCost: "#eab308",
       avgTtft: "#f97316",
       avgDuration: "#06b6d4",
       avgTps: "#14b8a6",
@@ -362,6 +376,7 @@ function DashboardContent() {
           })}
         </div>
       )}
+      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 -mt-2">{t("common:costDisclaimer")}</p>
     </PageContainer>
   );
 }

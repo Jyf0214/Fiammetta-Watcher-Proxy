@@ -249,6 +249,7 @@ async function archiveSingleDay(
     tokens: number;
     promptTokens: number;
     completionTokens: number;
+    cost: number;
     ttft: number;
     latency: number;
     isError: boolean;
@@ -280,6 +281,7 @@ async function archiveSingleDay(
           tokens: true,
           promptTokens: true,
           completionTokens: true,
+          cost: true,
           ttft: true,
           latency: true,
           isError: true,
@@ -318,6 +320,7 @@ async function archiveSingleDay(
       totalTokens: number;
       totalPromptTokens: number;
       totalCompletionTokens: number;
+      totalCost: number;
       ttftSum: number;
       ttftCount: number;
       latencySum: number;
@@ -344,6 +347,7 @@ async function archiveSingleDay(
         totalTokens: 0,
         totalPromptTokens: 0,
         totalCompletionTokens: 0,
+        totalCost: 0,
         ttftSum: 0,
         ttftCount: 0,
         latencySum: 0,
@@ -372,6 +376,8 @@ async function archiveSingleDay(
     group.totalTokens += log.tokens || 0;
     group.totalPromptTokens += log.promptTokens || 0;
     group.totalCompletionTokens += log.completionTokens || 0;
+    // 成本与 tokens 同口径：错误请求 cost 恒为 0，累加亦无影响
+    group.totalCost += log.cost || 0;
     if (log.ttft > 0) {
       group.ttftSum += log.ttft;
       group.ttftCount++;
@@ -410,6 +416,7 @@ async function archiveSingleDay(
       totalTokens: group.totalTokens,
       totalPromptTokens: group.totalPromptTokens,
       totalCompletionTokens: group.totalCompletionTokens,
+      totalCost: group.totalCost,
       avgTtft,
       avgDuration,
       avgTps,

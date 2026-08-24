@@ -37,6 +37,8 @@ interface PendingLogEntry {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  /** 单次请求成本（美元，按模型价格表计算；无价格数据记 0） */
+  cost: number;
   ttft: number;
   isError: boolean;
   errorMessage: string | null;

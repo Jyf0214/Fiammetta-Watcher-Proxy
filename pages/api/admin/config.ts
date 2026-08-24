@@ -35,6 +35,9 @@ const PROTECTED_CONFIG_KEYS = new Set<string>([
   UPSTREAM_PROXY_HEALTH_KEY,
   UPSTREAM_PROXY_CHECK_LOCK_KEY,
   UPSTREAM_PROXY_PULL_AT_KEY,
+  // 模型价格表：有专属校验端点 /api/admin/pricing（strict 逐条校验 + LiteLLM
+  // 导入），直写可注入负数/非法 JSON，请求路径只能静默丢弃或计 0 成本
+  "system:model_pricing",
 ]);
 
 /**

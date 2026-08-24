@@ -178,6 +178,7 @@ model dailyStats {
   totalTokens           Int     @default(0) @map("total_tokens")
   totalPromptTokens     Int     @default(0) @map("total_prompt_tokens")
   totalCompletionTokens Int     @default(0) @map("total_completion_tokens")
+  totalCost             Float   @default(0) @map("total_cost")
   avgTtft               Float   @default(0) @map("avg_ttft")
   avgDuration           Float   @default(0) @map("avg_duration")
   avgTps                Float   @default(0) @map("avg_tps")

@@ -6,10 +6,27 @@
  */
 
 import { proxyStatKey } from "@/lib/upstream-proxy";
+import { computeCost, ensurePricingLoaded, getPricingSnapshot } from "@/lib/model-pricing";
 import { recordFailure, recordPlatform429 } from "./load-balancer";
 import { banKey, recordKeyError, isPlatformWhitelisted } from "./platform-keys";
 import { bufferKeyUsage, bufferRequestLog, initBatchedWriter } from "./batched-writer";
 import type { WorkerEnv } from "./config";
+
+/**
+ * 提取上游自报的实时成本（美元）
+ *
+ * 部分上游（如 OpenRouter）在 usage 中直接返回本次请求成本（cost / total_cost）。
+ * 实时计价优先于价格表估算：仅采信明确为正的上报值——0 与"未返回"无法区分，
+ * 交由价格表估算兜底，避免把"未上报"误记成免费。
+ * 上界钳制 1e6 美元：单请求成本超过该值只可能是脏数据/恶意构造，
+ * 原样入库会经 _sum 放大到统计层。
+ */
+const UPSTREAM_COST_MAX = 1_000_000;
+
+function extractUpstreamCost(usage: Record<string, unknown>): number | null {
+  const raw = Number((usage as any).cost ?? (usage as any).total_cost);
+  return Number.isFinite(raw) && raw > 0 && raw <= UPSTREAM_COST_MAX ? raw : null;
+}
 
 /**
  * 从 OpenAI 格式的 usage 对象中提取 token 数
@@ -23,7 +40,10 @@ export function extractUsage(
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** 上游自报的实时成本（美元）；未上报或非法时为 null，调用方回退价格表估算 */
+  upstreamCost: number | null;
 } {
+  const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, upstreamCost: null };
   if (!usage) {
     // 上游未返回 usage 时用请求体预估值兜底（与下方 totalTokens<=0 同一防绕过语义）
     if (maxTokensEstimate > 0) {
@@ -31,11 +51,14 @@ export function extractUsage(
         promptTokens: maxTokensEstimate,
         completionTokens: 0,
         totalTokens: maxTokensEstimate,
+        upstreamCost: null,
       };
     }
-    return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    return noUsage;
   }
 
+  // 上游实时成本：只要 usage 存在即尝试提取（token 数被防篡改钳制的场景不影响成本上报）
+  const upstreamCost = extractUpstreamCost(usage);
   // 兼容 Chat (prompt_tokens/completion_tokens) 与 Responses (input_tokens/output_tokens) 两种 usage 形态
   // Responses API 返回 input_tokens/output_tokens/total_tokens，且可能包含 reasoning_tokens
   let promptTokens = Number(usage.prompt_tokens ?? (usage as any).input_tokens) || 0;
@@ -64,6 +87,7 @@ export function extractUsage(
       promptTokens: maxTokensEstimate,
       completionTokens: 0,
       totalTokens: maxTokensEstimate,
+      upstreamCost,
     };
   }
 
@@ -74,6 +98,7 @@ export function extractUsage(
     promptTokens: Math.min(promptTokens, INT32_MAX),
     completionTokens: Math.min(completionTokens, INT32_MAX),
     totalTokens: Math.min(totalTokens, INT32_MAX),
+    upstreamCost,
   };
 }
 
@@ -173,6 +198,11 @@ export async function recordRequestLog(params: {
   duration: number;
   isError: boolean;
   errorMessage?: string;
+  /**
+   * 上游自报的实时成本（美元）：usage 自带 cost 时由调用方传入并优先采信；
+   * 缺省时回退价格表估算（无价格数据记 0）
+   */
+  upstreamCost?: number | null;
   /** 客户端真实 IP（从下游请求头提取，日志页展示用；不传写 null） */
   ipAddress?: string;
   /** 客户端 User-Agent（从下游请求头提取，日志页展示用；不传写 null） */
@@ -183,6 +213,20 @@ export async function recordRequestLog(params: {
   env?: WorkerEnv;
 }): Promise<void> {
   initBatchedWriter(params.db, params.env);
+  // 成本核算：上游实时计价优先；缺省回退价格表估算（快照过期时懒加载刷新，
+  // 失败沿用旧值计 0）。仅回退路径才需要加载价格快照，实时成本存在时零开销
+  let cost = params.upstreamCost && params.upstreamCost > 0 && params.upstreamCost <= UPSTREAM_COST_MAX
+    ? params.upstreamCost
+    : null;
+  if (cost === null) {
+    try { await ensurePricingLoaded(params.db, params.env); } catch {}
+    cost = computeCost(
+      getPricingSnapshot(),
+      params.model,
+      params.promptTokens,
+      params.completionTokens
+    );
+  }
   bufferRequestLog({
     keyId: params.keyId,
     keyName: params.keyName,
@@ -195,6 +239,7 @@ export async function recordRequestLog(params: {
     tokens: params.tokens,
     promptTokens: params.promptTokens,
     completionTokens: params.completionTokens,
+    cost,
     ttft: params.ttft,
     isError: params.isError,
     errorMessage: params.errorMessage ?? null,
@@ -295,6 +340,8 @@ export function createUsageTransformer(params: {
 }): TransformStream<Uint8Array, Uint8Array> {
   let sseBuffer = "";
   let lastUsage: Record<string, unknown> | undefined;
+  // 最后一次 usage 事件自报的实时成本（美元）；未上报为 null，flush 时回退价格表估算
+  let lastUpstreamCost: number | null = null;
   let streamError: { code: number; message: string } | undefined;
   // 上游正常结束的标志：SSE 流必须以 data: [DONE] 收尾。上游在思考中途截断
   // （EOF 但无 [DONE]）时若按成功记录，坏平台永远不会被熔断，负载均衡会反复撞上它
@@ -356,6 +403,7 @@ export function createUsageTransformer(params: {
           const candidate = (pAny.usage ?? pAny.response?.usage ?? pAny.response?.response?.usage) as Record<string, unknown> | undefined;
           if (candidate) {
             lastUsage = candidate;
+            lastUpstreamCost = extractUpstreamCost(candidate);
           }
           // 上游 200 + 流内 error 事件：失败语义由日志记录（status=error.code，isError=true）
           if (parsed.error) {
@@ -415,6 +463,18 @@ export function createUsageTransformer(params: {
 
       // 复用同一个 PrismaClient 完成所有 DB 操作
       initBatchedWriter(params.db, params.env);
+      const failed = !!streamError || truncated || emptyCompletion;
+      // 成本核算：失败请求计 0；成功请求上游实时计价优先，缺省回退价格表估算
+      // （与 recordRequestLog 同口径）。仅回退路径才加载价格快照
+      let cost = 0;
+      if (!failed) {
+        if (lastUpstreamCost != null) {
+          cost = lastUpstreamCost;
+        } else {
+          try { await ensurePricingLoaded(params.db, params.env); } catch {}
+          cost = computeCost(getPricingSnapshot(), params.model, promptTokens, completionTokens);
+        }
+      }
       // 流内 error / 截断 / 空完成均视为失败请求：不计入 Key 用量/次数
       if (!streamError && !truncated && !emptyCompletion && totalTokens > 0) {
         bufferKeyUsage(params.keyId, totalTokens);
@@ -432,6 +492,7 @@ export function createUsageTransformer(params: {
         tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
         promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
         completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
+        cost,
         ttft,
         isError: !!streamError || truncated || emptyCompletion,
         errorMessage: streamError?.message ?? (emptyCompletion ? "上游返回空完成（200 + 流内无有效内容）" : truncated ? "上游流未正常结束（EOF 但未收到 [DONE]），疑似上游截断" : null),

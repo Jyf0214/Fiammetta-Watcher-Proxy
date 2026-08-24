@@ -27,6 +27,7 @@ import {
   UPSTREAM_PROXY_CONFIG_KEY,
   validateUpstreamProxyConfig,
 } from "@/lib/upstream-proxy";
+import { MODEL_PRICING_CONFIG_KEY } from "@/lib/model-pricing";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -927,6 +928,9 @@ const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
   UPSTREAM_PROXY_HEALTH_KEY,
   UPSTREAM_PROXY_CHECK_LOCK_KEY,
   UPSTREAM_PROXY_PULL_AT_KEY,
+  // 模型价格表：与 config.ts PROTECTED_CONFIG_KEYS 同源——导入备份若携带
+  // 未 strict 校验的价格快照会绕过 /api/admin/pricing 的专属校验与审计
+  MODEL_PRICING_CONFIG_KEY,
 ]);
 const IMPORT_CONFIG_PREFIX = "system:";
 
@@ -1336,6 +1340,7 @@ async function importDailyStats(
         totalTokens: sanitizeNonNegativeInt(s.totalTokens) ?? 0,
         totalPromptTokens: sanitizeNonNegativeInt(s.totalPromptTokens) ?? 0,
         totalCompletionTokens: sanitizeNonNegativeInt(s.totalCompletionTokens) ?? 0,
+        totalCost: sanitizeNonNegativeFloat(s.totalCost) ?? 0,
         avgTtft: sanitizeNonNegativeFloat(s.avgTtft) ?? 0,
         avgDuration: sanitizeNonNegativeFloat(s.avgDuration) ?? 0,
         avgTps: sanitizeNonNegativeFloat(s.avgTps) ?? 0,

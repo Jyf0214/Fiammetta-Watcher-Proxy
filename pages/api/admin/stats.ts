@@ -45,6 +45,8 @@ interface StatsData {
   activeKeys: number;
   totalRequests: number;
   totalTokens: number;
+  /** 累计成本（美元）：上游实时计价优先 + 价格表估算，仅供参考 */
+  totalCost: number;
   avgTtft: number;
   avgDuration: number;
   avgTps: number;
@@ -96,6 +98,7 @@ export default async function handler(
           totalRequests: true,
           errorRequests: true,
           totalTokens: true,
+          totalCost: true,
           avgTtft: true,
           avgDuration: true,
           avgTps: true,
@@ -113,11 +116,11 @@ export default async function handler(
 
     // 明细聚合并行（2 个 aggregate）
     const [detailAgg, perfAgg] = await Promise.all([
-      // 明细（未归档，含今日）：请求总数 + 总 token（含错误请求）
+      // 明细（未归档，含今日）：请求总数 + 总 token（含错误请求）+ 成本
       db.requestLogs.aggregate({
         where: { createdAt: { gte: detailSince } },
         _count: { id: true },
-        _sum: { tokens: true },
+        _sum: { tokens: true, cost: true },
       }),
       // 明细性能统计：非错误请求的 TTFT/延迟/输出Token 总和（保持原接口口径）
       db.requestLogs.aggregate({
@@ -138,6 +141,7 @@ export default async function handler(
     // 样本数"同级）。
     let histRequests = 0;
     let histTokens = 0;
+    let histCost = 0;
     let histPerfCount = 0;
     let histTtftSum = 0;
     let histLatencySum = 0;
@@ -147,6 +151,7 @@ export default async function handler(
       const perfCount = row.totalRequests - row.errorRequests;
       histRequests += row.totalRequests;
       histTokens += row.totalTokens;
+      histCost += row.totalCost ?? 0;
       histPerfCount += perfCount;
       if (row.avgTtft > 0) histTtftSum += row.avgTtft * perfCount;
       if (row.avgDuration > 0) histLatencySum += row.avgDuration * perfCount;
@@ -159,7 +164,6 @@ export default async function handler(
 
     // ---- 明细部分（request_logs，最近 RETENTION_DAYS 天）----
     const detailCount = detailAgg._count.id ?? 0;
-    const detailTokens = detailAgg._sum.tokens ?? 0;
     const detailPerfCount = perfAgg._count.id ?? 0;
     const detailTtftSum = perfAgg._sum.ttft ?? 0;
     const detailLatencySum = perfAgg._sum.latency ?? 0;
@@ -167,7 +171,8 @@ export default async function handler(
 
     // ---- 汇总 ----
     const totalRequests = histRequests + detailCount;
-    const totalTokens = histTokens + detailTokens;
+    const totalTokens = histTokens + (detailAgg._sum.tokens ?? 0);
+    const totalCost = histCost + Math.round((detailAgg._sum.cost ?? 0) * 1e6) / 1e6;
     const perfCount = histPerfCount + detailPerfCount;
     const ttftSum = histTtftSum + detailTtftSum;
     const latencySum = histLatencySum + detailLatencySum;
@@ -188,6 +193,7 @@ export default async function handler(
       activeKeys,
       totalRequests,
       totalTokens,
+      totalCost,
       avgTtft,
       avgDuration,
       avgTps,

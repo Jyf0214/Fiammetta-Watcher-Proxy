@@ -29,6 +29,8 @@ interface LogEntry {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  /** 单次请求成本（美元）：仅供参考 */
+  cost: number;
   ttft: number;
   duration: number;
   isError: boolean;
@@ -52,6 +54,8 @@ interface ArchiveEntry {
   totalTokens: number;
   totalPromptTokens: number;
   totalCompletionTokens: number;
+  /** 归档日成本合计（美元）：仅供参考 */
+  totalCost: number;
   avgTtft: number;
   avgDuration: number;
   avgTps: number;
@@ -228,6 +232,18 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
       width: 100,
       align: "right",
       render: (v: number) => v?.toLocaleString() || "0",
+    },
+    {
+      title: (
+        <Tooltip title={t("common:costDisclaimer")}>
+          {t("usage:totalCost")}
+        </Tooltip>
+      ),
+      dataIndex: "cost",
+      key: "cost",
+      width: 90,
+      align: "right",
+      render: (v: number) => `$${(v || 0).toFixed(2)}`,
     },
     {
       title: t("ttft"),
@@ -502,6 +518,18 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
       width: 100,
       align: "right",
       render: (v: number) => v?.toLocaleString() || "0",
+    },
+    {
+      title: (
+        <Tooltip title={t("common:costDisclaimer")}>
+          {t("usage:totalCost")}
+        </Tooltip>
+      ),
+      dataIndex: "totalCost",
+      key: "totalCost",
+      width: 90,
+      align: "right",
+      render: (v: number) => `$${(v || 0).toFixed(2)}`,
     },
     {
       title: t("avgTtft"),

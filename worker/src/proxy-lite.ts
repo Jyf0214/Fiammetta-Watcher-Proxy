@@ -337,7 +337,7 @@ function createLiteUsageTransformer(params: {
     },
 
     async flush() {
-      const { promptTokens, completionTokens, totalTokens } =
+      const { promptTokens, completionTokens, totalTokens, upstreamCost } =
         extractUsage(lastUsage, params.maxTokensEstimate);
       const duration = Date.now() - params.startTime;
 
@@ -381,6 +381,7 @@ function createLiteUsageTransformer(params: {
           tokens: streamError || truncated || emptyCompletion ? 0 : totalTokens,
           promptTokens: streamError || truncated || emptyCompletion ? 0 : promptTokens,
           completionTokens: streamError || truncated || emptyCompletion ? 0 : completionTokens,
+          upstreamCost: streamError || truncated || emptyCompletion ? null : upstreamCost,
           ttft,
           duration,
           isError: !!streamError || truncated || emptyCompletion,
@@ -1277,6 +1278,8 @@ async function handleUpstreamResponseLite(
   let responseTokens = 0;
   let responsePromptTokens = 0;
   let responseCompletionTokens = 0;
+  // 上游自报实时成本（usage.cost），成功日志优先采信
+  let responseUpstreamCost: number | null = null;
 
   // 上游为 Anthropic 协议：先转成 OpenAI 内部格式（usage 提取与下游转换共用同一对象）；
   // 转换失败（非 JSON / 结构异常）时 openaiBody 为 null，交由下方 502 分支处理
@@ -1292,6 +1295,7 @@ async function handleUpstreamResponseLite(
       responseTokens = extracted.totalTokens;
       responsePromptTokens = extracted.promptTokens;
       responseCompletionTokens = extracted.completionTokens;
+      responseUpstreamCost = extracted.upstreamCost;
     }
   } catch {
     // JSON 解析失败不影响响应
@@ -1317,6 +1321,7 @@ async function handleUpstreamResponseLite(
           tokens: responseTokens,
           promptTokens: responsePromptTokens,
           completionTokens: responseCompletionTokens,
+          upstreamCost: responseUpstreamCost,
           ttft: 0,
           duration: Date.now() - startTime,
           isError: false,
@@ -1351,6 +1356,7 @@ async function handleUpstreamResponseLite(
       tokens: responseTokens,
       promptTokens: responsePromptTokens,
       completionTokens: responseCompletionTokens,
+      upstreamCost: responseUpstreamCost,
       ttft: 0,
       duration: Date.now() - startTime,
       isError: false,

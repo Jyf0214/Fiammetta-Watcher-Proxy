@@ -767,7 +767,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 导致思考内容被整体缓冲、首字节随思考延伸而推迟，且大响应尾部有截断风险。
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache, no-transform"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
-    let tt = 0, pt = 0, ct = 0, buf = "";
+    let tt = 0, pt = 0, ct = 0, uc: number | null = null, buf = "";
     // 空完成检测：是否收到过有效输出内容（content/reasoning_content 非空）。
     // 上游 200 + 只有 [DONE]/空 data 的伪成功流不触发空流哨兵/流内 error/截断/
     // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
@@ -879,7 +879,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                 if (d.type === "response.completed" || d.type === "response.done" || d.response?.status === "completed") sawDone = true;
                 // 兼容 Chat 与 Responses 的 usage 形态
                 const usageCandidate = (d as any).usage ?? (d as any).response?.usage ?? (d as any).response?.response?.usage;
-                if (usageCandidate) { const ex = extractUsage(usageCandidate as Record<string, unknown>, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
+                if (usageCandidate) { const ex = extractUsage(usageCandidate as Record<string, unknown>, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; uc = ex.upstreamCost; }
                 if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码；code 缺失或为非数字字符串枚举（如 Azure "content_filter"）时兜底 502——否则流正常收尾会被记成 200 成功 */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } else { streamError = { code: 502, message: String(d.error.message || "上游流内返回错误").substring(0, 1000) }; } }
                 if (streamer) {
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
@@ -965,7 +965,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     } else {
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
+      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, upstreamCost: uc, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
     }
     try { res.end(); } catch { /* 客户端已断开，忽略结束写入错误 */ }
     return;
@@ -991,14 +991,14 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   clearTimeout(upstreamTimeoutId);
   // 空响应：2xx 但响应体为空（上游返回空 body），判定无效交由调用方重试
   if (!body.trim()) return EMPTY_UPSTREAM_RESPONSE;
-  let rt = 0, rpt = 0, rct = 0;
+  let rt = 0, rpt = 0, rct = 0, ruc: number | null = null;
   // 上游为 Anthropic 协议：先转成 OpenAI 内部格式（usage 提取与下游转换共用同一对象）；
   // 转换失败（非 JSON / 结构异常）时 openaiBody 为 null，交由下方 502 分支处理
   let openaiBody: Record<string, unknown> | null = null;
   try {
     const p = JSON.parse(body) as Record<string, unknown>;
     openaiBody = upstreamIsAnthropic ? convertAnthropicResponse(p, model) : p;
-    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; }
+    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; ruc = ex.upstreamCost; }
   } catch {}
   res.setHeader("Content-Type", "application/json");
   if (config.protocol === "anthropic") {
@@ -1009,7 +1009,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
       if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
       void recordSuccess(platform.id, dummyDb, env).catch(() => {});
       res.status(200).send(converted);
     } catch {
@@ -1024,7 +1024,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   // 非流式直通成功记账：与流式分支（tt>0）和 anthropic 转换分支（rt>0）对齐，
   // 此前缺失导致 stream:false 请求绕过 tokenLimit/callUsed 扣减（计费漏洞）
   if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
-  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
   void recordSuccess(platform.id, dummyDb, env).catch(() => {});
   // chat↔responses 互转已移除，非流式响应原样透传
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败

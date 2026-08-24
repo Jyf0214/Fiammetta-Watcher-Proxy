@@ -4,7 +4,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ProCard } from "@/components/ui/ProCard";
 import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
 import { useTranslation } from "react-i18next";
-import { Zap, TrendingUp, Cloud, Clock } from "lucide-react";
+import { Zap, TrendingUp, Cloud, Clock, CircleDollarSign } from "lucide-react";
 import "@/lib/i18n";
 import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 
@@ -21,6 +21,8 @@ interface KeyUsage {
     totalTokens: number;
     promptTokens: number;
     completionTokens: number;
+    /** 窗口内成本合计（美元）：仅供参考 */
+    totalCost: number;
     avgTtft: number;
     avgDuration: number;
     avgTokensPerSecond: number;
@@ -57,6 +59,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
     () => ({
       totalRequests: (data ?? []).reduce((s, k) => s + k.stats.totalRequests, 0),
       totalTokens: (data ?? []).reduce((s, k) => s + k.stats.totalTokens, 0),
+      totalCost: (data ?? []).reduce((s, k) => s + (k.stats.totalCost || 0), 0),
       activeKeys: (data ?? []).filter((k) => k.status === "active").length,
       avgTtft:
         (data ?? []).length > 0
@@ -84,6 +87,15 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       icon: <TrendingUp />,
       bgColor: "bg-emerald-50 dark:bg-emerald-900/20",
       iconColor: "text-emerald-500",
+    },
+    {
+      key: "totalCost",
+      title: t("totalCost"),
+      value: summary.totalCost,
+      icon: <CircleDollarSign />,
+      bgColor: "bg-yellow-50 dark:bg-yellow-900/20",
+      iconColor: "text-yellow-500",
+      get display() { return { value: `$${(this.value as number).toFixed(2)}`, suffix: "" }; },
     },
     {
       key: "activeKeys",
@@ -149,6 +161,19 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
       align: "right",
       render: (_: unknown, record: KeyUsage) =>
         record.stats.totalTokens.toLocaleString(),
+    },
+    {
+      title: (
+        <Tooltip title={t("common:costDisclaimer")}>
+          {t("totalCost")}
+        </Tooltip>
+      ),
+      key: "totalCost",
+      width: 100,
+      align: "right",
+      render: (_: unknown, record: KeyUsage) =>
+        `$${(record.stats.totalCost || 0).toFixed(2)}`,
+      responsive: ["md"],
     },
     {
       title: (
@@ -291,6 +316,7 @@ export default function KeyUsageTab({ period, refreshKey }: KeyUsageTabProps) {
         }}
         scroll={{ x: 1400 }}
       />
+      <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t("common:costDisclaimer")}</p>
     </>
   );
 }

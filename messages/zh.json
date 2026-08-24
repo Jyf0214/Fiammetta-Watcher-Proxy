@@ -23,6 +23,7 @@
     "reset": "重置",
     "copy": "复制",
     "copied": "已复制到剪贴板",
+    "costDisclaimer": "费用由上游实时计价或模型价格表估算得出，仅供参考，实际以服务提供商为准。",
     "copyFailed": "复制失败",
     "unlimited": "不限",
     "pagination": "共 {count} 条",
@@ -88,6 +89,7 @@
     "requestTemplates": "请求模板",
     "upstreamProxy": "出站代理",
     "dataManager": "数据管理",
+    "settings": "系统设置",
     "dataManagerDesc": "导出和导入系统数据，支持备份和迁移",
     "systemKeys": "系统 API Key",
     "logout": "退出登录",
@@ -347,6 +349,8 @@
     "status": "状态",
     "totalRequests": "总请求数",
     "totalTokens": "总 Token",
+    "totalCost": "总成本",
+    "windowCost": "窗口费用",
     "activeKeys": "活跃 Key 数",
     "promptTokens": "输入 Token",
     "promptTokensDesc": "所有请求的输入 token 总量",
@@ -385,6 +389,7 @@
     "avgTps": "TPS",
     "totalRequests": "总请求数",
     "totalTokens": "总 Token 用量",
+    "totalCost": "累计成本",
     "activeKeys": "活跃 Key 数",
     "activePlatforms": "活跃平台数",
     "title": "仪表盘",
@@ -411,7 +416,8 @@
     "actionUpdateSystemKey": "更新系统密钥",
     "actionDeleteSystemKey": "删除系统密钥",
     "actionImportData": "导入数据",
-    "actionExportData": "导出数据"
+    "actionExportData": "导出数据",
+    "actionUpdateModelPricing": "更新模型价格表"
   },
   "system": {
     "autoModelTitle": "自动模型",
@@ -597,5 +603,25 @@
     "stepStartServiceDesc": "docker-compose up -d 一键启动，自动初始化数据库",
     "stepGetStartedTitle": "接入使用",
     "stepGetStartedDesc": "在管理后台添加上游平台和 API Key，SDK 修改 base_url 即可"
+  },
+  "settings": {
+    "title": "系统设置",
+    "desc": "模型价格、告警通知等系统级配置",
+    "pricingTitle": "模型价格表",
+    "pricingUnitHint": "价格为美元/百万 token（输入/输出）。上游返回实时成本时优先采信，本表仅作估算回退。",
+    "pricingModel": "模型",
+    "pricingModelPlaceholder": "模型 ID，如 gpt-4o",
+    "pricingInputPrice": "输入 $/M",
+    "pricingOutputPrice": "输出 $/M",
+    "pricingAddModel": "添加模型",
+    "pricingImportLiteLLM": "从 LiteLLM 导入",
+    "pricingImporting": "导入中...",
+    "pricingSaving": "保存中...",
+    "pricingSaved": "价格表已保存",
+    "pricingEmpty": "暂无价格条目。可手动添加或从 LiteLLM 导入。",
+    "pricingImportSuccess": "已导入 {imported} 个模型，共 {total} 条",
+    "pricingErrorEmptyModel": "模型名不能为空",
+    "pricingErrorInvalidPrice": "模型 {model} 的价格无效：必须是非负数字",
+    "pricingErrorDuplicate": "模型重复：{model}"
   }
 }

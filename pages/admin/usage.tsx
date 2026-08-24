@@ -34,6 +34,8 @@ interface TrendPoint {
   tokens: number;
   promptTokens: number;
   completionTokens: number;
+  /** 片内成本合计（美元）：仅供参考 */
+  cost: number;
   tps: number;
 }
 
@@ -126,6 +128,8 @@ export default function UsagePage() {
     const data = trendData ?? [];
     const totalRequests = data.reduce((s, d) => s + d.requests, 0);
     const totalTokens = data.reduce((s, d) => s + d.tokens, 0);
+    // 窗口成本合计（美元，仅供参考）
+    const totalCost = data.reduce((s, d) => s + (d.cost || 0), 0);
     const avgTps = data.length > 0
       ? Math.round((data.reduce((s, d) => s + (d.tps || 0), 0) / data.length) * 100) / 100
       : 0;
@@ -165,7 +169,7 @@ export default function UsagePage() {
       }
     }
 
-    return { totalRequests, totalTokens, avgTps, peakTokens, currentStreak, longestStreak };
+    return { totalRequests, totalTokens, totalCost, avgTps, peakTokens, currentStreak, longestStreak };
   }, [trendData, todaySeq]);
 
   const tabItems = [
@@ -256,31 +260,45 @@ export default function UsagePage() {
             />
           )}
           {(trendData?.length ?? 0) > 0 && (
-            <div className="flex items-center justify-center gap-8 pt-3 border-t border-zinc-50 dark:border-zinc-700">
-              <div className="text-center">
-                <p className="text-xs text-zinc-400">
-                  {t("requests")}
-                </p>
-                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  {trendSummary.totalRequests.toLocaleString()}
-                </p>
+            <div className="pt-3 border-t border-zinc-50 dark:border-zinc-700">
+              <div className="flex items-center justify-center gap-8">
+                <div className="text-center">
+                  <p className="text-xs text-zinc-400">
+                    {t("requests")}
+                  </p>
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    {trendSummary.totalRequests.toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-zinc-400">
+                    {t("totalTokens")}
+                  </p>
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    {trendSummary.totalTokens.toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-zinc-400" title={t("common:costDisclaimer")}>
+                    {t("windowCost")}
+                  </p>
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 tabular-nums">
+                    ${trendSummary.totalCost.toFixed(2)}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-zinc-400">
+                    {t("tps")}
+                  </p>
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    {trendSummary.avgTps.toFixed(1)}
+                  </p>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="text-xs text-zinc-400">
-                  {t("totalTokens")}
-                </p>
-                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  {trendSummary.totalTokens.toLocaleString()}
-                </p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-zinc-400">
-                  {t("tps")}
-                </p>
-                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  {trendSummary.avgTps.toFixed(1)}
-                </p>
-              </div>
+              {/* 计价免责声明：上游实时计价与价格表估算均可能与实际账单有偏差 */}
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500 text-center pt-2">
+                {t("common:costDisclaimer")}
+              </p>
             </div>
           )}
         </div>

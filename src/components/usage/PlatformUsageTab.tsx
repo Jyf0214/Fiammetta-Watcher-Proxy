@@ -4,7 +4,7 @@ import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ProCard } from "@/components/ui/ProCard";
 import { formatDuration, formatCompactNumber, valueFontSize } from "@/lib/format";
 import { useTranslation } from "react-i18next";
-import { Zap, TrendingUp, Globe, AlertTriangle } from "lucide-react";
+import { Zap, TrendingUp, Globe, AlertTriangle, CircleDollarSign } from "lucide-react";
 import "@/lib/i18n";
 import { useApi, useRefreshKey, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 
@@ -21,6 +21,8 @@ interface PlatformUsage {
     totalTokens: number;
     promptTokens: number;
     completionTokens: number;
+    /** 窗口内成本合计（美元）：仅供参考 */
+    totalCost: number;
     avgTtft: number;
     avgDuration: number;
     avgTokensPerSecond: number;
@@ -61,6 +63,7 @@ export default function PlatformUsageTab({
     () => ({
       totalRequests: (data ?? []).reduce((s, p) => s + p.stats.totalRequests, 0),
       totalTokens: (data ?? []).reduce((s, p) => s + p.stats.totalTokens, 0),
+      totalCost: (data ?? []).reduce((s, p) => s + (p.stats.totalCost || 0), 0),
       activePlatforms: (data ?? []).filter((p) => p.enabled).length,
       errorRequests: (data ?? []).reduce((s, p) => s + p.stats.errorRequests, 0),
     }),
@@ -83,6 +86,15 @@ export default function PlatformUsageTab({
       icon: <TrendingUp />,
       bgColor: "bg-emerald-50 dark:bg-emerald-900/20",
       iconColor: "text-emerald-500",
+    },
+    {
+      key: "totalCost",
+      title: t("totalCost"),
+      value: summary.totalCost,
+      icon: <CircleDollarSign />,
+      bgColor: "bg-yellow-50 dark:bg-yellow-900/20",
+      iconColor: "text-yellow-500",
+      get display() { return { value: `$${(this.value as number).toFixed(2)}`, suffix: "" }; },
     },
     {
       key: "activePlatforms",
@@ -164,6 +176,19 @@ export default function PlatformUsageTab({
       align: "right",
       render: (_: unknown, record: PlatformUsage) =>
         record.stats.totalTokens.toLocaleString(),
+    },
+    {
+      title: (
+        <Tooltip title={t("common:costDisclaimer")}>
+          {t("totalCost")}
+        </Tooltip>
+      ),
+      key: "totalCost",
+      width: 100,
+      align: "right",
+      render: (_: unknown, record: PlatformUsage) =>
+        `$${(record.stats.totalCost || 0).toFixed(2)}`,
+      responsive: ["md"],
     },
     {
       title: (
@@ -308,6 +333,7 @@ export default function PlatformUsageTab({
         }}
         scroll={{ x: 1200 }}
       />
+      <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t("common:costDisclaimer")}</p>
     </>
   );
 }

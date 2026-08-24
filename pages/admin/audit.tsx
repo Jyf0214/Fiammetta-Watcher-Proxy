@@ -44,6 +44,8 @@ const ACTION_LABELS: Record<string, string> = {
   delete_system_key: "actionDeleteSystemKey",
   import_data: "actionImportData",
   export_data: "actionExportData",
+  update_model_pricing: "actionUpdateModelPricing",
+  import_model_pricing: "actionUpdateModelPricing",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -66,6 +68,8 @@ const ACTION_COLOR: Record<string, string> = {
   delete_system_key: "red",
   import_data: "purple",
   export_data: "purple",
+  update_model_pricing: "orange",
+  import_model_pricing: "purple",
 };
 
 // ==================== 页面组件 ====================

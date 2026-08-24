@@ -47,6 +47,7 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "dataManager", icon: Download, href: "/admin/data-manager", group: "system", order: 10 },
   { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 11 },
   { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 12 },
+  { key: "settings", icon: Settings, href: "/admin/settings", group: "system", order: 13 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）
@@ -218,6 +219,7 @@ function TopHeader({
     "/admin/data-manager": "dataManager",
     "/admin/system-keys": "systemKeys",
     "/admin/upstream-proxy": "upstreamProxy",
+    "/admin/settings": "settings",
     "/admin/upstream-proxy/[id]": "upstreamProxy",
   };
 

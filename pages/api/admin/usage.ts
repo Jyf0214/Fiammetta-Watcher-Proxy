@@ -91,6 +91,7 @@ export default async function handler(
           completionTokens: true,
           ttft: true,
           latency: true,
+          cost: true,
         },
         _min: { createdAt: true },
         _max: { createdAt: true },
@@ -129,6 +130,7 @@ export default async function handler(
         totalTokens: number;
         promptTokens: number;
         completionTokens: number;
+        totalCost: number;
         ttftSum: number;
         latencySum: number;
         perfCount: number;
@@ -150,6 +152,7 @@ export default async function handler(
           totalTokens: true,
           totalPromptTokens: true,
           totalCompletionTokens: true,
+          totalCost: true,
           avgTtft: true,
           avgDuration: true,
           maxDuration: true,
@@ -163,6 +166,7 @@ export default async function handler(
           totalTokens: 0,
           promptTokens: 0,
           completionTokens: 0,
+          totalCost: 0,
           ttftSum: 0,
           latencySum: 0,
           perfCount: 0,
@@ -174,6 +178,7 @@ export default async function handler(
         h.totalTokens += row.totalTokens;
         h.promptTokens += row.totalPromptTokens;
         h.completionTokens += row.totalCompletionTokens;
+        h.totalCost += row.totalCost ?? 0;
         h.perfCount += perfCount;
         // avg 为 0 表示该组无样本（ttft/latency > 0 才计入），权重取 0 避免稀释
         if (row.avgTtft > 0) h.ttftSum += row.avgTtft * perfCount;
@@ -246,6 +251,7 @@ export default async function handler(
           totalTokens,
           promptTokens: (g?._sum.promptTokens ?? 0) + (h?.promptTokens ?? 0),
           completionTokens: (g?._sum.completionTokens ?? 0) + (h?.completionTokens ?? 0),
+          totalCost: Math.round((((g?._sum.cost ?? 0) as number) + (h?.totalCost ?? 0)) * 1e6) / 1e6,
           avgTtft: perfCount > 0 ? Math.round(ttftSum / perfCount) : 0,
           avgDuration: perfCount > 0 ? Math.round(latencySum / perfCount) : 0,
           avgTokensPerSecond: rateValid && timeSpanSeconds > 0

@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS "daily_stats" (
     "total_tokens" INTEGER NOT NULL DEFAULT 0,
     "total_prompt_tokens" INTEGER NOT NULL DEFAULT 0,
     "total_completion_tokens" INTEGER NOT NULL DEFAULT 0,
+    "total_cost" REAL NOT NULL DEFAULT 0,
     "avg_ttft" REAL NOT NULL DEFAULT 0,
     "avg_duration" REAL NOT NULL DEFAULT 0,
     "avg_tps" REAL NOT NULL DEFAULT 0,
