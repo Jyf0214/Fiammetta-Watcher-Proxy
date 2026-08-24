@@ -608,6 +608,14 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         db: dummyDb,
         env,
       }).catch(() => {});
+      // 失败请求留痕：网络层失败无上游响应体，仅记录请求体供复现
+      void saveDebugLog(dummyDb, env?.DB_TYPE, {
+        model: requestedModel,
+        platformId: cur.id,
+        status: 502,
+        requestBody: JSON.stringify(rawBody),
+        errorMessage: e instanceof Error ? e.message : String(e),
+      });
       sendV1Error(res, config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
       return;
     }
@@ -732,6 +740,15 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
     void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
     if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
+    // 失败请求留痕：重试耗尽的最终失败同样落痕（含空响应场景，与 Worker 版位置语义对齐）
+    void saveDebugLog(dummyDb, env?.DB_TYPE, {
+      model: requestedModel,
+      platformId: cur.id,
+      status: isEmptyResponse ? 502 : upRes.status,
+      requestBody: JSON.stringify(rawBody),
+      responseSnippet: errText,
+      errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000),
+    });
     // 自动模型冻结：冻结实际发送的目标模型（tgt）——冻结 requestedModel（自动模型 ID）
     // 与 routeRequest 检查的候选具体模型名不相等，冻结机制从未命中
     if (isAutoModelRequest(requestedModel)) freezeAutoModel(tgt);

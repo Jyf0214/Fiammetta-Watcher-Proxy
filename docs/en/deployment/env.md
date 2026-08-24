@@ -40,6 +40,30 @@ Not needed on edge runtimes without a TCP peer (e.g. Cloudflare Pages/Workers) �
 |----------|-------------|
 | `CRON_SECRET` | Access key for the scheduled-task endpoints (**required — `/api/cron/*` returns 403 when unset**); requests must carry `Authorization: Bearer <CRON_SECRET>` |
 
+## Backup Push (Optional)
+
+| Variable | Description |
+|----------|-------------|
+| `BACKUP_WEBHOOK_URL` | Receiver URL for the daily 3:17 scheduled backup (any HTTP service that accepts POST). When unset, the backup task skips silently without affecting other cron jobs |
+| `BACKUP_ENCRYPTION_KEY` | Backup encryption key (any long string). **Required** — backups contain upstream platform and API Key plaintexts; without this key the task refuses to push rather than sending plaintext. The receiver gets an AES-GCM ciphertext envelope (JSON with Base64 `iv` + `data`); derive an AES-256 key from the same secret via SHA-256 to decrypt |
+
+## Two-Factor Authentication (2FA) Lockout Recovery
+
+Once 2FA is enabled in Admin → System Settings, login requires a 6-digit authenticator code. The secret is stored encrypted in the `configs` table (key `system:admin_2fa`) and bound to `JWT_SECRET`.
+
+If rotating `JWT_SECRET` makes every code fail (cannot log in and cannot disable 2FA), recover as follows:
+
+1. Delete the config row from your database (the `key` column is a reserved word on MySQL-family and needs backticks; PostgreSQL writes it bare):
+   ```sql
+   -- MySQL / MariaDB / TiDB / SQLite(D1)
+   DELETE FROM configs WHERE `key` = 'system:admin_2fa';
+   ```
+   ```sql
+   -- PostgreSQL
+   DELETE FROM configs WHERE key = 'system:admin_2fa';
+   ```
+2. Log in with your password, then re-enable 2FA in System Settings.
+
 ## By Platform
 
 Configuration entry points and full examples are on the corresponding deployment guides:

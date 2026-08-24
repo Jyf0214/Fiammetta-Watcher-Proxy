@@ -6,7 +6,7 @@
  * 默认行为一致）。
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   base32Encode,
@@ -15,6 +15,8 @@ import {
   verifyTotp,
   generateTotpSecret,
   buildOtpauthUri,
+  acceptTotpCounter,
+  resetTotpReplayGuardForTests,
 } from "../totp";
 
 // RFC 6238 B 节：secret = "12345678901234567890"（ASCII），SHA1
@@ -113,5 +115,27 @@ describe("buildOtpauthUri", () => {
     expect(uri).toContain("secret=JBSWY3DPEHPK3PXP");
     expect(uri).toContain("issuer=FWP");
     expect(uri).toContain("digits=6");
+  });
+});
+
+describe("acceptTotpCounter 重放防护", () => {
+  beforeEach(() => resetTotpReplayGuardForTests());
+
+  it("首次使用接受，同窗口/更旧窗口重放拒绝，更新窗口接受", () => {
+    expect(acceptTotpCounter(100)).toBe(true);
+    // 同窗口重放
+    expect(acceptTotpCounter(100)).toBe(false);
+    // 更旧窗口（时钟回拨场景）
+    expect(acceptTotpCounter(99)).toBe(false);
+    // 更新窗口正常接受
+    expect(acceptTotpCounter(101)).toBe(true);
+    // ±1 漂移窗口内的旧码（100）仍被拒
+    expect(acceptTotpCounter(100)).toBe(false);
+  });
+
+  it("重置后恢复初始态", () => {
+    acceptTotpCounter(500);
+    resetTotpReplayGuardForTests();
+    expect(acceptTotpCounter(1)).toBe(true);
   });
 });

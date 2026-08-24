@@ -13,7 +13,7 @@
 
 import { getConfig } from "../../worker/src/config";
 import type { WorkerEnv } from "../../worker/src/config";
-import { verifyTotp, generateTotpSecret, buildOtpauthUri } from "./totp";
+import { verifyTotp, generateTotpSecret, buildOtpauthUri, hotp, base32Decode, acceptTotpCounter, TOTP_PERIOD_SECONDS } from "./totp";
 import type { Database } from "@/lib/prisma";
 
 export const ADMIN_2FA_CONFIG_KEY = "system:admin_2fa";
@@ -179,7 +179,10 @@ export async function disable2fa(
 }
 
 /**
- * 登录流程校验：解密 secret 并核对验证码
+ * 登录流程校验：解密 secret 并核对验证码。
+ *
+ * 相比通用 verifyTotp 额外做重放防护：匹配成功的 counter 经单调判定
+ * 消费（同窗口验证码只接受一次），防止验证码在 30 秒有效期内被重放。
  */
 export async function verifyLoginCode(
   db: D1Database | Database,
@@ -191,7 +194,25 @@ export async function verifyLoginCode(
   if (!stored || !stored.enabled) return true; // 未启用直接放行
   const secret = await decryptSecret(stored, adminJwtSecret);
   if (!secret) return false; // 解密失败按验证不通过（密钥轮换等异常场景）
-  return verifyTotp(secret, code);
+  const trimmed = code.trim();
+  if (!/^\d{6}$/.test(trimmed)) return false;
+  let secretBytes: Uint8Array;
+  try {
+    secretBytes = base32Decode(secret);
+  } catch {
+    return false;
+  }
+  if (secretBytes.length === 0) return false;
+
+  const counter = Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS);
+  for (let offset = -1; offset <= 1; offset++) {
+    const expected = await hotp(secretBytes, counter + offset);
+    if (expected === trimmed) {
+      // 命中后仍需通过重放判定：该窗口已被消费则按失败处理（不尝试其他窗口）
+      return acceptTotpCounter(counter + offset);
+    }
+  }
+  return false;
 }
 
 // ==================== configs 写入 ====================

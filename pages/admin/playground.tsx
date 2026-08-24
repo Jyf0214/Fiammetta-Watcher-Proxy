@@ -128,14 +128,16 @@ function PlaygroundContent() {
         }),
       });
 
-      // API 层错误（鉴权/回环失败等）：管理端 JSON 错误信封
+      // 以响应 Content-Type 决定解析方式（而非请求参数）：服务端在上游
+      // 返回错误 JSON 时不做 SSE 包装，此时须按普通 JSON 提取错误
       const contentType = res.headers.get("content-type") || "";
-      if (!contentType.includes("text/event-stream") && !contentType.includes("application/json")) {
+      const isSse = contentType.includes("text/event-stream");
+      if (!contentType.includes("application/json") && !isSse) {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      if (!streamMode) {
-        // 非流式：回环响应是 OpenAI 格式（无 {success} 信封），只解析一次 body
+      if (!isSse) {
+        // 非流式 / 错误响应：回环响应是 OpenAI 格式（无 {success} 信封），只解析一次 body
         const json = (await res.json()) as {
           choices?: Array<{ message?: { content?: string }; delta?: { content?: string } }>;
           usage?: Record<string, unknown>;

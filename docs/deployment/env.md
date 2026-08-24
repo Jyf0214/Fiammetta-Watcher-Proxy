@@ -40,6 +40,30 @@ Serverless 平台（Cloudflare / Vercel / EdgeOne）在平台控制台或 GitHub
 |------|------|
 | `CRON_SECRET` | 定时任务端点访问密钥（**必须配置**，未配置时 `/api/cron/*` 端点返回 403 禁用）；调用需带 `Authorization: Bearer <CRON_SECRET>` 头 |
 
+## 备份推送（可选）
+
+| 变量 | 说明 |
+|------|------|
+| `BACKUP_WEBHOOK_URL` | 每日 3:17 定时备份的接收端地址（任意能收 POST 的 HTTP 服务）。未配置时备份任务自动跳过，不影响其他定时任务 |
+| `BACKUP_ENCRYPTION_KEY` | 备份加密密钥（任意长字符串）。**必须配置**——备份内容含上游平台与 API Keys 明文，未配置时任务拒绝推送而非明文外发。接收方收到的是 AES-GCM 密文信封（JSON：`iv` + `data`，Base64），用同一密钥按 SHA-256 派生 AES-256 密钥即可解密 |
+
+## 两步验证（2FA）锁死恢复
+
+管理后台「系统设置 → 两步验证」启用后，登录需额外输入验证器动态码；密钥加密存于数据库 `configs` 表（键 `system:admin_2fa`），与 `JWT_SECRET` 绑定。
+
+若更换了 `JWT_SECRET` 导致验证码始终校验失败（无法登录也无法关闭 2FA），按以下步骤恢复：
+
+1. 登录数据库删除该配置行（`key` 列名在 MySQL 系是保留字需反引号，PostgreSQL 直接裸写）：
+   ```sql
+   -- MySQL / MariaDB / TiDB / SQLite(D1)
+   DELETE FROM configs WHERE `key` = 'system:admin_2fa';
+   ```
+   ```sql
+   -- PostgreSQL
+   DELETE FROM configs WHERE key = 'system:admin_2fa';
+   ```
+2. 重新用密码登录，再在系统设置中重新开启两步验证。
+
 ## 按平台配置
 
 各平台的配置入口与完整示例见对应部署指南：

@@ -129,3 +129,29 @@ export function buildOtpauthUri(secretBase32: string, account: string): string {
     `&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=${TOTP_PERIOD_SECONDS}`
   );
 }
+
+// ==================== 重放防护 ====================
+
+/**
+ * 最近一次成功验证使用的 TOTP counter（进程内单调记录）。
+ * 重启清零可接受：攻击者须在同一个 ±30 秒窗口内、跨进程边界重放，
+ * 实际风险面趋近于零；持久化反而引入每管理员存储与清理复杂度。
+ */
+let lastUsedTotpCounter = -1;
+
+/**
+ * counter 单调递增判定：登录成功消费某窗口的验证码后，同窗口（含更旧
+ * 窗口）的码再次提交返回 false——防止验证码在有效期内被重放。
+ *
+ * @returns true 首次使用接受；false 已被消费（重放），调用方按验证失败处理
+ */
+export function acceptTotpCounter(counter: number): boolean {
+  if (counter <= lastUsedTotpCounter) return false;
+  lastUsedTotpCounter = counter;
+  return true;
+}
+
+/** 重置重放防护状态（测试用） */
+export function resetTotpReplayGuardForTests(): void {
+  lastUsedTotpCounter = -1;
+}

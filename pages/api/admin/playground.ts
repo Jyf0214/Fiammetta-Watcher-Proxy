@@ -17,8 +17,6 @@ import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { getClientIp } from "./auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
-import { refreshCache, getPlatformModelCache } from "../../../worker/src/router";
-import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
  * 从请求头推导本实例对外 origin。
@@ -33,21 +31,6 @@ function resolveOrigin(req: NextApiRequest): string {
   const host = req.headers.host || "localhost";
   const proto = (req.headers["x-forwarded-proto"] as string) === "https" ? "https" : "http";
   return `${proto}://${host}`;
-}
-
-/** dummyDb 占位（与 pages/api/v1 相同语义：createDb 忽略绑定走环境变量） */
-const DUMMY_DB = {} as D1Database;
-
-async function createPagesEnv(): Promise<WorkerEnv> {
-  return {
-    DB_TYPE: process.env.DB_TYPE,
-    DATABASE_URL: process.env.DATABASE_URL,
-    TIDB_URL: process.env.TIDB_URL,
-    MYSQL_URL: process.env.MYSQL_URL,
-    PG_URL: process.env.PG_URL,
-    MARIADB_URL: process.env.MARIADB_URL,
-    DEPLOY_PLATFORM: process.env.DEPLOY_PLATFORM,
-  };
 }
 
 export default async function handler(
@@ -66,18 +49,19 @@ export default async function handler(
     if (req.method === "GET") {
       if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
-      // 模型聚合（与 /v1/models 同源缓存）+ Key 名录（不含明文）
-      const env = await createPagesEnv();
-      await refreshCache(DUMMY_DB, env);
-      const pm = getPlatformModelCache();
+      // 模型聚合直查 platform_models（不依赖路由缓存）：路由缓存在 D1 部署
+      // 冷启动时依赖请求级 binding 闩锁，管理端点复用会出现冷缓存 500；
+      // 管理页低频调用，直查的额外开销可忽略。Key 名录不含明文。
       const seen = new Set<string>();
       const models: string[] = [];
-      for (const ms of pm.values()) {
-        for (const mid of ms) {
-          if (!seen.has(mid)) {
-            seen.add(mid);
-            models.push(mid);
-          }
+      const pmRows = await db.platformModels.findMany({
+        where: { enabled: true },
+        select: { modelId: true },
+      });
+      for (const row of pmRows) {
+        if (!seen.has(row.modelId)) {
+          seen.add(row.modelId);
+          models.push(row.modelId);
         }
       }
       models.sort((a, b) => a.localeCompare(b));
@@ -194,27 +178,32 @@ export default async function handler(
         },
       });
 
-      if (body.stream === true) {
-        // SSE 字节透传（与 v1 路由相同的 no-transform 头规避 gzip 缓冲）
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache, no-transform");
-        res.setHeader("Connection", "keep-alive");
-        res.status(upstreamRes.status);
-        const reader = upstreamRes.body?.getReader();
-        if (!reader) {
-          res.end();
+      if (body.stream === true && upstreamRes.ok) {
+        // 仅当上游确实返回 SSE 时才按事件流透传；上游失败（非 2xx 的 JSON
+        // 错误体）落入下方非流式透传——否则前端按 SSE 解析会得到空输出
+        // 且无任何报错
+        const upstreamCt = upstreamRes.headers.get("content-type") || "";
+        if (upstreamCt.includes("text/event-stream")) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache, no-transform");
+          res.setHeader("Connection", "keep-alive");
+          res.status(upstreamRes.status);
+          const reader = upstreamRes.body?.getReader();
+          if (!reader) {
+            res.end();
+            return;
+          }
+          try {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(Buffer.from(value));
+            }
+          } finally {
+            res.end();
+          }
           return;
         }
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(Buffer.from(value));
-          }
-        } finally {
-          res.end();
-        }
-        return;
       }
 
       // 非流式：透传状态码与 JSON 体
