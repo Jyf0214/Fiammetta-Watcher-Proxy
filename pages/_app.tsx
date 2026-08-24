@@ -11,8 +11,8 @@ import { message } from "antd"
 import RouteLoading from "@/components/RouteLoading"
 import { AntdProvider } from "@/components/providers/AntdProvider"
 
-// Toast 固定在导航栏下方，避免遮挡
-message.config({ top: 60 })
+// Toast 固定在导航栏（h-16=64px）下方留 8px 间距，避免遮挡
+message.config({ top: 72 })
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()

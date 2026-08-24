@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
+import { useThemeMode } from "@/hooks/use-theme-mode";
 import { formatCompact } from "@/lib/format";
 
 interface TrendPoint {
@@ -78,6 +79,11 @@ function ChartTooltip({ active, payload, label }: any) {
 
 export default function UsageChart({ data, granularity = "daily" }: UsageChartProps) {
   const { t } = useTranslation("usage");
+  const { isDark } = useThemeMode();
+  // 网格线/轴线是 SVG stroke attribute，无法使用 Tailwind dark: 类，
+  // 按主题切换色值（固定浅灰在深色背景上呈刺眼亮线）
+  const gridStroke = isDark ? "#3f3f46" : "#f0f0f0";
+  const axisLineStroke = isDark ? "#52525b" : "#e4e4e7";
 
   const chartData = useMemo(
     () =>
@@ -104,12 +110,12 @@ export default function UsageChart({ data, granularity = "daily" }: UsageChartPr
           data={chartData}
           margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
           <XAxis
             dataKey="dateLabel"
             tick={{ fontSize: 12, fill: "#a1a1aa" }}
             tickLine={false}
-            axisLine={{ stroke: "#e4e4e7" }}
+            axisLine={{ stroke: axisLineStroke }}
             interval="preserveStartEnd"
           />
           <YAxis

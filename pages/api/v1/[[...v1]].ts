@@ -880,8 +880,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                 // 兼容 Chat 与 Responses 的 usage 形态
                 const usageCandidate = (d as any).usage ?? (d as any).response?.usage ?? (d as any).response?.response?.usage;
                 if (usageCandidate) { const ex = extractUsage(usageCandidate as Record<string, unknown>, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
-                else if (d.usage) { const ex = extractUsage(d.usage, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; }
-                if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码（浮点等病态值会让 Prisma Int 校验失败、日志整条丢失） */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } }
+                if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码；code 缺失或为非数字字符串枚举（如 Azure "content_filter"）时兜底 502——否则流正常收尾会被记成 200 成功 */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } else { streamError = { code: 502, message: String(d.error.message || "上游流内返回错误").substring(0, 1000) }; } }
                 if (streamer) {
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
                   if (d.choices || d.usage) await writeChunk(streamer.feedChunk(d));

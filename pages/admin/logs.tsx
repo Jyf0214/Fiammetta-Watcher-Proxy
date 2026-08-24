@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RefreshCw,
   FileText,
-  Search,
+  RotateCcw,
   Cloud,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -329,7 +329,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           <Button
             variant="ghost"
             size="sm"
-            icon={<Search size={14} />}
+            icon={<RotateCcw size={14} />}
             onClick={handleResetFilters}
           >
             {t("common:reset")}
@@ -585,7 +585,7 @@ function ArchivedStatsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => 
           <Button
             variant="ghost"
             size="sm"
-            icon={<Search size={14} />}
+            icon={<RotateCcw size={14} />}
             onClick={() => {
               setKeyFilter(undefined);
               setDateRange(null);

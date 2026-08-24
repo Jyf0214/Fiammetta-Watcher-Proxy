@@ -275,7 +275,8 @@ export default async function handler(
       const rates = computeRates(unknownGroup, errorMap.get(null) ?? 0, undefined, perfMap.get(null));
       result.push({
         id: "unknown",
-        name: "未知平台",
+        // 中性哨兵值：名称由前端按界面语言渲染（此处写死中文会泄漏到英文界面）
+        name: "unknown",
         type: "unknown",
         enabled: false,
         status: "unknown",

@@ -46,6 +46,7 @@ export default function PlatformDetailPage() {
   // 模型操作状态
   const [refreshing, setRefreshing] = useState(false);
   const [newModelId, setNewModelId] = useState("");
+  const [addModelLoading, setAddModelLoading] = useState(false);
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
@@ -443,7 +444,10 @@ export default function PlatformDetailPage() {
   };
 
   const handleAddModel = async () => {
-    if (!id || isNew || !newModelId.trim()) return;
+    if (!id || isNew || !newModelId.trim() || addModelLoading) return;
+    // in-flight 守卫：连点会发出重复 POST，第二个命中后端查重返回
+    // 「该模型已存在」，成功与失败 toast 先后弹出造成困惑
+    setAddModelLoading(true);
     try {
       const res = await fetch(`/api/admin/platforms/${id}/models`, {
         method: "POST",
@@ -460,6 +464,8 @@ export default function PlatformDetailPage() {
       }
     } catch {
       message.error(t("common:error"));
+    } finally {
+      setAddModelLoading(false);
     }
   };
 

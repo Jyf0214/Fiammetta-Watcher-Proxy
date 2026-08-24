@@ -102,16 +102,15 @@ describe("createUsageTransformer 流内 error", () => {
     expect(log.tokens).toBe(0);
   });
 
-  it("无效 code（非 400-599）不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
+  it("无效 code（非 400-599）兜底 502 流内 error（此前回落 200 成功路径）", async () => {
     await runTransformer([
       'data: {"error":{"message":"warning","code":200}}\n\n',
       'data: {"usage":{"total_tokens":12,"prompt_tokens":5,"completion_tokens":7}}\n\n',
       "data: [DONE]\n\n",
     ]);
 
-    // 上游错误对象 code 200 非有效错误码，不触发 streamError 路径；
-    // 但流内无任何内容输出（completion_tokens 与内容缺失矛盾，上游异常）——
-    // 空完成检测判定 502 失败，不计入 Key 用量（此前误记 200 成功并计入用量）
+    // error 对象存在但 code 无效：resolveStreamErrorStatus 兜底 502，
+    // 记失败且不计入 Key 用量（此前静默忽略、误记 200 成功并计入用量）
     expect(mockBufferKeyUsage).not.toHaveBeenCalled();
     const log = mockBufferRequestLog.mock.calls[0][0];
     expect(log.status).toBe(502);
@@ -119,21 +118,20 @@ describe("createUsageTransformer 流内 error", () => {
     expect(log.tokens).toBe(0);
   });
 
-  it("浮点 code（503.5）不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
+  it("浮点 code（503.5）兜底 502 流内 error", async () => {
     await runTransformer([
       'data: {"error":{"message":"odd code","code":503.5}}\n\n',
       "data: [DONE]\n\n",
     ]);
 
-    // 不抛错、日志仍写入（status 502 为合法 Int，无 Prisma 校验风险）——
-    // 流内无内容 → 空完成，此前误记 200 成功
+    // 不抛错、日志仍写入（status 502 为合法 Int，无 Prisma 校验风险）
     expect(mockBufferRequestLog).toHaveBeenCalledTimes(1);
     const log = mockBufferRequestLog.mock.calls[0][0];
     expect(log.status).toBe(502);
     expect(log.isError).toBe(true);
   });
 
-  it("数组 code 不触发流内 error，但无内容 → 空完成 502（此前误记 200 成功）", async () => {
+  it("数组 code 兜底 502 流内 error", async () => {
     await runTransformer([
       'data: {"error":{"message":"array code","code":["503"]}}\n\n',
       "data: [DONE]\n\n",

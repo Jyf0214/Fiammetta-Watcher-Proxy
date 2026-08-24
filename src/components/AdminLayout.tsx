@@ -344,7 +344,13 @@ export default function AdminLayout({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       message.success(t("auth:logoutSuccess"));
       router.push("/");
-    } catch {
+    } catch (err) {
+      // 会话已过期（401）时登出目的本就是离开页面：跳登录页而非报错停留，
+      // 与数据请求路径的 401 行为一致
+      if (err instanceof Error && err.message === "HTTP 401") {
+        router.push("/admin/login");
+        return;
+      }
       message.error(t("auth:logoutFailed"));
     } finally {
       setLogoutLoading(false);

@@ -240,7 +240,8 @@ export default function KeysPage() {
         });
         const data: Record<string, any> = await res.json();
         if (data.success) {
-          message.success(data.message);
+          // 后端 message 为硬编码中文，统一走前端文案保证双语一致
+          message.success(t("createdTitle"));
           setModalOpen(false);
           form.resetFields();
           const keyValue = data.data.key as string;
@@ -540,7 +541,8 @@ export default function KeysPage() {
               <Input />
             </Form.Item>
             <Form.Item name="tokenLimit" label={t("tokenLimit")}>
-              <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />
+              {/* 后端要求非负整数：precision=0 在输入端拦截小数，避免提交后才 400 */}
+              <InputNumber min={0} precision={0} className="w-full" placeholder={t("common:unlimited")} />
             </Form.Item>
             <Form.Item name="callLimit" label={t("callLimit")}>
               <InputNumber min={0} className="w-full" placeholder={t("common:unlimited")} />

@@ -26,7 +26,8 @@ const WINDOW_MS = 60_000;
  * @param kv - KV 命名空间
  * @returns 限制结果
  *
- * 注意：KV 无原子递增操作，存在 TOCTOU 竞态。通过预留 1 的缓冲减少超限概率。
+ * 注意：KV 无原子递增操作，存在 TOCTOU 竞态，并发下可能略微超限
+ * （KV 限流固有局限，尽力而为），无预留缓冲逻辑。
  */
 export async function checkPlatformRpm(
   platformId: string,

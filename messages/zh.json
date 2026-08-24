@@ -375,7 +375,9 @@
     "peakTokens": "峰值 Token",
     "peakDuration": "峰值耗时",
     "currentStreak": "连续活跃",
-    "longestStreak": "最长连续"
+    "longestStreak": "最长连续",
+    "unknownPlatform": "未知平台",
+    "statusUnknown": "未知"
   },
   "dashboard": {
     "avgTtft": "TTFT",

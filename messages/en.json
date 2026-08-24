@@ -375,7 +375,9 @@
     "peakTokens": "Peak Tokens",
     "peakDuration": "Peak Duration",
     "currentStreak": "Current Streak",
-    "longestStreak": "Longest Streak"
+    "longestStreak": "Longest Streak",
+    "unknownPlatform": "Unknown platform",
+    "statusUnknown": "Unknown"
   },
   "dashboard": {
     "avgTtft": "TTFT",

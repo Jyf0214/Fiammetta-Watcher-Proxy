@@ -56,19 +56,27 @@ export default function UsagePage() {
     mutate: mutateTrend,
   } = useApi<TrendPoint[]>(`/api/admin/usage/trend?period=${period}`);
 
-  // 平台用量数据（用于排行榜）
+  // 平台用量数据（用于排行榜）；error 需消费提示，否则接口失败时排行榜无声消失，
+  // 管理员无法区分「没数据」和「加载失败」
   const {
     data: platformData,
-  } = useApi<Array<{ name: string; stats: { totalRequests: number; totalTokens: number } }>>(
+    error: platformError,
+  } = useApi<Array<{ id: string; name: string; stats: { totalRequests: number; totalTokens: number } }>>(
     `/api/admin/usage/platform?period=${period}`
   );
+
+  useEffect(() => {
+    if (platformError && platformError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("dashboard:fetchFailed"));
+    }
+  }, [platformError, t]);
 
   // 峰值耗时（秒）：/api/admin/usage 顶层 peakDuration 字段。
   // apiFetcher 只解包 data，顶层字段需此处直接请求读取；401 处理与 apiFetcher 对齐。
   // key 用数组而非 URL 字符串：KeyUsageTab 以同一 URL 为 key 通过 useApi 读取 data
   // 数组，若此处也以 URL 为 key，SWR 按 key 去重缓存且不区分 fetcher，一方必然
   // 拿到另一方形态的数据（number 上 .reduce 崩溃 / 数组被当峰值显示）
-  const { data: peakDuration, mutate: mutatePeakDuration } = useSWR<number | null>(
+  const { data: peakDuration, mutate: mutatePeakDuration, error: peakError } = useSWR<number | null>(
     ["usage-peak", period],
     async ([, p]: [string, string]) => {
       const res = await fetch(`/api/admin/usage?period=${p}`);
@@ -82,10 +90,19 @@ export default function UsagePage() {
         }
         throw new Error(UNAUTHORIZED_MESSAGE);
       }
-      if (!body || body.success !== true) return null;
+      // 失败抛错交由 SWR error 消费提示——静默返回 null 会与「无数据」混淆
+      if (!body || body.success !== true) {
+        throw new Error("usage-peak fetch failed");
+      }
       return body.peakDuration ?? null;
     }
   );
+
+  useEffect(() => {
+    if (peakError && peakError.message !== UNAUTHORIZED_MESSAGE) {
+      message.error(t("dashboard:fetchFailed"));
+    }
+  }, [peakError, t]);
 
   // 刷新按钮（refreshKey 计数）触发趋势、峰值耗时与子 Tab（各自内部监听）重新验证
   useRefreshKey(refreshKey, () => {
@@ -287,14 +304,20 @@ export default function UsagePage() {
               title={t("topPlatforms")}
               items={(platformData ?? [])
                 .filter((item) => item.stats.totalRequests > 0)
-                .map((item) => ({ label: item.name, value: item.stats.totalRequests }))
+                .map((item) => ({
+                  label: item.id === "unknown" ? t("unknownPlatform") : item.name,
+                  value: item.stats.totalRequests,
+                }))
                 .slice(0, 5)}
             />
             <BarListChart
               title={t("topTokens")}
               items={(platformData ?? [])
                 .filter((item) => item.stats.totalTokens > 0)
-                .map((item) => ({ label: item.name, value: item.stats.totalTokens }))
+                .map((item) => ({
+                  label: item.id === "unknown" ? t("unknownPlatform") : item.name,
+                  value: item.stats.totalTokens,
+                }))
                 .slice(0, 5)}
             />
           </div>

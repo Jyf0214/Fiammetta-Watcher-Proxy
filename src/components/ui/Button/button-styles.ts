@@ -36,4 +36,6 @@ export const roundedStyles: Record<ButtonRounded, string> = {
 export const BASE_BUTTON_CLASSES =
   "inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 active:scale-95 active:duration-75 " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1 " +
-  "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none";
+  // 不用 disabled:pointer-events-none：原生 disabled 已不触发 click，
+  // 而 pointer-events-none 会抵消 cursor-not-allowed 并抑制 title 提示
+  "disabled:opacity-50 disabled:cursor-not-allowed";

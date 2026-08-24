@@ -109,11 +109,13 @@ export default function PlatformUsageTab({
     down: "red",
   };
 
-  // 状态文案走 i18n（与平台列表页/详情页同口径），未知状态回退原文
+  // 状态文案走 i18n（与平台列表页/详情页同口径），unknown 为后端哨兵值
+  // （platformId=null 的聚合条目），其余未知状态回退原文
   const statusLabelMap: Record<string, string> = {
     healthy: t("platform:statusHealthy"),
     degraded: t("platform:statusDegraded"),
     down: t("platform:statusDown"),
+    unknown: t("statusUnknown"),
   };
 
   const columns: TableColumnsType<PlatformUsage> = [
@@ -123,6 +125,8 @@ export default function PlatformUsageTab({
       key: "name",
       width: 150,
       ellipsis: true,
+      render: (v: string, record: PlatformUsage) =>
+        record.id === "unknown" ? t("unknownPlatform") : v,
     },
     {
       title: t("platform:type"),

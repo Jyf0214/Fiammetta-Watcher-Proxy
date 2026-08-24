@@ -52,7 +52,7 @@ export function HeatmapCard({ stats, isLoading, className = "" }: HeatmapCardPro
   const { t } = useTranslation("usage");
 
   const items: Array<{ label: string; value?: string }> = [
-    { label: t("peakTokens"), value: stats.peakTokens != null ? String(stats.peakTokens) : undefined },
+    { label: t("peakTokens"), value: stats.peakTokens != null ? stats.peakTokens.toLocaleString() : undefined },
     { label: t("peakDuration"), value: stats.peakDuration != null ? formatDuration(stats.peakDuration) : undefined },
     { label: t("currentStreak"), value: stats.currentStreak != null ? `${stats.currentStreak}` : undefined },
     { label: t("longestStreak"), value: stats.longestStreak != null ? `${stats.longestStreak}` : undefined },

@@ -263,8 +263,11 @@ export default function DataManagerPage() {
       const res = await fetch(`/api/admin/export?${params}`);
 
       if (!res.ok) {
-        const error: Record<string, any> = await res.json();
-        throw new Error(error.error || t("dmErrExport"));
+        // 网关错误页等非 JSON 响应 res.json() 会抛 SyntaxError，
+        // 回退通用导出失败文案而非把解析器报错原样弹出
+        const error = await res.json().catch(() => null);
+        const msg = error && typeof error === "object" ? (error as Record<string, any>).error : null;
+        throw new Error(typeof msg === "string" && msg ? msg : t("dmErrExport"));
       }
 
       const blob = await res.blob();
@@ -481,12 +484,15 @@ export default function DataManagerPage() {
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (!file) return;
-
-      if (!validateImportFile(file)) return;
-
-      processImportFile(file);
-      e.target.value = "";
+      // 无论成功失败都重置 input.value：否则校验失败后再次选择同一文件
+      // 不触发 change 事件，表现为点了没反应
+      try {
+        if (!file) return;
+        if (!validateImportFile(file)) return;
+        processImportFile(file);
+      } finally {
+        e.target.value = "";
+      }
     },
     [processImportFile, validateImportFile]
   );
@@ -495,13 +501,15 @@ export default function DataManagerPage() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
+      // 导入进行中忽略新文件：结束后弹出过期预览会误导再次确认导入
+      if (importing) return;
       const file = e.dataTransfer.files?.[0];
       if (!file) return;
 
       if (!validateImportFile(file)) return;
       processImportFile(file);
     },
-    [processImportFile, validateImportFile]
+    [importing, processImportFile, validateImportFile]
   );
 
   /** 渲染导入进度 */

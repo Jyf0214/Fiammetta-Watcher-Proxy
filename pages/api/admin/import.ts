@@ -24,6 +24,8 @@ import {
   UPSTREAM_PROXY_POOL_KEY,
   UPSTREAM_PROXY_CHECK_LOCK_KEY,
   UPSTREAM_PROXY_PULL_AT_KEY,
+  UPSTREAM_PROXY_CONFIG_KEY,
+  validateUpstreamProxyConfig,
 } from "@/lib/upstream-proxy";
 
 /** 每类导入的结果统计 */
@@ -971,6 +973,19 @@ async function importConfigs(
       skipReasons["非 system:* 配置跳过"] = (skipReasons["非 system:* 配置跳过"] || 0) + 1;
       skipped++;
       continue;
+    }
+
+    // 出站代理主配置与 config PUT 同校验（非法 JSON/指向缺失组的绑定/保留组名
+    // "new"/越界 interval 直接落库会重现「绑定保存后消失」的坏状态），
+    // 不合格跳过并计入 skipReasons
+    if (key === UPSTREAM_PROXY_CONFIG_KEY) {
+      const validation = validateUpstreamProxyConfig(value);
+      if (!validation.ok) {
+        const reason = `出站代理配置校验失败: ${validation.error ?? "未知错误"}`;
+        skipReasons[reason] = (skipReasons[reason] || 0) + 1;
+        skipped++;
+        continue;
+      }
     }
 
     const now = Math.floor(Date.now() / 1000);

@@ -239,8 +239,9 @@ export function extractClientInfo(
  * 从流内 error 事件中解析 HTTP 状态码
  *
  * 上游网关对失败请求可能返回 200 + SSE 流内 `data: {"error": {"code": 503}}`，
- * 此时 HTTP 头无法反映失败。code 为 400-599 的整数才视为有效状态码，
- * 否则返回 null（调用方回退到 200 成功路径）。
+ * 此时 HTTP 头无法反映失败。code 为 400-599 的整数时用原值；error 对象存在但
+ * code 缺失或为非数字字符串枚举（如 Azure "content_filter"）时兜底 502——
+ * error 事件本身即失败信号，不能回落 200 成功路径。仅 error 缺失返回 null。
  */
 export function resolveStreamErrorStatus(error: Record<string, unknown> | undefined): number | null {
   if (!error || typeof error !== "object") return null;
@@ -250,7 +251,10 @@ export function resolveStreamErrorStatus(error: Record<string, unknown> | undefi
   // 必须是 400-599 的整数：浮点等病态 code 会触发 Prisma Int 列校验错误，
   // 导致整条失败日志丢失（外层 catch 吞掉）
   if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) return code;
-  return null;
+  // code 缺失或为非数字字符串枚举（如 Azure "content_filter"）：error 事件本身
+  // 即失败信号，兜底 502 记账并触发熔断——否则流随后正常 [DONE] 收尾时会被记成
+  // 200 成功，坏平台评分不降、日志误导排障
+  return 502;
 }
 
 /**

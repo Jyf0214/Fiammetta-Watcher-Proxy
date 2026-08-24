@@ -41,10 +41,9 @@ export default function RouteLoading() {
       role="status"
       aria-label={t("loading")}
     >
-      {/* 顶栏骨架 — 与 TopHeader 一致 */}
-      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800 flex items-center px-4 lg:pl-64 lg:pr-6">
-        <Skeleton className="h-4 w-28" />
-      </div>
+      {/* 顶栏占位 — 真顶栏为半透明 + backdrop-blur，此处只铺纯色底；
+          画骨架块会以模糊残影透出在面包屑文字后方 */}
+      <div className="h-16 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800" />
 
       {/* 内容骨架 — 与 AdminLayout main 的 pt-16 lg:pl-64、p-4 lg:p-6 对齐 */}
       <div className="pt-16 lg:pl-64">

@@ -410,9 +410,13 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 
     // 解禁（status=healthy）时强制清零失败计数并同步清内存熔断条目，
     // 使解禁立即生效——否则内存 breaker 仍 open，最长 30s（缓存 TTL）后
-    // 才被 syncCircuitBreakersFromDatabase 清除，期间请求仍被 selectPlatform 拦截
+    // 才被 syncCircuitBreakersFromDatabase 清除，期间请求仍被 selectPlatform 拦截。
+    // 同时强制清 cooldownEnd：API 直调 {status:"healthy", cooldownEnd:<未来>} 时
+    // 若保留旧值，selectPlatform 会继续排除该平台直到冷却自然到期，与「已解禁」
+    // 预期相反（前端总是同时提交 null，此处对 API 层兜底）
     if (updateData.status === "healthy") {
       updateData.failCount = 0;
+      updateData.cooldownEnd = null;
       resetCircuitBreaker(id);
     }
 

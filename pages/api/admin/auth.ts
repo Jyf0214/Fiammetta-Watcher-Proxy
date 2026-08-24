@@ -389,7 +389,9 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     // getClientIp 可能返回 null（如无可信代理头），用 remoteAddress 兜底，
-    // 两者都不可得时用 "unknown" 确保限流始终生效，防止暴力破解
+    // 两者都不可得时用 "unknown" 确保限流始终生效，防止暴力破解。
+    // Node 运行时 socket 地址恒存在，该兜底实际不可达；与 getClientIp 注释中
+    // 「禁止共享桶」的约定不冲突——那是指平台头缺失时的处理策略
     const clientIp = getClientIp(req) || req.socket?.remoteAddress || "unknown";
 
     // 数据库限流预检：已超限的 IP 直接拒绝（不写入，避免超限后仍持续写库）；
