@@ -20,5 +20,8 @@
     "prisma": "^7.9.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
   }
 }

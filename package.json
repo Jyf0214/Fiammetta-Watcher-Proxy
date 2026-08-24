@@ -89,6 +89,7 @@
     },
     "vitepress": {
       "vite": "6.4.3"
-    }
+    },
+    "deepmerge-ts": "^8.0.0"
   }
 }
