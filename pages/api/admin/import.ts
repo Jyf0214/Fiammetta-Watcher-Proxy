@@ -29,6 +29,7 @@ import {
 } from "@/lib/upstream-proxy";
 import { MODEL_PRICING_CONFIG_KEY } from "@/lib/model-pricing";
 import { NOTIFICATIONS_CONFIG_KEY } from "@/lib/notifier";
+import { ADMIN_2FA_CONFIG_KEY } from "@/lib/admin-2fa";
 
 /** 每类导入的结果统计 */
 interface ImportResult {
@@ -934,6 +935,8 @@ const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
   MODEL_PRICING_CONFIG_KEY,
   // 告警通知配置：同源保护，防止导入注入任意 webhook URL
   NOTIFICATIONS_CONFIG_KEY,
+  // 两步验证配置：同源保护，防止导入注入攻击者 secret 或关闭 2FA
+  ADMIN_2FA_CONFIG_KEY,
 ]);
 const IMPORT_CONFIG_PREFIX = "system:";
 

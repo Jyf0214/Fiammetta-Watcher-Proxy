@@ -23,6 +23,7 @@ import {
   WifiOff,
   Settings,
   Globe,
+  FlaskConical,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -48,6 +49,7 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 11 },
   { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 12 },
   { key: "settings", icon: Settings, href: "/admin/settings", group: "system", order: 13 },
+  { key: "playground", icon: FlaskConical, href: "/admin/playground", group: "manage", order: 6 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）

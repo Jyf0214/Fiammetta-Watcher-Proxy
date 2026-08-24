@@ -14,9 +14,11 @@ import {
   Bell,
   CircleDollarSign,
   Download,
+  KeyRound,
   Loader2,
   Plus,
   Save,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -77,6 +79,15 @@ function SettingsContent() {
   const [notif, setNotif] = useState<NotificationsConfig>(DEFAULT_NOTIFICATIONS);
   const [notifLoading, setNotifLoading] = useState(true);
   const [notifSaving, setNotifSaving] = useState(false);
+
+  // 两步验证（2FA）
+  const [twofaEnabled, setTwofaEnabled] = useState(false);
+  const [twofaLoading, setTwofaLoading] = useState(true);
+  const [twofaBusy, setTwofaBusy] = useState(false);
+  const [pendingSecret, setPendingSecret] = useState<string | null>(null);
+  const [pendingUri, setPendingUri] = useState<string>("");
+  const [confirmCode, setConfirmCode] = useState("");
+  const [disableCode, setDisableCode] = useState("");
 
   const loadPricing = useCallback(async () => {
     setLoading(true);
@@ -175,14 +186,101 @@ function SettingsContent() {
     }));
   };
 
+  // ==================== 两步验证（2FA） ====================
+
+  const load2fa = useCallback(async () => {
+    setTwofaLoading(true);
+    try {
+      const res = await fetch("/api/admin/2fa");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { success?: boolean; data?: { enabled?: boolean } };
+      setTwofaEnabled(json?.data?.enabled === true);
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTwofaLoading(false);
+    }
+  }, [t]);
+
+  const twofaPost = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/admin/2fa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return (await res.json().catch(() => null)) as {
+      success?: boolean;
+      data?: { secret?: string; otpauthUri?: string };
+      error?: string | { message?: string };
+    } | null;
+  };
+
+  const handleBegin2fa = async () => {
+    setTwofaBusy(true);
+    try {
+      const json = await twofaPost({ action: "begin" });
+      if (!json?.success || !json.data?.secret) throw new Error("begin failed");
+      setPendingSecret(json.data.secret);
+      setPendingUri(json.data.otpauthUri ?? "");
+      setConfirmCode("");
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTwofaBusy(false);
+    }
+  };
+
+  const handleConfirm2fa = async () => {
+    if (!pendingSecret || confirmCode.length !== 6) {
+      message.error(t("twofaErrorNeedCode"));
+      return;
+    }
+    setTwofaBusy(true);
+    try {
+      const json = await twofaPost({ action: "confirm", secret: pendingSecret, code: confirmCode });
+      if (!json?.success) throw new Error(typeof json?.error === "string" ? json.error : "confirm failed");
+      message.success(t("twofaEnabled"));
+      // 成功后立即清空注册材料（secret 不在页面残留）
+      setPendingSecret(null);
+      setPendingUri("");
+      setConfirmCode("");
+      await load2fa();
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTwofaBusy(false);
+    }
+  };
+
+  const handleDisable2fa = async () => {
+    if (disableCode.length !== 6) {
+      message.error(t("twofaErrorNeedCode"));
+      return;
+    }
+    setTwofaBusy(true);
+    try {
+      const json = await twofaPost({ action: "disable", code: disableCode });
+      if (!json?.success) throw new Error(typeof json?.error === "string" ? json.error : "disable failed");
+      message.success(t("twofaDisabled"));
+      setDisableCode("");
+      await load2fa();
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTwofaBusy(false);
+    }
+  };
+
   useEffect(() => {
     // 延迟到宏任务执行：loadPricing 首行同步 setLoading 会触发
     // react-hooks/set-state-in-effect（effect 体内禁止同步 setState）
     const timer = setTimeout(loadPricing, 0);
     const notifTimer = setTimeout(loadNotifications, 0);
+    const twofaTimer = setTimeout(load2fa, 0);
     return () => {
       clearTimeout(timer);
       clearTimeout(notifTimer);
+      clearTimeout(twofaTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -492,6 +590,75 @@ function SettingsContent() {
                   </Button>
                 </div>
               </>
+            )}
+          </div>
+        </ProCard>
+
+        {/* ========== 两步验证（2FA） ========== */}
+        <ProCard title={t("twofaTitle")}>
+          <div className="space-y-4">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("twofaDesc")}</p>
+
+            {twofaLoading ? (
+              <div className="flex items-center justify-center py-8 text-zinc-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            ) : twofaEnabled && !pendingSecret ? (
+              /* 已启用：展示状态 + 关闭入口（需当前验证码） */
+              <div className="space-y-3">
+                <p className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+                  <ShieldCheck className="w-4 h-4" />
+                  {t("twofaActive")}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <input
+                    value={disableCode}
+                    onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ""))}
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder={t("twofaCodePlaceholder")}
+                    className="h-8 w-full sm:w-40 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm tracking-[0.4em] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+                  />
+                  <Button variant="dangerGhost" size="sm" onClick={handleDisable2fa} disabled={twofaBusy}>
+                    {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+                    {t("twofaDisable")}
+                  </Button>
+                </div>
+              </div>
+            ) : pendingSecret ? (
+              /* 注册中：展示密钥/URI → 输码确认 */
+              <div className="space-y-3">
+                <p className="text-sm text-zinc-700 dark:text-zinc-300">{t("twofaAddHint")}</p>
+                <div className="rounded-lg bg-zinc-50 dark:bg-zinc-900 p-3 space-y-2 overflow-x-auto">
+                  <code className="block text-xs break-all text-zinc-700 dark:text-zinc-300">{pendingUri}</code>
+                  <code className="block text-sm font-mono font-semibold tracking-wider text-zinc-900 dark:text-zinc-100 select-all">{pendingSecret}</code>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <input
+                    value={confirmCode}
+                    onChange={(e) => setConfirmCode(e.target.value.replace(/\D/g, ""))}
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder={t("twofaCodePlaceholder")}
+                    className="h-8 w-full sm:w-40 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm tracking-[0.4em] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+                  />
+                  <Button variant="primary" size="sm" onClick={handleConfirm2fa} disabled={twofaBusy}>
+                    {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-1" />}
+                    {t("twofaConfirm")}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setPendingSecret(null); setPendingUri(""); }} disabled={twofaBusy}>
+                    {t("common:cancel")}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              /* 未启用：开启按钮 */
+              <div>
+                <Button variant="primary" size="sm" onClick={handleBegin2fa} disabled={twofaBusy}>
+                  {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+                  {t("twofaEnable")}
+                </Button>
+              </div>
             )}
           </div>
         </ProCard>

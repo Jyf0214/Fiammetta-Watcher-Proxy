@@ -205,6 +205,24 @@ model configs {
   @@map("configs")
 }
 
+// ==================== 失败请求留痕（调试） ====================
+
+model requestDebugLogs {
+  id              String  @id
+  requestLogId    String? @map("request_log_id")
+  model           String
+  platformId      String? @map("platform_id")
+  status          Int     @default(0)
+  requestBody     String? @map("request_body")
+  responseSnippet String? @map("response_snippet")
+  errorMessage    String? @map("error_message")
+  createdAt       Int     @default(0) @map("created_at")
+
+  @@index([requestLogId])
+  @@index([createdAt])
+  @@map("request_debug_logs")
+}
+
 // ==================== 审计日志 ====================
 
 model auditLogs {

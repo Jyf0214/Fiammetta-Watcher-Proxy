@@ -41,6 +41,9 @@ const PROTECTED_CONFIG_KEYS = new Set<string>([
   // 告警通知配置：有专属端点 /api/admin/notifications，直写可注入任意
   // webhook URL（引流）或破坏事件开关结构
   "system:notifications",
+  // 两步验证配置：secret 为加密信封，直写可注入攻击者自备的 secret
+  // （接管 2FA）或直接置 enabled 绕过验证
+  "system:admin_2fa",
 ]);
 
 /**

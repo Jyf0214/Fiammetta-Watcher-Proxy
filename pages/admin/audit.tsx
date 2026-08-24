@@ -47,6 +47,9 @@ const ACTION_LABELS: Record<string, string> = {
   update_model_pricing: "actionUpdateModelPricing",
   import_model_pricing: "actionUpdateModelPricing",
   update_notifications: "actionUpdateNotifications",
+  enable_2fa: "actionEnable2fa",
+  disable_2fa: "actionDisable2fa",
+  playground_call: "actionPlaygroundCall",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -72,6 +75,9 @@ const ACTION_COLOR: Record<string, string> = {
   update_model_pricing: "orange",
   import_model_pricing: "purple",
   update_notifications: "orange",
+  enable_2fa: "green",
+  disable_2fa: "red",
+  playground_call: "blue",
 };
 
 // ==================== 页面组件 ====================

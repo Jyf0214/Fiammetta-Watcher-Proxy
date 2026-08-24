@@ -12,6 +12,7 @@
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
 import { sendNotification } from "@/lib/notifier";
+import { saveDebugLog } from "@/lib/debug-log";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
@@ -1109,6 +1110,16 @@ export async function proxyV1Request(
     if (isAutoModelRequest(requestedModel)) {
       freezeAutoModel(currentTargetModel);
     }
+
+    // 失败请求留痕：置于空响应/协议分支之前，保证 anthropic 协议错误与
+    // 空响应两类失败同样落库（与 Pages 版位置语义对齐）
+    void saveDebugLog(env.DB, workerEnv?.DB_TYPE, {
+      model: currentTargetModel,
+      platformId: currentPlatform.id,
+      status: upstreamResponse.status,
+      requestBody: JSON.stringify(upstreamBody),
+      responseSnippet: errorText,
+    });
 
     // 空响应特判：绝不向下游透传空响应，返回 502 + 明确错误
     if (isEmptyResponse) {

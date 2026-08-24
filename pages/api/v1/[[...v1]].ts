@@ -19,6 +19,7 @@ import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, rel
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { sendNotification } from "@/lib/notifier";
+import { saveDebugLog } from "@/lib/debug-log";
 import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
 
@@ -646,6 +647,15 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       try { await recordFailure(cur.id, dummyDb, env); } catch {}
       if (proxy?.url) recordProxyTraffic(proxy.url, upRes.status);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
+      // 失败请求留痕：下游请求体 + 上游响应片段（截断 16KB），供日志页复现排查
+      void saveDebugLog(dummyDb, env?.DB_TYPE, {
+        model: requestedModel,
+        platformId: cur.id,
+        status: upRes.status,
+        requestBody: JSON.stringify(rawBody),
+        responseSnippet: errText,
+        errorMessage: errText.substring(0, 1000),
+      });
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
         res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));

@@ -14,6 +14,7 @@ import { generateToken, verifyToken, type AdminPayload } from "@/lib/auth";
 import { createDb } from "@/lib/prisma";
 import { getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { is2faEnabledStrict, verifyLoginCode } from "@/lib/admin-2fa";
 
 const COOKIE_NAME = "admin_token";
 
@@ -408,7 +409,7 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
       }
     }
 
-    const body = req.body as { username?: string; password?: string } | undefined;
+    const body = req.body as { username?: string; password?: string; totpCode?: string } | undefined;
     if (!body || typeof body !== "object") return res.status(400).json({ success: false, error: "请求格式错误" });
 
     const { username, password } = body;
@@ -429,6 +430,29 @@ async function handleLogin(req: NextApiRequest, res: NextApiResponse) {
         });
       }
       return res.status(401).json({ success: false, error: "用户名或密码错误" });
+    }
+
+    // 两步验证关卡：置于密码验证之后，未通过密码关卡的请求不泄露 2FA 启用状态。
+    // TOTP 码错误同样计入登录限流（与密码错误同窗口防爆破）。
+    // 使用 Strict 变体：DB 读取异常时向上抛错走下方 fail-closed 分支，
+    // 杜绝"瞬时 DB 抖动跳过两步验证"
+    try {
+      const db2fa = await createDb();
+      if (await is2faEnabledStrict(db2fa)) {
+        const totpCode = typeof body.totpCode === "string" ? body.totpCode.trim() : "";
+        if (!totpCode) {
+          return res.status(401).json({ success: false, error: "请输入两步验证码", need2fa: true });
+        }
+        const totpOk = await verifyLoginCode(db2fa, undefined, env.JWT_SECRET as string, totpCode);
+        if (!totpOk) {
+          await registerDbLoginAttempt(clientIp, username, "两步验证码错误");
+          return res.status(401).json({ success: false, error: "两步验证码错误", need2fa: true });
+        }
+      }
+    } catch (err2fa) {
+      // 2FA 校验链路异常（DB 不可达等）：fail-closed，不放行无验证码的登录
+      console.error("[POST /api/admin/auth] 2FA 校验异常:", err2fa instanceof Error ? err2fa.message : String(err2fa));
+      return res.status(500).json({ success: false, error: "两步验证校验失败，请稍后重试" });
     }
 
     // 登录成功 → 清空该 IP 的进程内失败计数（审计失败记录保持 append-only，

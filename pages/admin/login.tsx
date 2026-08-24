@@ -15,6 +15,9 @@ export default function AdminLoginPage() {
   const [step, setStep] = useState<"username" | "password">("username");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // 两步验证：服务端返回 need2fa 时展示验证码输入并在重试时携带
+  const [totpCode, setTotpCode] = useState("");
+  const [need2fa, setNeed2fa] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copied, setCopied] = useState(false);
@@ -110,7 +113,11 @@ export default function AdminLoginPage() {
       const res = await fetch("/api/admin/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          ...(need2fa && totpCode ? { totpCode: totpCode.trim() } : {}),
+        }),
       });
 
       const data: Record<string, any> = await res.json();
@@ -134,6 +141,10 @@ export default function AdminLoginPage() {
         const ts = new Date(data.resetAt).getTime();
         setLockUntil(Number.isFinite(ts) ? ts : null);
         setError(data.error || t("loginFailed"));
+      } else if (data.need2fa) {
+        // 服务端要求两步验证：展开验证码输入框，保留已输入的凭据供重试
+        setNeed2fa(true);
+        setError(data.error || t("loginFailed"));
       } else {
         setError(data.error || t("loginFailed"));
       }
@@ -151,6 +162,8 @@ export default function AdminLoginPage() {
   const handleBack = () => {
     setStep("username");
     setPassword("");
+    setTotpCode("");
+    setNeed2fa(false);
     setError("");
     setSuccess("");
     setLockUntil(null);
@@ -265,6 +278,20 @@ export default function AdminLoginPage() {
             autoFocus
           />
         </div>
+
+        {need2fa && (
+          <input
+            id="login-totp"
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            value={totpCode}
+            onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+            placeholder={t("totpCode")}
+            className={inputStyle + " tracking-[0.5em] text-center"}
+            autoComplete="one-time-code"
+          />
+        )}
 
         {error && (
           <div role="alert" className="flex items-start justify-between gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
