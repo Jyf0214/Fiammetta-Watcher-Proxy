@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { message, Select } from "antd";
-import { FlaskConical, Loader2, Send, Square } from "lucide-react";
+import { FlaskConical, Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -270,12 +270,7 @@ function PlaygroundContent() {
                     {t("stop")}
                   </Button>
                 ) : null}
-                <Button variant="primary" size="sm" onClick={handleSend} disabled={sending}>
-                  {sending ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4 mr-1" />
-                  )}
+                <Button variant="primary" size="sm" onClick={handleSend} loading={sending} icon={<Send className="w-4 h-4 mr-1" />} disabled={sending}>
                   {sending ? t("sending") : t("send")}
                 </Button>
               </div>

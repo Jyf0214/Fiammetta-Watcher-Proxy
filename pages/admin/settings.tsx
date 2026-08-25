@@ -384,6 +384,8 @@ function SettingsContent() {
           description={t("desc")}
         />
 
+        {/* 卡片间距容器：ProCard 无外边距，多卡片平铺需显式 gap（对齐 data-manager 惯例） */}
+        <div className="space-y-4">
         <ProCard title={t("pricingTitle")}>
           <div className="space-y-4">
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -463,20 +465,10 @@ function SettingsContent() {
                 {t("pricingAddModel")}
               </Button>
               <div className="flex-1" />
-              <Button variant="secondary" size="sm" onClick={handleImport} disabled={importing || saving || loading}>
-                {importing ? (
-                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4 mr-1" />
-                )}
+              <Button variant="secondary" size="sm" onClick={handleImport} loading={importing} icon={<Download className="w-4 h-4 mr-1" />} disabled={importing || saving || loading}>
                 {importing ? t("pricingImporting") : t("pricingImportLiteLLM")}
               </Button>
-              <Button variant="primary" size="sm" onClick={handleSave} disabled={saving || importing || loading}>
-                {saving ? (
-                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4 mr-1" />
-                )}
+              <Button variant="primary" size="sm" onClick={handleSave} loading={saving} icon={<Save className="w-4 h-4 mr-1" />} disabled={saving || importing || loading}>
                 {saving ? t("pricingSaving") : t("common:save")}
               </Button>
             </div>
@@ -580,12 +572,7 @@ function SettingsContent() {
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                  <Button variant="primary" size="sm" onClick={handleSaveNotifications} disabled={notifSaving || notifLoading}>
-                    {notifSaving ? (
-                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                    ) : (
-                      <Bell className="w-4 h-4 mr-1" />
-                    )}
+                  <Button variant="primary" size="sm" onClick={handleSaveNotifications} loading={notifSaving} icon={<Bell className="w-4 h-4 mr-1" />} disabled={notifSaving || notifLoading}>
                     {notifSaving ? t("notifSaving") : t("common:save")}
                   </Button>
                 </div>
@@ -619,8 +606,7 @@ function SettingsContent() {
                     placeholder={t("twofaCodePlaceholder")}
                     className="h-8 w-full sm:w-40 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm tracking-[0.4em] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
                   />
-                  <Button variant="dangerGhost" size="sm" onClick={handleDisable2fa} disabled={twofaBusy}>
-                    {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+                  <Button variant="dangerGhost" size="sm" onClick={handleDisable2fa} loading={twofaBusy} icon={<KeyRound className="w-4 h-4 mr-1" />} disabled={twofaBusy}>
                     {t("twofaDisable")}
                   </Button>
                 </div>
@@ -642,8 +628,7 @@ function SettingsContent() {
                     placeholder={t("twofaCodePlaceholder")}
                     className="h-8 w-full sm:w-40 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm tracking-[0.4em] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
                   />
-                  <Button variant="primary" size="sm" onClick={handleConfirm2fa} disabled={twofaBusy}>
-                    {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-1" />}
+                  <Button variant="primary" size="sm" onClick={handleConfirm2fa} loading={twofaBusy} icon={<ShieldCheck className="w-4 h-4 mr-1" />} disabled={twofaBusy}>
                     {t("twofaConfirm")}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => { setPendingSecret(null); setPendingUri(""); }} disabled={twofaBusy}>
@@ -654,14 +639,14 @@ function SettingsContent() {
             ) : (
               /* 未启用：开启按钮 */
               <div>
-                <Button variant="primary" size="sm" onClick={handleBegin2fa} disabled={twofaBusy}>
-                  {twofaBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+                <Button variant="primary" size="sm" onClick={handleBegin2fa} loading={twofaBusy} icon={<KeyRound className="w-4 h-4 mr-1" />} disabled={twofaBusy}>
                   {t("twofaEnable")}
                 </Button>
               </div>
             )}
           </div>
         </ProCard>
+        </div>
       </PageContainer>
     </AdminLayout>
   );

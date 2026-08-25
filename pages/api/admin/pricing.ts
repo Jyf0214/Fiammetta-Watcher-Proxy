@@ -26,9 +26,18 @@ import {
   type ModelPricingMap,
 } from "@/lib/model-pricing";
 
-/** LiteLLM 公开价格源：全社区维护的 model_prices_and_context_window 映射 */
-const LITELLM_PRICING_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+/**
+ * LiteLLM 公开价格源候选（按序回退）。
+ *
+ * raw.githubusercontent 在部分出网环境（如国内边缘节点）不可达，
+ * jsDelivr CDN 镜像同一文件且国内可达性好——故镜像在前、主源兜底。
+ * 三源内容一致（同仓库同分支）。
+ */
+const LITELLM_PRICING_URLS = [
+  "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json",
+  "https://fastly.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json",
+  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+];
 
 async function readPricingFromDb(
   db: Awaited<ReturnType<typeof createDb>>
@@ -143,41 +152,41 @@ export default async function handler(
       if (!checkCsrfOrigin(req, res)) return;
       if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
-      // 服务端拉取公开价格源：密钥不出网、浏览器不直连第三方（CORS/反爬无关）
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15_000);
+      // 服务端按序尝试候选价格源：任一成功即用；全失败时 502 并附各源
+      // 失败原因，便于区分网络不通（超时/连接拒绝）与源异常（HTTP 状态）
       let remote: unknown;
-      try {
-        const upstream = await fetch(LITELLM_PRICING_URL, {
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        });
-        if (!upstream.ok) {
-          res.status(502).json({
-            success: false,
-            error: { message: `价格源返回 HTTP ${upstream.status}`, type: "upstream_error" },
+      const tried: string[] = [];
+      for (const sourceUrl of LITELLM_PRICING_URLS) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        try {
+          const upstream = await fetch(sourceUrl, {
+            signal: controller.signal,
+            headers: { Accept: "application/json" },
           });
-          return;
+          if (!upstream.ok) {
+            tried.push(`${new URL(sourceUrl).host}: HTTP ${upstream.status}`);
+            continue;
+          }
+          remote = await upstream.json();
+          break;
+        } catch (err) {
+          const reason =
+            err instanceof Error && err.name === "AbortError"
+              ? "超时"
+              : err instanceof Error
+                ? err.message
+                : String(err);
+          tried.push(`${new URL(sourceUrl).host}: ${reason}`);
+        } finally {
+          clearTimeout(timeout);
         }
-        remote = await upstream.json();
-      } catch (err) {
-        const aborted = err instanceof Error && err.name === "AbortError";
-        res.status(502).json({
-          success: false,
-          error: {
-            message: aborted ? "拉取价格源超时（15 秒）" : "拉取价格源失败",
-            type: "upstream_error",
-          },
-        });
-        return;
-      } finally {
-        clearTimeout(timeout);
       }
 
       if (typeof remote !== "object" || remote === null || Array.isArray(remote)) {
         res.status(502).json({
           success: false,
-          error: { message: "价格源格式异常", type: "upstream_error" },
+          error: { message: `所有价格源均不可达（${tried.join("；")}）`, type: "upstream_error" },
         });
         return;
       }
