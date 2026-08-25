@@ -67,7 +67,8 @@ export interface ModelItem {
   source: string;
   type: string;
   enabled: boolean;
-  fetchedAt: string;
+  /** 秒级 Unix 时间戳（platform_models.fetched_at 为 Int 列） */
+  fetchedAt: number;
 }
 
 export const MODEL_TYPE_CONFIG: Record<string, { icon: typeof Cpu; labelKey: string; color: string; bg: string }> = {

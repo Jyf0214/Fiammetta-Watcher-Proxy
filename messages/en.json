@@ -428,7 +428,8 @@
     "actionUpdateNotifications": "Update Notification Config",
     "actionEnable2fa": "Enable 2FA",
     "actionDisable2fa": "Disable 2FA",
-    "actionPlaygroundCall": "Playground Call"
+    "actionPlaygroundCall": "Playground Call",
+    "actionTestModelCall": "Model Connectivity Test"
   },
   "system": {
     "autoModelTitle": "Auto Model",

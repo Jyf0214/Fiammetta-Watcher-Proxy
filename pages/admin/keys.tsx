@@ -84,6 +84,11 @@ function ApiKeyCard({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("usedTokens")}</span>
+          {/* 与桌面表格 usedTokens 列同一口径：纯数字千分位格式化（tokenLimit 是否限量均不组合显示） */}
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{apiKey.usedTokens.toLocaleString()}</span>
+        </div>
+        <div className="flex items-center gap-2">
           <span className="text-[11px] text-zinc-400 w-14 shrink-0">{t("callUsed")}</span>
           <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{apiKey.callUsed.toLocaleString()}</span>
         </div>

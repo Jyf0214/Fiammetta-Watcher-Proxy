@@ -352,7 +352,11 @@ function SettingsContent() {
   const handleImport = async () => {
     setImporting(true);
     try {
-      const res = await fetch("/api/admin/pricing/import", { method: "POST" });
+      const res = await fetch("/api/admin/pricing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "import-litellm" }),
+      });
       const json = (await res.json().catch(() => null)) as {
         success?: boolean;
         data?: { imported?: number; total?: number };

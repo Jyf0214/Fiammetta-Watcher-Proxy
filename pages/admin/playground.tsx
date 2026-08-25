@@ -151,7 +151,9 @@ function PlaygroundContent() {
           throw new Error(errMsg);
         }
         const acc = { text: "", tokens: undefined as number | undefined, cost: undefined as number | undefined };
-        consumeFrame(JSON.stringify(json), acc);
+        // consumeFrame 只认 "data: " 前缀的 SSE 行，裸 JSON 需包一层帧格式，
+        // 否则整行被跳过导致非流式输出恒为空
+        consumeFrame(`data: ${JSON.stringify(json)}`, acc);
         setOutput(acc.text);
         setMeta({
           latencyMs: Date.now() - startedAt,

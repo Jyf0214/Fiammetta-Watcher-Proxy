@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import {
+  isValidElement,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  type ReactNode,
+} from "react";
 import { Table, Pagination } from "antd";
 import type { TableProps } from "antd";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -49,6 +56,25 @@ function useScreenWidth() {
 function colVisible<T>(col: Col<T>, sw: number): boolean {
   if (!col.responsive) return true;
   return col.responsive.some((bp: string) => sw >= (BP[bp] ?? 0));
+}
+
+/* ── 递归提取 ReactNode 中的纯文本（title 为 JSX 时用于生成卡片标签） ── */
+function textOfTitle(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return textOfTitle(node.props.children);
+  }
+  if (Array.isArray(node)) return node.map(textOfTitle).join("");
+  return "";
+}
+
+/* ── 移动端卡片标签：title 为字符串直出；为 JSX（如 Tooltip 包裹）时提取其中的
+ *    纯文本作为标签，提取不到非空文本再回退列 key，避免把英文 key 直出给用户 ── */
+function cardLabel<T>(col: Col<T>): string {
+  if (typeof col.title === "string") return col.title;
+  const text = textOfTitle(col.title).trim();
+  return text || String(col.key ?? "");
 }
 
 /* ── 提取单元格内容 ── */
@@ -118,7 +144,7 @@ function MobileCards<T>({
             {bodyCols.map((c) => (
               <div key={String(c.key ?? c.dataIndex)}>
                 <div className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 mb-0.5 leading-tight">
-                  {typeof c.title === "string" ? c.title : String(c.key ?? "")}
+                  {cardLabel(c)}
                 </div>
                 <div className="text-sm text-zinc-700 dark:text-zinc-300 break-words leading-snug">
                   {cellOf(c, r, i)}

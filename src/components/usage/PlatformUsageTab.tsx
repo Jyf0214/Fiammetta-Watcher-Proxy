@@ -295,7 +295,9 @@ export default function PlatformUsageTab({
     <>
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         {statCards.map((card) => {
-          const displayVal = formatCompactNumber(card.value, t);
+          const display = "display" in card ? card.display : null;
+          const displayVal = display ? display.value : formatCompactNumber(card.value, t);
+          const suffix = display?.suffix ?? card.suffix;
           return (
             <ProCard key={card.key} className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800" padding="p-3">
               <div className="flex items-center gap-2.5">
@@ -308,9 +310,9 @@ export default function PlatformUsageTab({
                   <p className="text-zinc-500 dark:text-zinc-400 text-[11px] leading-tight truncate mb-0.5">{card.title}</p>
                   <p className={`${valueFontSize(displayVal)} font-bold text-zinc-900 dark:text-zinc-100 leading-tight tabular-nums whitespace-nowrap`}>
                     {displayVal}
-                    {card.suffix && (
+                    {suffix && (
                       <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500 ml-1">
-                        {card.suffix}
+                        {suffix}
                       </span>
                     )}
                   </p>

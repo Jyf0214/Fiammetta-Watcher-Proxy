@@ -428,7 +428,8 @@
     "actionUpdateNotifications": "更新通知配置",
     "actionEnable2fa": "开启两步验证",
     "actionDisable2fa": "关闭两步验证",
-    "actionPlaygroundCall": "调试台调用"
+    "actionPlaygroundCall": "调试台调用",
+    "actionTestModelCall": "模型连通性测试"
   },
   "system": {
     "autoModelTitle": "自动模型",

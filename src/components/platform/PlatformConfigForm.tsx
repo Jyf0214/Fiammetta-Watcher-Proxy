@@ -77,6 +77,17 @@ export function PlatformConfigForm({
   const [batchText, setBatchText] = useState("");
   const [expandedProxyIndex, setExpandedProxyIndex] = useState<number | null>(null);
 
+  // 删除密钥行时同步修正展开态：expandedProxyIndex 按位置索引记录，
+  // 删除位之前的行被移除后后续行前移，若不修正，代理绑定面板会错位到另一把密钥
+  const handleRemoveKey = (index: number) => {
+    setExpandedProxyIndex((prev) => {
+      if (prev === null || index > prev) return prev;
+      if (index === prev) return null;
+      return prev - 1;
+    });
+    onRemoveKey(index);
+  };
+
   // 认证类/协议管控头禁止透传（与代理层 FORBIDDEN_FORWARD_HEADERS 双端一致，W7）：
   // 透传白名单可覆盖平台密钥，导致 401 封禁循环或 BYOK 绕过计费
   const FORBIDDEN_FORWARD_HEADERS = [
@@ -331,7 +342,7 @@ export function PlatformConfigForm({
                         </button>
                         <button
                           type="button"
-                          onClick={() => onRemoveKey(index)}
+                          onClick={() => handleRemoveKey(index)}
                           disabled={namedKeys.length <= 1}
                           className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                           title={t("removeKeyTip")}

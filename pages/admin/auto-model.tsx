@@ -29,7 +29,8 @@ interface PlatformModel {
   modelId: string;
   ownedBy: string | null;
   source: string;
-  fetchedAt: string;
+  /** 秒级 Unix 时间戳（platform_models.fetched_at 为 Int 列） */
+  fetchedAt: number;
   platform: { name: string };
 }
 

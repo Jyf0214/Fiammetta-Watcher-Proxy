@@ -340,7 +340,7 @@ export default function UpstreamProxyPage() {
         pollChainActive.current = false;
         return;
       }
-      checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1), 2000);
+      checkPollTimer.current = setTimeout(() => void pollHealthProgress(lastKey, stalled + 1, manual), 2000);
     }
   };
 
