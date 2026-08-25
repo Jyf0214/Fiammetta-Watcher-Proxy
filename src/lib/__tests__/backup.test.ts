@@ -102,4 +102,46 @@ describe("runBackupTask", () => {
     expect(snapshot.exportType).toBe("config-backup");
     expect(snapshot.configs).toEqual([{ key: "system:x", value: "{}" }]);
   });
+
+  it("推送后必须消费响应体释放连接（成功/失败分支均读取 arrayBuffer）", async () => {
+    // 未读取的 body 会挂起 keep-alive 连接造成泄漏（同 upstream-proxy 各路径）
+    const env = {
+      BACKUP_WEBHOOK_URL: "https://recv.example/backup",
+      BACKUP_ENCRYPTION_KEY: "k",
+    };
+
+    const failBody = vi.fn(async () => new ArrayBuffer(0));
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 502, arrayBuffer: failBody });
+    let r = await runBackupTask(stubDb(), env);
+    expect(r.success).toBe(false);
+    expect(r.skipped).toBe("接收端返回 HTTP 502");
+    expect(failBody).toHaveBeenCalledTimes(1);
+
+    const okBody = vi.fn(async () => new ArrayBuffer(0));
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, arrayBuffer: okBody });
+    r = await runBackupTask(stubDb(), env);
+    expect(r.success).toBe(true);
+    expect(r.pushed).toBe(true);
+    expect(okBody).toHaveBeenCalledTimes(1);
+  });
+
+  it("响应体读取中断时取消流兜底且不改变失败语义", async () => {
+    const cancel = vi.fn(async () => undefined);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      arrayBuffer: vi.fn(async () => {
+        throw new Error("aborted mid-body");
+      }),
+      body: { cancel },
+    });
+    const r = await runBackupTask(stubDb(), {
+      BACKUP_WEBHOOK_URL: "https://recv.example/backup",
+      BACKUP_ENCRYPTION_KEY: "k",
+    });
+    expect(r.success).toBe(false);
+    expect(r.skipped).toBe("接收端返回 HTTP 500");
+    // arrayBuffer 中断后必须走 cancel 兜底释放连接
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

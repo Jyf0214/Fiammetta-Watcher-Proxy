@@ -46,7 +46,7 @@ const whitelistedPlatforms = new Set<string>();
 // ==================== 白名单 TTL 自动刷新（A2） ====================
 
 /**
- * 白名单自动刷新间隔：管理后台勾选/取消「白名单」后最多 60s 在运行期生效，
+ * 白名单自动刷新间隔：管理后台勾选/取消「白名单」后最多 5 分钟在运行期生效，
  * 无需重启进程。刷新为后台触发（isKeyWhitelisted/isPlatformWhitelisted 是
  * 同步函数，无法阻塞等待），本次调用继续用旧集合，刷新完成后后续调用生效。
  */
@@ -112,7 +112,7 @@ export async function loadWhitelist(db: D1Database, env?: WorkerEnv): Promise<bo
 }
 
 /**
- * 白名单 TTL 自动刷新（A2）：集合上次成功加载超过 60s 后，下一次
+ * 白名单 TTL 自动刷新（A2）：集合上次成功加载超过 5 分钟后，下一次
  * isKeyWhitelisted/isPlatformWhitelisted 调用触发后台重新加载，
  * 使管理后台修改「白名单」在运行期生效。
  *
@@ -249,6 +249,16 @@ export function isPlatformWhitelisted(platformId?: string): boolean {
 }
 
 /**
+ * 入口懒加载（loadKeyStatusFromKV）最近一次传入的 KV binding（undefined 时清空）
+ *
+ * recordKeyError 无 kv 参数，其白名单降级分支依赖此缓存写入持久化状态，
+ * 与 banKey 直接收 kv 的口径对齐。所有入口（index/index-lite/pages v1）
+ * 首请求都会调用 loadKeyStatusFromKV；非 Cloudflare 部署传 undefined 即清空，
+ * 不写 KV（仅内存降级）。
+ */
+let loadedKvBinding: KVNamespace | null = null;
+
+/**
  * 从 KV 恢复 Key 封禁/降级状态到内存（冷启动后调用）
  *
  * KV 中只存密钥指纹，需要结合平台密钥明文计算指纹后才能映射回内存 Map。
@@ -263,6 +273,9 @@ export async function loadKeyStatusFromKV(
   kv: KVNamespace | undefined,
   env?: WorkerEnv
 ): Promise<boolean> {
+  // 记录/清空本次传入的 KV binding（供 recordKeyError 白名单降级持久化使用，
+  // 与 banKey 的 kv 参数口径一致）；放在 try 外，加载失败也不影响 binding 捕获
+  loadedKvBinding = kv ?? null;
   try {
     const { createDb } = await import("@/lib/prisma");
     const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
@@ -572,7 +585,8 @@ function errorIncrement(status: number): number {
  * - 累加错误计数（429→+1, 401→+2, 402→+5 一次即达阈值禁用, 其余→+1）
  * - 达到 5 次后自动将密钥 enabled 设为 false，不再变更 errorCount
  * - 已禁用的密钥再次调用不会变更 errorCount
- * - 白名单 Key 或白名单平台的密钥豁免：不累计错误计数、不自动禁用，仅临时降级（与 banKey 语义一致）
+ * - 白名单 Key 或白名单平台的密钥豁免：不累计错误计数、不自动禁用，仅临时降级
+ *   （内存 + KV 持久化，与 banKey 白名单分支同口径）
  *
  * 同时写入内存禁用集合，保证即时生效（下一次密钥选择立即跳过）
  */
@@ -598,10 +612,17 @@ export async function recordKeyError(
       const target = keys.find((k) => k.key === key);
       if (!target) return;
 
-      // 白名单 Key 或白名单平台：不累计错误计数、不自动禁用，仅临时降级（同 banKey）
+      // 白名单 Key 或白名单平台：不累计错误计数、不自动禁用，仅临时降级（同 banKey）。
+      // 降级状态与 banKey 白名单分支同口径写入 KV 持久化：重启后可从 KV 恢复、
+      // 管理后台可见。binding 来自入口 loadKeyStatusFromKV 的模块级缓存，
+      // 无 KV 部署（未缓存）时不写，仅内存降级。
       if (isPlatformWhitelisted(platformId) || isKeyWhitelisted(key)) {
         const expireAt = Date.now() + WHITELISTED_KEY_COOLDOWN_MS;
         whitelistedKeyCooldowns.set(banKeyId(platformId, key), expireAt);
+        const kv = loadedKvBinding;
+        if (platformId && kv) {
+          await writePlatformKeyStatus(kv, platformId, keyFingerprint(key), { status: "deprioritized", expireAt });
+        }
         console.log(
           `[platform-keys] 白名单密钥 ${keyFingerprint(key)} 收到上游错误 ${upstreamStatus}，仅降级不计数（平台 ${platformId}）`
         );

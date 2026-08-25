@@ -303,6 +303,30 @@ export function resolveStreamErrorStatus(error: Record<string, unknown> | undefi
 }
 
 /**
+ * Responses API 流事件检测
+ *
+ * 对 JSON.parse 后的单帧对象判断是否携带 Responses 协议的内容/完成信号。
+ * sawContent 规则：delta / output_text / text+type 含 output_text /
+ * output 数组 / response.output；sawDone 规则：response.completed /
+ * response.done / response.status==="completed" / response.type==="response.completed"。
+ * Worker 全量与 lite 共用此实现；Pages v1 的内联副本待接入本函数后消除漂移。
+ */
+export function detectResponsesStreamEvent(parsed: unknown): { sawContent: boolean; sawDone: boolean } {
+  let sawContent = false;
+  let sawDone = false;
+  const pAny = parsed as any;
+  if (typeof pAny.delta === "string" && pAny.delta.length > 0) sawContent = true;
+  if (typeof pAny.output_text === "string" && pAny.output_text.length > 0) sawContent = true;
+  if (typeof pAny.text === "string" && pAny.text.length > 0 && pAny.type && String(pAny.type).includes("output_text")) sawContent = true;
+  if (Array.isArray(pAny.output) && pAny.output.length > 0) sawContent = true;
+  if (pAny.response?.output) sawContent = true;
+  if (pAny.type === "response.completed" || pAny.type === "response.done" || pAny.response?.status === "completed" || pAny.response?.type === "response.completed") {
+    sawDone = true;
+  }
+  return { sawContent, sawDone };
+}
+
+/**
  * 创建 Usage 提取 TransformStream
  *
  * 在流式响应中逐块解析 SSE 数据，提取最后一个 usage 对象，
@@ -389,16 +413,10 @@ export function createUsageTransformer(params: {
           }
           // Responses API 流式检测：适配 Responses 协议的 delta/output 等字段
           // Responses 的增量事件如 response.output_text.delta {delta:"..."} 或 output 数组
+          const responsesEvent = detectResponsesStreamEvent(parsed);
+          if (responsesEvent.sawContent) sawContent = true;
+          if (responsesEvent.sawDone) sawDone = true;
           const pAny = parsed as any;
-          if (typeof pAny.delta === "string" && pAny.delta.length > 0) sawContent = true;
-          if (typeof pAny.output_text === "string" && pAny.output_text.length > 0) sawContent = true;
-          if (typeof pAny.text === "string" && pAny.text.length > 0 && pAny.type && String(pAny.type).includes("output_text")) sawContent = true;
-          if (Array.isArray(pAny.output) && pAny.output.length > 0) sawContent = true;
-          if (pAny.response?.output) sawContent = true;
-          // Responses 完成事件亦视为 sawDone
-          if (pAny.type === "response.completed" || pAny.type === "response.done" || pAny.response?.status === "completed" || pAny.response?.type === "response.completed") {
-            sawDone = true;
-          }
           // 兼容 Chat 与 Responses 两种 usage 形态：顶层 usage / response.usage
           const candidate = (pAny.usage ?? pAny.response?.usage ?? pAny.response?.response?.usage) as Record<string, unknown> | undefined;
           if (candidate) {

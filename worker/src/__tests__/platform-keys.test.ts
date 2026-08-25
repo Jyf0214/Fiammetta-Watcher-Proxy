@@ -274,6 +274,92 @@ describe("recordKeyError 白名单豁免", () => {
   });
 });
 
+// ==================== recordKeyError 白名单降级 KV 持久化 ====================
+// 与 banKey 白名单分支同口径：内存降级之外还写 KV（重启可恢复、管理后台可见）。
+// KV binding 来自入口 loadKeyStatusFromKV 的模块级缓存，测试里通过显式调用它注入。
+
+describe("recordKeyError 白名单降级 KV 持久化", () => {
+  beforeEach(() => {
+    prismaState.apiKeysByPlatform = {
+      "platform-1": JSON.stringify([
+        { name: "normal", key: "sk-normal" },
+        { name: "w", key: "sk-whitelisted", whitelisted: true },
+      ]),
+      "whitelisted-platform": JSON.stringify([{ name: "normal", key: "sk-normal" }]),
+    };
+  });
+
+  it("白名单 Key 错误路径写入 KV 降级状态（与 banKey 白名单分支同口径）", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    // 覆盖 createDb 单次：loadKeyStatusFromKV 只见 platform-1 且无 enabled=false
+    // 密钥，避免污染 disabledKeys 破坏后续用例的前置断言
+    const { createDb } = await import("@/lib/prisma");
+    vi.mocked(createDb).mockResolvedValueOnce({
+      platforms: {
+        findMany: async () => [
+          { id: "platform-1", apiKeys: JSON.stringify([{ name: "w", key: "sk-whitelisted", whitelisted: true }]) },
+        ],
+      },
+    } as never);
+    // 模拟入口懒加载：捕获 KV binding
+    const kv = makeMockKv();
+    expect(await loadKeyStatusFromKV({} as D1Database, kv, { DB_TYPE: "d1" })).toBe(true);
+
+    await recordKeyError("sk-whitelisted", 429, "platform-1", {} as D1Database);
+
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
+    const raw = kv.store.get(keyStatusKey("platform-1"));
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw!) as Record<string, { status: string; expireAt: number }>;
+    const values = Object.values(parsed);
+    expect(values.length).toBe(1);
+    expect(values[0].status).toBe("deprioritized");
+    expect(values[0].expireAt).toBeGreaterThan(Date.now());
+  });
+
+  it("白名单平台的普通 Key 错误路径同样写入 KV 降级状态", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    const { createDb } = await import("@/lib/prisma");
+    vi.mocked(createDb).mockResolvedValueOnce({
+      platforms: {
+        findMany: async () => [
+          { id: "whitelisted-platform", apiKeys: JSON.stringify([{ name: "normal", key: "sk-normal" }]), whitelisted: true },
+        ],
+      },
+    } as never);
+    const kv = makeMockKv();
+    await loadKeyStatusFromKV({} as D1Database, kv, { DB_TYPE: "d1" });
+
+    await recordKeyError("sk-normal", 401, "whitelisted-platform", {} as D1Database);
+
+    expect(isKeyDeprioritized("sk-normal", "whitelisted-platform")).toBe(true);
+    const raw = kv.store.get(keyStatusKey("whitelisted-platform"));
+    expect(raw).toBeTruthy();
+    const value = Object.values(JSON.parse(raw!) as Record<string, { status: string }>)[0];
+    expect(value.status).toBe("deprioritized");
+  });
+
+  it("无 KV binding（undefined 清空）时不得触发 KV 写入，仅内存降级", async () => {
+    await loadWhitelist({} as D1Database, { DB_TYPE: "d1" });
+    // 显式以 undefined 加载清空 binding（模拟非 Cloudflare 部署）；覆盖为空平台
+    // 列表，避免默认 mock 中 enabled=false 的 sk-disabled 进入 disabledKeys
+    const { createDb } = await import("@/lib/prisma");
+    vi.mocked(createDb).mockResolvedValueOnce({
+      platforms: { findMany: async () => [] },
+    } as never);
+    await loadKeyStatusFromKV({} as D1Database, undefined, { DB_TYPE: "d1" });
+
+    const kv = makeMockKv();
+    const putSpy = vi.spyOn(kv, "put");
+
+    await recordKeyError("sk-whitelisted", 401, "platform-1", {} as D1Database);
+
+    expect(isKeyDeprioritized("sk-whitelisted", "platform-1")).toBe(true);
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(kv.store.size).toBe(0);
+  });
+});
+
 // ==================== banKey KV 持久化 ====================
 
 /** 内存版 KV mock（仅实现 get/put） */

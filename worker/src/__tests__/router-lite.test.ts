@@ -182,4 +182,45 @@ describe("routeRequestLite 路由", () => {
     expect(route!.platform.id).toBe("p-b");
     expect(route!.targetModel).toBe("gpt-4o");
   });
+
+  it("映射钉定平台处于冷却期时不被直选（返回不可用，不回退其他平台）", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [
+          makePlatform({
+            id: "p-pinned",
+            cooldownEnd: Math.floor((Date.now() + 60_000) / 1000),
+          }),
+          makePlatform({ id: "p-other" }),
+        ],
+        [
+          { platformId: "p-pinned", modelId: "gpt-4o" },
+          { platformId: "p-other", modelId: "gpt-4o" },
+        ],
+        [{ id: "m1", alias: "fixed", targetModel: "gpt-4o", platformId: "p-pinned" }]
+      ) as any
+    );
+    await forceRefreshRouterCacheLite(dummyDb, env);
+
+    // 钉定平台在冷却期内：与全量版 router.ts 同场景语义一致，直接返回不可用，
+    // 不回退到同样支持该模型的 p-other
+    const route = await routeRequestLite("fixed", dummyDb, env);
+    expect(route).toBeNull();
+  });
+
+  it("映射钉定平台冷却到期后恢复直选", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform({ id: "p-pinned", cooldownEnd: Math.floor(Date.now() / 1000) - 60 })],
+        [{ platformId: "p-pinned", modelId: "gpt-4o" }],
+        [{ id: "m1", alias: "fixed", targetModel: "gpt-4o", platformId: "p-pinned" }]
+      ) as any
+    );
+    await forceRefreshRouterCacheLite(dummyDb, env);
+
+    const route = await routeRequestLite("fixed", dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.platform.id).toBe("p-pinned");
+    expect(route!.targetModel).toBe("gpt-4o");
+  });
 });

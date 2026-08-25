@@ -13,7 +13,7 @@ import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel
 import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
 import { sendNotification } from "@/lib/notifier";
 import { saveDebugLog } from "@/lib/debug-log";
-import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "./load-balancer";
+import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, checkAndUpdateCircuitBreakerState, recordPlatform429 } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
   checkPlatformRpm,
@@ -387,8 +387,10 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformRpm.allowed) {
-    // 请求未发出：释放半开探测配额（否则被门禁拒绝的探测槽位永远不归还）
-    releaseHalfOpenPending(route.platform.id);
+    // 请求未发出：仅当 routeRequest 经 selectPlatform 占用了半开探测槽位
+    // （halfOpenHeld=true，映射直选恒 false 未占用）才释放，否则会误减其他
+    // 并发探测请求持有的槽位（bug L5）
+    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
     // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
     try {
       await recordRequestLog({
@@ -425,7 +427,9 @@ export async function proxyV1Request(
     env.KV
   );
   if (!keyRpm.allowed) {
-    releaseHalfOpenPending(route.platform.id);
+    // 仅当 routeRequest 经 selectPlatform 占用了半开探测槽位（halfOpenHeld=true，
+    // 映射直选恒 false 未占用）才释放，否则会误减其他并发探测请求持有的槽位（bug L5）
+    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
     // Key 级拒绝时归还已扣的平台 RPM 计数（与 Pages 版 v1-rate-limit 行为对齐）：
     // 先扣平台后扣 Key 的顺序下不归还会让平台共享配额被无关请求白白消耗
     try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
@@ -457,8 +461,15 @@ export async function proxyV1Request(
     env.KV
   );
   if (!platformTpm.allowed) {
-    // 请求未发出：释放半开探测配额
-    releaseHalfOpenPending(route.platform.id);
+    // 请求未发出：仅当 routeRequest 经 selectPlatform 占用了半开探测槽位
+    // （halfOpenHeld=true，映射直选恒 false 未占用）才释放，否则会误减其他
+    // 并发探测请求持有的槽位（bug L5）
+    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
+    // platformTpm 拒绝时平台 RPM 与 TPM 均已扣减，需一并归还
+    // （与 keyTpm 分支同一理由：先扣平台后扣 Key 的顺序下不归还会让平台
+    // 共享配额被无关请求白白消耗）
+    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
+    try { await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, estimatedTokens, env.KV); } catch {}
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
     try {
       await recordRequestLog({
@@ -496,7 +507,9 @@ export async function proxyV1Request(
     env.KV
   );
   if (!keyTpm.allowed) {
-    releaseHalfOpenPending(route.platform.id);
+    // 仅当 routeRequest 经 selectPlatform 占用了半开探测槽位（halfOpenHeld=true，
+    // 映射直选恒 false 未占用）才释放，否则会误减其他并发探测请求持有的槽位（bug L5）
+    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
     // 与 Pages v1 对齐：keyTpm 拒绝时平台 RPM 与 TPM 均已扣减，需一并归还
     try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
     try { await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, estimatedTokens, env.KV); } catch {}
@@ -511,6 +524,10 @@ export async function proxyV1Request(
   let currentPlatform = route.platform;
   const currentTargetModel = route.targetModel;
   let currentKey = getNextKey(currentPlatform);
+  // 当前平台是否持有半开探测槽位：初值取 routeRequest 的 halfOpenHeld 标记
+  // （映射直选恒 false）；重试路径经 selectPlatform 换平台时同步更新，供循环内
+  // 不走 recordSuccess/recordFailure 的失败分支精确归还槽位（bug L5）
+  let currentHalfOpenHeld = route.halfOpenHeld === true;
   const triedKeys = new Set<string>();
   const triedPlatforms = new Set<string>();
 
@@ -525,32 +542,57 @@ export async function proxyV1Request(
       `，尝试切换到其他平台`
     );
     triedPlatforms.add(currentPlatform.id);
-    // 释放半开探测配额：routeRequest 的 selectPlatform 选中该 half-open 平台时
-    // 已占用探测槽位（halfOpenPending++），此处因无可用 Key 放弃它必须归还，
-    // 否则槽位被无 Key 候选占满后该平台被排除探测，直到缓存重建（最长 30 秒）
-    // 才恢复——与重试路径换平台时的 releaseHalfOpenPending 行为对齐
-    releaseHalfOpenPending(currentPlatform.id);
+    // 释放半开探测配额：仅当 routeRequest 经 selectPlatform 占用了该 half-open
+    // 平台的探测槽位（halfOpenHeld=true，映射直选恒 false 未占用）才归还，否则
+    // 会误减其他并发探测请求持有的槽位（bug L5）。不归还则槽位被无 Key 候选
+    // 占满后该平台被排除探测，直到缓存重建（最长 30 秒）才恢复
+    if (currentHalfOpenHeld) {
+      releaseHalfOpenPending(currentPlatform.id);
+      currentHalfOpenHeld = false;
+    }
 
-    const availablePlatforms = getPlatformsForModel(
-      currentTargetModel,
-      triedPlatforms
-    );
+    // 与重试路径同语义：经 selectPlatform 过滤选择（熔断 open 排除/半开探测配额/
+    // 高错误率降级/429 冷却/优先级排序），而非直接取第一个有 Key 候选——后者绕过
+    // 全部负载均衡过滤，把请求打向已熔断或高错误率平台（bug M7）
+    const availablePlatforms = [
+      ...getPlatformsForModel(currentTargetModel, triedPlatforms),
+    ];
+    // 循环会逐个剔除无 Key 候选，提前快照候选总数供兜底日志统计
+    const totalCandidates = availablePlatforms.length;
     let switched = false;
-    for (const p of availablePlatforms) {
-      const key = getNextKey(p);
+    while (availablePlatforms.length > 0 && !switched) {
+      const nextPlatform = selectPlatform(availablePlatforms);
+      if (!nextPlatform) break;
+      const key = getNextKey(nextPlatform);
       if (key) {
-        currentPlatform = p;
+        // 紧随 selectPlatform 同步判定占用状态（中间无 await，与 router.ts
+        // heldHalfOpenSlot 同理）：选中即可能已为本次选择占用半开探测槽位，
+        // 后续失败分支据此精确归还（bug L5）
+        currentHalfOpenHeld =
+          checkAndUpdateCircuitBreakerState(nextPlatform.id) === "half-open";
+        currentPlatform = nextPlatform;
         currentKey = key;
         switched = true;
-        console.log(`${logTag} 已切换到平台 "${p.name}" (${p.id})`);
-        break;
+        console.log(
+          `${logTag} 已切换到平台 "${nextPlatform.name}" (${nextPlatform.id})`
+        );
+      } else {
+        // 该候选无可用 Key：剔除后继续尝试下一个候选。
+        // 同时释放半开探测配额：nextPlatform 刚由上方 selectPlatform 选中
+        // 且至此无 await 间隔——若其为 half-open 则 selectPlatform 必已为
+        // 本次选择占用一个槽位，此处无条件释放恰好归还自己的占用；非
+        // half-open 时 releaseHalfOpenPending 为无操作，无需 halfOpenHeld 标记。
+        // 不释放则探测槽位被无 Key 候选占满后该平台被排除，直到缓存重建
+        // （最长 30 秒）才恢复探测
+        releaseHalfOpenPending(nextPlatform.id);
+        availablePlatforms.splice(availablePlatforms.indexOf(nextPlatform), 1);
       }
     }
 
     if (!switched) {
       console.error(
         `${logTag} 所有平台均无可用 Key，` +
-        `已检查 ${availablePlatforms.length + 1} 个平台`
+        `已检查 ${totalCandidates + 1} 个平台`
       );
       // 全部平台无可用 Key：平台维度未知记 null（配置问题，不计入任何平台评分）
       try {
@@ -866,9 +908,12 @@ export async function proxyV1Request(
           // 读取失败不影响流程
         }
         clearTimeout(upstreamTimeoutId);
-        // selectPlatform 可能已占用半开探测槽位；3xx 属配置错误不计熔断，
-        // 但槽位必须归还，否则连续占用后平台恢复探测被饿死
-        releaseHalfOpenPending(currentPlatform.id);
+        // 仅当当前平台持有半开探测槽位（首轮取 routeRequest 的 halfOpenHeld，
+        // 重试轮取 selectPlatform 换平台时的占用标记）才归还；3xx 属配置错误
+        // 不计熔断且不走 recordSuccess/recordFailure，必须在此显式归还（bug L5）
+        if (currentHalfOpenHeld) {
+          releaseHalfOpenPending(currentPlatform.id);
+        }
         try {
           await recordRequestLog({
             keyId: apiKey.id,
@@ -937,6 +982,14 @@ export async function proxyV1Request(
         console.error(`${logTag} 日志写入失败:`, logError);
       }
 
+      // 自动模型冻结（bug L21）：不可重试 5xx 的提前 return 此前不经过重试
+      // 耗尽处的冻结逻辑，自动模型分流选中的一次性坏模型不会被拉黑，后续
+      // 请求仍会命中同一坏模型。守卫与最终失败处一致（isAutoModelRequest），
+      // 仅冻结实际发送的目标模型（currentTargetModel），显式指定模型不受影响
+      if (isAutoModelRequest(requestedModel)) {
+        freezeAutoModel(currentTargetModel);
+      }
+
       if (config.protocol === "anthropic") {
         return Response.json(
           formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
@@ -956,9 +1009,14 @@ export async function proxyV1Request(
     // 封禁与错误计数对每一轮（含最后一轮）都执行：此前只封禁可重试的中间轮次，
     // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
     // 自动禁用阈值（5 次）被系统性稀释
-    // 该平台可能经 selectPlatform 占用了半开探测槽位；本路径不走
-    // recordSuccess/recordFailure（二者内部会清零 pending），必须显式归还
-    releaseHalfOpenPending(currentPlatform.id);
+    // 仅当当前平台持有半开探测槽位（首轮 routeRequest 的 halfOpenHeld / 重试轮
+    // selectPlatform 换平台的占用标记）才显式归还：本路径不走
+    // recordSuccess/recordFailure（二者内部会清零 pending），归还后立即清零标记，
+    // 防止同平台换 Key 的下一轮失败在此重复释放误减他人槽位（bug L5）
+    if (currentHalfOpenHeld) {
+      releaseHalfOpenPending(currentPlatform.id);
+      currentHalfOpenHeld = false;
+    }
     await banKey(currentKey, undefined, currentPlatform.id, env.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
     // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位
@@ -1033,6 +1091,11 @@ export async function proxyV1Request(
           if (!nextPlatform) break;
           const nextPlatformKey = getNextKey(nextPlatform);
           if (nextPlatformKey) {
+            // 紧随 selectPlatform 同步判定占用状态（中间无 await，与 router.ts
+            // heldHalfOpenSlot 同理）：选中即可能已为本次选择占用半开探测槽位，
+            // 后续失败分支据此精确归还（bug L5）
+            currentHalfOpenHeld =
+              checkAndUpdateCircuitBreakerState(nextPlatform.id) === "half-open";
             // 消费响应体释放连接（同策略 1：仅真正重试时消费）
             try {
               await upstreamResponse.text();
@@ -1044,9 +1107,12 @@ export async function proxyV1Request(
             switched = true;
           } else {
             // 该平台无可用 Key：剔除后继续尝试下一个候选。
-            // 同时释放半开探测配额：选中但无 Key（Key 常处于封禁冷却，熔断 open
-            // 60 秒先解除）时若不释放，探测槽位被无 Key 候选占满后该平台被排除，
-            // 直到缓存重建（最长 30 秒）才恢复探测
+            // 同时释放半开探测配额：nextPlatform 刚由上方 selectPlatform 选中
+            // 且至此无 await 间隔——若其为 half-open 则 selectPlatform 必已为
+            // 本次选择占用一个槽位，此处无条件释放恰好归还自己的占用；非
+            // half-open 时 releaseHalfOpenPending 为无操作，无需 halfOpenHeld 标记。
+            // 不释放则探测槽位被无 Key 候选占满后该平台被排除，直到缓存重建
+            // （最长 30 秒）才恢复探测
             releaseHalfOpenPending(nextPlatform.id);
             candidates.splice(candidates.indexOf(nextPlatform), 1);
           }

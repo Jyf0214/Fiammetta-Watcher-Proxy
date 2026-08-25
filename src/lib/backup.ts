@@ -104,6 +104,17 @@ export async function runBackupTask(
       body: encrypted,
       signal: controller.signal,
     });
+    // 必须消费响应体：未读取的 body 会使 keep-alive 连接保持占用而泄漏
+    // （同 upstream-proxy 健康/拉取/重试/模型发现各路径的修复）；
+    // mock/异常响应可能没有 arrayBuffer（测试 stub 返回 { ok, status }），跳过读取，
+    // 读取中断则取消流兜底避免连接滞留；无论成败均不改返回结构与错误信息
+    if (typeof res.arrayBuffer === "function") {
+      try {
+        await res.arrayBuffer();
+      } catch {
+        await res.body?.cancel().catch(() => {});
+      }
+    }
     if (!res.ok) {
       return { success: false, skipped: `接收端返回 HTTP ${res.status}`, sizeBytes: encrypted.length };
     }

@@ -2,7 +2,7 @@
  * Lite 版路由引擎 — 纯负载均衡，无评分/优先级/熔断器
  *
  * VERSION=lite 时构建使用（见 scripts/worker-lite-gate.sh），以最小化 CPU 运行时间：
- * - 内存缓存平台列表与模型映射（30 秒 TTL），只拉取平台信息
+ * - 内存缓存平台列表与模型映射（120 秒 TTL），只拉取平台信息
  * - 模型名称解析（精确匹配 + 通配符，与全量版语义一致）
  * - 平台选择：仅按权重加权随机（不读 platform_scores、不按优先级分组、
  *   不维护熔断器状态、不写平台状态）
@@ -291,10 +291,15 @@ export async function routeRequestLite(
   let selectedPlatform: PlatformConfig | null;
 
   if (targetPlatformId) {
-    // 映射指定了平台
+    // 映射指定了平台：过滤口径与 selectPlatformLite 一致（enabled + 冷却期已过）。
+    // 钉定平台处于冷却期时不直选、也不回退其他平台（返回不可用），与全量版
+    // router.ts 同场景语义对齐，避免映射路由绕过解禁时间把请求打进已知故障平台
     selectedPlatform =
       platformCache.find(
-        (p) => p.id === targetPlatformId && p.enabled
+        (p) =>
+          p.id === targetPlatformId &&
+          p.enabled &&
+          (p.cooldownEnd === null || p.cooldownEnd * 1000 <= Date.now())
       ) ?? null;
   } else {
     // 收集所有支持该模型的平台，按权重负载均衡

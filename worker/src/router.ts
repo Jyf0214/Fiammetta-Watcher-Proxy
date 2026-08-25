@@ -2,7 +2,7 @@
  * 路由引擎 — 为请求选择最佳上游平台
  *
  * 核心功能：
- * - 内存缓存平台列表和模型映射，30 秒 TTL
+ * - 内存缓存平台列表和模型映射，120 秒 TTL
  * - 模型名称解析（精确匹配 + 通配符）
  * - 自动模型支持（配置自动模型 ID 后，所有请求自动路由）
  * - 加权轮询选择平台
@@ -275,19 +275,55 @@ function resolveModelMapping(
 // ==================== 路由入口 ====================
 
 /**
+ * 带半开探测槽位归属标记的路由决策
+ *
+ * RouteDecision 定义在共享类型文件 lib/types.ts（Pages/Worker 共用，经
+ * src/lib/types.ts 桥接导出），此处不改共享定义，以结构扩展方式追加
+ * halfOpenHeld 字段；扩展后的类型仍可赋值给任何接受 RouteDecision 的位置。
+ */
+export interface WorkerRouteDecision extends RouteDecision {
+  /**
+   * 本次选择是否占用了目标平台的半开探测槽位（halfOpenPending++）。
+   *
+   * 仅当平台经 selectPlatform 选中、且选中时熔断器处于 half-open 状态时为 true；
+   * 模型映射直选等不经 selectPlatform 的路径不占用槽位，恒为 false。
+   *
+   * 调用方约定：请求被 RPM/TPM 门禁拒绝时，仅当此值为 true 才应调用
+   * releaseHalfOpenPending —— 否则会误减其他并发探测请求持有的槽位，
+   * 使半开期实际并发探测超过上限（bug L5）。
+   */
+  halfOpenHeld?: boolean;
+}
+
+/**
+ * 判断刚被 selectPlatform 选中的平台是否在选中时占用了半开探测槽位
+ *
+ * selectPlatform 内部仅在「选中且当时熔断器为 half-open」时执行
+ * halfOpenPending++。本函数必须在同一同步块内紧随 selectPlatform 调用：
+ * 中间无 await、状态不可能被其他请求改写（Workers 单线程），读取结果与
+ * 占用条件完全一致；且刚通过过滤的平台不可能处于 open 态（open→half-open
+ * 的转换只发生在 selectPlatform 的过滤阶段），此时
+ * checkAndUpdateCircuitBreakerState 对 closed/half-open 均为纯读。
+ */
+function heldHalfOpenSlot(platformId: string): boolean {
+  return checkAndUpdateCircuitBreakerState(platformId) === "half-open";
+}
+
+/**
  * 为请求选择最佳路由
  *
  * @param requestedModel - 客户端请求的模型名称
  * @param db - D1 数据库绑定
  * @param sourceApi - 下游来源 API（由端点决定），默认 chat 兼容旧调用
- * @returns 路由决策（平台 + 目标模型名），无可用平台返回 null
+ * @returns 路由决策（平台 + 目标模型名），无可用平台返回 null；
+ *          halfOpenHeld 标记本次选择是否占用了半开探测槽位，语义见 WorkerRouteDecision
  */
 export async function routeRequest(
   requestedModel: string,
   db: D1Database,
   env?: WorkerEnv,
   sourceApi: ApiType = "chat"
-): Promise<RouteDecision | null> {
+): Promise<WorkerRouteDecision | null> {
   await refreshCache(db, env);
 
   // 自动模型处理（暂不参与 API 转换映射，自动模型本身已是抽象 ID）
@@ -313,6 +349,7 @@ export async function routeRequest(
       platform: autoPlatform,
       targetModel: modelByPlatform.get(autoPlatform.id) as string,
       sourceApi,
+      halfOpenHeld: heldHalfOpenSlot(autoPlatform.id),
     };
   }
 
@@ -323,6 +360,10 @@ export async function routeRequest(
 
   // 选择平台
   let selectedPlatform: PlatformConfig | null;
+  // 本次选择是否经 selectPlatform 占用了半开探测槽位：
+  // 仅负载均衡路径（selectPlatform 内部对 half-open 选中平台 halfOpenPending++）
+  // 可能为 true；映射直选不经过 selectPlatform，恒为 false（bug L5）
+  let halfOpenHeld = false;
 
   if (targetPlatformId) {
     // 映射指定了平台，但仍需检查熔断器状态，避免绕过保护机制
@@ -333,16 +374,16 @@ export async function routeRequest(
     if (candidate) {
       const breakerState = checkAndUpdateCircuitBreakerState(candidate.id);
       if (breakerState === "open") {
-        // 熔断器打开状态：平台不可用，回退到 selectPlatform 负载均衡
+        // 熔断器打开状态：平台不可用，直选失败（置空后由下方统一返回 null，不回退负载均衡）
         selectedPlatform = null;
       } else if (breakerState === "half-open" && isHalfOpenProbeFull(candidate.id)) {
-        // 半开状态且探测配额已满：不再新开探测，回退到负载均衡
+        // 半开状态且探测配额已满：不再新开探测，直选失败（不回退负载均衡）
         selectedPlatform = null;
       } else if (isHighErrorRate(candidate.id)) {
-        // 高错误率降级：滑动窗口失败率超阈值，回退到负载均衡
+        // 高错误率降级：滑动窗口失败率超阈值，直选失败（不回退负载均衡）
         selectedPlatform = null;
       } else if (isPlatform429Cooldown(candidate.id)) {
-        // 429 冷却期：平台过载，回退到负载均衡
+        // 429 冷却期：平台过载，直选失败（不回退负载均衡）
         selectedPlatform = null;
       } else if (candidate.cooldownEnd !== null && candidate.cooldownEnd * 1000 > Date.now()) {
         // 管理员/系统设置的持久化冷却期未到（库中为 Unix 秒）：与 selectPlatform
@@ -368,6 +409,9 @@ export async function routeRequest(
 
     if (candidatePlatforms.length > 0) {
       selectedPlatform = selectPlatform(candidatePlatforms);
+      // 必须紧随 selectPlatform 同步调用（无 await 间隔），见 heldHalfOpenSlot 注释
+      halfOpenHeld =
+        selectedPlatform !== null && heldHalfOpenSlot(selectedPlatform.id);
     } else {
       // 没有任何平台支持该模型（系统中不存在的模型）：不请求上游，直接视为无可用平台
       selectedPlatform = null;
@@ -380,6 +424,7 @@ export async function routeRequest(
     platform: selectedPlatform,
     targetModel,
     sourceApi,
+    halfOpenHeld,
   };
 }
 

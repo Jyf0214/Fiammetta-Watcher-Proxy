@@ -185,7 +185,8 @@ export function incrementCallLimitCount(keyId: string): void {
 /**
  * 从请求中提取并验证 API Key
  *
- * @param authorizationHeader - Authorization 请求头值
+ * @param authorizationHeader - 认证头原始值：OpenAI 客户端的 "Bearer <key>"
+ *   或 Anthropic 客户端经 x-api-key 透传的裸密钥（无前缀，原样参与校验）
  * @param db - D1 数据库绑定
  * @returns apiKey（验证通过）或 { error: Response }（验证失败）
  */
@@ -200,7 +201,10 @@ export async function validateApiKey(
     if (trimmed.startsWith("Bearer ")) {
       apiKeyStr = trimmed.slice(7).trim();
     } else {
-      apiKeyStr = "";
+      // 非 Bearer 前缀原样参与校验：三端提取函数会把 Anthropic SDK 仅带的
+      // x-api-key 裸密钥（无 Bearer 前缀）透传进来，此前置空导致这类客户端
+      // 全部 401；非法值在下方查库时自然失败返回 401，不引入额外风险
+      apiKeyStr = trimmed || null;
     }
   }
 

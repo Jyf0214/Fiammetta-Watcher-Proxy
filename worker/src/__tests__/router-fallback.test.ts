@@ -6,8 +6,12 @@
  * 由调用方（Pages/Worker 入口）响应 500 "此模型不存在"。
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { routeRequest, forceRefreshRouterCache } from "../router";
+import {
+  recordFailure,
+  checkAndUpdateCircuitBreakerState,
+} from "../load-balancer";
 import { createDb } from "@/lib/prisma";
 
 vi.mock("@/lib/prisma", () => ({
@@ -46,7 +50,12 @@ function makeFakePrisma(
   autoModelSelectedConfig: string | null = null
 ) {
   return {
-    platforms: { findMany: async () => platforms },
+    platforms: {
+      findMany: async () => platforms,
+      // 熔断状态机 recordFailure/recordSuccess 会写平台状态；桩为空操作即可，
+      // 内存状态不受影响（halfOpenHeld 测试依赖）
+      update: async () => ({}),
+    },
     modelMappings: { findMany: async () => mappings },
     platformModels: { findMany: async () => platformModels },
     configs: {
@@ -62,6 +71,12 @@ function makeFakePrisma(
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// halfOpenHeld 测试使用 fake timers 推进熔断冷却期；用例中断时也要恢复真实
+// 定时器，避免冻结的 Date.now() 污染后续用例（对未启用 fake 的用例是无操作）
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("routeRequest 对不存在模型的 fallback 行为", () => {
@@ -330,5 +345,73 @@ describe("routeRequest 自动模型分流白名单", () => {
     expect(route).not.toBeNull();
     expect(route!.platform.id).toBe("p-b");
     expect(route!.targetModel).toBe("claude-3");
+  });
+});
+
+// ==================== halfOpenHeld 半开探测槽位归属标记（bug L5） ====================
+
+/**
+ * 行为约定：halfOpenHeld 仅在「平台经 selectPlatform 选中且选中时处于
+ * half-open」时为 true（selectPlatform 内部执行了 halfOpenPending++）；
+ * 模型映射直选不经 selectPlatform、不占槽位，恒为 false。
+ * 消费方（proxy.ts / [[...v1]].ts）据此决定门禁拒绝时是否 releaseHalfOpenPending。
+ */
+describe("routeRequest halfOpenHeld 半开探测槽位归属标记", () => {
+  /** 连续失败 5 次（DEFAULT_FAILURE_THRESHOLD）触发熔断 open，再推进冷却期转 half-open */
+  async function tripToHalfOpen(platformId: string) {
+    for (let i = 0; i < 5; i++) {
+      await recordFailure(platformId, dummyDb);
+    }
+    expect(checkAndUpdateCircuitBreakerState(platformId)).toBe("open");
+    // DEFAULT_COOLDOWN_MS = 60_000，推进超过冷却期后状态机转为 half-open
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(61_000);
+    expect(checkAndUpdateCircuitBreakerState(platformId)).toBe("half-open");
+  }
+
+  it("经 selectPlatform 选中的 half-open 平台返回 halfOpenHeld=true", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-half-lb", "HalfLB")],
+        [{ platformId: "p-half-lb", modelId: "gpt-4o" }]
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    await tripToHalfOpen("p-half-lb");
+
+    // 负载均衡路径：selectPlatform 选中 half-open 平台并占用探测槽位
+    const route = await routeRequest("gpt-4o", dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.platform.id).toBe("p-half-lb");
+    expect(route!.halfOpenHeld).toBe(true);
+  });
+
+  it("半开平台经模型映射直选时返回 halfOpenHeld=false（未占用槽位）", async () => {
+    mockCreateDb.mockResolvedValue(
+      makeFakePrisma(
+        [makePlatform("p-half-map", "HalfMap")],
+        [{ platformId: "p-half-map", modelId: "deepseek-chat" }],
+        [
+          {
+            id: "m1",
+            alias: "my-deepseek",
+            targetModel: "deepseek-chat",
+            platformId: "p-half-map",
+          },
+        ]
+      ) as any
+    );
+    await forceRefreshRouterCache(dummyDb, env);
+
+    await tripToHalfOpen("p-half-map");
+
+    // 直选分支：half-open 且探测配额未满时允许直选，但不经过 selectPlatform，
+    // 从未占用槽位 —— 门禁拒绝时不得释放他人持有的槽位（bug L5 的路由侧根源）
+    const route = await routeRequest("my-deepseek", dummyDb, env);
+    expect(route).not.toBeNull();
+    expect(route!.platform.id).toBe("p-half-map");
+    expect(route!.targetModel).toBe("deepseek-chat");
+    expect(route!.halfOpenHeld).toBe(false);
   });
 });

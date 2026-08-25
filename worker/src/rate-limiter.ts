@@ -141,15 +141,22 @@ export async function checkApiKeyRpm(
  * Key 级拒绝需归还已扣的平台计数，避免平台共享配额被无关请求消耗。
  * limit 为 null 时 checkPlatformRpm 从未扣减，直接跳过（防止窗口中途
  * 管理员改为不限流后误扣新键）。KV 无原子操作，尽力而为。
+ *
+ * @param windowStart - 扣减时刻所在窗口的起点（毫秒），即扣减时的窗口键。
+ * 应传扣减时刻的 windowStart 以防跨窗口边界误减：扣减发生在窗口末尾、
+ * KV 读改写往返跨过分钟边界时，若按归还时刻现算窗口键会误减新窗口计数
+ * （凭空放行下一窗口配额），旧窗口的扣减则永久滞留。
+ * 未传时退化为按当前时刻现算窗口键（与历史行为一致，向后兼容）。
  */
 export async function releasePlatformRpm(
   platformId: string,
   rpmLimit: number | null,
-  kv: KVNamespace
+  kv: KVNamespace,
+  windowStart?: number
 ): Promise<void> {
   if (rpmLimit === null) return;
-  const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
-  const key = `${RATE_PREFIX}platform:${platformId}:${windowStart}`;
+  const ws = windowStart ?? Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  const key = `${RATE_PREFIX}platform:${platformId}:${ws}`;
   try {
     const current = await kv.get(key, { type: "text" });
     const count = current ? parseInt(current, 10) : 0;
@@ -163,16 +170,22 @@ export async function releasePlatformRpm(
 
 /**
  * 归还平台级 TPM 配额（Key 级限流拒绝时调用，按扣减时的预估值归还）
+ *
+ * @param windowStart - 扣减时刻所在窗口的起点（毫秒），即扣减时的窗口键。
+ * 语义同 releasePlatformRpm 的 windowStart：应传扣减时刻的 windowStart
+ * 以防跨窗口边界误减（跨分钟边界回滚时按归还时刻现算窗口键会误减新窗口
+ * 计数）。未传时退化为按当前时刻现算窗口键（向后兼容历史行为）。
  */
 export async function releasePlatformTpm(
   platformId: string,
   tpmLimit: number | null,
   tokenCount: number,
-  kv: KVNamespace
+  kv: KVNamespace,
+  windowStart?: number
 ): Promise<void> {
   if (tpmLimit === null || tokenCount <= 0) return;
-  const windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
-  const key = `${TPM_PREFIX}platform:${platformId}:${windowStart}`;
+  const ws = windowStart ?? Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
+  const key = `${TPM_PREFIX}platform:${platformId}:${ws}`;
   try {
     const current = await kv.get(key, { type: "text" });
     const currentTokens = current ? parseInt(current, 10) : 0;
