@@ -214,9 +214,10 @@ model requestDebugLogs {
   model           String
   platformId      String? @map("platform_id")
   status          Int     @default(0)
-  requestBody     String? @map("request_body")
-  responseSnippet String? @map("response_snippet")
-  errorMessage    String? @map("error_message")
+  // 长文本经 debug-log.ts MAX_FIELD_BYTES(16KB) 截断，裸 String 在 MySQL 映射 VARCHAR(191) 会超长报错
+  requestBody     String? @db.Text @map("request_body")
+  responseSnippet String? @db.Text @map("response_snippet")
+  errorMessage    String? @db.Text @map("error_message")
   createdAt       Int     @default(0) @map("created_at")
 
   @@index([requestLogId])
