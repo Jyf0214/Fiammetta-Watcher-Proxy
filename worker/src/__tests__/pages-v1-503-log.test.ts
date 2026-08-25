@@ -56,6 +56,9 @@ vi.mock("../../../worker/src/load-balancer", () => ({
   recordFailure: vi.fn(async () => {}),
   recordPlatform429: vi.fn(),
   releaseHalfOpenPending: vi.fn(() => {}),
+  // L5/M7：换平台路径 selectPlatform + 槽位持有判定（选中平台非 half-open 时返回 closed）
+  selectPlatform: vi.fn(() => null),
+  checkAndUpdateCircuitBreakerState: vi.fn(() => "closed"),
 }));
 
 vi.mock("@/lib/v1-rate-limit", () => ({
@@ -72,13 +75,18 @@ vi.mock("../../../worker/src/request-templates", () => ({
 }));
 
 // Pages 版 v1 代理是内联实现，不调用 createUsageTransformer；
-// recordRequestLog/updateKeyUsage 是 handler 直接调用处，extractUsage 用于内联 usage 提取
-vi.mock("../../../worker/src/token", () => ({
-  recordRequestLog: vi.fn(async () => {}),
-  extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
-  updateKeyUsage: vi.fn(async () => {}),
-  extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
-}));
+// recordRequestLog/updateKeyUsage 是 handler 直接调用处，extractUsage 用于内联 usage 提取；
+// detectResponsesStreamEvent 用真实实现（M4 后 handler 直接调用共享函数，mock 会掩盖其行为）
+vi.mock("../../../worker/src/token", async () => {
+  const actual = await vi.importActual<typeof import("../../../worker/src/token")>("../../../worker/src/token");
+  return {
+    recordRequestLog: vi.fn(async () => {}),
+    extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
+    updateKeyUsage: vi.fn(async () => {}),
+    extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
+    detectResponsesStreamEvent: actual.detectResponsesStreamEvent,
+  };
+});
 
 vi.mock("../../../worker/src/forward-headers", () => ({
   extractForwardableHeaders: vi.fn(() => ({})),
@@ -424,11 +432,9 @@ describe("Pages 版 v1 代理 上游 503 日志重现", () => {
     // 客户端断开是下游原因，无法确认上游是否真的返回空流：不触发熔断
     // （修复前空完成分支无 !clientClosed 守卫，会记 502 并熔断平台）
     expect(recordFailure).not.toHaveBeenCalled();
-    // 日志按成功路径记录（与截断分支客户端断开时落入 else 的行为一致）
-    expect(recordRequestLog).toHaveBeenCalledTimes(1);
-    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
-    expect(logParams.status).toBe(200);
-    expect(logParams.isError).toBe(false);
+    // L19 口径统一：客户端断开时成功路径零留痕（与 Worker 版一致不记 200 成功日志，
+    // 断言更新理由：旧断言 status=200/isError=false 编码了断开后仍记成功日志的旧行为）
+    expect(recordRequestLog).not.toHaveBeenCalled();
   });
 
   it("修复验证：流式上游挂起（看门狗 120s 无数据）→ 日志记 504 + isError=true", async () => {

@@ -73,7 +73,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const param = req.query.cron;
   const task = Array.isArray(param) ? param[0] : param;
-  const VALID_TASKS = ["model-fetch", "key-reset", "log-archive", "proxy-health", "proxy-pull"];
+  // 与 CRON_ROUTES 键保持一致：此前遗漏 "backup" 导致 /api/cron/backup 恒 404，
+  // 非 CF Worker 部署（外部调度器触发）的定时加密备份静默失效
+  const VALID_TASKS = ["model-fetch", "key-reset", "log-archive", "proxy-health", "proxy-pull", "backup"];
   if (!task || !VALID_TASKS.includes(task)) {
     return res.status(404).json({ error: "Not Found" });
   }

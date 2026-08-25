@@ -11,8 +11,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
-import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429 } from "../../../worker/src/load-balancer";
-import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo } from "../../../worker/src/token";
+import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429, checkAndUpdateCircuitBreakerState } from "../../../worker/src/load-balancer";
+import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent } from "../../../worker/src/token";
 import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
@@ -153,6 +153,9 @@ async function resolvePagesEnv(): Promise<WorkerEnv & { KV?: KVNamespace; DB?: D
     if (env.PG_URL) process.env.PG_URL = env.PG_URL;
     if (env.MARIADB_URL) process.env.MARIADB_URL = env.MARIADB_URL;
     if (env.MYSQL_URL) process.env.MYSQL_URL = env.MYSQL_URL;
+    // HYPERDRIVE binding 同步（与 Worker 入口 syncWorkerEnv 写法一致）：连接串只在
+    // binding 对象中，不同步则 Pages 部署下 createDb 解析不到 Hyperdrive
+    if (env.HYPERDRIVE) process.env.HYPERDRIVE = JSON.stringify(env.HYPERDRIVE);
     if (env.NODE_NAME) process.env.NODE_NAME = env.NODE_NAME;
     if (env.DEPLOY_PLATFORM) process.env.DEPLOY_PLATFORM = env.DEPLOY_PLATFORM;
     return {
@@ -211,7 +214,8 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
 /**
  * 可重试的上游错误状态码
  *
- * 429（限流）、401（密钥失效）、403（密钥无权限/被拦截）均表示当前 Key 或平台
+ * 429（限流）、401（密钥失效）、403（密钥无权限/被拦截）、402（欠费/额度耗尽，
+ * recordKeyError 计数增量最大 +5 直接达自动禁用阈值）均表示当前 Key 或平台
  * 不可用，封禁当前 Key 并换 Key/换平台重试。5xx 等其它错误不重试，直接真实透传。
  */
 const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
@@ -276,15 +280,17 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
   const map: Record<string, ProxyConfig> = {
     "/chat/completions": { upstreamPath: "/chat/completions", supportsStreaming: true },
     "/completions": { upstreamPath: "/completions", supportsStreaming: true },
-    "/embeddings": { upstreamPath: "/embeddings" },
-    "/images/generations": { upstreamPath: "/images/generations" },
-    "/images/edits": { upstreamPath: "/images/edits" },
-    "/images/variations": { upstreamPath: "/images/variations" },
-    "/audio/speech": { upstreamPath: "/audio/speech" },
-    "/audio/transcriptions": { upstreamPath: "/audio/transcriptions" },
-    "/audio/translations": { upstreamPath: "/audio/translations" },
+    // 以下 JSON 端点显式 supportsStreaming:false（与 worker/src/endpoints.ts 端点表
+    // 一致）：缺省时 undefined !== false 恒过，stream:true 会把 JSON 上游当 SSE 解析
+    "/embeddings": { upstreamPath: "/embeddings", supportsStreaming: false },
+    "/images/generations": { upstreamPath: "/images/generations", supportsStreaming: false },
+    "/images/edits": { upstreamPath: "/images/edits", supportsStreaming: false },
+    "/images/variations": { upstreamPath: "/images/variations", supportsStreaming: false },
+    "/audio/speech": { upstreamPath: "/audio/speech", supportsStreaming: false },
+    "/audio/transcriptions": { upstreamPath: "/audio/transcriptions", supportsStreaming: false },
+    "/audio/translations": { upstreamPath: "/audio/translations", supportsStreaming: false },
     "/responses": { upstreamPath: "/responses", supportsStreaming: true },
-    "/models": { upstreamPath: "/models" },
+    "/models": { upstreamPath: "/models", supportsStreaming: false },
     "/messages": {
       upstreamPath: "/chat/completions",
       supportsStreaming: true,
@@ -297,19 +303,23 @@ function getEndpointConfig(pathname: string): ProxyConfig | null {
   return null;
 }
 
+/** 平台优先级排序 comparator：priority 小者优先，无优先级信息的平台排最后。
+ *  列表去重与详情 owned_by 归属必须使用同一实体，避免两端口径漂移 */
+function comparePlatformsByPriority(pc: ReturnType<typeof getPlatformCache>) {
+  return (a: string, b: string): number =>
+    (pc.find(x => x.id === a)?.priority ?? Number.MAX_SAFE_INTEGER) -
+    (pc.find(x => x.id === b)?.priority ?? Number.MAX_SAFE_INTEGER);
+}
+
 async function handleModelsList(res: NextApiResponse): Promise<void> {
   const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
   const models: Array<{ id: string; object: string; owned_by: string }> = [];
   const pc = getPlatformCache(), pm = getPlatformModelCache();
-  // 同名模型多平台重复：按平台优先级（priority 小者优先）取最优归属去重，
+  // 同名模型多平台重复：按平台优先级取最优归属去重，
   // 避免客户端模型下拉出现大量同名条目
   const seen = new Set<string>();
-  const orderedPids = [...pm.keys()].sort((a, b) => {
-    const pa = pc.find(x => x.id === a)?.priority ?? Number.MAX_SAFE_INTEGER;
-    const pb = pc.find(x => x.id === b)?.priority ?? Number.MAX_SAFE_INTEGER;
-    return pa - pb;
-  });
+  const orderedPids = [...pm.keys()].sort(comparePlatformsByPriority(pc));
   for (const pid of orderedPids) {
     const p = pc.find(x => x.id === pid);
     for (const mid of pm.get(pid) ?? []) {
@@ -325,11 +335,12 @@ async function handleModelDetail(modelId: string, res: NextApiResponse): Promise
   const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
   const pc = getPlatformCache(), pm = getPlatformModelCache();
-  for (const [pid, ms] of pm) {
-    if (ms.has(modelId)) {
-      const p = pc.find(x => x.id === pid);
-      res.status(200).json({ id: modelId, object: "model", owned_by: p?.name ?? "unknown" }); return;
-    }
+  // 与列表端点同一口径：按平台优先级取最优归属（priority 小者优先，缺失排最后），
+  // 避免同名模型两处 owned_by 不一致（此前按缓存插入序首个命中）
+  const owningPids = [...pm.entries()].filter(([, ms]) => ms.has(modelId)).map(([pid]) => pid).sort(comparePlatformsByPriority(pc));
+  if (owningPids.length > 0) {
+    const p = pc.find(x => x.id === owningPids[0]);
+    res.status(200).json({ id: modelId, object: "model", owned_by: p?.name ?? "unknown" }); return;
   }
   res.status(404).json({ error: { message: `模型 ${modelId} 不存在`, type: "invalid_request_error" } });
 }
@@ -392,17 +403,26 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     sendV1Error(res, config, 500, "此模型不存在", "server_error"); return;
   }
 
+  // 当前平台是否由本次请求占用半开探测槽位：初始取 routeRequest 的 halfOpenHeld
+  // 标记（经 selectPlatform 选中的 half-open 平台为 true），切换平台后按选中时的
+  // 熔断器状态重新判定。所有 releaseHalfOpenPending 调用点据此条件化——否则会
+  // 误减其他并发探测请求持有的槽位，半开期实际并发探测超上限（bug L5）
+  let curHoldsHalfOpenSlot = route.halfOpenHeld === true;
+
   const pRpm = await checkPlatformRpm(route.platform.id, route.platform.rpmLimit);
   if (!pRpm.allowed) {
-    // 请求未发出：释放半开探测配额（否则被门禁拒绝的探测槽位永远不归还）
-    releaseHalfOpenPending(route.platform.id);
+    // 请求未发出：仅当本请求确实持有半开探测槽位（routeRequest 经 selectPlatform
+    // 占用）才释放——映射直选的 half-open 平台未占槽位，无条件释放会误减其他
+    // 并发探测请求的槽位（bug L5）
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(route.platform.id);
     // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台请求频率超限", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
     sendV1Error(res, config, 429, "上游平台请求频率超限", "rate_limit_error", { retry_after: Math.ceil((pRpm.resetAt - Date.now()) / 1000) }); return;
   }
   const kRpm = await checkApiKeyRpm(apiKey.id, apiKey.rpmLimit);
   if (!kRpm.allowed) {
-    releaseHalfOpenPending(route.platform.id);
+    // 同 pRpm：仅持有槽位时才释放（bug L5）
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(route.platform.id);
     // Key 级拒绝时平台 RPM 已扣：不归还则配额被与该客户端无关的请求白白消耗；
     // 传扣减时刻的窗口键，跨分钟边界回滚不会误减新窗口计数
     await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
@@ -420,9 +440,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const anthropicInputEstimate = config.protocol === "anthropic" ? estimateInputTokens(rawBody) : est;
   const pTpm = await checkPlatformTpm(route.platform.id, route.platform.tpmLimit, est);
   if (!pTpm.allowed) {
-    // 请求未发出：释放半开探测配额；平台 RPM 已扣同样归还（与 kRpm/kTpm
+    // 请求未发出：仅持有半开探测槽位时才释放；平台 RPM 已扣同样归还（与 kRpm/kTpm
     // 拒绝分支同一理由——不归则会配额被无关请求白白消耗，放大后续 429）
-    releaseHalfOpenPending(route.platform.id);
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(route.platform.id);
     await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
     // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
     try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "上游平台 Token 速率超限", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
@@ -430,7 +450,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
   const kTpm = await checkApiKeyTpm(apiKey.id, apiKey.tpmLimit, est);
   if (!kTpm.allowed) {
-    releaseHalfOpenPending(route.platform.id);
+    // 同 pRpm：仅持有槽位时才释放（bug L5）
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(route.platform.id);
     // Key 级拒绝时平台 RPM/TPM 均已扣：一并归还，est 与扣减时保持同一预估值，
     // 窗口键传扣减时刻的 windowStart 防跨窗口误减
     await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, pRpm.windowStart);
@@ -444,11 +465,33 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const tried = new Set<string>(), triedP = new Set<string>();
 
   if (!curKey) {
-    // selectPlatform 可能已为该 half-open 平台占用探测槽位；因无可用 Key
-    // 放弃它必须归还（与 Worker 版 proxy.ts 同路径对齐），否则恢复探测被饿死
-    releaseHalfOpenPending(cur.id);
+    // selectPlatform 可能已为该 half-open 平台占用探测槽位；因无可用 Key 放弃它
+    // 必须归还——但仅当本请求确实持有（映射直选路径未占槽位，无条件释放会误减
+    // 其他并发探测请求的槽位，bug L5）
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(cur.id);
     triedP.add(cur.id);
-    for (const p of getPlatformsForModel(tgt, triedP)) { const k = getNextKey(p); if (k) { cur = p; curKey = k; break; } }
+    // 与重试路径同语义：经 selectPlatform 过滤选择（熔断 open 排除/半开配额/
+    // 错误率/429 冷却/优先级排序），而非直接取第一个有 Key 候选——后者绕过全部
+    // 负载均衡过滤，把请求打向已熔断或高错误率平台（bug M7）
+    const candidates = [...getPlatformsForModel(tgt, triedP)];
+    while (candidates.length > 0 && !curKey) {
+      const nextPlatform = selectPlatform(candidates);
+      if (!nextPlatform) break;
+      const k = getNextKey(nextPlatform);
+      if (k) {
+        cur = nextPlatform; curKey = k;
+        // selectPlatform 对选中的 half-open 平台执行 halfOpenPending++；紧随其后
+        // 同步读取熔断器状态即选中时是否持有槽位（与 router.ts heldHalfOpenSlot
+        // 同一手法，中间无 await 状态不会被改写）
+        curHoldsHalfOpenSlot = checkAndUpdateCircuitBreakerState(nextPlatform.id) === "half-open";
+      } else {
+        // 该候选无可用 Key：剔除后尝试下一个。刚被本请求 selectPlatform 选中的
+        // 平台若处于 half-open，其探测槽位必由本请求占用，必须归还——否则槽位被
+        // 无 Key 候选占满后该平台被排除，直到缓存重建才恢复探测
+        releaseHalfOpenPending(nextPlatform.id);
+        candidates.splice(candidates.indexOf(nextPlatform), 1);
+      }
+    }
     if (!curKey) {
       // 全部平台无可用 Key：平台维度未知记 null（配置问题，不计入任何平台评分）
       try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: null, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: "所有平台均无可用 API Key", ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
@@ -461,11 +504,8 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   for (let attempt = 0; attempt <= MAX_UPSTREAM_RETRIES; attempt++) {
     if (curKey) tried.add(curKey);
     triedP.add(cur.id);
-    if (!curKey) {
-      // 当前平台 Key 耗尽（同平台换 Key 失败）：计入该平台错误统计
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 500, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `平台 "${cur.name}" 无可用 API Key`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }); } catch {}
-      sendV1Error(res, config, 500, `平台 "${cur.name}" 无可用 API Key`, "server_error"); return;
-    }
+    // 不变量：此处 curKey 恒非空——进入循环前已由上方初始选择保证；循环内仅有的
+    // 两条 continue 路径（同平台换 Key / 换平台）都以非空 Key 赋值后才继续
 
     // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
     // 认证用 x-api-key + anthropic-version
@@ -626,7 +666,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo);
+      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo, rawBody);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -642,9 +682,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         // 消费响应体释放连接（keep-alive 连接泄漏防护，与其他错误分支一致）
         void upRes.arrayBuffer().catch(() => {});
         clearTimeout(upstreamTimeoutId);
-        // selectPlatform 可能已占用半开探测槽位；3xx 属配置错误不计熔断，
-        // 但槽位必须归还，否则连续占用后平台恢复探测被饿死
-        releaseHalfOpenPending(cur.id);
+        // 3xx 属配置错误不计熔断，但本请求持有的半开探测槽位必须归还，
+        // 否则连续占用后平台恢复探测被饿死（未持槽位不释放，bug L5）
+        if (curHoldsHalfOpenSlot) releaseHalfOpenPending(cur.id);
         if (proxy?.url) recordProxyTraffic(proxy.url, upRes.status);
         void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游返回重定向（HTTP ${upRes.status}），请检查平台 baseUrl 配置`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
         sendV1Error(res, config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error"); return;
@@ -664,6 +704,10 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         responseSnippet: errText,
         errorMessage: errText.substring(0, 1000),
       });
+      // 自动模型冻结：不可重试 5xx 同样证明目标模型故障，提前 return 路径也须冻结，
+      // 否则自动模型在冻结机制之外反复撞上同一坏模型（守卫与重试耗尽路径一致；
+      // 3xx 分支不冻结——baseUrl 配置错误非模型故障，且该平台所有模型都会失败）
+      if (isAutoModelRequest(requestedModel)) freezeAutoModel(tgt);
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
         res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
@@ -677,9 +721,11 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 封禁与错误计数对每一轮（含最后一轮）都执行：此前仅封禁可重试的中间轮次，
     // 最后一次尝试失败时该 Key 逃过 5 分钟封禁与 errorCount 累计，
     // 自动禁用阈值（5 次）被系统性稀释（与 Worker 版 proxy.ts 对齐）
-    // 该平台可能经 selectPlatform 占用了半开探测槽位；本路径不走
-    // recordSuccess/recordFailure，必须显式归还（与 Worker 版同路径对齐）
-    releaseHalfOpenPending(cur.id);
+    // 本路径不走 recordSuccess/recordFailure，持有的半开探测槽位必须显式归还；
+    // 未持槽位（映射直选的 half-open 平台）不释放，避免误减其他并发探测的槽位
+    // （bug L5）。释放后清零标记：同平台换 Key 继续下一轮时不可重复归还
+    if (curHoldsHalfOpenSlot) releaseHalfOpenPending(cur.id);
+    curHoldsHalfOpenSlot = false;
     await banKey(curKey, undefined, cur.id, env?.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
     // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位
@@ -694,11 +740,13 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
       // 清理本次尝试的超时定时器，避免泄漏
       clearTimeout(upstreamTimeoutId);
-      // 消费本次失败的响应体，避免 undici keep-alive 连接泄漏（空响应分支 body 已
-      // 被 handleUpstreamResponsePages 消费过，此处 arrayBuffer 会 reject 被吞，安全）
-      void upRes.arrayBuffer().catch(() => {});
       const nk = getRandomKeyExcept(cur, tried);
       if (nk) {
+        // 确认切换后才消费本次失败的响应体释放连接（keep-alive 泄漏防护）——
+        // 无处可切换时下方需读取真实错误体返回 errText，提前消费会让下游收到
+        // "未知错误"（与 Worker 版「仅真正重试时消费」语义一致；空响应分支 body
+        // 已被 handleUpstreamResponsePages 消费过，此处 arrayBuffer 会 reject 被吞，安全）
+        void upRes.arrayBuffer().catch(() => {});
         // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
         // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
         // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）
@@ -718,16 +766,24 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
           const nextKey = getNextKey(nextPlatform);
           if (nextKey) {
             cur = nextPlatform; curKey = nextKey; switched = true;
+            // 同初始路径：紧随 selectPlatform 同步读熔断器状态，
+            // 判定新平台是否由本请求占用半开探测槽位
+            curHoldsHalfOpenSlot = checkAndUpdateCircuitBreakerState(nextPlatform.id) === "half-open";
           } else {
             // 该平台无可用 Key：剔除后继续尝试下一个候选。
-            // 同时释放半开探测配额：选中但无 Key（Key 常处于封禁冷却，
-            // 熔断 open 60 秒先解除）时若不释放，探测槽位被无 Key
-            // 候选占满后该平台被排除，直到缓存重建才恢复
+            // 同时释放半开探测配额：该平台刚被本请求 selectPlatform 选中，若处于
+            // half-open 其槽位必由本请求占用（选中但无 Key——Key 常处于封禁冷却，
+            // 熔断 open 60 秒先解除），不释放则探测槽位被无 Key 候选占满后该平台
+            // 被排除，直到缓存重建才恢复
             releaseHalfOpenPending(nextPlatform.id);
             candidates.splice(candidates.indexOf(nextPlatform), 1);
           }
         }
-        if (switched) continue;
+        if (switched) {
+          // 确认切换后才消费响应体（同上：仅真正重试时消费）
+          void upRes.arrayBuffer().catch(() => {});
+          continue;
+        }
       }
     }
 
@@ -772,7 +828,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }, /** 下游原始请求体（JSON）：空闲超时/流内 error 失败留痕用，本函数作用域拿不到调用方的 rawBody */ requestBody?: Record<string, unknown>): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
@@ -793,7 +849,11 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     try { first = await r.read(); }
     catch {
       clearTimeout(upstreamTimeoutId);
+      // abort 是客户端断开/总超时原因，与全量版一致不熔断
       if (upstreamController.signal.aborted) { sendV1Error(res, config, 504, "上游响应读取超时", "timeout_error"); return; }
+      // 上游原因的首块读取失败：触发平台熔断（与全量版 proxy.ts 首块 catch 一致），
+      // 否则坏平台评分不降、负载均衡反复撞上它
+      try { await recordFailure(platform.id, dummyDb, env); } catch {}
       sendV1Error(res, config, 500, "读取上游响应失败", "server_error"); return;
     }
     if (first.done) { clearTimeout(upstreamTimeoutId); r.releaseLock(); return EMPTY_UPSTREAM_RESPONSE; }
@@ -809,7 +869,11 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 导致思考内容被整体缓冲、首字节随思考延伸而推迟，且大响应尾部有截断风险。
     res.setHeader("Content-Type", "text/event-stream"); res.setHeader("Cache-Control", "no-cache, no-transform"); res.setHeader("Connection", "keep-alive");
     const d = new TextDecoder();
-    let tt = 0, pt = 0, ct = 0, uc: number | null = null, buf = "";
+    let buf = "";
+    // 最后一次收到的流内 usage 对象：成功分支统一经 extractUsage(streamUsage, est)
+    // 计算——上游漏报 usage 时按请求 max_tokens 预估兜底入账（防 0-token 绕过计费）
+    // （tt/pt/ct/uc 仅成功分支消费，在该分支内局部声明）
+    let streamUsage: Record<string, unknown> | undefined;
     // 空完成检测：是否收到过有效输出内容（content/reasoning_content 非空）。
     // 上游 200 + 只有 [DONE]/空 data 的伪成功流不触发空流哨兵/流内 error/截断/
     // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
@@ -913,15 +977,17 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                     }
                   }
                 }
-                // Responses API 流式：delta/output_text 等即视为有效内容（未转换时的兜底）
-                if (typeof d.delta === "string" && d.delta.length > 0) sawContent = true;
-                if (typeof d.output_text === "string" && d.output_text.length > 0) sawContent = true;
-                if (Array.isArray(d.output) && d.output.length > 0) sawContent = true;
-                if (d.response?.output) sawContent = true;
-                if (d.type === "response.completed" || d.type === "response.done" || d.response?.status === "completed") sawDone = true;
-                // 兼容 Chat 与 Responses 的 usage 形态
+                // Responses API 流式检测：与 Worker 全量版共用 token.ts 权威实现
+                // （含 text+output_text 内容规则、response.type==="response.completed"
+                // 完成规则，消除此前内联副本缺失两条规则的漂移）
+                const responsesEvent = detectResponsesStreamEvent(d);
+                if (responsesEvent.sawContent) sawContent = true;
+                if (responsesEvent.sawDone) sawDone = true;
+                // 兼容 Chat 与 Responses 的 usage 形态；记账统一在成功分支做——
+                // 整个流未上报 usage 时由 extractUsage(undefined, est) 按 max_tokens
+                // 预估兜底入账（与全量版 createUsageTransformer flush 语义一致）
                 const usageCandidate = (d as any).usage ?? (d as any).response?.usage ?? (d as any).response?.response?.usage;
-                if (usageCandidate) { const ex = extractUsage(usageCandidate as Record<string, unknown>, est); tt = ex.totalTokens; pt = ex.promptTokens; ct = ex.completionTokens; uc = ex.upstreamCost; }
+                if (usageCandidate) streamUsage = usageCandidate as Record<string, unknown>;
                 if (d.error) { /* 与 Worker 版 resolveStreamErrorStatus 保持一致的语义：仅 400-599 整数视为错误码；code 缺失或为非数字字符串枚举（如 Azure "content_filter"）时兜底 502——否则流正常收尾会被记成 200 成功 */ const rawCode = d.error.code; const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN; if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) { streamError = { code, message: String(d.error.message || "").substring(0, 1000) }; } else { streamError = { code: 502, message: String(d.error.message || "上游流内返回错误").substring(0, 1000) }; } }
                 if (streamer) {
                   // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
@@ -963,6 +1029,14 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 504);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+      // 失败请求留痕：无独立响应体可截取（挂起被切断），仅记录请求体供复现
+      void saveDebugLog(dummyDb, env?.DB_TYPE, {
+        model,
+        platformId: platform.id,
+        status: 504,
+        requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
+        errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+      });
     } else if (streamError) {
       // 流内 error：HTTP 头无法反映失败（下游实际收到 200 + error 流），
       // 按错误码记失败日志（不计 Key 用量）并触发平台熔断——此前只记日志不打分，
@@ -981,6 +1055,15 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       }
       if (proxyUrl) recordProxyTraffic(proxyUrl, streamError.code);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+      // 失败请求留痕：流内 error 无独立响应体可截取（错误信息已入日志 message），
+      // 仅记录请求体供复现（与网络错误路径同语义）
+      void saveDebugLog(dummyDb, env?.DB_TYPE, {
+        model,
+        platformId: platform.id,
+        status: streamError.code,
+        requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
+        errorMessage: streamError.message,
+      });
     } else if (!sawDone && !clientClosed) {
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
@@ -1005,9 +1088,19 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       if (proxyUrl) recordProxyTraffic(proxyUrl, 502);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 502, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: "上游返回空完成（200 + 流内无有效内容）", ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
     } else {
+      // 记账统一在此计算：上游漏报 usage 时 extractUsage(undefined, est) 按请求
+      // max_tokens 预估入账（与全量版 transformer flush 一致，防止 0-token 绕过计费）
+      const ex = extractUsage(streamUsage, est);
+      const tt = ex.totalTokens, pt = ex.promptTokens, ct = ex.completionTokens;
+      const uc: number | null = ex.upstreamCost;
+      // 已真实消耗的 token 仍要记账（部分转发后客户端断开，计费不应丢）
       if (tt > 0) { try { await updateKeyUsage(apiKey.id, tt, dummyDb, env); } catch {} }
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, upstreamCost: uc, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
+      // 客户端断开零留痕：与 Worker 版同场景一致不记成功日志（流被取消，
+      // 记 200 成功会虚增平台成功样本）；代理流量统计非请求日志，照常记录
+      if (!clientClosed) {
+        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, upstreamCost: uc, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
+      }
     }
     try { res.end(); } catch { /* 客户端已断开，忽略结束写入错误 */ }
     return;
@@ -1020,8 +1113,10 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 空响应：空 multipart 视为空响应，交由调用方重试
     if (ab.byteLength === 0) return EMPTY_UPSTREAM_RESPONSE;
     // 不阻塞响应：写库后置为 fire-and-forget（与流式分支一致）
-    void recordSuccess(platform.id, dummyDb, env).catch(() => {}); if (proxyUrl) recordProxyTraffic(proxyUrl, 200); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
-    res.setHeader("Content-Type", ct); res.status(200).send(Buffer.from(ab)); return;
+    // 状态码透传上游真实值（本分支仅在 2xx 进入；此前硬编码 200，上游 201/206 等
+    // 被改写为 200，日志与下游实收状态不一致——与 Worker 版 upstreamResponse.status 对齐）
+    void recordSuccess(platform.id, dummyDb, env).catch(() => {}); if (proxyUrl) recordProxyTraffic(proxyUrl, upRes.status); void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+    res.setHeader("Content-Type", ct); res.status(upRes.status).send(Buffer.from(ab)); return;
   }
   let body: string;
   try { body = await upRes.text(); }
@@ -1040,7 +1135,10 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   try {
     const p = JSON.parse(body) as Record<string, unknown>;
     openaiBody = upstreamIsAnthropic ? convertAnthropicResponse(p, model) : p;
-    if (openaiBody.usage) { const ex = extractUsage(openaiBody.usage as Record<string, unknown>, est); rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; ruc = ex.upstreamCost; }
+    // 记账统一经 extractUsage：usage 缺失时按请求 max_tokens 预估兜底入账
+    // （与全量版 flush 语义一致，防止上游漏报绕过计费；解析失败走下方 502 分支不入账）
+    const ex = extractUsage(openaiBody.usage as Record<string, unknown> | undefined, est);
+    rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; ruc = ex.upstreamCost;
   } catch {}
   res.setHeader("Content-Type", "application/json");
   if (config.protocol === "anthropic") {
@@ -1143,9 +1241,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       const parseResult = await parseRequestBody<Record<string, unknown>>(req);
       if ("error" in parseResult) { res.status(parseResult.statusCode ?? 400).json(formatAnthropicError(parseResult.statusCode ?? 400, parseResult.error)); return; }
-      // count_tokens 是 JSON 端点：multipart 形态（"multipart" in parseResult）属客户端
-      // 协议错误，按空体估算 0（不参与路由，无透传语义）
-      res.status(200).json({ input_tokens: estimateInputTokens("body" in parseResult ? parseResult.body : {}) });
+      // count_tokens 是纯 JSON 端点：multipart 形态属非法请求，回 400「请求体格式错误」
+      // ——两端一致性依据：Worker 版 v1-route.ts 对 request.json() 解析失败正是该
+      // 状态码与文案（multipart 体 JSON.parse 必然失败），Pages 版此前按空体估算
+      // 0 返回 200 属漂移
+      if ("multipart" in parseResult) { res.status(400).json(formatAnthropicError(400, "请求体格式错误")); return; }
+      res.status(200).json({ input_tokens: estimateInputTokens(parseResult.body) });
       return;
     }
     const cfgResolved = getEndpointConfig(full);

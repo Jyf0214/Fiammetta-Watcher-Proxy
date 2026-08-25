@@ -246,6 +246,15 @@ describe("proxyV1RequestLite 单次尝试", () => {
     expect(logParams.status).toBe(502);
     expect(logParams.isError).toBe(true);
     expect(logParams.errorMessage).toContain("空响应");
+    // 空响应与全量版重试路径/Pages 版对齐：封禁 Key + 计数（此前只计数不封禁）
+    expect(banKey).toHaveBeenCalledWith("sk-key1", undefined, "test-platform", env.KV);
+    expect(recordKeyError).toHaveBeenCalledWith(
+      "sk-key1",
+      502,
+      "test-platform",
+      env.DB,
+      { DB_TYPE: "d1" }
+    );
   });
 
   it("上游 200 成功：透传 200，日志 isError=false", async () => {
@@ -607,5 +616,126 @@ describe("proxyV1RequestLite forwardHeaders 认证类头过滤（W7）", () => {
     expect(sentHeaders["content-type"]).toBe("application/json");
     // 非认证类白名单头正常透传
     expect(sentHeaders["x-custom-header"]).toBe("custom-value");
+  });
+});
+
+// ==================== usage 兜底 / 转换失败落日志（与全量版语义对齐） ====================
+
+describe("proxyV1RequestLite usage maxTokensEstimate 兜底", () => {
+  it("非流式响应 usage 全 0：以请求体 max_tokens 预估值兜底记账（防 tokenLimit 绕过）", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "x",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [], max_tokens: 100 }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.isError).toBe(false);
+    // 上游漏报真实用量：以 max_tokens=100 兜底，此前记 0 导致计费绕过
+    expect(logParams.tokens).toBe(100);
+    expect(logParams.promptTokens).toBe(100);
+    expect(logParams.completionTokens).toBe(0);
+  });
+
+  it("流式响应无 usage chunk：flush 以请求体 max_tokens 预估值兜底记账", async () => {
+    const encoder = new TextEncoder();
+    const sseStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValue(
+      new Response(sseStream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [], stream: true, max_tokens: 100 }),
+      { upstreamPath: "/chat/completions", supportsStreaming: true },
+      apiKey,
+      env,
+      ctx
+    );
+    expect(res.status).toBe(200);
+
+    // 消费响应流，触发 transformer flush 写日志
+    const reader = res.body!.getReader();
+    for (;;) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.isError).toBe(false);
+    expect(logParams.tokens).toBe(100);
+    expect(logParams.promptTokens).toBe(100);
+    expect(logParams.completionTokens).toBe(0);
+  });
+
+  it("客户端未传 max_tokens：预估值钳制下限为 1，usage 缺失时不产生异常记账", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: "x", choices: [{ message: { role: "assistant", content: "ok" } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.isError).toBe(false);
+    // 与全量版一致：无 usage 字段时非流式路径不兜底（仅 usage 存在但全 0 才兜底），tokens 记 0
+    expect(logParams.tokens).toBe(0);
+  });
+});
+
+describe("proxyV1RequestLite Anthropic 转换失败落日志", () => {
+  it("anthropic 下游协议 + 上游非 JSON 响应：502 + 补记失败日志（此前零落痕）", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("not-json", { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+
+    const res = await proxyV1RequestLite(
+      buildRequest({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      { upstreamPath: "/chat/completions", supportsStreaming: false, protocol: "anthropic" },
+      apiKey,
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error?: { message?: string } };
+    // 错误文案与全量版/Pages 版同场景对齐
+    expect(body?.error?.message).toBe("上游响应格式错误");
+    const logParams = vi.mocked(recordRequestLog).mock.calls[0][0];
+    expect(logParams.platformId).toBe("test-platform");
+    expect(logParams.status).toBe(502);
+    expect(logParams.isError).toBe(true);
+    expect(logParams.errorMessage).toBe("上游响应格式错误");
   });
 });

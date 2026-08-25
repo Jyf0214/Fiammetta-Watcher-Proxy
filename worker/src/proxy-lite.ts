@@ -105,6 +105,12 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 /**
+ * token 数预估值上限（与全量版 proxy.ts / Pages 版同值）：
+ * 上游未返回 usage 时的兜底记账依据，客户端可能传极大 max_tokens，钳制防污染
+ */
+const MAX_ESTIMATED_TOKENS = 8192;
+
+/**
  * 透传白名单禁止项（大小写不敏感）：认证/请求语义类头不得由下游客户端透传覆盖。
  * 与全量版 proxy.ts 同集合——lite 部署若允许 authorization/x-api-key 等透传覆盖，
  * 下游客户端可替换平台密钥（401 封禁循环 / BYOK 绕过计费），content-length 等
@@ -554,6 +560,18 @@ export async function proxyV1RequestLite(
     }
   }
 
+  // 上游未返回 usage 时的 token 兜底预估值（防 tokenLimit 绕过，与全量版
+  // estimatedTokens 同源同算法）：multipart（图片/音频）请求体无 token 字段且
+  // 实际消耗达数千至数万 token，按上限计；普通请求取 body 的
+  // max_output_tokens/max_tokens/max_completion_tokens 并钳制到上限。
+  // 与全量版一致基于转换后的 body 计算（Anthropic 转换保留 max_tokens 字段）
+  const maxTokensEstimate = multipart
+    ? MAX_ESTIMATED_TOKENS
+    : Math.min(
+        MAX_ESTIMATED_TOKENS,
+        Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
+      );
+
   // ── 3. 路由（纯负载均衡：权重随机，无评分/优先级/熔断） ──
   const modelName = body.model as string | undefined;
   if (!modelName) {
@@ -811,6 +829,7 @@ export async function proxyV1RequestLite(
       upstreamController,
       upstreamTimeoutId,
       anthropicInputEstimate,
+      maxTokensEstimate,
       currentKey,
       clientInfo
     );
@@ -927,6 +946,8 @@ async function handleUpstreamResponseLite(
   upstreamController: AbortController,
   upstreamTimeoutId: ReturnType<typeof setTimeout>,
   anthropicInputEstimate: number,
+  /** max_tokens 兜底预估值：上游未返回 usage 时兜底记账（防 tokenLimit 绕过，与全量版一致） */
+  maxTokensEstimate: number,
   currentKey: string,
   /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */
   clientInfo?: { ipAddress?: string; userAgent?: string }
@@ -982,8 +1003,10 @@ async function handleUpstreamResponseLite(
       } catch (logError) {
         console.error("[proxy-lite] 日志写入失败:", logError);
       }
-      // 空响应也计入错误计数
+      // 空响应与全量版重试路径/Pages 版对齐：封禁 Key 5 分钟 + 计数
+      // （此前只计数不封禁，坏平台需累计 5 次才自动禁用，期间持续吞掉请求）
       if (currentKey) {
+        ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
       return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
@@ -1030,6 +1053,8 @@ async function handleUpstreamResponseLite(
       // 流内密钥类错误（429/401/402/403）时封禁+计数（与 HTTP 透传路径对齐）
       key: currentKey,
       endpoint: config.upstreamPath,
+      // 上游未返回 usage 时以请求体 max_tokens 预估值兜底记账（防 tokenLimit 绕过）
+      maxTokensEstimate,
       ipAddress: clientInfo?.ipAddress,
       userAgent: clientInfo?.userAgent,
       db: env.DB,
@@ -1145,8 +1170,10 @@ async function handleUpstreamResponseLite(
       } catch (logError) {
         console.error("[proxy-lite] 日志写入失败:", logError);
       }
-      // 空响应也计入错误计数
+      // 空响应与全量版重试路径/Pages 版对齐：封禁 Key 5 分钟 + 计数
+      // （此前只计数不封禁，坏平台需累计 5 次才自动禁用，期间持续吞掉请求）
       if (currentKey) {
+        ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
       return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
@@ -1275,8 +1302,10 @@ async function handleUpstreamResponseLite(
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
-    // 空响应也计入错误计数
+    // 空响应与全量版重试路径/Pages 版对齐：封禁 Key 5 分钟 + 计数
+    // （此前只计数不封禁，坏平台需累计 5 次才自动禁用，期间持续吞掉请求）
     if (currentKey) {
+      ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
       ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
     }
     return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
@@ -1299,7 +1328,8 @@ async function handleUpstreamResponseLite(
       : parsed;
     const usage = openaiBody.usage as Record<string, unknown> | undefined;
     if (usage) {
-      const extracted = extractUsage(usage);
+      // 传入 max_tokens 预估值防篡改（usage 全 0 时兜底记账，与全量版一致）
+      const extracted = extractUsage(usage, maxTokensEstimate);
       responseTokens = extracted.totalTokens;
       responsePromptTokens = extracted.promptTokens;
       responseCompletionTokens = extracted.completionTokens;
@@ -1346,8 +1376,35 @@ async function handleUpstreamResponseLite(
         headers: { "Content-Type": "application/json" },
       });
     } catch {
-      // 转换失败（上游返回了意外的 JSON 结构）：不记成功日志，按 502 处理
-      return liteErrorResponse(config, 502, "上游响应格式无法转换", "upstream_error");
+      // 转换失败（上游返回了意外的 JSON 结构）：不记成功日志，按 502 处理。
+      // 补记失败日志再返回（与全量版同场景对齐）：此前直接返回 502 零落痕，
+      // 日志页只见客户端报错不见平台侧记录，可用率统计被高估
+      try {
+        await recordRequestLog({
+          keyId: apiKey.id,
+          keyName: apiKey.name,
+          platformId: platform.id,
+          model: requestedModel,
+          endpoint: config.upstreamPath,
+          method: "POST",
+          status: 502,
+          tokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          ttft: 0,
+          duration: Date.now() - startTime,
+          isError: true,
+          errorMessage: "上游响应格式错误",
+          ipAddress: clientInfo?.ipAddress,
+          userAgent: clientInfo?.userAgent,
+          db: env.DB,
+          env: workerEnv,
+        });
+      } catch (logError) {
+        console.error("[proxy-lite] 日志写入失败:", logError);
+      }
+      // 错误文案与全量版/Pages 版同场景对齐（此前为「上游响应格式无法转换」）
+      return liteErrorResponse(config, 502, "上游响应格式错误", "upstream_error");
     }
   }
 

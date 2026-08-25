@@ -55,6 +55,12 @@ vi.mock("../../../worker/src/platform-keys", () => ({
 vi.mock("../../../worker/src/load-balancer", () => ({
   recordSuccess: vi.fn(async () => {}),
   recordFailure: vi.fn(async () => {}),
+  // 补齐 handler 实际导入的其余导出：此前缺失导致触达这些路径时
+  // TypeError 被外层 catch 吞成 500，用例在异常路径上假通过
+  selectPlatform: vi.fn(() => null),
+  releaseHalfOpenPending: vi.fn(() => {}),
+  recordPlatform429: vi.fn(),
+  checkAndUpdateCircuitBreakerState: vi.fn(() => "closed"),
 }));
 
 vi.mock("@/lib/v1-rate-limit", () => ({
@@ -70,11 +76,18 @@ vi.mock("../../../worker/src/request-templates", () => ({
   applyTemplates: vi.fn((b: unknown) => b),
 }));
 
-vi.mock("../../../worker/src/token", () => ({
-  recordRequestLog: vi.fn(async () => {}),
-  extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
-  updateKeyUsage: vi.fn(async () => {}),
-}));
+// 补齐 handler 实际导入的导出（extractClientInfo 此前缺失导致每次请求都在
+// proxyV1RequestPages 开头抛 TypeError）；detectResponsesStreamEvent 用真实实现
+vi.mock("../../../worker/src/token", async () => {
+  const actual = await vi.importActual<typeof import("../../../worker/src/token")>("../../../worker/src/token");
+  return {
+    recordRequestLog: vi.fn(async () => {}),
+    extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
+    updateKeyUsage: vi.fn(async () => {}),
+    extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
+    detectResponsesStreamEvent: actual.detectResponsesStreamEvent,
+  };
+});
 
 vi.mock("../../../worker/src/forward-headers", () => ({
   extractForwardableHeaders: vi.fn(() => ({})),
