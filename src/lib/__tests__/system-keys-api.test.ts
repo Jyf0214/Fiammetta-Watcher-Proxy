@@ -3,10 +3,12 @@
  *
  * 覆盖：
  * - GET 列表（认证、密钥掩码——不泄露完整密钥、数据库错误）
- * - POST 创建（认证、名称校验、成功创建返回完整密钥且写入审计日志）
+ * - POST 创建（认证、名称校验、成功创建返回完整密钥且写入审计日志、
+ *   审计失败返回 500 且 Key 不落库、审计 ip 取自 getClientIp 结果）
  * - 不支持方法 405
  *
- * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security
+ * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security、
+ * pages/api/admin/auth（仅 getClientIp）
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -21,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   getAdmin: vi.fn(),
   getAuditAdminId: vi.fn(),
+  getClientIp: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -43,6 +46,11 @@ vi.mock("@/lib/admin-auth", () => ({
 
 vi.mock("@/lib/admin-security", () => ({
   checkCsrfOrigin: vi.fn(() => true),
+}));
+
+// system-keys.ts 从 ./auth 导入 getClientIp 记录审计来源 IP，整体 mock 隔离其内部依赖
+vi.mock("../../../pages/api/admin/auth", () => ({
+  getClientIp: mocks.getClientIp,
 }));
 
 // ==================== Helpers ====================
@@ -88,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAdmin.mockResolvedValue(ADMIN);
   mocks.getAuditAdminId.mockReturnValue("env-admin");
+  mocks.getClientIp.mockReturnValue(null);
   mocks.findMany.mockResolvedValue([]);
   mocks.create.mockResolvedValue({});
   mocks.auditCreate.mockResolvedValue({});
@@ -258,6 +267,28 @@ describe("POST /api/admin/system-keys", () => {
           action: "create_system_key",
           adminId: "env-admin",
         }),
+      })
+    );
+  });
+
+  it("审计写入失败返回 500 且 Key 不落库（审计先于写入）", async () => {
+    mocks.auditCreate.mockRejectedValue(new Error("audit write failed"));
+
+    const { res } = await call({ method: "POST", body: validBody });
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    // 审计先于主表写入：审计失败时 create 不得被调用
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("审计日志 ip 记录为 getClientIp(req) 的结果", async () => {
+    mocks.getClientIp.mockReturnValue("203.0.113.66");
+
+    const { res } = await call({ method: "POST", body: validBody });
+    expect(res.statusCode).toBe(200);
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ ip: "203.0.113.66" }),
       })
     );
   });

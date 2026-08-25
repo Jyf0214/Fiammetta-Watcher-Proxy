@@ -937,6 +937,11 @@ const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
   NOTIFICATIONS_CONFIG_KEY,
   // 两步验证配置：同源保护，防止导入注入攻击者 secret 或关闭 2FA
   ADMIN_2FA_CONFIG_KEY,
+  // 日志归档 CAS 互斥锁（log-archiver 内部写入）：导入旧快照会使归档互斥失效
+  "system:log_archive_lock",
+  // 请求模板整包存储（request-templates 模块内部写入）：导入直写会绕过
+  // sanitizeMergeBody 白名单清洗与保存审计
+  "system:request_templates",
 ]);
 const IMPORT_CONFIG_PREFIX = "system:";
 
@@ -1071,6 +1076,8 @@ export function toUnixSeconds(value: unknown): number {
 /**
  * 合法的审计日志 action 枚举（与前端 ACTION_LABELS 保持一致）
  * 不在白名单内的 action 会在导入时被拒绝，防止注入伪造的审计记录
+ * 注意：此名单必须覆盖全部生产写入路径的 action——此前缺 6 个导致
+ * 导出→恢复闭环确定性丢弃这些记录（含 2FA 安全审计）
  */
 const VALID_AUDIT_ACTIONS = new Set([
   "login",
@@ -1090,6 +1097,13 @@ const VALID_AUDIT_ACTIONS = new Set([
   "delete_system_key",
   "import_data",
   "export_data",
+  "enable_2fa",
+  "disable_2fa",
+  "playground_call",
+  "update_model_pricing",
+  "import_model_pricing",
+  "update_notifications",
+  "test_model_call",
 ]);
 
 /**

@@ -251,6 +251,34 @@ describe("POST /api/admin/keys", () => {
     expect(res.body.error.message).toContain("调用次数");
   });
 
+  it("rpmLimit 为小数返回 400（Prisma Int 列不接受小数）", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, rpmLimit: 10.5 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toContain("RPM");
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("tpmLimit 为小数返回 400", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, tpmLimit: 0.5 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toContain("TPM");
+  });
+
+  it("callLimit 为小数返回 400", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, callLimit: 3.14 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toContain("调用次数");
+  });
+
   it("tokenLimit 非整数返回 400", async () => {
     const { res } = await call({
       method: "POST",
@@ -289,6 +317,24 @@ describe("POST /api/admin/keys", () => {
         }),
       })
     );
+  });
+
+  it("审计写入先于 Key 创建（config.ts 写入语义）", async () => {
+    await call({ method: "POST", body: validBody });
+    expect(mocks.auditCreate).toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalled();
+    expect(mocks.auditCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.create.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("审计写入失败返回 500 且 Key 不落库（避免假成功）", async () => {
+    mocks.auditCreate.mockRejectedValue(new Error("audit write failed"));
+    const { res } = await call({ method: "POST", body: validBody });
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    // 审计失败时主操作必须未执行——Key 不会被重复创建
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("生成的 Key 以 sk- 开头", async () => {

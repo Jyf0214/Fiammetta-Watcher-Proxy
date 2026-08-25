@@ -108,14 +108,14 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ success: false, error: { message: "重置周期必须是 monthly、daily 或 never", type: "invalid_request_error" } });
     }
 
-    if (rpmLimit !== undefined && rpmLimit !== null && (typeof rpmLimit !== "number" || !Number.isFinite(rpmLimit) || rpmLimit < 0)) {
-      return res.status(400).json({ success: false, error: { message: "RPM 限制必须是非负数", type: "invalid_request_error" } });
+    if (rpmLimit !== undefined && rpmLimit !== null && (typeof rpmLimit !== "number" || !Number.isInteger(rpmLimit) || rpmLimit < 0)) {
+      return res.status(400).json({ success: false, error: { message: "RPM 限制必须是非负整数", type: "invalid_request_error" } });
     }
-    if (tpmLimit !== undefined && tpmLimit !== null && (typeof tpmLimit !== "number" || !Number.isFinite(tpmLimit) || tpmLimit < 0)) {
-      return res.status(400).json({ success: false, error: { message: "TPM 限制必须是非负数", type: "invalid_request_error" } });
+    if (tpmLimit !== undefined && tpmLimit !== null && (typeof tpmLimit !== "number" || !Number.isInteger(tpmLimit) || tpmLimit < 0)) {
+      return res.status(400).json({ success: false, error: { message: "TPM 限制必须是非负整数", type: "invalid_request_error" } });
     }
-    if (callLimit !== undefined && callLimit !== null && (typeof callLimit !== "number" || !Number.isFinite(callLimit) || callLimit < 0)) {
-      return res.status(400).json({ success: false, error: { message: "调用次数限制必须是非负数", type: "invalid_request_error" } });
+    if (callLimit !== undefined && callLimit !== null && (typeof callLimit !== "number" || !Number.isInteger(callLimit) || callLimit < 0)) {
+      return res.status(400).json({ success: false, error: { message: "调用次数限制必须是非负整数", type: "invalid_request_error" } });
     }
     if (tokenLimit !== undefined && tokenLimit !== null && (typeof tokenLimit !== "number" || !Number.isInteger(tokenLimit) || tokenLimit < 0)) {
       return res.status(400).json({ success: false, error: { message: "Token 限制必须是非负整数", type: "invalid_request_error" } });
@@ -135,6 +135,18 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const keyValue = generateApiKey();
     const currentTime = now();
 
+    // 审计先于 Key 创建：审计写入失败时主流程抛错返回 500，Key 不会落库
+    // ——避免「Key 已创建但无审计」的假成功（与 config.ts 写入语义一致；
+    // TiDB HTTP 适配器下 $transaction 不可依赖，改为按顺序先审计后写入）
+    const ip = getClientIp(req);
+    await db.auditLogs.create({
+      data: {
+        id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
+        detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
+        ip, createdAt: currentTime,
+      },
+    });
+
     const newKey = await db.apiKeys.create({
       data: {
         id: keyId, key: keyValue, name: name.trim(),
@@ -143,15 +155,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
         status: "active", expiresAt: expiresAtTimestamp,
         createdAt: currentTime, updatedAt: currentTime,
-      },
-    });
-
-    const ip = getClientIp(req);
-    await db.auditLogs.create({
-      data: {
-        id: generateId(), adminId: getAuditAdminId(admin), action: "create_api_key",
-        detail: JSON.stringify({ target: keyId, keyId, name: name.trim() }),
-        ip, createdAt: currentTime,
       },
     });
 

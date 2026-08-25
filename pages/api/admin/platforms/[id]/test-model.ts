@@ -8,10 +8,11 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "@/lib/admin-auth";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
+import { getClientIp } from "../../auth";
 
 /** 测试超时（毫秒） */
 const TEST_TIMEOUT_MS = 30_000;
@@ -127,6 +128,26 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse, id: string)
 
     const chatUrl = `${platform.baseUrl.replace(/\/+$/, "")}/chat/completions`;
     const results: TestResult[] = [];
+
+    // 审计：模型测试会对上游发起至多 MAX_TEST_KEYS 个真实流式 chat 请求，
+    // 消耗配额与费用，必须留痕。与 playground_call 同构：直接 await 不吞
+    // 异常，写失败随外层 catch 返回 500。
+    await db.auditLogs.create({
+      data: {
+        id: crypto.randomUUID(),
+        adminId: getAuditAdminId(admin),
+        action: "test_model_call",
+        detail: JSON.stringify({
+          platformId: id,
+          platformName: platform.name,
+          model: modelId.trim(),
+          keyCount: keys.length,
+          ...(totalKeyCount > MAX_TEST_KEYS ? { totalKeys: totalKeyCount } : {}),
+        }),
+        ip: getClientIp(req),
+        createdAt: Math.floor(Date.now() / 1000),
+      },
+    });
 
     // 串行测试每个密钥，避免并发触发上游限流
     for (const { name, key } of keys) {

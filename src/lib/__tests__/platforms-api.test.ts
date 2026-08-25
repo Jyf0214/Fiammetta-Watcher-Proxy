@@ -299,6 +299,53 @@ describe("POST /api/admin/platforms", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toContain("权重");
   });
+
+  it("小数 rpmLimit 返回 400（Prisma Int 列不接受小数）", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, rpmLimit: 3.5 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toContain("RPM");
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("小数 tpmLimit 返回 400（Prisma Int 列不接受小数）", async () => {
+    const { res } = await call({
+      method: "POST",
+      body: { ...validBody, tpmLimit: 10.25 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toContain("TPM");
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("审计先于平台记录写入（config.ts 同款顺序）", async () => {
+    await call({ method: "POST", body: validBody });
+    expect(mocks.auditCreate).toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalled();
+    // invocationCallOrder 为全局递增调用序号：auditCreate 必须先于 create
+    expect(mocks.auditCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.create.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("审计日志写入失败时返回 500 且平台不落库（假成功防御）", async () => {
+    mocks.auditCreate.mockRejectedValue(new Error("audit write failed"));
+    const { res } = await call({ method: "POST", body: validBody });
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("审计 detail 引用的 platformId 与落库 id 为同一预生成值", async () => {
+    await call({ method: "POST", body: validBody });
+    const auditDetail = JSON.parse(
+      mocks.auditCreate.mock.calls[0][0].data.detail
+    );
+    const createdId = mocks.create.mock.calls[0][0].data.id;
+    expect(auditDetail.platformId).toBe(createdId);
+  });
 });
 
 // ==================== 其他方法 ====================

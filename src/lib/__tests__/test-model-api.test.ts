@@ -19,6 +19,9 @@ import type { NextApiRequest, NextApiResponse } from "next";
 const mocks = vi.hoisted(() => ({
   platformFindFirst: vi.fn(),
   getAdmin: vi.fn(),
+  getAuditAdminId: vi.fn(),
+  getClientIp: vi.fn(),
+  auditCreate: vi.fn(),
   checkCsrfOrigin: vi.fn(),
   isSafeUrl: vi.fn(),
   checkRateLimit: vi.fn(),
@@ -32,11 +35,22 @@ vi.mock("@/lib/prisma", () => ({
     platforms: {
       findFirst: mocks.platformFindFirst,
     },
+    auditLogs: {
+      create: mocks.auditCreate,
+    },
   })),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
   getAdminFromRequest: mocks.getAdmin,
+  // 与真实实现语义对齐：system-key 认证返回 null，否则取 adminId
+  getAuditAdminId: mocks.getAuditAdminId,
+}));
+
+// 源文件以 "../../auth" 相对导入 pages/api/admin/auth，vitest 按解析后的
+// 绝对模块 id 匹配 mock，此处以测试文件相对路径指向同一文件即可拦截
+vi.mock("../../../pages/api/admin/auth", () => ({
+  getClientIp: mocks.getClientIp,
 }));
 
 vi.mock("@/lib/admin-security", () => ({
@@ -109,6 +123,9 @@ function okResponse() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAdmin.mockResolvedValue(ADMIN);
+  mocks.getAuditAdminId.mockImplementation((a: { adminId?: string } | null) => a?.adminId ?? null);
+  mocks.getClientIp.mockReturnValue("203.0.113.7");
+  mocks.auditCreate.mockResolvedValue({});
   mocks.checkCsrfOrigin.mockReturnValue(true);
   mocks.isSafeUrl.mockResolvedValue({ safe: true, reason: "" });
   mocks.checkRateLimit.mockResolvedValue(true);
@@ -165,6 +182,8 @@ describe("POST /api/admin/platforms/:id/test-model", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toContain("可用密钥");
     expect(mocks.fetch).not.toHaveBeenCalled();
+    // 未发起任何真实上游调用，不应写消耗性审计
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
   });
 
   it("字符串数组旧格式全部密钥参与测试", async () => {
@@ -176,5 +195,65 @@ describe("POST /api/admin/platforms/:id/test-model", () => {
     expect(res.statusCode).toBe(200);
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
     expect(res.body.data).toHaveLength(2);
+  });
+
+  // ==================== 审计留痕（消耗性操作，与 playground_call 同构） ====================
+
+  it("发起真实上游调用前写入 test_model_call 审计留痕", async () => {
+    mocks.platformFindFirst.mockResolvedValue({
+      ...PLATFORM,
+      apiKeys: JSON.stringify(["sk-a", "sk-b"]),
+    });
+    const { res } = await call({ modelId: "gpt-4o" });
+    expect(res.statusCode).toBe(200);
+
+    expect(mocks.auditCreate).toHaveBeenCalledTimes(1);
+    const data = mocks.auditCreate.mock.calls[0][0].data;
+    expect(data.action).toBe("test_model_call");
+    expect(data.adminId).toBe("admin-1");
+    const detail = JSON.parse(data.detail);
+    expect(detail).toEqual({
+      platformId: "p1",
+      platformName: "OpenAI",
+      model: "gpt-4o",
+      keyCount: 2,
+    });
+    expect(data.ip).toBe("203.0.113.7");
+    expect(typeof data.id).toBe("string");
+    expect((data.id as string).length).toBeGreaterThan(0);
+    expect(typeof data.createdAt).toBe("number");
+
+    // 留痕先于第一次真实上游调用（调用前语义）
+    expect(mocks.auditCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.fetch.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("密钥超过上限抽样时 detail 记录原始总量", async () => {
+    const manyKeys = Array.from({ length: 22 }, (_, i) => `sk-key-${i + 1}`);
+    mocks.platformFindFirst.mockResolvedValue({
+      ...PLATFORM,
+      apiKeys: JSON.stringify(manyKeys),
+    });
+    const { res } = await call();
+    expect(res.statusCode).toBe(200);
+    // 只发起 MAX_TEST_KEYS 次请求
+    expect(mocks.fetch).toHaveBeenCalledTimes(20);
+    const detail = JSON.parse(mocks.auditCreate.mock.calls[0][0].data.detail);
+    expect(detail.keyCount).toBe(20);
+    expect(detail.totalKeys).toBe(22);
+  });
+
+  it("审计写入失败时不吞异常，返回 500", async () => {
+    // 需先通过密钥校验走到审计点：默认 apiKeys 为空会在审计前 400 返回
+    mocks.platformFindFirst.mockResolvedValue({
+      ...PLATFORM,
+      apiKeys: JSON.stringify(["sk-a"]),
+    });
+    mocks.auditCreate.mockRejectedValue(new Error("audit db down"));
+    const { res } = await call();
+    expect(res.statusCode).toBe(500);
+    // 审计失败发生在任何上游调用之前
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });

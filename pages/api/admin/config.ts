@@ -44,6 +44,13 @@ const PROTECTED_CONFIG_KEYS = new Set<string>([
   // 两步验证配置：secret 为加密信封，直写可注入攻击者自备的 secret
   // （接管 2FA）或直接置 enabled 绕过验证
   "system:admin_2fa",
+  // 日志归档 CAS 互斥锁（log-archiver 模块内部写入的租约）：直写可破坏归档
+  // 互斥，使并发归档在锁 TTL 周期内同时执行——与 check_lock 同源同语义
+  "system:log_archive_lock",
+  // 请求模板整包存储（request-templates 模块内部写入）：直写会绕过专属端点
+  // /api/admin/request-templates 的 sanitizeMergeBody 白名单清洗与保存审计
+  // （运行时有二次过滤兜底，写入侧仍须封堵）
+  "system:request_templates",
 ]);
 
 /**

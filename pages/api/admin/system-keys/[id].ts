@@ -12,6 +12,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { getClientIp } from "../auth";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -89,23 +90,21 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
       return res.status(404).json({ success: false, error: "系统 Key 不存在" });
     }
 
-    await db.systemApiKeys.delete({ where: { id } });
+    // 审计先于写入（config.ts 不变量）：审计失败时抛错返回 500，删除不执行，
+    // 避免「Key 已删除但无审计」的假成功。detail 引用上方查询到的 existing
+    const ip = getClientIp(req);
+    await db.auditLogs.create({
+      data: {
+        id: generateId(),
+        adminId: getAuditAdminId(admin),
+        action: "delete_system_key",
+        detail: JSON.stringify({ target: id, name: existing.name }),
+        ip,
+        createdAt: now(),
+      },
+    });
 
-    // 审计日志
-    try {
-      await db.auditLogs.create({
-        data: {
-          id: generateId(),
-          adminId: getAuditAdminId(admin),
-          action: "delete_system_key",
-          detail: JSON.stringify({ target: id, name: existing.name }),
-          ip: null,
-          createdAt: now(),
-        },
-      });
-    } catch {
-      /* 审计日志失败不阻塞 */
-    }
+    await db.systemApiKeys.delete({ where: { id } });
 
     return res.status(200).json({ success: true, message: "系统 Key 已删除" });
   } catch (err) {
@@ -141,26 +140,24 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, id: string
       return res.status(404).json({ success: false, error: "系统 Key 不存在" });
     }
 
+    // 审计先于写入（config.ts 不变量）：审计失败时抛错返回 500，更新不执行，
+    // 避免「配置已生效但无审计」的假成功。detail 引用即将写入的请求数据 enabled
+    const ip = getClientIp(req);
+    await db.auditLogs.create({
+      data: {
+        id: generateId(),
+        adminId: getAuditAdminId(admin),
+        action: "update_system_key",
+        detail: JSON.stringify({ target: id, name: existing.name, enabled }),
+        ip,
+        createdAt: now(),
+      },
+    });
+
     await db.systemApiKeys.update({
       where: { id },
       data: { enabled, updatedAt: now() },
     });
-
-    // 审计日志
-    try {
-      await db.auditLogs.create({
-        data: {
-          id: generateId(),
-          adminId: getAuditAdminId(admin),
-          action: "update_system_key",
-          detail: JSON.stringify({ target: id, name: existing.name, enabled }),
-          ip: null,
-          createdAt: now(),
-        },
-      });
-    } catch {
-      /* 审计日志失败不阻塞 */
-    }
 
     return res.status(200).json({ success: true, message: enabled ? "系统 Key 已启用" : "系统 Key 已禁用" });
   } catch (err) {

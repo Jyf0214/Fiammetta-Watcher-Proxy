@@ -33,7 +33,7 @@ async function nextConfigUpdatedAt(
     });
     dbUpdatedAt = row?.updatedAt ?? 0;
   } catch {
-    // 读库失败退回进程内单调递增兜底，不阻断保存
+    // 读库失败退回自然秒值兜底，不阻断保存
   }
   return Math.max(now, dbUpdatedAt + 1);
 }

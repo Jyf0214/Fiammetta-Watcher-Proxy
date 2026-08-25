@@ -3,6 +3,8 @@
  *
  * 覆盖：
  * - GET 单个 Key 明文（认证、404、返回明文而非掩码）
+ * - PATCH 启用/禁用（config.ts 不变量：审计先于写入，审计失败返回 500 且不落库）
+ * - DELETE 删除（config.ts 不变量：审计先于删除，审计失败返回 500 且不删除）
  * - 不支持方法 405
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security
@@ -16,6 +18,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 const mocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
   update: vi.fn(),
+  delete: vi.fn(),
   auditCreate: vi.fn(),
   getAdmin: vi.fn(),
   getAuditAdminId: vi.fn(),
@@ -27,6 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     systemApiKeys: {
       findFirst: mocks.findFirst,
       update: mocks.update,
+      delete: mocks.delete,
     },
     auditLogs: {
       create: mocks.auditCreate,
@@ -93,6 +97,7 @@ beforeEach(() => {
   mocks.checkRateLimit.mockResolvedValue(true);
   mocks.findFirst.mockResolvedValue(null);
   mocks.update.mockResolvedValue({});
+  mocks.delete.mockResolvedValue({});
   mocks.auditCreate.mockResolvedValue({});
 });
 
@@ -202,13 +207,14 @@ describe("PATCH /api/admin/system-keys/[id]", () => {
     );
   });
 
-  it("审计日志写入失败不阻塞主流程", async () => {
+  it("审计日志写入失败返回 500 且更新未执行（审计先于写入）", async () => {
     mocks.findFirst.mockResolvedValue(EXISTING);
     mocks.auditCreate.mockRejectedValue(new Error("audit db down"));
 
     const { res } = await call({ method: "PATCH", body: { enabled: true } });
-    expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("数据库错误返回 500", async () => {
@@ -217,6 +223,61 @@ describe("PATCH /api/admin/system-keys/[id]", () => {
     const { res } = await call({ method: "PATCH", body: { enabled: true } });
     expect(res.statusCode).toBe(500);
     expect(res.body.success).toBe(false);
+  });
+});
+
+// ==================== DELETE — 删除系统 Key ====================
+
+describe("DELETE /api/admin/system-keys/[id]", () => {
+  const EXISTING = { id: "sys-001", name: "开发 Key" };
+
+  it("未认证返回 401", async () => {
+    mocks.getAdmin.mockResolvedValue(null);
+    const { res } = await call({ method: "DELETE" });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it("Key 不存在返回 404", async () => {
+    mocks.findFirst.mockResolvedValue(null);
+    const { res } = await call({ method: "DELETE" });
+    expect(res.statusCode).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+    expect(mocks.delete).not.toHaveBeenCalled();
+  });
+
+  it("成功删除并写入审计日志，且审计先于删除执行", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+
+    const { res } = await call({ method: "DELETE" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    expect(mocks.delete).toHaveBeenCalledWith({ where: { id: "sys-001" } });
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "delete_system_key",
+          adminId: "env-admin",
+          detail: JSON.stringify({ target: "sys-001", name: "开发 Key" }),
+        }),
+      })
+    );
+    // config.ts 不变量：审计先于主操作
+    expect(mocks.auditCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.delete.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("审计日志写入失败返回 500 且删除未执行（审计先于写入）", async () => {
+    mocks.findFirst.mockResolvedValue(EXISTING);
+    mocks.auditCreate.mockRejectedValue(new Error("audit db down"));
+
+    const { res } = await call({ method: "DELETE" });
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(mocks.delete).not.toHaveBeenCalled();
   });
 });
 

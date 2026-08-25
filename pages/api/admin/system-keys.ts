@@ -13,6 +13,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { getClientIp } from "./auth";
 
 // ==================== 工具函数 ====================
 
@@ -137,6 +138,20 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const keyValue = generateSystemKey();
     const currentTime = now();
 
+    // 审计先于写入（对齐 config.ts 模式）：审计失败抛错走外层 catch 返回 500，
+    // Key 不落库——避免「Key 已生效但无审计」的静默假成功。detail 引用的 keyId
+    // 为 create 前预生成值，与主表写入共用，不依赖创建后信息
+    await db.auditLogs.create({
+      data: {
+        id: generateId(),
+        adminId: getAuditAdminId(admin),
+        action: "create_system_key",
+        detail: JSON.stringify({ target: keyId, name: name.trim() }),
+        ip: getClientIp(req),
+        createdAt: currentTime,
+      },
+    });
+
     const newKey = await db.systemApiKeys.create({
       data: {
         id: keyId,
@@ -147,22 +162,6 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         updatedAt: currentTime,
       },
     });
-
-    // 审计日志
-    try {
-      await db.auditLogs.create({
-        data: {
-          id: generateId(),
-          adminId: getAuditAdminId(admin),
-          action: "create_system_key",
-          detail: JSON.stringify({ target: keyId, name: name.trim() }),
-          ip: null,
-          createdAt: currentTime,
-        },
-      });
-    } catch {
-      /* 审计日志失败不阻塞 */
-    }
 
     // 返回完整 key（仅此一次）
     return res.status(200).json({

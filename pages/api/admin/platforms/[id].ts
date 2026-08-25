@@ -41,6 +41,9 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, id: string) 
   if (!admin) {
     return res.status(401).json({ success: false, error: "未授权" });
   }
+  // 明文密钥下发端点必须限流：凭据泄露时可被反复拉取整库明文
+  // （与 export.ts 同理由，见 export.ts checkAdminRateLimit 注释）
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   try {
     const db = await createDb();
@@ -137,20 +140,20 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.rpmLimit !== undefined && body.rpmLimit !== null) {
       if (
         typeof body.rpmLimit !== "number" ||
-        !Number.isFinite(body.rpmLimit) ||
+        !Number.isInteger(body.rpmLimit) ||
         body.rpmLimit < 0
       ) {
-        errors.push("RPM 限制必须是非负数");
+        errors.push("RPM 限制必须是非负整数");
       }
     }
 
     if (body.tpmLimit !== undefined && body.tpmLimit !== null) {
       if (
         typeof body.tpmLimit !== "number" ||
-        !Number.isFinite(body.tpmLimit) ||
+        !Number.isInteger(body.tpmLimit) ||
         body.tpmLimit < 0
       ) {
-        errors.push("TPM 限制必须是非负数");
+        errors.push("TPM 限制必须是非负整数");
       }
     }
 
@@ -331,8 +334,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       // 兼容直接传数组的客户端：统一转 JSON 字符串后解析
       const rawApiKeys =
         typeof body.apiKeys === "string" ? body.apiKeys : JSON.stringify(body.apiKeys);
-      if (rawApiKeys === "") {
-        updateData.apiKeys = "[]";
+      // 空串/纯空白串守卫：与创建端 POST 对齐（POST 对 trim 后为空的 apiKeys
+      // 显式 400）。此前空串直接置 [] 落库并返回 200——静默清空平台全部密钥
+      // 且假成功，v1 路由对该平台将无 Key 可用
+      if (typeof rawApiKeys === "string" && rawApiKeys.trim() === "") {
+        errors.push("API 密钥不能为空");
       } else {
         let parsed: unknown;
         try {
@@ -374,7 +380,15 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                 if (k.proxyStrict === false) obj.proxyStrict = false;
                 return obj;
               });
-            updateData.apiKeys = JSON.stringify(validKeys);
+            // 空集守卫：与创建端 POST 对齐（POST 对解析后无有效密钥统一返回
+            // 「API 密钥不能为空」400，同样拒绝显式 []）。否则畸形载荷
+            // （如 [{"key":" "}]）会静默清空平台全部密钥并假成功，
+            // v1 路由对该平台将无 Key 可用
+            if (validKeys.length === 0) {
+              errors.push("API 密钥不能为空");
+            } else {
+              updateData.apiKeys = JSON.stringify(validKeys);
+            }
           } else {
             // 旧格式：字符串数组
             const validKeys = parsed.filter(
@@ -383,7 +397,12 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
                 k.trim().length > 0 &&
                 k.length <= 500
             );
-            updateData.apiKeys = JSON.stringify(validKeys);
+            // 空集守卫：同上，与 POST「API 密钥不能为空」语义一致
+            if (validKeys.length === 0) {
+              errors.push("API 密钥不能为空");
+            } else {
+              updateData.apiKeys = JSON.stringify(validKeys);
+            }
           }
         } else if (parsed !== null) {
           errors.push("apiKeys 必须是 JSON 数组");

@@ -9,7 +9,7 @@
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 // ==================== Mocks ====================
@@ -168,5 +168,30 @@ describe("PUT /api/admin/request-templates", () => {
     const { res } = await call("PUT", { id: "t1", models: [] });
     expect(res.statusCode).toBe(200);
     expect(res.body.data.models).toEqual(["*"]);
+  });
+});
+
+describe("PUT /api/admin/request-templates updatedAt 单调递增补偿", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("库中 updatedAt 较大时新写入取 max+1（读库取 max，多实例安全）", async () => {
+    // 固定自然秒 = 1784000000；库中已有行 updatedAt 更大
+    // （模拟其他实例刚写过：纯进程内补偿方案下本实例会写出更小的自然秒值）
+    vi.useFakeTimers();
+    vi.setSystemTime(1_784_000_000_000);
+    mocks.configFindFirst.mockResolvedValue({
+      ...CONFIG_ROW,
+      updatedAt: 1_784_000_100,
+    });
+
+    const { res } = await call("PUT", { id: "t1", enabled: false });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.configUpdate).toHaveBeenCalled();
+    // 写入值 = 库中当前值 +1（而非自然秒），相对库中最新值单调递增，
+    // 保证 worker 模板缓存的 updatedAt 等值失效检查能感知本次保存
+    expect(mocks.configUpdate.mock.calls[0][0].data.updatedAt).toBe(1_784_000_101);
   });
 });

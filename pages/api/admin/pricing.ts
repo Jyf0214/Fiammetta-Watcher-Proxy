@@ -63,7 +63,7 @@ async function nextConfigUpdatedAt(
     });
     dbUpdatedAt = row?.updatedAt ?? 0;
   } catch {
-    // 读库失败退回进程内单调递增兜底，不阻断保存
+    // 读库失败退回自然秒值兜底，不阻断保存
   }
   return Math.max(now, dbUpdatedAt + 1);
 }
@@ -165,6 +165,17 @@ export default async function handler(
             headers: { Accept: "application/json" },
           });
           if (!upstream.ok) {
+            // 必须消费失败响应体：未读取的 body 会使 keep-alive 连接保持占用而泄漏
+            // （同 backup.ts / upstream-proxy 健康、拉取、重试各路径的既有修复）；
+            // mock/stub 响应可能没有 arrayBuffer，跳过读取；读取中断则取消流兜底；
+            // 无论成败均不改 tried 记录与换源逻辑
+            if (typeof upstream.arrayBuffer === "function") {
+              try {
+                await upstream.arrayBuffer();
+              } catch {
+                await upstream.body?.cancel().catch(() => {});
+              }
+            }
             tried.push(`${new URL(sourceUrl).host}: HTTP ${upstream.status}`);
             continue;
           }

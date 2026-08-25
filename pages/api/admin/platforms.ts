@@ -14,11 +14,6 @@ import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status"
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../worker/src/platform-keys";
 import { getClientIp } from "./auth";
 
-/** 生成唯一 ID（cuid 风格） */
-function newId(prefix = "c"): string {
-  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
 /** 掩码 API 密钥（与 keys.ts 等保持一致） */
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -246,20 +241,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (body.rpmLimit !== undefined && body.rpmLimit !== null) {
         if (
           typeof body.rpmLimit !== "number" ||
-          !Number.isFinite(body.rpmLimit) ||
+          !Number.isInteger(body.rpmLimit) ||
           body.rpmLimit < 0
         ) {
-          errors.push("RPM 限制必须是非负数");
+          errors.push("RPM 限制必须是非负整数");
         }
       }
 
       if (body.tpmLimit !== undefined && body.tpmLimit !== null) {
         if (
           typeof body.tpmLimit !== "number" ||
-          !Number.isFinite(body.tpmLimit) ||
+          !Number.isInteger(body.tpmLimit) ||
           body.tpmLimit < 0
         ) {
-          errors.push("TPM 限制必须是非负数");
+          errors.push("TPM 限制必须是非负整数");
         }
       }
 
@@ -347,10 +342,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ? customUserAgent.trim()
           : null;
 
-      // 生成唯一 ID（cuid 格式）
-      const id = newId();
+      // 生成唯一 ID，create 与审计 detail 共用同一预生成值
+      const id = crypto.randomUUID();
 
       const db = await createDb();
+
+      // 审计日志：审计先于写入（与 config.ts 一致）——审计写入失败时主流程
+      // 抛错返回 500，平台不会落库，避免「平台已创建但无审计」的假成功
+      // （TiDB HTTP 适配器下 $transaction 不可依赖，改为按顺序先审计后写入）
+      await db.auditLogs.create({
+        data: {
+          id: crypto.randomUUID(),
+          adminId: getAuditAdminId(admin),
+          action: "create_platform",
+          detail: JSON.stringify({ platformId: id, name }),
+          ip: getClientIp(req),
+          createdAt: now,
+        },
+      });
 
       // 写入数据库（Prisma camelCase 属性名）
       // 注意：name 只做 trim，不做 escapeHtml——React 前端渲染会自动转义，
@@ -377,18 +386,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           customUserAgent: normalizedCustomUserAgent,
           createdAt: now,
           updatedAt: now,
-        },
-      });
-
-      // 审计日志
-      await db.auditLogs.create({
-        data: {
-          id: newId(),
-          adminId: getAuditAdminId(admin),
-          action: "create_platform",
-          detail: JSON.stringify({ platformId: id, name }),
-          ip: getClientIp(req),
-          createdAt: now,
         },
       });
 

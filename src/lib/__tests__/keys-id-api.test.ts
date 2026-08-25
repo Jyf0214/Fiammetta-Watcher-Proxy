@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   apiKeyUpdate: vi.fn(),
   apiKeyDelete: vi.fn(),
   requestLogsDeleteMany: vi.fn(),
+  requestLogsCount: vi.fn(),
   dailyStatsDeleteMany: vi.fn(),
   auditCreate: vi.fn(),
   getAdmin: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     requestLogs: {
       deleteMany: mocks.requestLogsDeleteMany,
+      count: mocks.requestLogsCount,
     },
     dailyStats: {
       deleteMany: mocks.dailyStatsDeleteMany,
@@ -119,6 +121,7 @@ beforeEach(() => {
   mocks.apiKeyUpdate.mockResolvedValue({ ...EXISTING_KEY, status: "active" });
   mocks.apiKeyDelete.mockResolvedValue({});
   mocks.requestLogsDeleteMany.mockResolvedValue({ count: 3 });
+  mocks.requestLogsCount.mockResolvedValue(3);
   mocks.dailyStatsDeleteMany.mockResolvedValue({ count: 2 });
   mocks.auditCreate.mockResolvedValue({});
 });
@@ -164,6 +167,15 @@ describe("DELETE /api/admin/keys/[id]", () => {
       })
     );
   });
+
+  it("审计失败返回 500 且不执行任何删除（审计先于写入）", async () => {
+    mocks.auditCreate.mockRejectedValue(new Error("audit down"));
+    const { res } = await call("DELETE");
+    expect(res.statusCode).toBe(500);
+    expect(mocks.requestLogsDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.dailyStatsDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.apiKeyDelete).not.toHaveBeenCalled();
+  });
 });
 
 // ==================== PUT — status 枚举 ====================
@@ -185,6 +197,20 @@ describe("PUT /api/admin/keys/[id]", () => {
     const { res } = await call("PUT", { status: "banned" });
     expect(res.statusCode).toBe(400);
     expect(res.body.error.message).toContain("status");
+    expect(mocks.apiKeyUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rpmLimit 小数返回 400（与 POST 的非负整数守卫一致，防止 Prisma Int 列 500）", async () => {
+    const { res } = await call("PUT", { rpmLimit: 1.5 });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toContain("必须是非负整数");
+    expect(mocks.apiKeyUpdate).not.toHaveBeenCalled();
+  });
+
+  it("审计失败返回 500 且不执行 update（审计先于写入）", async () => {
+    mocks.auditCreate.mockRejectedValue(new Error("audit down"));
+    const { res } = await call("PUT", { status: "disabled" });
+    expect(res.statusCode).toBe(500);
     expect(mocks.apiKeyUpdate).not.toHaveBeenCalled();
   });
 });

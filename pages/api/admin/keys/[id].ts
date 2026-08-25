@@ -73,8 +73,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     const numericFields = ["rpmLimit", "tpmLimit", "callLimit"] as const;
     for (const field of numericFields) {
       if (body[field] !== undefined && body[field] !== null) {
-        if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
-          return res.status(400).json({ success: false, error: { message: `${field} 必须是非负数`, type: "invalid_request_error" } });
+        if (typeof body[field] !== "number" || !Number.isInteger(body[field]) || body[field] < 0) {
+          return res.status(400).json({ success: false, error: { message: `${field} 必须是非负整数`, type: "invalid_request_error" } });
         }
       }
     }
@@ -129,8 +129,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (body.status !== undefined) updateData.status = body.status;
     if (expiresAtTimestamp !== undefined) updateData.expiresAt = expiresAtTimestamp;
 
-    const updated = await db.apiKeys.update({ where: { id }, data: updateData });
-
+    // 审计先于写入（config.ts 不变量）：审计失败时抛错返回 500，update 不执行，
+    // 避免「配置已生效但无审计」的假成功。changes 引用的是即将写入的请求体数据
     const sanitizedChanges = { ...body };
     if (sanitizedChanges.key) sanitizedChanges.key = String(sanitizedChanges.key).substring(0, 8) + "***";
 
@@ -142,6 +142,8 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
         ip, createdAt: currentTime,
       },
     });
+
+    const updated = await db.apiKeys.update({ where: { id }, data: updateData });
 
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key), usedTokens: Number(updated.usedTokens) }, message: "API Key 更新成功" });
   } catch (err) {
@@ -156,20 +158,24 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, admin: { 
     const existing = await db.apiKeys.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: { message: "API Key 不存在", type: "invalid_request_error" } });
 
-    const deletedLogsResult = await db.requestLogs.deleteMany({ where: { keyId: id } });
-    // 级联清理每日统计：否则日志已删而 daily_stats 残留，仪表盘历史统计与日志页数据矛盾
-    await db.dailyStats.deleteMany({ where: { keyId: id } });
-    await db.apiKeys.delete({ where: { id } });
+    // 审计先于写入（config.ts 不变量）：审计 detail 所需数据（记录名、待删日志数）
+    // 先行查询；审计失败时抛错返回 500，下方任何删除都不会执行
+    const pendingLogCount = await db.requestLogs.count({ where: { keyId: id } });
 
     const currentTime = now();
     const ip = getClientIp(req);
     await db.auditLogs.create({
       data: {
         id: generateId(), adminId: getAuditAdminId(admin as AuthResult), action: "delete_api_key",
-        detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: deletedLogsResult.count }),
+        detail: JSON.stringify({ target: id, keyId: id, name: existing.name, deletedLogs: pendingLogCount }),
         ip, createdAt: currentTime,
       },
     });
+
+    const deletedLogsResult = await db.requestLogs.deleteMany({ where: { keyId: id } });
+    // 级联清理每日统计：否则日志已删而 daily_stats 残留，仪表盘历史统计与日志页数据矛盾
+    await db.dailyStats.deleteMany({ where: { keyId: id } });
+    await db.apiKeys.delete({ where: { id } });
 
     return res.status(200).json({ success: true, message: "API Key 删除成功", deletedLogs: deletedLogsResult.count });
   } catch (err) {

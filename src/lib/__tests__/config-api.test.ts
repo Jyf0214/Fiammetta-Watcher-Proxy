@@ -8,7 +8,8 @@
  * - PUT 跨秒保存：updatedAt 取自然秒值（不叠加补偿）
  * - PUT 触发写操作限流（checkAdminRateLimit 按 adminId 计数）
  * - PUT 配置键必须以 system: 前缀（400）
- * - PUT 内部派生键保护：system:upstream_proxy_pool / _health 禁止直写（400）
+ * - PUT 内部派生键保护：system:upstream_proxy_pool / _health、
+ *   system:log_archive_lock / request_templates 禁止直写（400）
  * - PUT 成功后写审计日志（action=update_config，值内嵌凭据脱敏）
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security、
@@ -203,6 +204,24 @@ describe("PUT /api/admin/config 内部派生键保护（L1）", () => {
 
   it("拒绝直写 system:upstream_proxy_health（400，不写库）", async () => {
     const { res } = await call(putBody("system:upstream_proxy_health", "{}"));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("该配置键受保护，禁止直接修改");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("拒绝直写 system:log_archive_lock（400，不写库不审计）", async () => {
+    // 日志归档 CAS 互斥锁（log-archiver 内部写入），直写会使归档互斥失效
+    const { res } = await call(putBody("system:log_archive_lock", '{"owner":"x","expiresAt":9999999999}'));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.message).toBe("该配置键受保护，禁止直接修改");
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("拒绝直写 system:request_templates（400，不写库不审计）", async () => {
+    // 请求模板整包存储（request-templates 模块内部写入），直写会绕过专属端点的白名单清洗与审计
+    const { res } = await call(putBody("system:request_templates", "[]"));
     expect(res.statusCode).toBe(400);
     expect(res.body.error.message).toBe("该配置键受保护，禁止直接修改");
     expect(mocks.upsert).not.toHaveBeenCalled();
