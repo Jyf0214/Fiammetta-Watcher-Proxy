@@ -6,16 +6,18 @@
  * - null 限制不拦截
  * - TPM 恰好打满配额（c + est === tpmLimit）时拒绝——与 KV 版（worker/src/rate-limiter.ts）的 >= 语义一致
  * - RPM 每窗口最多放行 rpmLimit 个请求
+ * - windowStart 返回（与扣减窗口键同源，放行/拒绝均携带；limit=null 早退不带）
  *
  * 注意：模块内部计数器为模块级 Map（跨测试共享），每个用例使用唯一 id 避免相互污染。
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   checkPlatformRpm,
   checkPlatformTpm,
   checkApiKeyRpm,
   checkApiKeyTpm,
+  releasePlatformRpm,
 } from "@/lib/v1-rate-limit";
 
 let seq = 0;
@@ -118,5 +120,89 @@ describe("checkPlatformRpm / checkApiKeyRpm（内存版）", () => {
     expect(r2.allowed).toBe(true);
     const r3 = await checkApiKeyRpm(id, 2); // count=2 >= 2 → 拒绝
     expect(r3.allowed).toBe(false);
+  });
+});
+
+// ==================== windowStart 返回（双端对称：放行/拒绝均携带） ====================
+
+describe("check* 返回 windowStart（与窗口键同源）", () => {
+  const WINDOW_MS = 60_000;
+  // 固定 mock 时刻，保证窗口起点确定：ws = floor(T / WINDOW_MS) * WINDOW_MS
+  const T = 1_700_000_059_500;
+  const ws = Math.floor(T / WINDOW_MS) * WINDOW_MS;
+
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(T);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("checkPlatformRpm 放行/拒绝分支均返回窗口键起点", async () => {
+    const id = uid();
+    const r1 = await checkPlatformRpm(id, 2);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+    expect(r1.resetAt).toBe(ws + WINDOW_MS);
+
+    await checkPlatformRpm(id, 2); // count→2 占满
+    const r3 = await checkPlatformRpm(id, 2); // count=2 >= 2 → 拒绝
+    expect(r3.allowed).toBe(false);
+    expect(r3.windowStart).toBe(ws);
+    expect(r3.resetAt).toBe(ws + WINDOW_MS);
+  });
+
+  it("checkPlatformTpm 放行/拒绝分支均返回窗口键起点", async () => {
+    const id = uid();
+    const r1 = await checkPlatformTpm(id, 1000, 600);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+
+    const r2 = await checkPlatformTpm(id, 1000, 500); // 600+500=1100 >= 1000 → 拒绝
+    expect(r2.allowed).toBe(false);
+    expect(r2.windowStart).toBe(ws);
+  });
+
+  it("checkApiKeyRpm 放行/拒绝分支均返回窗口键起点", async () => {
+    const id = uid();
+    const r1 = await checkApiKeyRpm(id, 5);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+
+    for (let i = 0; i < 4; i++) await checkApiKeyRpm(id, 5); // count→5 占满
+    const r7 = await checkApiKeyRpm(id, 5); // count=5 >= 5 → 拒绝
+    expect(r7.allowed).toBe(false);
+    expect(r7.windowStart).toBe(ws);
+  });
+
+  it("checkApiKeyTpm 放行/拒绝分支均返回窗口键起点", async () => {
+    const id = uid();
+    const r1 = await checkApiKeyTpm(id, 800, 500);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+
+    const r2 = await checkApiKeyTpm(id, 800, 300); // 500+300=800 >= 800 → 拒绝
+    expect(r2.allowed).toBe(false);
+    expect(r2.windowStart).toBe(ws);
+  });
+
+  it("未触发窗口计数时不返回 windowStart（limit=null 早退）", async () => {
+    expect((await checkPlatformRpm("p-null-" + uid(), null)).windowStart).toBeUndefined();
+    expect((await checkPlatformTpm("p-null-" + uid(), null, 100)).windowStart).toBeUndefined();
+    expect((await checkApiKeyRpm("k-null-" + uid(), null)).windowStart).toBeUndefined();
+    expect((await checkApiKeyTpm("k-null-" + uid(), null, 100)).windowStart).toBeUndefined();
+  });
+
+  it("windowStart 与扣减窗口桶同源：按其回滚后配额恢复", async () => {
+    const id = uid();
+    const r1 = await checkPlatformRpm(id, 1);
+    expect(r1.allowed).toBe(true);
+    const r2 = await checkPlatformRpm(id, 1); // count=1 >= 1 → 拒绝
+    expect(r2.allowed).toBe(false);
+    // 按 r2.windowStart（= 扣减窗口键）回滚 → 计数归零 → 再次放行；
+    // 若 windowStart 与扣减桶不同源则回滚 no-op，r3 必然仍被拒绝
+    await releasePlatformRpm(id, 1, r2.windowStart);
+    const r3 = await checkPlatformRpm(id, 1);
+    expect(r3.allowed).toBe(true);
   });
 });

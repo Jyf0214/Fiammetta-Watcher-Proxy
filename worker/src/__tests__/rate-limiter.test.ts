@@ -7,11 +7,12 @@
  * - null 限制不拦截
  * - 每窗口最多放行 rpmLimit 个请求（含 rpmLimit=1 边界）
  * - KV 读写与 TTL
+ * - windowStart 返回（与 KV 键中的窗口值一致，放行/拒绝均携带）
  *
  * 使用内存 Map 模拟 KVNamespace
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   checkPlatformRpm,
   checkPlatformTpm,
@@ -178,5 +179,80 @@ describe("checkApiKeyTpm", () => {
     await checkApiKeyTpm("k1", 500, 400, kv);
     const result = await checkApiKeyTpm("k2", 500, 400, kv);
     expect(result.allowed).toBe(true);
+  });
+});
+
+// ==================== windowStart 返回 ====================
+
+describe("check* 返回 windowStart（与 KV 键中的窗口值一致）", () => {
+  const WINDOW_MS = 60_000;
+  // 固定 mock 时刻，保证窗口起点确定：ws = floor(T / WINDOW_MS) * WINDOW_MS
+  const T = 1_700_000_059_500;
+  const ws = Math.floor(T / WINDOW_MS) * WINDOW_MS;
+
+  let kv: KVNamespace;
+  beforeEach(() => {
+    kv = makeKv();
+    vi.spyOn(Date, "now").mockReturnValue(T);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("checkPlatformRpm 放行时返回窗口键起点且与 KV 键一致；拒绝分支同样携带", async () => {
+    const r1 = await checkPlatformRpm("p1", 2, kv);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+    expect(r1.resetAt).toBe(ws + WINDOW_MS);
+    // 与 KV 键中的窗口值交叉验证：扣减落在 windowStart 对应的桶上
+    await expect(kv.get(`rate:platform:p1:${ws}`)).resolves.toBe("1");
+
+    await checkPlatformRpm("p1", 2, kv); // count→2 占满
+    const r3 = await checkPlatformRpm("p1", 2, kv);
+    expect(r3.allowed).toBe(false);
+    expect(r3.windowStart).toBe(ws);
+  });
+
+  it("checkPlatformTpm 放行时返回窗口键起点且与 KV 键一致；拒绝分支同样携带", async () => {
+    const r1 = await checkPlatformTpm("p1", 1000, 600, kv);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+    await expect(kv.get(`tpm:platform:p1:${ws}`)).resolves.toBe("600");
+
+    const r2 = await checkPlatformTpm("p1", 1000, 500, kv); // 600+500=1100 >= 1000
+    expect(r2.allowed).toBe(false);
+    expect(r2.windowStart).toBe(ws);
+  });
+
+  it("checkApiKeyRpm 放行时返回窗口键起点且与 KV 键一致；拒绝分支同样携带", async () => {
+    const r1 = await checkApiKeyRpm("k1", 5, kv);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+    await expect(kv.get(`rate:key:k1:${ws}`)).resolves.toBe("1");
+
+    for (let i = 0; i < 4; i++) await checkApiKeyRpm("k1", 5, kv); // count→5 占满
+    const r7 = await checkApiKeyRpm("k1", 5, kv);
+    expect(r7.allowed).toBe(false);
+    expect(r7.windowStart).toBe(ws);
+  });
+
+  it("checkApiKeyTpm 放行时返回窗口键起点且与 KV 键一致；拒绝分支同样携带", async () => {
+    const r1 = await checkApiKeyTpm("k1", 800, 500, kv);
+    expect(r1.allowed).toBe(true);
+    expect(r1.windowStart).toBe(ws);
+    await expect(kv.get(`tpm:key:k1:${ws}`)).resolves.toBe("500");
+
+    const r2 = await checkApiKeyTpm("k1", 800, 300, kv); // 500+300=800 >= 800
+    expect(r2.allowed).toBe(false);
+    expect(r2.windowStart).toBe(ws);
+  });
+
+  it("未触发窗口计数时不返回 windowStart（limit=null / tokenCount<=0）", async () => {
+    expect((await checkPlatformRpm("p1", null, kv)).windowStart).toBeUndefined();
+    expect((await checkPlatformTpm("p1", null, 100, kv)).windowStart).toBeUndefined();
+    expect((await checkPlatformTpm("p1", 1000, 0, kv)).windowStart).toBeUndefined();
+    expect((await checkApiKeyRpm("k1", null, kv)).windowStart).toBeUndefined();
+    expect((await checkApiKeyTpm("k1", null, 100, kv)).windowStart).toBeUndefined();
+    expect((await checkApiKeyTpm("k1", 1000, 0, kv)).windowStart).toBeUndefined();
   });
 });

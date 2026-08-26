@@ -84,8 +84,10 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetAt: number;
-  /** 扣减所在窗口起点（毫秒）。Pages 内存限流器返回，供拒绝回滚定位原窗口键；
-   *  Worker KV 版不返回（无回滚能力） */
+  /** 本次限流检查所用固定窗口的起点（毫秒，即扣减所在窗口键），供跨分钟
+   *  边界回滚时定位原窗口桶。双端四函数走窗口键的全部分支（放行+拒绝）
+   *  均返回；未触发窗口计数（如 limit 为 null 或 tokenCount<=0）时不
+   *  返回 */
   windowStart?: number;
 }
 

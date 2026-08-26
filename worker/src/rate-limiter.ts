@@ -24,7 +24,9 @@ const WINDOW_MS = 60_000;
  * @param platformId - 平台 ID
  * @param rpmLimit - RPM 限制（null 表示不限制）
  * @param kv - KV 命名空间
- * @returns 限制结果
+ * @returns 限制结果（含 windowStart=本次检查所用窗口键起点，供跨分钟边界
+ *          回滚定位原窗口桶；拒绝分支同样携带，limit 为 null 时未构造
+ *          窗口键故省略）
  *
  * 注意：KV 无原子递增操作，存在 TOCTOU 竞态，并发下可能略微超限
  * （KV 限流固有局限，尽力而为），无预留缓冲逻辑。
@@ -47,8 +49,10 @@ export async function checkPlatformRpm(
 
   // 每窗口最多放行 rpmLimit 个请求（与 TPM 分支一致的判定语义）；
   // KV 读改写非原子，并发下可能略微超限（KV 限流固有局限，尽力而为）
+  // 拒绝分支未写 KV、无扣减，windowStart 仅标示本次检查所用窗口键，
+  // 供调用方无需区分放行/拒绝即可统一读取
   if (count >= rpmLimit) {
-    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
+    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS, windowStart };
   }
 
   // 原子递增
@@ -60,6 +64,7 @@ export async function checkPlatformRpm(
     allowed: true,
     remaining: rpmLimit - count - 1,
     resetAt: windowStart + WINDOW_MS,
+    windowStart,
   };
 }
 
@@ -84,7 +89,7 @@ export async function checkPlatformTpm(
   const currentTokens = current ? parseInt(current, 10) : 0;
 
   if (currentTokens + tokenCount >= tpmLimit) {
-    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
+    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS, windowStart };
   }
 
   await kv.put(key, String(currentTokens + tokenCount), {
@@ -95,6 +100,7 @@ export async function checkPlatformTpm(
     allowed: true,
     remaining: tpmLimit - currentTokens - tokenCount,
     resetAt: windowStart + WINDOW_MS,
+    windowStart,
   };
 }
 
@@ -120,7 +126,7 @@ export async function checkApiKeyRpm(
   // 每窗口最多放行 rpmLimit 个请求（与 TPM 分支一致的判定语义）；
   // KV 读改写非原子，并发下可能略微超限（KV 限流固有局限，尽力而为）
   if (count >= rpmLimit) {
-    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
+    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS, windowStart };
   }
 
   await kv.put(key, String(count + 1), {
@@ -131,6 +137,7 @@ export async function checkApiKeyRpm(
     allowed: true,
     remaining: rpmLimit - count - 1,
     resetAt: windowStart + WINDOW_MS,
+    windowStart,
   };
 }
 
@@ -220,7 +227,7 @@ export async function checkApiKeyTpm(
   const currentTokens = current ? parseInt(current, 10) : 0;
 
   if (currentTokens + tokenCount >= tpmLimit) {
-    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS };
+    return { allowed: false, remaining: 0, resetAt: windowStart + WINDOW_MS, windowStart };
   }
 
   await kv.put(key, String(currentTokens + tokenCount), {
@@ -231,5 +238,6 @@ export async function checkApiKeyTpm(
     allowed: true,
     remaining: tpmLimit - currentTokens - tokenCount,
     resetAt: windowStart + WINDOW_MS,
+    windowStart,
   };
 }

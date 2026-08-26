@@ -93,7 +93,7 @@ export async function checkPlatformRpm(platformId: string, rpmLimit: number | nu
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(rpmCounters, RATE_PREFIX, platformId, ws);
-  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS, windowStart: ws };
   await incCount(rpmCounters, RATE_PREFIX, platformId, ws);
   return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
@@ -103,7 +103,7 @@ export async function checkPlatformTpm(platformId: string, tpmLimit: number | nu
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(tpmCounters, TPM_PREFIX, platformId, ws);
-  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS, windowStart: ws };
   await incCount(tpmCounters, TPM_PREFIX, platformId, ws, est);
   return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
@@ -113,9 +113,9 @@ export async function checkApiKeyRpm(apiKeyId: string, rpmLimit: number | null):
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(rpmCounters, RATE_PREFIX, `key:${apiKeyId}`, ws);
-  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c >= rpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS, windowStart: ws };
   await incCount(rpmCounters, RATE_PREFIX, `key:${apiKeyId}`, ws);
-  return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS };
+  return { allowed: true, remaining: Math.max(0, rpmLimit - c - 1), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
 
 export async function checkApiKeyTpm(apiKeyId: string, tpmLimit: number | null, est: number): Promise<RateLimitResult> {
@@ -123,7 +123,7 @@ export async function checkApiKeyTpm(apiKeyId: string, tpmLimit: number | null, 
   cleanup();
   const now = Date.now(), ws = Math.floor(now / WINDOW_MS) * WINDOW_MS;
   const c = await getCount(tpmCounters, TPM_PREFIX, `key:${apiKeyId}`, ws);
-  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS };
+  if (c + est >= tpmLimit) return { allowed: false, remaining: 0, resetAt: ws + WINDOW_MS, windowStart: ws };
   await incCount(tpmCounters, TPM_PREFIX, `key:${apiKeyId}`, ws, est);
-  return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS };
+  return { allowed: true, remaining: Math.max(0, tpmLimit - c - est), resetAt: ws + WINDOW_MS, windowStart: ws };
 }
