@@ -1,4 +1,7 @@
 {
+  // wrangler 4.122+ 要求 Pages 配置声明 pages_build_output_dir，否则整个 wrangler.jsonc
+  // 被忽略（绑定/兼容性设置均失效），导致 Pages Worker 部署失败
+  "pages_build_output_dir": ".open-next",
   // build:cf 会把 OpenNext 产物 mv 为 _worker.js（见 package.json），main 必须指向改后文件名
   "main": ".open-next/_worker.js",
   "name": "fiammetta",
