@@ -66,6 +66,10 @@ vi.mock("@/lib/v1-rate-limit", () => ({
   checkApiKeyRpm: vi.fn(async () => ({ allowed: true })),
   checkPlatformTpm: vi.fn(async () => ({ allowed: true })),
   checkApiKeyTpm: vi.fn(async () => ({ allowed: true })),
+  // 门禁统一化后 handler 经 runLimitGate 适配器间接引用归还函数：
+  // mock 覆盖完整导入面，避免拒绝路径误触 undefined
+  releasePlatformRpm: vi.fn(async () => {}),
+  releasePlatformTpm: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../worker/src/request-templates", () => ({

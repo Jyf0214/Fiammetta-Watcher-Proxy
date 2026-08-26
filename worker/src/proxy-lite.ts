@@ -17,6 +17,7 @@ import { recordPlatform429 } from "./load-balancer";
 import { sendNotification } from "@/lib/notifier";
 import { withIdleTimeout } from "./stream-guard";
 import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
+import { buildProxyError } from "./proxy-core/error-response";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import {
   convertOpenAIResponse,
@@ -77,20 +78,32 @@ function sanitizeUpstreamError(errorText: string, upstreamStatus: number): strin
 }
 
 /**
- * 按协议构造错误响应：anthropic 用 {type:"error",error:{type,message}}，
- * openai 保持 {error:{message,type,...}}。状态码两边保持一致。
+ * 按协议构造错误响应：委托共享层 buildProxyError（proxy-core/error-response，
+ * 三端错误体构造的唯一实现）。anthropic 用 {type:"error",error:{type,message}}，
+ * openai 保持 {error:{message,type}}。状态码两边保持一致。
+ *
+ * protocol 判定与原内联分支语义一致：仅 "anthropic" 走 anthropic 分支，
+ * 其余（含缺省 undefined）走 openai 分支。lite 全部调用点均为 4 参调用
+ * （无 extra），故不传 retryAfterSeconds；共享层契约亦不支持任意 extra 键
+ * 展开，第 5 参仅为保持既有签名占位（下划线前缀表未使用）。
  */
 function liteErrorResponse(
   cfg: ProxyConfig,
   status: number,
   message: string,
   type: string,
-  extra?: Record<string, unknown>
+  _extra?: Record<string, unknown>
 ): Response {
-  if (cfg.protocol === "anthropic") {
-    return Response.json(formatAnthropicError(status, message, type), { status });
-  }
-  return Response.json({ error: { message, type, ...extra } }, { status });
+  const payload = buildProxyError({
+    protocol: cfg.protocol === "anthropic" ? "anthropic" : "openai",
+    status,
+    message,
+    type,
+  });
+  return new Response(payload.body, {
+    status: payload.status,
+    headers: { "Content-Type": payload.contentType },
+  });
 }
 
 // ==================== 配置常量（与全量版 proxy.ts 保持一致） ====================

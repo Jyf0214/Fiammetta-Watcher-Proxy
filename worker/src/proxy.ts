@@ -23,6 +23,9 @@ import {
   releasePlatformRpm,
   releasePlatformTpm,
 } from "./rate-limiter";
+import { runLimitGate } from "./proxy-core/limit-gate";
+import type { LimitGateStage } from "./proxy-core/limit-gate";
+import { buildProxyError } from "./proxy-core/error-response";
 import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
@@ -96,6 +99,11 @@ function sanitizeUpstreamError(errorText: string, upstreamStatus: number): strin
 /**
  * 按协议构造错误响应：anthropic 用 {type:"error",error:{type,message}}，
  * openai 保持 {error:{message,type,...}}。状态码两边保持一致。
+ * 响应体构造统一委托共享层 buildProxyError（三端同语义），本函数仅做薄适配：
+ * protocol 未配置（undefined）时归入 openai，与历史 if 分支行为一致；
+ * extra 仅透传数值型 retry_after——全文件唯一带 extra 的调用点即 429 门禁
+ * 拒绝分支，恒传 { retry_after: <秒数整数> }；anthropic 分支丢弃 extra
+ * （formatAnthropicError 无此参数），与历史行为一致。
  */
 function v1ErrorResponse(
   cfg: ProxyConfig,
@@ -104,11 +112,31 @@ function v1ErrorResponse(
   type: string,
   extra?: Record<string, unknown>
 ): Response {
-  if (cfg.protocol === "anthropic") {
-    return Response.json(formatAnthropicError(status, message, type), { status });
-  }
-  return Response.json({ error: { message, type, ...extra } }, { status });
+  const rawRetryAfter = extra?.["retry_after"];
+  const payload = buildProxyError({
+    protocol: cfg.protocol === "anthropic" ? "anthropic" : "openai",
+    status,
+    message,
+    type,
+    retryAfterSeconds:
+      typeof rawRetryAfter === "number" ? rawRetryAfter : undefined,
+  });
+  return new Response(payload.body, {
+    status: payload.status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
+
+/**
+ * 限流门禁四段被拒时的对外文案（与历史内联分支逐字一致）：
+ * 平台级两段同时用作请求日志的 errorMessage，四段均用作下游 429 响应体 message
+ */
+const LIMIT_GATE_MESSAGES: Record<LimitGateStage, string> = {
+  platformRpm: "上游平台请求频率超限",
+  keyRpm: "API Key 请求频率超限",
+  platformTpm: "上游平台 Token 速率超限",
+  keyTpm: "API Key Token 速率超限",
+};
 
 // ==================== 流式空闲超时 ====================
 // withIdleTimeout 已移至 stream-guard.ts（lite 版 Worker 共用），此处 re-export 保持兼容
@@ -381,64 +409,18 @@ export async function proxyV1Request(
   }
 
   // ── 4. 速率限制检查（本地限制，不重试）──
-  const platformRpm = await checkPlatformRpm(
-    route.platform.id,
-    route.platform.rpmLimit,
-    env.KV
-  );
-  if (!platformRpm.allowed) {
-    // 请求未发出：仅当 routeRequest 经 selectPlatform 占用了半开探测槽位
-    // （halfOpenHeld=true，映射直选恒 false 未占用）才释放，否则会误减其他
-    // 并发探测请求持有的槽位（bug L5）
-    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
-    // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是客户端行为，不记录避免污染平台评分）
-    try {
-      await recordRequestLog({
-        keyId: apiKey.id,
-        keyName: apiKey.name,
-        platformId: route.platform.id,
-        model: requestedModel,
-        endpoint: config.upstreamPath,
-        method: "POST",
-        status: 429,
-        tokens: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        ttft: 0,
-        duration: Date.now() - startTime,
-        isError: true,
-        errorMessage: "上游平台请求频率超限",
-        ipAddress: clientInfo.ipAddress,
-        userAgent: clientInfo.userAgent,
-        db: env.DB,
-        env: workerEnv,
-      });
-    } catch (logError) {
-      console.error(`${logTag} 日志写入失败:`, logError);
-    }
-    return v1ErrorResponse(config, 429, "上游平台请求频率超限", "rate_limit_error", {
-      retry_after: Math.ceil((platformRpm.resetAt - Date.now()) / 1000),
-    });
-  }
-
-  const keyRpm = await checkApiKeyRpm(
-    apiKey.id,
-    apiKey.rpmLimit,
-    env.KV
-  );
-  if (!keyRpm.allowed) {
-    // 仅当 routeRequest 经 selectPlatform 占用了半开探测槽位（halfOpenHeld=true，
-    // 映射直选恒 false 未占用）才释放，否则会误减其他并发探测请求持有的槽位（bug L5）
-    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
-    // Key 级拒绝时归还已扣的平台 RPM 计数（与 Pages 版 v1-rate-limit 行为对齐）：
-    // 先扣平台后扣 Key 的顺序下不归还会让平台共享配额被无关请求白白消耗
-    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
-    return v1ErrorResponse(config, 429, "API Key 请求频率超限", "rate_limit_error", {
-      retry_after: Math.ceil((keyRpm.resetAt - Date.now()) / 1000),
-    });
-  }
-
-  // TPM 检查：用请求体中的 max_tokens 作为预估 token 数
+  // 四段门禁（平台 RPM → Key RPM → 平台 TPM → Key TPM）的编排已收敛至
+  // proxy-core/runLimitGate 统一实现：任一段拒绝即短路，仅当本请求确实持有
+  // 半开探测槽位时才释放（bug L5），并按被拒段归还平台级配额——keyRpm 拒绝
+  // 还平台 RPM、platformTpm 拒绝还平台 RPM（TPM 从未扣减不可还）、keyTpm
+  // 拒绝还平台 RPM+TPM。
+  // 行为差异（本批起）：
+  // - 配额归还携带扣减时刻检查结果的窗口键（windowStart），替代原先按归还
+  //   时刻现算——跨分钟边界回滚时现算窗口键会误减新窗口计数；
+  // - platformTpm 拒绝不归还平台 TPM：旧版在此分支误还从未扣减的 TPM（check
+  //   拒绝分支不写计数），会凭空膨胀有效上限——本批修正为仅归还已真实扣减的
+  //   平台 RPM，并与 Pages 版既有正确行为对齐。
+  // TPM 预扣 token 数：用请求体中的 max_tokens 作为预估 token 数
   // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
   // Responses API 使用 max_output_tokens 字段，Chat 使用 max_tokens/max_completion_tokens，兼容两者。
   // multipart（图片/音频）请求体无 token 字段且实际消耗达数千至数万 token，
@@ -454,80 +436,82 @@ export async function proxyV1Request(
   const anthropicInputEstimate =
     config.protocol === "anthropic" ? estimateInputTokens(rawBody) : estimatedTokens;
 
-  const platformTpm = await checkPlatformTpm(
-    route.platform.id,
-    route.platform.tpmLimit,
-    estimatedTokens,
-    env.KV
-  );
-  if (!platformTpm.allowed) {
-    // 请求未发出：仅当 routeRequest 经 selectPlatform 占用了半开探测槽位
-    // （halfOpenHeld=true，映射直选恒 false 未占用）才释放，否则会误减其他
-    // 并发探测请求持有的槽位（bug L5）
-    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
-    // platformTpm 拒绝时平台 RPM 与 TPM 均已扣减，需一并归还
-    // （与 keyTpm 分支同一理由：先扣平台后扣 Key 的顺序下不归还会让平台
-    // 共享配额被无关请求白白消耗）
-    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
-    try { await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, estimatedTokens, env.KV); } catch {}
-    // 平台级 TPM 限流计入该平台错误统计（与平台 RPM 一致；Key 级不记录）
-    try {
-      await recordRequestLog({
-        keyId: apiKey.id,
-        keyName: apiKey.name,
-        platformId: route.platform.id,
-        model: requestedModel,
-        endpoint: config.upstreamPath,
-        method: "POST",
-        status: 429,
-        tokens: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        ttft: 0,
-        duration: Date.now() - startTime,
-        isError: true,
-        errorMessage: "上游平台 Token 速率超限",
-        ipAddress: clientInfo.ipAddress,
-        userAgent: clientInfo.userAgent,
-        db: env.DB,
-        env: workerEnv,
-      });
-    } catch (logError) {
-      console.error(`${logTag} 日志写入失败:`, logError);
+  const gate = await runLimitGate(
+    {
+      initialHalfOpenHeld: route.halfOpenHeld === true,
+      estimatedTokens,
+      onGateRejected: async (stage) => {
+        // 平台级限流反映平台过载/配额耗尽，计入该平台错误统计（Key 级限流是
+        // 客户端行为，不记录避免污染平台评分——既有语义保持）
+        if (stage !== "platformRpm" && stage !== "platformTpm") return;
+        try {
+          await recordRequestLog({
+            keyId: apiKey.id,
+            keyName: apiKey.name,
+            platformId: route.platform.id,
+            model: requestedModel,
+            endpoint: config.upstreamPath,
+            method: "POST",
+            status: 429,
+            tokens: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            ttft: 0,
+            duration: Date.now() - startTime,
+            isError: true,
+            errorMessage: LIMIT_GATE_MESSAGES[stage],
+            ipAddress: clientInfo.ipAddress,
+            userAgent: clientInfo.userAgent,
+            db: env.DB,
+            env: workerEnv,
+          });
+        } catch (logError) {
+          console.error(`${logTag} 日志写入失败:`, logError);
+        }
+      },
+    },
+    {
+      checkPlatformRpm: () =>
+        checkPlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV),
+      checkApiKeyRpm: () => checkApiKeyRpm(apiKey.id, apiKey.rpmLimit, env.KV),
+      checkPlatformTpm: (est) =>
+        checkPlatformTpm(route.platform.id, route.platform.tpmLimit, est, env.KV),
+      checkApiKeyTpm: (est) =>
+        checkApiKeyTpm(apiKey.id, apiKey.tpmLimit, est, env.KV),
+      // 归还传扣减时刻窗口键（精确回滚），见上方「行为差异」说明
+      releasePlatformRpm: (ws) =>
+        releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV, ws),
+      releasePlatformTpm: (est, ws) =>
+        releasePlatformTpm(route.platform.id, route.platform.tpmLimit, est, env.KV, ws),
+      releaseHalfOpenPending: () => releaseHalfOpenPending(route.platform.id),
     }
-    return v1ErrorResponse(config, 429, "上游平台 Token 速率超限", "rate_limit_error", {
-      retry_after: Math.ceil((platformTpm.resetAt - Date.now()) / 1000),
-    });
-  }
-
-  const keyTpm = await checkApiKeyTpm(
-    apiKey.id,
-    apiKey.tpmLimit,
-    estimatedTokens,
-    env.KV
   );
-  if (!keyTpm.allowed) {
-    // 仅当 routeRequest 经 selectPlatform 占用了半开探测槽位（halfOpenHeld=true，
-    // 映射直选恒 false 未占用）才释放，否则会误减其他并发探测请求持有的槽位（bug L5）
-    if (route.halfOpenHeld === true) releaseHalfOpenPending(route.platform.id);
-    // 与 Pages v1 对齐：keyTpm 拒绝时平台 RPM 与 TPM 均已扣减，需一并归还
-    try { await releasePlatformRpm(route.platform.id, route.platform.rpmLimit, env.KV); } catch {}
-    try { await releasePlatformTpm(route.platform.id, route.platform.tpmLimit, estimatedTokens, env.KV); } catch {}
-    return v1ErrorResponse(config, 429, "API Key Token 速率超限", "rate_limit_error", {
-      retry_after: Math.ceil((keyTpm.resetAt - Date.now()) / 1000),
-    });
-  }
 
   // ── 5. 上游错误自动重试（429/401/403：同平台换 Key → 换平台，最多 3 次）──
   const MAX_UPSTREAM_RETRIES = 3;
 
   let currentPlatform = route.platform;
   const currentTargetModel = route.targetModel;
+  // 当前平台是否持有半开探测槽位：初值由限流门禁结果回传（通过门禁不消费
+  // 槽位，等于 routeRequest 的 halfOpenHeld 标记，映射直选恒 false）；重试路径
+  // 经 selectPlatform 换平台时同步更新，供循环内不走 recordSuccess/recordFailure
+  // 的失败分支精确归还槽位（bug L5）
+  let currentHalfOpenHeld: boolean;
+  if (gate.allowed) {
+    currentHalfOpenHeld = gate.halfOpenHeld;
+  } else {
+    // 门禁被拒（本地限制不重试）：按被拒段返回与原内联分支一致的 429 响应，
+    // retry_after 由被拒段窗口结束时间换算为秒（KV 版拒绝必携带 resetAt，
+    // ?? Date.now() 仅为可选类型的兜底，此时退化为 0 表示可立即重试）
+    return v1ErrorResponse(
+      config,
+      429,
+      LIMIT_GATE_MESSAGES[gate.stage],
+      "rate_limit_error",
+      { retry_after: Math.ceil(((gate.resetAt ?? Date.now()) - Date.now()) / 1000) }
+    );
+  }
   let currentKey = getNextKey(currentPlatform);
-  // 当前平台是否持有半开探测槽位：初值取 routeRequest 的 halfOpenHeld 标记
-  // （映射直选恒 false）；重试路径经 selectPlatform 换平台时同步更新，供循环内
-  // 不走 recordSuccess/recordFailure 的失败分支精确归还槽位（bug L5）
-  let currentHalfOpenHeld = route.halfOpenHeld === true;
   const triedKeys = new Set<string>();
   const triedPlatforms = new Set<string>();
 
