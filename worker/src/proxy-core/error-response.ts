@@ -115,3 +115,35 @@ export function buildProxyError(opts: BuildProxyErrorOptions): ProxyErrorPayload
     contentType: "application/json",
   };
 }
+
+/**
+ * Worker 传输薄适配：按 ProxyConfig.protocol 构造错误并包装为 Response
+ *
+ * 全量版 proxy.ts 的 v1ErrorResponse 与 lite 版 proxy-lite.ts 的
+ * liteErrorResponse 此前是两份相同的「protocol 归一 + buildProxyError +
+ * new Response」薄封装，收敛为本函数。语义与两版现状逐条一致：
+ * - protocol 未配置（undefined）时归入 openai（历史 if 分支行为）；
+ * - extra 仅透传数值型 retry_after（全文件唯一带 extra 的调用点即 429 门禁
+ *   拒绝分支）；anthropic 分支丢弃 extra（formatAnthropicError 无此参数）。
+ */
+export function buildProxyErrorResponse(
+  cfg: { protocol?: "openai" | "anthropic" },
+  status: number,
+  message: string,
+  type: string,
+  extra?: Record<string, unknown>
+): Response {
+  const rawRetryAfter = extra?.["retry_after"];
+  const payload = buildProxyError({
+    protocol: cfg.protocol === "anthropic" ? "anthropic" : "openai",
+    status,
+    message,
+    type,
+    retryAfterSeconds:
+      typeof rawRetryAfter === "number" ? rawRetryAfter : undefined,
+  });
+  return new Response(payload.body, {
+    status: payload.status,
+    headers: { "Content-Type": payload.contentType },
+  });
+}

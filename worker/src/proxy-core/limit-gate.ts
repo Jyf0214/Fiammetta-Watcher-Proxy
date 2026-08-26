@@ -69,6 +69,19 @@ export type LimitGateStage =
   | "keyTpm";
 
 /**
+ * 门禁四段被拒时的对外文案（与三端历史内联分支逐字一致）：
+ * 平台级两段同时用作请求日志的 errorMessage，四段均用作下游 429 响应体 message。
+ * 此前全量版 proxy.ts（LIMIT_GATE_MESSAGES）与 Pages 版 [[...v1]].ts
+ * （GATE_STAGE_MESSAGES）各持一份相同映射，收敛为唯一定义。
+ */
+export const LIMIT_GATE_MESSAGES: Record<LimitGateStage, string> = {
+  platformRpm: "上游平台请求频率超限",
+  keyRpm: "API Key 请求频率超限",
+  platformTpm: "上游平台 Token 速率超限",
+  keyTpm: "API Key Token 速率超限",
+};
+
+/**
  * 限流门禁适配器集
  *
  * 全部由调用方注入；平台 ID、API Key、限额配置、KV/内存存储等上下文一律

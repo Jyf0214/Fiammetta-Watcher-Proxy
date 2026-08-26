@@ -23,280 +23,66 @@ import {
   releasePlatformRpm,
   releasePlatformTpm,
 } from "./rate-limiter";
-import { runLimitGate } from "./proxy-core/limit-gate";
-import type { LimitGateStage } from "./proxy-core/limit-gate";
-import { buildProxyError } from "./proxy-core/error-response";
+import { runLimitGate, LIMIT_GATE_MESSAGES } from "./proxy-core/limit-gate";
+import { buildProxyErrorResponse } from "./proxy-core/error-response";
+import {
+  extractUpstreamErrorMessage,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamError,
+} from "./proxy-core/upstream-error";
+import {
+  UPSTREAM_TIMEOUT_MS,
+  UPSTREAM_IDLE_TIMEOUT_MS,
+  RETRYABLE_UPSTREAM_STATUSES,
+  EMPTY_UPSTREAM_RESPONSE,
+  estimateRequestTokens,
+  retryBackoffMs,
+  isAbortLikeError,
+} from "./proxy-core/proxy-constants";
+import {
+  parseWorkerRequestBody,
+  type MultipartBody,
+} from "./proxy-core/request-body";
+import {
+  filterForwardHeaders,
+  resolveUpstreamUrl,
+  buildUpstreamFetchHeaders,
+} from "./proxy-core/forward-context";
+import {
+  createAnthropicStreamTransformer,
+  createOpenAIStreamTransformer,
+} from "./proxy-core/stream-transformers";
 import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
-import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
+import { extractForwardableHeaders } from "./forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "./request-templates";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import {
   convertOpenAIResponse,
-  OpenAIToAnthropicStream,
   formatAnthropicError,
   AnthropicRequestError,
   estimateInputTokens,
   convertOpenAIRequest,
   OpenAIRequestError,
   convertAnthropicResponse,
-  AnthropicToOpenAIStream,
 } from "@/lib/anthropic";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
 
-/**
- * 单请求 TPM 预估 token 数上界。
- * max_tokens 仅是输出上限，客户端可能传极大值（如 1000000），
- * 不钳制会一次烧尽整个 TPM 配额；8192 是高估但不离谱的单次输出预估值
- */
-const MAX_ESTIMATED_TOKENS = 8192;
-
 // ==================== 上游错误脱敏 ====================
-
-/** 提取上游错误体中的可读消息 */
-function extractUpstreamErrorMessage(text: string): string {
-  try {
-    const parsed = JSON.parse(text);
-    // parsed?.detail 可能是数组（FastAPI 标准格式）或对象，不能直接 String()，否则变成 "[object Object]"
-    const raw = parsed?.error?.message || parsed?.message || parsed?.detail || "";
-    if (typeof raw === "string") return raw.substring(0, 500);
-    if (Array.isArray(raw)) return raw.map((r: unknown) => {
-      const s = (r as Record<string, unknown>)?.msg || (r as Record<string, unknown>)?.detail || String(r);
-      return typeof s === "string" ? s : "";
-    }).filter(Boolean).join("; ").substring(0, 500);
-    return String(raw).substring(0, 500);
-  } catch {
-    return "上游服务返回未知错误";
-  }
-}
+// extractUpstreamErrorMessage / sanitizeUpstreamMessage / sanitizeUpstreamError
+// 已移至 proxy-core/upstream-error.ts（三端共用），此处统一导入
 
 /**
- * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
- * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
+ * 限流门禁四段被拒时的对外文案已收敛至 proxy-core/limit-gate.ts
+ * （LIMIT_GATE_MESSAGES，与 Pages 版 GATE_STAGE_MESSAGES 同源）
  */
-function sanitizeMessage(original: string, status: number): string {
-  if (status === 403) return "上游访问被拒绝（HTTP 403）";
-  if (status === 401) return "上游认证失败（HTTP 401）";
-  if (status === 429) return "上游请求过多（HTTP 429）";
-  return original;
-}
-
-/**
- * 脱敏上游错误响应，仅提取错误消息
- */
-function sanitizeUpstreamError(errorText: string, upstreamStatus: number): string {
-  return JSON.stringify({
-    error: {
-      message: sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamStatus),
-      type: "upstream_error",
-      upstream_status: upstreamStatus,
-    },
-  });
-}
-
-/**
- * 按协议构造错误响应：anthropic 用 {type:"error",error:{type,message}}，
- * openai 保持 {error:{message,type,...}}。状态码两边保持一致。
- * 响应体构造统一委托共享层 buildProxyError（三端同语义），本函数仅做薄适配：
- * protocol 未配置（undefined）时归入 openai，与历史 if 分支行为一致；
- * extra 仅透传数值型 retry_after——全文件唯一带 extra 的调用点即 429 门禁
- * 拒绝分支，恒传 { retry_after: <秒数整数> }；anthropic 分支丢弃 extra
- * （formatAnthropicError 无此参数），与历史行为一致。
- */
-function v1ErrorResponse(
-  cfg: ProxyConfig,
-  status: number,
-  message: string,
-  type: string,
-  extra?: Record<string, unknown>
-): Response {
-  const rawRetryAfter = extra?.["retry_after"];
-  const payload = buildProxyError({
-    protocol: cfg.protocol === "anthropic" ? "anthropic" : "openai",
-    status,
-    message,
-    type,
-    retryAfterSeconds:
-      typeof rawRetryAfter === "number" ? rawRetryAfter : undefined,
-  });
-  return new Response(payload.body, {
-    status: payload.status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-/**
- * 限流门禁四段被拒时的对外文案（与历史内联分支逐字一致）：
- * 平台级两段同时用作请求日志的 errorMessage，四段均用作下游 429 响应体 message
- */
-const LIMIT_GATE_MESSAGES: Record<LimitGateStage, string> = {
-  platformRpm: "上游平台请求频率超限",
-  keyRpm: "API Key 请求频率超限",
-  platformTpm: "上游平台 Token 速率超限",
-  keyTpm: "API Key Token 速率超限",
-};
 
 // ==================== 流式空闲超时 ====================
 // withIdleTimeout 已移至 stream-guard.ts（lite 版 Worker 共用），此处 re-export 保持兼容
 
 export { withIdleTimeout };
-
-// ==================== 上游超时与重试配置 ====================
-
-/** 上游请求总超时（等待响应头 + 非流式响应体） */
-const UPSTREAM_TIMEOUT_MS = 120_000;
-
-/** 流式响应空闲超时：距上次收到数据超过该时长即切断（正常持续传输的长流不受影响） */
-const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
-
-/**
- * 可重试的上游错误状态码
- *
- * 429（限流）、401（密钥失效）、403（密钥无权限/被拦截）均表示当前 Key 或平台
- * 不可用，封禁当前 Key 并换 Key/换平台重试。5xx 等其它错误不重试，直接真实透传。
- */
-const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
-
-/**
- * 透传白名单禁透传头名（大小写不敏感）
- *
- * 认证类头（authorization/x-api-key 等）与请求语义关键头（content-type/host 等）
- * 一律不允许通过 forwardHeaders 白名单透传覆盖：白名单展开在认证头之后，
- * 若允许覆盖，任意下游客户端头可替换平台密钥（401 封禁循环或 BYOK 绕过计费），
- * content-type/host 等被覆盖则破坏请求语义甚至引发 SSRF 类错误路由。
- */
-const FORBIDDEN_FORWARD_HEADERS = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
-  "x-auth-token",
-  "cookie",
-  "content-type",
-  "content-length",
-  "host",
-  "connection",
-  "transfer-encoding",
-  "upgrade",
-  "expect",
-  // 下游伪造 x-forwarded-* 可污染日志 IP 与可信代理判定，统一禁止透传
-  "x-forwarded-for",
-  "x-forwarded-proto",
-  "x-forwarded-host",
-  "x-real-ip",
-  "cf-connecting-ip",
-  "eo-client-ip",
-  "eo-connecting-ip",
-  "x-vercel-forwarded-for",
-]);
-
-/**
- * 空响应哨兵：上游返回 2xx 但响应体为空（空 JSON / 空 SSE 流 / 空 multipart）。
- * handleUpstreamResponse 检测到后返回此哨兵，调用方将其判定为无效并纳入重试
- * （封禁当前 Key → 换 Key → 换平台），耗尽后返回 502 明确错误，绝不透传空响应。
- */
-const EMPTY_UPSTREAM_RESPONSE = Symbol("empty-upstream-response");
-
-// ==================== 请求体解析 ====================
-
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
-
-/** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
-type MultipartBody = { model: string | null; raw: Uint8Array; contentType: string };
-
-async function parseRequestBody<T>(
-  request: Request
-): Promise<{ body: T } | { multipart: MultipartBody } | { error: Response }> {
-  // 优先用 Content-Length 头快速拒绝超大请求，避免读取整个 body
-  const contentLength = Number(request.headers.get("content-length") || "0");
-  if (contentLength > MAX_BODY_BYTES) {
-    return {
-      error: Response.json(
-        { error: { message: "请求体过大", type: "invalid_request_error" } },
-        { status: 413 }
-      ),
-    };
-  }
-
-  const contentType = request.headers.get("content-type") || "";
-  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
-    // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
-    // 标准客户端必然发送 multipart 导致固定 400「请求体格式错误」，端点形同虚设；
-    // 现读取原始字节（重试循环需可重放 body），formData 仅用于提取 model 路由
-    let raw: Uint8Array;
-    try {
-      raw = new Uint8Array(await request.arrayBuffer());
-    } catch {
-      return {
-        error: Response.json(
-          { error: { message: "读取请求体失败", type: "invalid_request_error" } },
-          { status: 400 }
-        ),
-      };
-    }
-
-    // Content-Length 不存在或不准时，用实际字节数兜底
-    if (raw.length > MAX_BODY_BYTES) {
-      return {
-        error: Response.json(
-          { error: { message: "请求体过大", type: "invalid_request_error" } },
-          { status: 413 }
-        ),
-      };
-    }
-
-    let model: string | null = null;
-    try {
-      const fd = await new Request(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: raw,
-      }).formData();
-      const m = fd.get("model");
-      model = typeof m === "string" && m.length > 0 ? m : null;
-    } catch {
-      // 非标准 multipart（boundary 畸形等）：model 留 null，调用方按缺 model 400
-    }
-    return { multipart: { model, raw, contentType } };
-  }
-
-  let bodyText: string;
-  try {
-    bodyText = await request.text();
-  } catch {
-    return {
-      error: Response.json(
-        { error: { message: "读取请求体失败", type: "invalid_request_error" } },
-        { status: 400 }
-      ),
-    };
-  }
-
-  // Content-Length 不存在或不准时，用字符串长度兜底（中文等多字节会略小，但足够做限制）
-  if (bodyText.length > MAX_BODY_BYTES) {
-    return {
-      error: Response.json(
-        { error: { message: "请求体过大", type: "invalid_request_error" } },
-        { status: 413 }
-      ),
-    };
-  }
-
-  let body: T;
-  try {
-    body = JSON.parse(bodyText);
-  } catch {
-    return {
-      error: Response.json(
-        { error: { message: "请求体格式错误", type: "invalid_request_error" } },
-        { status: 400 }
-      ),
-    };
-  }
-
-  return { body };
-}
 
 // ==================== 统一代理入口 ====================
 // ProxyConfig 类型已移至 endpoints.ts（lite 版 Worker 共用），此处 re-export 保持兼容
@@ -323,13 +109,13 @@ export async function proxyV1Request(
   const clientInfo = extractClientInfo(request);
 
   // ── 1. 解析请求体 ──
-  const parseResult = await parseRequestBody<Record<string, unknown>>(request);
+  const parseResult = await parseWorkerRequestBody<Record<string, unknown>>(request);
   if ("error" in parseResult) {
     // 请求体解析错误（413 过大 / 400 读取失败或 JSON 格式错误）按协议格式化：
     // Anthropic 分支需要 {type:"error",error:{type,message}}，OpenAI 分支保持原错误形状
     const errRes = parseResult.error;
     const errBody = (await errRes.json().catch(() => ({}))) as { error?: { message?: string } };
-    return v1ErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
+    return buildProxyErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
   }
   // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
   // 原始字节在循环内原样透传上游（JSON 管道字段如 max_tokens/stream 不适用）
@@ -337,7 +123,7 @@ export async function proxyV1Request(
   if ("multipart" in parseResult) {
     multipart = parseResult.multipart;
     if (!multipart.model) {
-      return v1ErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+      return buildProxyErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
     }
   }
   // TS 联合收窄：in 运算符分支后 parseResult 类型被收窄到 { multipart }，
@@ -372,7 +158,7 @@ export async function proxyV1Request(
     // 客户端漏传 model（/v1/models 之外所有端点必填）：按 4xx 返回，
     // 此前用 "__any__" 兜底恒路由失败返回 500，把客户端错误伪装成
     // 服务器故障并污染错误统计
-    return v1ErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+    return buildProxyErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
   }
   const requestedModel = modelName;
   // 根据端点判断下游来源 API：/responses 为 responses，其余按 chat 处理（与模板分类一致）
@@ -405,7 +191,7 @@ export async function proxyV1Request(
     } catch (logError) {
       console.error(`${logTag} 日志写入失败:`, logError);
     }
-    return v1ErrorResponse(config, 500, "此模型不存在", "server_error");
+    return buildProxyErrorResponse(config, 500, "此模型不存在", "server_error");
   }
 
   // ── 4. 速率限制检查（本地限制，不重试）──
@@ -420,17 +206,11 @@ export async function proxyV1Request(
   // - platformTpm 拒绝不归还平台 TPM：旧版在此分支误还从未扣减的 TPM（check
   //   拒绝分支不写计数），会凭空膨胀有效上限——本批修正为仅归还已真实扣减的
   //   平台 RPM，并与 Pages 版既有正确行为对齐。
-  // TPM 预扣 token 数：用请求体中的 max_tokens 作为预估 token 数
-  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
-  // Responses API 使用 max_output_tokens 字段，Chat 使用 max_tokens/max_completion_tokens，兼容两者。
+  // TPM 预扣 token 数：统一走共享 estimateRequestTokens（三端同源同算法）。
+  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS；
   // multipart（图片/音频）请求体无 token 字段且实际消耗达数千至数万 token，
   // 按上限预扣（与 Pages 版 [[...v1]].ts 对齐），防止 TPM 配额被以 1 token 名义绕过
-  const estimatedTokens = multipart
-    ? MAX_ESTIMATED_TOKENS
-    : Math.min(
-        MAX_ESTIMATED_TOKENS,
-        Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
-      );
+  const estimatedTokens = estimateRequestTokens(body, multipart !== null);
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 estimatedTokens）
   const anthropicInputEstimate =
@@ -503,7 +283,7 @@ export async function proxyV1Request(
     // 门禁被拒（本地限制不重试）：按被拒段返回与原内联分支一致的 429 响应，
     // retry_after 由被拒段窗口结束时间换算为秒（KV 版拒绝必携带 resetAt，
     // ?? Date.now() 仅为可选类型的兜底，此时退化为 0 表示可立即重试）
-    return v1ErrorResponse(
+    return buildProxyErrorResponse(
       config,
       429,
       LIMIT_GATE_MESSAGES[gate.stage],
@@ -610,7 +390,7 @@ export async function proxyV1Request(
         `模型 ${requestedModel} 的请求无任何可用平台/Key，已返回 500`,
         { db: env.DB, env: workerEnv }
       );
-      return v1ErrorResponse(config, 500, "所有平台均无可用 API Key", "server_error");
+      return buildProxyErrorResponse(config, 500, "所有平台均无可用 API Key", "server_error");
     }
   }
 
@@ -654,7 +434,7 @@ export async function proxyV1Request(
       } catch (logError) {
         console.error(`${logTag} 日志写入失败:`, logError);
       }
-      return v1ErrorResponse(config, 500, `平台 "${currentPlatform.name}" 无可用 API Key`, "server_error");
+      return buildProxyErrorResponse(config, 500, `平台 "${currentPlatform.name}" 无可用 API Key`, "server_error");
     }
 
     // 上游为 Anthropic 协议（官方 Anthropic / GitHub Copilot / Vercel AI 网关）：
@@ -691,7 +471,7 @@ export async function proxyV1Request(
         upstreamBody = convertOpenAIRequest(upstreamBody);
       } catch (convertError) {
         if (convertError instanceof OpenAIRequestError) {
-          return v1ErrorResponse(config, 400, convertError.message, "invalid_request_error");
+          return buildProxyErrorResponse(config, 400, convertError.message, "invalid_request_error");
         }
         throw convertError;
       }
@@ -711,25 +491,13 @@ export async function proxyV1Request(
       upstreamBody.stream_options = { include_usage: true };
     }
 
-    // 解析透传头（只保留合法 header 名，Workers fetch 对非法名会抛 TypeError）
-    const rawForwardHeaders = extractForwardableHeaders(
-      request.headers,
-      currentPlatform.forwardHeaders
+    // 解析透传头（只保留合法 header 名，Workers fetch 对非法名会抛 TypeError）；
+    // 合法名过滤 + 认证/语义关键头黑名单统一走共享 filterForwardHeaders
+    const forwardHeaders = filterForwardHeaders(
+      extractForwardableHeaders(request.headers, currentPlatform.forwardHeaders)
     );
-    const forwardHeaders: Record<string, string> = {};
-    for (const [k, v] of Object.entries(rawForwardHeaders)) {
-      // 只保留合法 header 名
-      if (!/^[a-zA-Z0-9-]+$/.test(k)) continue;
-      // 丢弃认证类/请求语义关键头（大小写不敏感）：白名单展开在认证头与
-      // extraHeaders 之前，若允许 authorization/x-api-key/content-type/host 等
-      // 透传覆盖，下游客户端可替换平台密钥或破坏请求语义
-      if (FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) continue;
-      forwardHeaders[k] = v;
-    }
 
-    const upstreamUrl = upstreamIsAnthropic
-      ? `${currentPlatform.baseUrl.replace(/\/+$/, "")}/v1/messages`
-      : `${currentPlatform.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
+    const upstreamUrl = resolveUpstreamUrl(currentPlatform.baseUrl, effectiveUpstreamPath, upstreamIsAnthropic);
 
     // SSRF 防护：校验上游 URL
     const urlCheck = isSafeUpstreamUrl(currentPlatform.baseUrl);
@@ -758,7 +526,7 @@ export async function proxyV1Request(
       } catch (logError) {
         console.error(`${logTag} 日志写入失败:`, logError);
       }
-      return v1ErrorResponse(config, 400, `上游 URL 不安全: ${urlCheck.reason}`, "invalid_request_error");
+      return buildProxyErrorResponse(config, 400, `上游 URL 不安全: ${urlCheck.reason}`, "invalid_request_error");
     }
 
     // 发送上游请求
@@ -771,22 +539,17 @@ export async function proxyV1Request(
       UPSTREAM_TIMEOUT_MS
     );
     try {
-      const headers: Record<string, string> = {
-        // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
-        "Content-Type": multipart ? multipart.contentType : "application/json",
-        // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
-        // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
-        ...(upstreamIsAnthropic
-          ? { "x-api-key": currentKey, "anthropic-version": "2023-06-01" }
-          : { Authorization: `Bearer ${currentKey}` }),
-        ...forwardHeaders,
-        // 高级设置：自定义请求头（强制覆盖），优先级高于下游透传头
-        ...parseExtraHeaders(currentPlatform.extraHeaders),
-      };
-      // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
-      if (currentPlatform.reuseUserAgent && currentPlatform.customUserAgent) {
-        headers["User-Agent"] = currentPlatform.customUserAgent;
-      }
+      // 请求头组装统一走共享 buildUpstreamFetchHeaders（优先级：基础头 < 透传头
+      // < extraHeaders < 自定义 UA，三端同序）
+      const headers = buildUpstreamFetchHeaders({
+        platformKey: currentKey,
+        upstreamIsAnthropic,
+        contentType: multipart ? multipart.contentType : "application/json",
+        forwardHeaders,
+        extraHeaders: currentPlatform.extraHeaders,
+        reuseUserAgent: currentPlatform.reuseUserAgent,
+        customUserAgent: currentPlatform.customUserAgent,
+      });
       upstreamResponse = await fetch(upstreamUrl, {
         method: "POST",
         headers,
@@ -801,10 +564,7 @@ export async function proxyV1Request(
       // 网络层失败（总超时中止 / DNS 解析失败 / 连接拒绝等）统一补记请求日志并
       // 触发平台熔断，再返回明确错误——此前零记录零熔断（非 AbortError 直接 throw
       // 冒泡到入口 500），坏平台永远不会被降级，可用率高估、负载均衡反复撞上它
-      const isAbort =
-        (fetchError instanceof DOMException ||
-          fetchError instanceof Error) &&
-        fetchError.name === "AbortError";
+      const isAbort = isAbortLikeError(fetchError);
       const status = isAbort ? 504 : 502;
       const errorMessage = isAbort
         ? `上游请求超时（${UPSTREAM_TIMEOUT_MS / 1000} 秒无响应头）`
@@ -844,9 +604,9 @@ export async function proxyV1Request(
       }
 
       if (isAbort) {
-        return v1ErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
+        return buildProxyErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
       }
-      return v1ErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
+      return buildProxyErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
     }
 
     // ── 2xx 成功响应：正常处理（流式/非流式）──
@@ -922,7 +682,7 @@ export async function proxyV1Request(
         } catch (logError) {
           console.error(`${logTag} 日志写入失败:`, logError);
         }
-        return v1ErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
+        return buildProxyErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
       }
       let errorText = "";
       try {
@@ -976,7 +736,7 @@ export async function proxyV1Request(
 
       if (config.protocol === "anthropic") {
         return Response.json(
-          formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
+          formatAnthropicError(upstreamResponse.status, sanitizeUpstreamMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
           { status: upstreamResponse.status }
         );
       }
@@ -1053,9 +813,9 @@ export async function proxyV1Request(
         }
         // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
         // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
-        // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）
-        const backoffMs = Math.min(250 * Math.pow(2, attempt), 2000) + Math.random() * 250;
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）。
+        // 公式收敛至共享 retryBackoffMs（与 Pages 版同源）
+        await new Promise((resolve) => setTimeout(resolve, retryBackoffMs(attempt)));
         currentKey = nextKey;
         continue;
       }
@@ -1190,7 +950,7 @@ export async function proxyV1Request(
 
     if (config.protocol === "anthropic") {
       return Response.json(
-        formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
+        formatAnthropicError(upstreamResponse.status, sanitizeUpstreamMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
         { status: upstreamResponse.status }
       );
     }
@@ -1202,107 +962,15 @@ export async function proxyV1Request(
   }
 
   // 不应到达此处，兜底返回
-  return v1ErrorResponse(config, 503, "重试耗尽", "server_error");
+  return buildProxyErrorResponse(config, 503, "重试耗尽", "server_error");
 }
 
 // ==================== 上游响应处理 ====================
 
-/**
- * OpenAI SSE → Anthropic SSE 的 TransformStream（Anthropic 协议分支专用）
- *
- * 接在 createUsageTransformer 之后：usage 提取/日志/截断检测仍作用于上游
- * OpenAI 流（语义不变），本转换器只把 OpenAI chunk 转成 Anthropic 事件
- * （message_start → content_block_* → message_delta → message_stop）
- */
-function createAnthropicStreamTransformer(
-  model: string,
-  inputTokens: number
-): TransformStream<Uint8Array, Uint8Array> {
-  const streamer = new OpenAIToAnthropicStream({ model, inputTokens });
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-  let errored = false;
-  return new TransformStream({
-    transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") continue;
-        if (!data) continue;
-        try {
-          const parsed = JSON.parse(data);
-          // 流内 error：Anthropic 客户端靠 event: error 感知失败（与 Pages 侧语义一致）
-          if (parsed.error) {
-            const rawCode = parsed.error.code;
-            const code = typeof rawCode === "number" ? rawCode : typeof rawCode === "string" ? parseInt(rawCode, 10) : NaN;
-            if (!Number.isNaN(code) && Number.isInteger(code) && code >= 400 && code <= 599) {
-              errored = true;
-              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify(formatAnthropicError(code, String(parsed.error.message || "").substring(0, 500)))}\n\n`));
-              continue;
-            }
-          }
-          // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
-          if (parsed.choices || parsed.usage) {
-            const out = streamer.feedChunk(parsed);
-            if (out) controller.enqueue(encoder.encode(out));
-          }
-        } catch {
-          // 无法解析的行（非 JSON 数据）直接忽略，不影响流
-        }
-      }
-    },
-    flush(controller) {
-      // 流内 error 已发事件，不再发正常收尾（message_stop）
-      if (errored) return;
-      const out = streamer.finish();
-      if (out) controller.enqueue(encoder.encode(out));
-    },
-  });
-}
-
-/**
- * Anthropic SSE → OpenAI SSE 的 TransformStream（上游为 Anthropic 协议时专用）
- *
- * 接在 createUsageTransformer 之前：usage 提取/日志/截断检测作用于转换后的
- * OpenAI 流（语义不变），本转换器把 Anthropic 事件（message_start →
- * content_block_* → message_delta → message_stop）转成 OpenAI chunk，
- * 正常收尾输出 data: [DONE]（Anthropic 只有 message_stop，无 [DONE]）。
- */
-function createOpenAIStreamTransformer(): TransformStream<Uint8Array, Uint8Array> {
-  const streamer = new AnthropicToOpenAIStream();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-  return new TransformStream({
-    transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (!data) continue;
-        try {
-          const parsed = JSON.parse(data);
-          const out = streamer.feedData(parsed);
-          if (out) controller.enqueue(encoder.encode(out));
-        } catch {
-          // 无法解析的行（非 JSON 数据）直接忽略，不影响流
-        }
-      }
-    },
-    flush(controller) {
-      const out = streamer.finish();
-      if (out) controller.enqueue(encoder.encode(out));
-    },
-  });
-}
+// createAnthropicStreamTransformer（OpenAI SSE → Anthropic SSE）与
+// createOpenAIStreamTransformer（Anthropic SSE → OpenAI SSE）已收敛至
+// proxy-core/stream-transformers.ts（全量版与 lite 版共用同一实现，
+// 流内错误码解析统一走 resolveStreamErrorStatus）
 
 /**
  * 处理上游成功响应（流式/非流式），记录日志和统计
@@ -1345,7 +1013,7 @@ async function handleUpstreamResponse(
       } catch {
         console.error(`${logTag} 流式响应缺失时熔断器记录失败`);
       }
-      return v1ErrorResponse(config, 500, "上游未返回流式响应", "server_error");
+      return buildProxyErrorResponse(config, 500, "上游未返回流式响应", "server_error");
     }
 
     // 先读第一块判断是否为空流：200 + 空 SSE（首个 read 即 done）视为空响应，
@@ -1357,11 +1025,11 @@ async function handleUpstreamResponse(
     } catch (readError) {
       clearTimeout(upstreamTimeoutId);
       if (upstreamController.signal.aborted) {
-        return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+        return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
       console.error(`${logTag} 流式响应首块读取失败:`, readError);
       await recordFailure(platform.id, env.DB, env);
-      return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
+      return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstChunk.done) {
       clearTimeout(upstreamTimeoutId);
@@ -1500,7 +1168,7 @@ async function handleUpstreamResponse(
     const multipartBody = upstreamResponse.body;
     if (!multipartBody) {
       clearTimeout(upstreamTimeoutId);
-      return v1ErrorResponse(config, 500, "上游未返回响应体", "server_error");
+      return buildProxyErrorResponse(config, 500, "上游未返回响应体", "server_error");
     }
     // 先读第一块判断是否为空：空 multipart 视为空响应，交由调用方重试；
     // 等待第一块仍受总超时（signal）保护
@@ -1511,10 +1179,10 @@ async function handleUpstreamResponse(
     } catch {
       clearTimeout(upstreamTimeoutId);
       if (upstreamController.signal.aborted) {
-        return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+        return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
       await recordFailure(platform.id, env.DB, env);
-      return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
+      return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstMultipart.done) {
       clearTimeout(upstreamTimeoutId);
@@ -1620,10 +1288,10 @@ async function handleUpstreamResponse(
   } catch {
     clearTimeout(upstreamTimeoutId);
     if (upstreamController.signal.aborted) {
-      return v1ErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+      return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
     }
     await recordFailure(platform.id, env.DB, env);
-    return v1ErrorResponse(config, 500, "读取上游响应失败", "server_error");
+    return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
   } finally {
     clearTimeout(upstreamTimeoutId);
   }

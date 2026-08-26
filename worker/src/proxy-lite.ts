@@ -16,240 +16,57 @@ import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClient
 import { recordPlatform429 } from "./load-balancer";
 import { sendNotification } from "@/lib/notifier";
 import { withIdleTimeout } from "./stream-guard";
-import { extractForwardableHeaders, parseExtraHeaders } from "./forward-headers";
-import { buildProxyError } from "./proxy-core/error-response";
+import { extractForwardableHeaders } from "./forward-headers";
+import { buildProxyErrorResponse } from "./proxy-core/error-response";
+import {
+  extractUpstreamErrorMessage,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamError,
+} from "./proxy-core/upstream-error";
+import {
+  UPSTREAM_TIMEOUT_MS,
+  UPSTREAM_IDLE_TIMEOUT_MS,
+  estimateRequestTokens,
+  isAbortLikeError,
+} from "./proxy-core/proxy-constants";
+import {
+  parseWorkerRequestBody,
+  type MultipartBody,
+} from "./proxy-core/request-body";
+import {
+  filterForwardHeaders,
+  resolveUpstreamUrl,
+  buildUpstreamFetchHeaders,
+} from "./proxy-core/forward-context";
+import {
+  createAnthropicStreamTransformer,
+  createOpenAIStreamTransformer,
+} from "./proxy-core/stream-transformers";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import {
   convertOpenAIResponse,
-  OpenAIToAnthropicStream,
   formatAnthropicError,
   AnthropicRequestError,
   estimateInputTokens,
   convertOpenAIRequest,
   OpenAIRequestError,
   convertAnthropicResponse,
-  AnthropicToOpenAIStream,
 } from "@/lib/anthropic";
 import type { ProxyConfig } from "./endpoints";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
 
 // ==================== 上游错误脱敏 ====================
+// extractUpstreamErrorMessage / sanitizeUpstreamMessage / sanitizeUpstreamError
+// 已移至 proxy-core/upstream-error.ts（三端共用），此处统一导入
 
-/** 提取上游错误体中的可读消息 */
-function extractUpstreamErrorMessage(text: string): string {
-  try {
-    const parsed = JSON.parse(text);
-    // parsed?.detail 可能是数组（FastAPI 标准格式）或对象，不能直接 String()，否则变成 "[object Object]"
-    const raw = parsed?.error?.message || parsed?.message || parsed?.detail || "";
-    if (typeof raw === "string") return raw.substring(0, 500);
-    if (Array.isArray(raw)) return raw.map((r: unknown) => {
-      const s = (r as Record<string, unknown>)?.msg || (r as Record<string, unknown>)?.detail || String(r);
-      return typeof s === "string" ? s : "";
-    }).filter(Boolean).join("; ").substring(0, 500);
-    return String(raw).substring(0, 500);
-  } catch {
-    return "上游服务返回未知错误";
-  }
-}
-
-/**
- * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
- * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
- */
-function sanitizeMessage(original: string, status: number): string {
-  if (status === 403) return "上游访问被拒绝（HTTP 403）";
-  if (status === 401) return "上游认证失败（HTTP 401）";
-  if (status === 429) return "上游请求过多（HTTP 429）";
-  return original;
-}
-
-/**
- * 脱敏上游错误响应，仅提取错误消息
- */
-function sanitizeUpstreamError(errorText: string, upstreamStatus: number): string {
-  return JSON.stringify({
-    error: {
-      message: sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamStatus),
-      type: "upstream_error",
-      upstream_status: upstreamStatus,
-    },
-  });
-}
-
-/**
- * 按协议构造错误响应：委托共享层 buildProxyError（proxy-core/error-response，
- * 三端错误体构造的唯一实现）。anthropic 用 {type:"error",error:{type,message}}，
- * openai 保持 {error:{message,type}}。状态码两边保持一致。
- *
- * protocol 判定与原内联分支语义一致：仅 "anthropic" 走 anthropic 分支，
- * 其余（含缺省 undefined）走 openai 分支。lite 全部调用点均为 4 参调用
- * （无 extra），故不传 retryAfterSeconds；共享层契约亦不支持任意 extra 键
- * 展开，第 5 参仅为保持既有签名占位（下划线前缀表未使用）。
- */
-function liteErrorResponse(
-  cfg: ProxyConfig,
-  status: number,
-  message: string,
-  type: string,
-  _extra?: Record<string, unknown>
-): Response {
-  const payload = buildProxyError({
-    protocol: cfg.protocol === "anthropic" ? "anthropic" : "openai",
-    status,
-    message,
-    type,
-  });
-  return new Response(payload.body, {
-    status: payload.status,
-    headers: { "Content-Type": payload.contentType },
-  });
-}
-
-// ==================== 配置常量（与全量版 proxy.ts 保持一致） ====================
-
-/** 上游请求总超时（等待响应头 + 非流式响应体） */
-const UPSTREAM_TIMEOUT_MS = 120_000;
-
-/** 流式响应空闲超时：距上次收到数据超过该时长即切断 */
-const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
-
-/** 请求体大小上限 */
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
-
-/**
- * token 数预估值上限（与全量版 proxy.ts / Pages 版同值）：
- * 上游未返回 usage 时的兜底记账依据，客户端可能传极大 max_tokens，钳制防污染
- */
-const MAX_ESTIMATED_TOKENS = 8192;
-
-/**
- * 透传白名单禁止项（大小写不敏感）：认证/请求语义类头不得由下游客户端透传覆盖。
- * 与全量版 proxy.ts 同集合——lite 部署若允许 authorization/x-api-key 等透传覆盖，
- * 下游客户端可替换平台密钥（401 封禁循环 / BYOK 绕过计费），content-length 等
- * 则与重写后的请求体不符导致上游解析错乱。管理后台表单同样禁止（双端防护，
- * 代理层为最终防线）。
- */
-const FORBIDDEN_FORWARD_HEADERS = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
-  "x-auth-token",
-  "cookie",
-  "content-type",
-  "content-length",
-  "host",
-  "connection",
-  "transfer-encoding",
-  "upgrade",
-  "expect",
-  // 下游伪造 x-forwarded-* 可污染日志 IP 与可信代理判定，统一禁止透传
-  "x-forwarded-for",
-  "x-forwarded-proto",
-  "x-forwarded-host",
-  "x-real-ip",
-  "cf-connecting-ip",
-  "eo-client-ip",
-  "eo-connecting-ip",
-  "x-vercel-forwarded-for",
-]);
+// ==================== 配置常量 ====================
+// 超时/上限常量与 token 预估公式已收敛至 proxy-core/proxy-constants.ts
+// （三端唯一定义）；liteErrorResponse 已由共享 buildProxyErrorResponse 替代
 
 // ==================== 请求体解析 ====================
-
-/** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
-type MultipartBody = { model: string | null; raw: Uint8Array; contentType: string };
-
-async function parseRequestBody<T>(
-  request: Request
-): Promise<{ body: T } | { multipart: MultipartBody } | { error: Response }> {
-  if (Number(request.headers.get("content-length") || "0") > MAX_BODY_BYTES) {
-    return {
-      error: Response.json(
-        { error: { message: "请求体过大", type: "invalid_request_error" } },
-        { status: 413 }
-      ),
-    };
-  }
-
-  const contentType = request.headers.get("content-type") || "";
-  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
-    // multipart（images/edits、audio/transcriptions 等）：此前只做 JSON.parse，
-    // 标准客户端必然发送 multipart 导致固定 400「请求体格式错误」，端点形同虚设；
-    // 现读取原始字节透传上游，formData 仅用于提取 model 路由
-    let raw: Uint8Array;
-    try {
-      raw = new Uint8Array(await request.arrayBuffer());
-    } catch {
-      return {
-        error: Response.json(
-          { error: { message: "读取请求体失败", type: "invalid_request_error" } },
-          { status: 400 }
-        ),
-      };
-    }
-
-    // Content-Length 预检之外的按字节兜底（与全量版 proxy.ts 一致）
-    if (raw.length > MAX_BODY_BYTES) {
-      return {
-        error: Response.json(
-          { error: { message: "请求体过大", type: "invalid_request_error" } },
-          { status: 413 }
-        ),
-      };
-    }
-
-    let model: string | null = null;
-    try {
-      const fd = await new Request(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: raw,
-      }).formData();
-      const m = fd.get("model");
-      model = typeof m === "string" && m.length > 0 ? m : null;
-    } catch {
-      // 非标准 multipart（boundary 畸形等）：model 留 null，调用方按缺 model 400
-    }
-    return { multipart: { model, raw, contentType } };
-  }
-
-  let rawText: string;
-  try {
-    rawText = await request.text();
-  } catch {
-    return {
-      error: Response.json(
-        { error: { message: "读取请求体失败", type: "invalid_request_error" } },
-        { status: 400 }
-      ),
-    };
-  }
-
-  // Content-Length 预检之外的按字节兜底（与全量版 proxy.ts 一致）：chunked 编码
-  // （无 Content-Length 头）时任意大的请求体会被整体读入内存，无上限保护
-  if (rawText.length > MAX_BODY_BYTES) {
-    return {
-      error: Response.json(
-        { error: { message: "请求体过大", type: "invalid_request_error" } },
-        { status: 413 }
-      ),
-    };
-  }
-
-  // 空 body 不特判放行：JSON.parse("") 抛错走下方 catch → 400「请求体格式错误」，
-  // 与全量版 proxy.ts parseRequestBody 行为一致（此前空 body 放行走 __any__ 路由
-  // 发起真实上游请求浪费配额，两版行为分叉）
-  try {
-    return { body: JSON.parse(rawText) as T };
-  } catch {
-    return {
-      error: Response.json(
-        { error: { message: "请求体格式错误", type: "invalid_request_error" } },
-        { status: 400 }
-      ),
-    };
-  }
-}
+// parseRequestBody / MultipartBody 已收敛至 proxy-core/request-body.ts
+// （全量版与 lite 版共用同一实现，multipart model 提取三端统一）
 
 // ==================== Lite 流式 Usage 转换器 ====================
 
@@ -422,99 +239,10 @@ function createLiteUsageTransformer(params: {
 }
 
 // ==================== OpenAI SSE → Anthropic SSE 转换 ====================
-
-/**
- * OpenAI SSE → Anthropic SSE 的 TransformStream（Anthropic 协议分支专用）
- *
- * 接在 createLiteUsageTransformer 之后：usage 提取/日志仍作用于上游
- * OpenAI 流（语义不变），本转换器只把 OpenAI chunk 转成 Anthropic 事件。
- */
-function createAnthropicStreamTransformerLite(
-  model: string,
-  inputTokens: number
-): TransformStream<Uint8Array, Uint8Array> {
-  const streamer = new OpenAIToAnthropicStream({ model, inputTokens });
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-  let errored = false;
-  return new TransformStream({
-    transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") continue;
-        if (!data) continue;
-        try {
-          const parsed = JSON.parse(data);
-          // 流内 error：Anthropic 客户端靠 event: error 感知失败（与全量版语义一致）
-          if (parsed.error) {
-            const code = resolveStreamErrorStatus(parsed.error);
-            if (code !== null) {
-              errored = true;
-              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify(formatAnthropicError(code, String(parsed.error.message || "").substring(0, 500)))}\n\n`));
-              continue;
-            }
-          }
-          // 纯 usage chunk（无 choices 键）也可能携带 output_tokens，不能过滤掉
-          if (parsed.choices || parsed.usage) {
-            const out = streamer.feedChunk(parsed);
-            if (out) controller.enqueue(encoder.encode(out));
-          }
-        } catch {
-          // 无法解析的行（非 JSON 数据）直接忽略，不影响流
-        }
-      }
-    },
-    flush(controller) {
-      // 流内 error 已发事件，不再发正常收尾（message_stop）
-      if (errored) return;
-      const out = streamer.finish();
-      if (out) controller.enqueue(encoder.encode(out));
-    },
-  });
-}
-
-/**
- * Anthropic SSE → OpenAI SSE 的 TransformStream（上游为 Anthropic 协议时专用）
- *
- * 接在 usage 提取之前：日志/截断检测作用于转换后的 OpenAI 流（语义不变），
- * 正常收尾输出 data: [DONE]（Anthropic 只有 message_stop，无 [DONE]）。
- */
-function createOpenAIStreamTransformerLite(): TransformStream<Uint8Array, Uint8Array> {
-  const streamer = new AnthropicToOpenAIStream();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-  return new TransformStream({
-    transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (!data) continue;
-        try {
-          const parsed = JSON.parse(data);
-          const out = streamer.feedData(parsed);
-          if (out) controller.enqueue(encoder.encode(out));
-        } catch {
-          // 无法解析的行（非 JSON 数据）直接忽略，不影响流
-        }
-      }
-    },
-    flush(controller) {
-      const out = streamer.finish();
-      if (out) controller.enqueue(encoder.encode(out));
-    },
-  });
-}
+// createAnthropicStreamTransformer（OpenAI SSE → Anthropic SSE）与
+// createOpenAIStreamTransformer（Anthropic SSE → OpenAI SSE）已收敛至
+// proxy-core/stream-transformers.ts（全量版与 lite 版共用同一实现，
+// 流内错误码解析统一走 resolveStreamErrorStatus）
 
 // ==================== 单次上游请求 ====================
 
@@ -535,11 +263,11 @@ export async function proxyV1RequestLite(
   const clientInfo = extractClientInfo(request);
 
   // ── 1. 解析请求体 ──
-  const parseResult = await parseRequestBody<Record<string, unknown>>(request);
+  const parseResult = await parseWorkerRequestBody<Record<string, unknown>>(request);
   if ("error" in parseResult) {
     const errRes = parseResult.error;
     const errBody = (await errRes.json().catch(() => ({}))) as { error?: { message?: string } };
-    return liteErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
+    return buildProxyErrorResponse(config, errRes.status, errBody?.error?.message || "请求体解析失败", "invalid_request_error");
   }
   // multipart 请求（images/edits、audio/transcriptions 等）：model 从表单字段提取，
   // 原始字节透传上游（JSON 管道字段如 max_tokens/stream 不适用）
@@ -547,7 +275,7 @@ export async function proxyV1RequestLite(
   if ("multipart" in parseResult) {
     multipart = parseResult.multipart;
     if (!multipart.model) {
-      return liteErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+      return buildProxyErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
     }
   }
   // TS 联合收窄：in 运算符分支后 parseResult 类型被收窄到 { multipart }，
@@ -573,17 +301,12 @@ export async function proxyV1RequestLite(
     }
   }
 
-  // 上游未返回 usage 时的 token 兜底预估值（防 tokenLimit 绕过，与全量版
-  // estimatedTokens 同源同算法）：multipart（图片/音频）请求体无 token 字段且
-  // 实际消耗达数千至数万 token，按上限计；普通请求取 body 的
+  // 上游未返回 usage 时的 token 兜底预估值（防 tokenLimit 绕过）：统一走共享
+  // estimateRequestTokens（三端同源同算法）。multipart（图片/音频）请求体无
+  // token 字段且实际消耗达数千至数万 token，按上限计；普通请求取 body 的
   // max_output_tokens/max_tokens/max_completion_tokens 并钳制到上限。
   // 与全量版一致基于转换后的 body 计算（Anthropic 转换保留 max_tokens 字段）
-  const maxTokensEstimate = multipart
-    ? MAX_ESTIMATED_TOKENS
-    : Math.min(
-        MAX_ESTIMATED_TOKENS,
-        Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1)
-      );
+  const maxTokensEstimate = estimateRequestTokens(body, multipart !== null);
 
   // ── 3. 路由（纯负载均衡：权重随机，无评分/优先级/熔断） ──
   const modelName = body.model as string | undefined;
@@ -591,7 +314,7 @@ export async function proxyV1RequestLite(
     // 客户端漏传 model（/v1/models 之外所有端点必填）：按 4xx 返回，
     // 此前用 "__any__" 兜底恒路由失败返回 500，把客户端错误伪装成
     // 服务器故障并污染错误统计
-    return liteErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
+    return buildProxyErrorResponse(config, 400, "缺少 model 参数", "invalid_request_error");
   }
   const requestedModel = modelName;
   const sourceApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
@@ -623,7 +346,7 @@ export async function proxyV1RequestLite(
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
     // 与全量版 proxy.ts 一致：路由/模型不存在属服务器侧配置问题，返回 server_error
-    return liteErrorResponse(config, 500, "此模型不存在", "server_error");
+    return buildProxyErrorResponse(config, 500, "此模型不存在", "server_error");
   }
 
   // ── 3. 选择平台 Key（轮询，跳过已封禁/降级） ──
@@ -661,7 +384,7 @@ export async function proxyV1RequestLite(
       `模型 ${requestedModel} 的请求无可用 Key，已返回 500`,
       { db: env.DB, env: workerEnv }
     );
-    return liteErrorResponse(config, 500, `平台 "${route.platform.name}" 无可用 API Key`, "server_error");
+    return buildProxyErrorResponse(config, 500, `平台 "${route.platform.name}" 无可用 API Key`, "server_error");
   }
 
   // ── 4. 构建上游请求 ──
@@ -680,7 +403,7 @@ export async function proxyV1RequestLite(
       });
     } catch (convertError) {
       if (convertError instanceof OpenAIRequestError) {
-        return liteErrorResponse(config, 400, convertError.message, "invalid_request_error");
+        return buildProxyErrorResponse(config, 400, convertError.message, "invalid_request_error");
       }
       throw convertError;
     }
@@ -698,24 +421,13 @@ export async function proxyV1RequestLite(
     upstreamBody.stream_options = { include_usage: true };
   }
 
-  // 解析透传头（只保留合法 header 名，Workers fetch 对非法名会抛 TypeError）
-  const rawForwardHeaders = extractForwardableHeaders(
-    request.headers,
-    route.platform.forwardHeaders
+  // 解析透传头（只保留合法 header 名，Workers fetch 对非法名会抛 TypeError）；
+  // 合法名过滤 + 认证/语义关键头黑名单统一走共享 filterForwardHeaders
+  const forwardHeaders = filterForwardHeaders(
+    extractForwardableHeaders(request.headers, route.platform.forwardHeaders)
   );
-  const forwardHeaders: Record<string, string> = {};
-  for (const [k, v] of Object.entries(rawForwardHeaders)) {
-    // 只保留合法 header 名
-    if (!/^[a-zA-Z0-9-]+$/.test(k)) continue;
-    // 丢弃认证类/请求语义关键头（大小写不敏感）：白名单展开在认证头与
-    // extraHeaders 之前，若允许透传覆盖则下游客户端可替换平台密钥或破坏请求语义
-    if (FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) continue;
-    forwardHeaders[k] = v;
-  }
 
-  const upstreamUrl = upstreamIsAnthropic
-      ? `${route.platform.baseUrl.replace(/\/+$/, "")}/v1/messages`
-      : `${route.platform.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
+  const upstreamUrl = resolveUpstreamUrl(route.platform.baseUrl, effectiveUpstreamPath, upstreamIsAnthropic);
 
   // SSRF 防护：校验上游 URL
   const urlCheck = isSafeUpstreamUrl(route.platform.baseUrl);
@@ -744,7 +456,7 @@ export async function proxyV1RequestLite(
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
-    return liteErrorResponse(config, 400, `上游 URL 不安全: ${urlCheck.reason}`, "invalid_request_error");
+    return buildProxyErrorResponse(config, 400, `上游 URL 不安全: ${urlCheck.reason}`, "invalid_request_error");
   }
 
   // ── 5. 发送上游请求（单次，不重试） ──
@@ -755,22 +467,17 @@ export async function proxyV1RequestLite(
   );
   let upstreamResponse: Response;
   try {
-    const headers: Record<string, string> = {
-      // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
-      "Content-Type": multipart ? multipart.contentType : "application/json",
-      // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
-      // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
-      ...(upstreamIsAnthropic
-        ? { "x-api-key": currentKey, "anthropic-version": "2023-06-01" }
-        : { Authorization: `Bearer ${currentKey}` }),
-      ...forwardHeaders,
-      // 高级设置：自定义请求头（强制覆盖），优先级高于下游透传头
-      ...parseExtraHeaders(route.platform.extraHeaders),
-    };
-    // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
-    if (route.platform.reuseUserAgent && route.platform.customUserAgent) {
-      headers["User-Agent"] = route.platform.customUserAgent;
-    }
+    // 请求头组装统一走共享 buildUpstreamFetchHeaders（优先级：基础头 < 透传头
+    // < extraHeaders < 自定义 UA，三端同序）
+    const headers = buildUpstreamFetchHeaders({
+      platformKey: currentKey,
+      upstreamIsAnthropic,
+      contentType: multipart ? multipart.contentType : "application/json",
+      forwardHeaders,
+      extraHeaders: route.platform.extraHeaders,
+      reuseUserAgent: route.platform.reuseUserAgent,
+      customUserAgent: route.platform.customUserAgent,
+    });
     upstreamResponse = await fetch(upstreamUrl, {
       method: "POST",
       headers,
@@ -786,15 +493,12 @@ export async function proxyV1RequestLite(
     // 明确错误——此前非 AbortError 直接 throw 冒泡到入口 catch 返回 500，
     // request_logs 零记录、可用率统计被高估（与全量版 proxy.ts 网络层失败分支
     // 对齐；lite 无熔断器，只补日志不触发平台级处置）
-    // AbortError 判断兼容 DOMException 与 Error 两种实现：Worker 原生 fetch 抛
+    // AbortError 判定统一走共享 isAbortLikeError：Worker 原生 fetch 抛
     // DOMException，Node/undici 抛 Error——只判 DOMException 会漏判超时
-    const isAbort =
-      (fetchError instanceof DOMException ||
-        fetchError instanceof Error) &&
-      fetchError.name === "AbortError";
+    const isAbort = isAbortLikeError(fetchError);
     const status = isAbort ? 504 : 502;
     const errorMessage = isAbort
-      ? "上游请求超时"
+      ? `上游请求超时（${UPSTREAM_TIMEOUT_MS / 1000} 秒无响应头）`
       : `上游请求失败: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`;
     try {
       await recordRequestLog({
@@ -821,9 +525,9 @@ export async function proxyV1RequestLite(
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
     if (isAbort) {
-      return liteErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
+      return buildProxyErrorResponse(config, 504, "上游请求超时（2 分钟），请稍后重试", "timeout_error");
     }
-    return liteErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
+    return buildProxyErrorResponse(config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
   }
 
   // ── 6. 2xx 成功响应：正常处理（流式/非流式） ──
@@ -885,7 +589,7 @@ export async function proxyV1RequestLite(
     } catch (logError) {
       console.error("[proxy-lite] 日志写入失败:", logError);
     }
-    return liteErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
+    return buildProxyErrorResponse(config, 502, "上游返回重定向，请检查平台 baseUrl 配置", "upstream_error");
   }
 
   // 密钥类状态码（429/401/402/403）：封禁 Key + 累加错误计数（达 5 次自动禁用；
@@ -927,7 +631,7 @@ export async function proxyV1RequestLite(
 
   if (config.protocol === "anthropic") {
     return Response.json(
-      formatAnthropicError(upstreamResponse.status, sanitizeMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
+      formatAnthropicError(upstreamResponse.status, sanitizeUpstreamMessage(extractUpstreamErrorMessage(errorText), upstreamResponse.status)),
       { status: upstreamResponse.status }
     );
   }
@@ -972,7 +676,7 @@ async function handleUpstreamResponseLite(
     const stream = upstreamResponse.body;
     if (!stream) {
       clearTimeout(upstreamTimeoutId);
-      return liteErrorResponse(config, 500, "上游未返回流式响应", "server_error");
+      return buildProxyErrorResponse(config, 500, "上游未返回流式响应", "server_error");
     }
 
     // 先读第一块判断是否为空流：200 + 空 SSE（首个 read 即 done）视为空响应
@@ -983,10 +687,10 @@ async function handleUpstreamResponseLite(
     } catch (readError) {
       clearTimeout(upstreamTimeoutId);
       if (upstreamController.signal.aborted) {
-        return liteErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+        return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
       console.error("[proxy-lite] 流式响应首块读取失败:", readError);
-      return liteErrorResponse(config, 500, "读取上游响应失败", "server_error");
+      return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstChunk.done) {
       // 空流：无重试机制，直接记空响应失败（与全量版重试耗尽后的终态一致）
@@ -1022,7 +726,7 @@ async function handleUpstreamResponseLite(
         ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
-      return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
+      return buildProxyErrorResponse(config, 502, "上游返回空响应", "upstream_error");
     }
 
     // 总超时使命完成：流式响应允许长时间持续传输，改由空闲超时保护（无数据才切断）
@@ -1114,12 +818,12 @@ async function handleUpstreamResponseLite(
     // usage 提取/截断检测才能按 OpenAI 语义工作（[DONE] 收尾、usage 字段）
     let pipeline: ReadableStream<Uint8Array> = guardedStream;
     if (upstreamIsAnthropic) {
-      pipeline = pipeline.pipeThrough(createOpenAIStreamTransformerLite());
+      pipeline = pipeline.pipeThrough(createOpenAIStreamTransformer());
     }
     const pipedStream = pipeline.pipeThrough(transformer);
     // Anthropic 协议：OpenAI SSE → Anthropic 事件流
     const finalStream = config.protocol === "anthropic"
-      ? pipedStream.pipeThrough(createAnthropicStreamTransformerLite(requestedModel, anthropicInputEstimate))
+      ? pipedStream.pipeThrough(createAnthropicStreamTransformer(requestedModel, anthropicInputEstimate))
       : pipedStream;
 
     return new Response(finalStream, {
@@ -1142,7 +846,7 @@ async function handleUpstreamResponseLite(
     const multipartBody = upstreamResponse.body;
     if (!multipartBody) {
       clearTimeout(upstreamTimeoutId);
-      return liteErrorResponse(config, 500, "上游未返回响应体", "server_error");
+      return buildProxyErrorResponse(config, 500, "上游未返回响应体", "server_error");
     }
     // 先读第一块判断是否为空：空 multipart 视为空响应
     const multipartReader = multipartBody.getReader();
@@ -1152,9 +856,9 @@ async function handleUpstreamResponseLite(
     } catch {
       clearTimeout(upstreamTimeoutId);
       if (upstreamController.signal.aborted) {
-        return liteErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+        return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
       }
-      return liteErrorResponse(config, 500, "读取上游响应失败", "server_error");
+      return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
     }
     if (firstMultipart.done) {
       clearTimeout(upstreamTimeoutId);
@@ -1189,7 +893,7 @@ async function handleUpstreamResponseLite(
         ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
         ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
       }
-      return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
+      return buildProxyErrorResponse(config, 502, "上游返回空响应", "upstream_error");
     }
 
     clearTimeout(upstreamTimeoutId);
@@ -1260,6 +964,10 @@ async function handleUpstreamResponseLite(
               duration: Date.now() - startTime,
               isError: true,
               errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
+              // 与 SSE 分支对齐：来源信息随超时失败日志落库（此前缺失，
+              // multipart 挂起场景日志页无 IP/UA 可查）
+              ipAddress: clientInfo?.ipAddress,
+              userAgent: clientInfo?.userAgent,
               db: env.DB,
               env: workerEnv,
             }).catch((logError) => {
@@ -1282,9 +990,9 @@ async function handleUpstreamResponseLite(
   } catch {
     clearTimeout(upstreamTimeoutId);
     if (upstreamController.signal.aborted) {
-      return liteErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
+      return buildProxyErrorResponse(config, 504, "上游响应读取超时（2 分钟），请稍后重试", "timeout_error");
     }
-    return liteErrorResponse(config, 500, "读取上游响应失败", "server_error");
+    return buildProxyErrorResponse(config, 500, "读取上游响应失败", "server_error");
   } finally {
     clearTimeout(upstreamTimeoutId);
   }
@@ -1321,7 +1029,7 @@ async function handleUpstreamResponseLite(
       ctx.waitUntil(banKey(currentKey, undefined, platform.id, env.KV).catch(() => {}));
       ctx.waitUntil(recordKeyError(currentKey, 502, platform.id, env.DB, workerEnv).catch(() => {}));
     }
-    return liteErrorResponse(config, 502, "上游返回空响应", "upstream_error");
+    return buildProxyErrorResponse(config, 502, "上游返回空响应", "upstream_error");
   }
 
   // 提取 usage（只写日志，不更新 Key 用量）
@@ -1417,7 +1125,7 @@ async function handleUpstreamResponseLite(
         console.error("[proxy-lite] 日志写入失败:", logError);
       }
       // 错误文案与全量版/Pages 版同场景对齐（此前为「上游响应格式无法转换」）
-      return liteErrorResponse(config, 502, "上游响应格式错误", "upstream_error");
+      return buildProxyErrorResponse(config, 502, "上游响应格式错误", "upstream_error");
     }
   }
 
@@ -1450,9 +1158,11 @@ async function handleUpstreamResponseLite(
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
   // chat↔responses 互转已移除，非流式响应原样透传
+  // Content-Type 固定 application/json（与全量版/Pages 版对齐：此前透传上游
+  // 原始 content-type，同一上游在 lite 与全量部署下响应头不一致）
   const finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
   return new Response(finalBody, {
     status: upstreamResponse.status,
-    headers: { "Content-Type": responseContentType },
+    headers: { "Content-Type": "application/json" },
   });
 }

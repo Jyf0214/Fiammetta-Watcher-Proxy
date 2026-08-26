@@ -12,17 +12,42 @@ import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, recordPlatform429, checkAndUpdateCircuitBreakerState } from "../../../worker/src/load-balancer";
-import { runLimitGate, type LimitGateStage } from "../../../worker/src/proxy-core/limit-gate";
+import { runLimitGate, LIMIT_GATE_MESSAGES, type LimitGateStage } from "../../../worker/src/proxy-core/limit-gate";
 import { buildProxyError } from "../../../worker/src/proxy-core/error-response";
+import {
+  extractUpstreamErrorMessage,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamError,
+} from "../../../worker/src/proxy-core/upstream-error";
+import {
+  UPSTREAM_TIMEOUT_MS,
+  UPSTREAM_IDLE_TIMEOUT_MS,
+  MAX_BODY_BYTES,
+  RETRYABLE_UPSTREAM_STATUSES,
+  EMPTY_UPSTREAM_RESPONSE,
+  estimateRequestTokens,
+  retryBackoffMs,
+} from "../../../worker/src/proxy-core/proxy-constants";
+import { extractMultipartField } from "../../../worker/src/proxy-core/request-body";
+import {
+  filterForwardHeaders,
+  resolveUpstreamUrl,
+  buildUpstreamFetchHeaders,
+} from "../../../worker/src/proxy-core/forward-context";
+import {
+  buildModelsListPayload,
+  resolveModelDetailOwner,
+} from "../../../worker/src/proxy-core/v1-route-core";
+import { getEndpointConfig, type ProxyConfig } from "../../../worker/src/endpoints";
 import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent } from "../../../worker/src/token";
-import { extractForwardableHeaders, parseExtraHeaders } from "../../../worker/src/forward-headers";
+import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { sendNotification } from "@/lib/notifier";
 import { saveDebugLog } from "@/lib/debug-log";
-import { convertAnthropicRequest, convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
+import { convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -35,96 +60,22 @@ export const config = {
   },
 };
 
-interface ProxyConfig {
-  upstreamPath: string;
-  supportsStreaming?: boolean;
-  /** 代理协议：anthropic 时做 /v1/messages ↔ /chat/completions 双向转换 */
-  protocol?: "openai" | "anthropic";
-  /** 上游请求体构造钩子（Anthropic 分支用，把下游格式转为 OpenAI 格式） */
-  buildUpstreamBody?: (body: Record<string, unknown>) => Record<string, unknown>;
-}
+/**
+ * 单请求 TPM 预估 token 数上界与四段门禁拒绝文案已收敛至共享层
+ * （proxy-core/proxy-constants.ts 的 MAX_ESTIMATED_TOKENS/estimateRequestTokens、
+ * proxy-core/limit-gate.ts 的 LIMIT_GATE_MESSAGES），此处统一导入使用。
+ */
 
 /**
- * 单请求 TPM 预估 token 数上界。
- * max_tokens 仅是输出上限，客户端可能传极大值（如 1000000），
- * 不钳制会一次烧尽整个 TPM 配额；8192 是高估但不离谱的单次输出预估值
+ * 透传白名单禁止项已收敛至共享层 proxy-core/proxy-constants.ts
+ * （FORBIDDEN_FORWARD_HEADERS，三端同集合）；经 filterForwardHeaders 统一过滤。
  */
-const MAX_ESTIMATED_TOKENS = 8192;
-
-/** 四段限流门禁各段的拒绝文案：下游 429 响应与平台级拒绝日志共用同一来源
- *  （与原四段内联分支的 message/errorMessage 字面量一致） */
-const GATE_STAGE_MESSAGES: Record<LimitGateStage, string> = {
-  platformRpm: "上游平台请求频率超限",
-  keyRpm: "API Key 请求频率超限",
-  platformTpm: "上游平台 Token 速率超限",
-  keyTpm: "API Key Token 速率超限",
-};
 
 /**
- * 透传白名单禁止项（大小写不敏感）：认证/请求语义类头不得由下游客户端透传覆盖。
- *
- * authorization/x-api-key 承载平台密钥，若平台把同名头加入 forwardHeaders，
- * 展开顺序上透传值会覆盖代理注入的认证头——任意下游客户端可借此替换平台密钥
- * （401 封禁循环 / BYOK 绕过计费）；content-type 决定上游对请求体的解析语义、
- * host 决定虚拟主机路由，均须由本代理按平台配置生成。管理后台表单同样禁止
- * 把此类头名写入白名单（双端防护，代理层为最终防线）。
+ * 上游错误脱敏三件套（extractUpstreamErrorMessage / sanitizeUpstreamMessage /
+ * sanitizeUpstreamError）已收敛至共享层 proxy-core/upstream-error.ts
+ * （三端逐字同源实现），此处统一导入使用。
  */
-const FORBIDDEN_FORWARD_HEADERS = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
-  "x-auth-token",
-  "cookie",
-  "content-type",
-  "content-length",
-  "host",
-  "connection",
-  "transfer-encoding",
-  "upgrade",
-  "expect",
-  // 与 Worker 版 proxy.ts / proxy-lite.ts 保持同一黑名单：下游伪造
-  // x-forwarded-* / cf-connecting-ip 等可污染日志 IP 与上游侧来源判定
-  "x-forwarded-for",
-  "x-forwarded-proto",
-  "x-forwarded-host",
-  "x-real-ip",
-  "cf-connecting-ip",
-  "eo-client-ip",
-  "eo-connecting-ip",
-  "x-vercel-forwarded-for",
-]);
-
-/** 提取上游错误体中的可读消息 */
-function extractUpstreamErrorMessage(text: string): string {
-  try {
-    const p = JSON.parse(text);
-    // p?.detail 可能是数组（FastAPI 标准格式）或对象，不能直接 String()，否则变成 "[object Object]"
-    const raw = p?.error?.message || p?.message || p?.detail || "";
-    if (typeof raw === "string") return raw.substring(0, 500);
-    if (Array.isArray(raw)) return raw.map((r: unknown) => {
-      const s = (r as Record<string, unknown>)?.msg || (r as Record<string, unknown>)?.detail || String(r);
-      return typeof s === "string" ? s : "";
-    }).filter(Boolean).join("; ").substring(0, 500);
-    return String(raw).substring(0, 500);
-  } catch {
-    return "上游服务返回未知错误";
-  }
-}
-
-/**
- * 对上游原始错误消息进行脱敏，防止敏感信息（如地区封锁策略、内部地址等）泄露给客户端
- * 403/401/429 返回通用消息，其余错误保留原始消息（5xx 错误信息通常不敏感）
- */
-function sanitizeMessage(original: string, status: number): string {
-  if (status === 403) return "上游访问被拒绝（HTTP 403）";
-  if (status === 401) return "上游认证失败（HTTP 401）";
-  if (status === 429) return "上游请求过多（HTTP 429）";
-  return original;
-}
-
-function sanitizeUpstreamError(text: string, status: number): string {
-  return JSON.stringify({ error: { message: sanitizeMessage(extractUpstreamErrorMessage(text), status), type: "upstream_error", upstream_status: status } });
-}
 
 /**
  * 按协议发送错误响应：anthropic 用 {type:"error",error:{type,message}}，
@@ -219,30 +170,8 @@ let whitelistLoaded = false;
 let keyStatusLoaded = false;
 
 // ==================== 上游超时与重试配置 ====================
-
-/** 上游请求总超时（等待响应头 + 非流式响应体） */
-const UPSTREAM_TIMEOUT_MS = 120_000;
-
-/** 流式响应空闲超时：距上次收到数据超过该时长即切断（正常持续传输的长流不受影响） */
-const UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
-
-/**
- * 可重试的上游错误状态码
- *
- * 429（限流）、401（密钥失效）、403（密钥无权限/被拦截）、402（欠费/额度耗尽，
- * recordKeyError 计数增量最大 +5 直接达自动禁用阈值）均表示当前 Key 或平台
- * 不可用，封禁当前 Key 并换 Key/换平台重试。5xx 等其它错误不重试，直接真实透传。
- */
-const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 401, 403, 402]);
-
-/**
- * 空响应哨兵：上游返回 2xx 但响应体为空（空 JSON / 空 SSE 流 / 空 multipart）。
- * handleUpstreamResponsePages 检测到后返回此哨兵，调用方将其判定为无效并纳入重试
- * （封禁当前 Key → 换 Key → 换平台），耗尽后返回 502 明确错误，绝不透传空响应。
- */
-const EMPTY_UPSTREAM_RESPONSE = Symbol("empty-upstream-response");
-
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
+// 超时常量、可重试状态集、请求体上限与空响应哨兵已收敛至共享层
+// proxy-core/proxy-constants.ts（三端唯一定义），此处统一导入使用
 
 /** multipart/form-data 请求体解析结果：仅提取 model 字段用于路由，原始字节转发时透传 */
 type MultipartBody = { model: string | null; raw: Buffer; contentType: string };
@@ -252,23 +181,8 @@ type ParseBodyResult<T> =
   | { multipart: MultipartBody }
   | { error: string; statusCode?: number };
 
-/** 从 multipart body 中提取指定文本字段（latin1 保字节序：仅头部与文本字段为
- *  ASCII，文件二进制不受影响；按 boundary 切分逐 part 查 Content-Disposition） */
-function extractMultipartField(raw: Buffer, contentType: string, field: string): string | null {
-  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
-  if (!m) return null;
-  const boundary = (m[1] ?? m[2]).trim();
-  const text = raw.toString("latin1");
-  for (const part of text.split(`--${boundary}`)) {
-    const headerEnd = part.indexOf("\r\n\r\n");
-    if (headerEnd === -1) continue;
-    const header = part.slice(0, headerEnd);
-    const dm = /name="([^"]*)"/.exec(header);
-    if (!dm || dm[1] !== field) continue;
-    return part.slice(headerEnd + 4).replace(/\r\n$/, "").trim();
-  }
-  return null;
-}
+// multipart 字段提取（extractMultipartField）已收敛至共享层
+// proxy-core/request-body.ts（三端同一 latin1 保字节序实现）
 
 async function parseRequestBody<T>(req: NextApiRequest): Promise<ParseBodyResult<T>> {
   const cl = Number(req.headers["content-length"] || "0");
@@ -290,72 +204,28 @@ async function parseRequestBody<T>(req: NextApiRequest): Promise<ParseBodyResult
   try { return { body: JSON.parse(text) as T }; } catch { return { error: "请求体格式错误" }; }
 }
 
-function getEndpointConfig(pathname: string): ProxyConfig | null {
-  const ep = pathname.replace(/^\/v1/, "");
-  const map: Record<string, ProxyConfig> = {
-    "/chat/completions": { upstreamPath: "/chat/completions", supportsStreaming: true },
-    "/completions": { upstreamPath: "/completions", supportsStreaming: true },
-    // 以下 JSON 端点显式 supportsStreaming:false（与 worker/src/endpoints.ts 端点表
-    // 一致）：缺省时 undefined !== false 恒过，stream:true 会把 JSON 上游当 SSE 解析
-    "/embeddings": { upstreamPath: "/embeddings", supportsStreaming: false },
-    "/images/generations": { upstreamPath: "/images/generations", supportsStreaming: false },
-    "/images/edits": { upstreamPath: "/images/edits", supportsStreaming: false },
-    "/images/variations": { upstreamPath: "/images/variations", supportsStreaming: false },
-    "/audio/speech": { upstreamPath: "/audio/speech", supportsStreaming: false },
-    "/audio/transcriptions": { upstreamPath: "/audio/transcriptions", supportsStreaming: false },
-    "/audio/translations": { upstreamPath: "/audio/translations", supportsStreaming: false },
-    "/responses": { upstreamPath: "/responses", supportsStreaming: true },
-    "/models": { upstreamPath: "/models", supportsStreaming: false },
-    "/messages": {
-      upstreamPath: "/chat/completions",
-      supportsStreaming: true,
-      protocol: "anthropic",
-      buildUpstreamBody: convertAnthropicRequest,
-    },
-  };
-  if (ep in map) return map[ep];
-  if (ep.startsWith("/models/")) return { upstreamPath: ep };
-  return null;
-}
-
-/** 平台优先级排序 comparator：priority 小者优先，无优先级信息的平台排最后。
- *  列表去重与详情 owned_by 归属必须使用同一实体，避免两端口径漂移 */
-function comparePlatformsByPriority(pc: ReturnType<typeof getPlatformCache>) {
-  return (a: string, b: string): number =>
-    (pc.find(x => x.id === a)?.priority ?? Number.MAX_SAFE_INTEGER) -
-    (pc.find(x => x.id === b)?.priority ?? Number.MAX_SAFE_INTEGER);
-}
+// 端点配置表已收敛至共享层 worker/src/endpoints.ts 的 getEndpointConfig
+// （全量版/lite 版/Pages 版三端同表），此处统一导入使用
 
 async function handleModelsList(res: NextApiResponse): Promise<void> {
   const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
-  const models: Array<{ id: string; object: string; owned_by: string }> = [];
-  const pc = getPlatformCache(), pm = getPlatformModelCache();
-  // 同名模型多平台重复：按平台优先级取最优归属去重，
-  // 避免客户端模型下拉出现大量同名条目
-  const seen = new Set<string>();
-  const orderedPids = [...pm.keys()].sort(comparePlatformsByPriority(pc));
-  for (const pid of orderedPids) {
-    const p = pc.find(x => x.id === pid);
-    for (const mid of pm.get(pid) ?? []) {
-      if (seen.has(mid)) continue;
-      seen.add(mid);
-      models.push({ id: mid, object: "model", owned_by: p?.name ?? "unknown" });
-    }
-  }
-  res.status(200).json({ object: "list", data: models });
+  // 同名模型多平台重复：按平台优先级取最优归属去重（负载构造收敛至
+  // proxy-core/v1-route-core.ts，与 Worker 全量/lite 两端同源同口径）
+  res.status(200).json({
+    object: "list",
+    data: buildModelsListPayload(getPlatformCache(), getPlatformModelCache()),
+  });
 }
 
 async function handleModelDetail(modelId: string, res: NextApiResponse): Promise<void> {
   const env = await createPagesEnv();
   await refreshCache(dummyDb, env);
-  const pc = getPlatformCache(), pm = getPlatformModelCache();
-  // 与列表端点同一口径：按平台优先级取最优归属（priority 小者优先，缺失排最后），
-  // 避免同名模型两处 owned_by 不一致（此前按缓存插入序首个命中）
-  const owningPids = [...pm.entries()].filter(([, ms]) => ms.has(modelId)).map(([pid]) => pid).sort(comparePlatformsByPriority(pc));
-  if (owningPids.length > 0) {
-    const p = pc.find(x => x.id === owningPids[0]);
-    res.status(200).json({ id: modelId, object: "model", owned_by: p?.name ?? "unknown" }); return;
+  // 与列表端点同一口径：按平台优先级取最优归属（归属解析收敛至
+  // proxy-core/v1-route-core.ts，与 Worker 全量/lite 两端同源同口径）
+  const ownedBy = resolveModelDetailOwner(getPlatformCache(), getPlatformModelCache(), modelId);
+  if (ownedBy !== null) {
+    res.status(200).json({ id: modelId, object: "model", owned_by: ownedBy }); return;
   }
   res.status(404).json({ error: { message: `模型 ${modelId} 不存在`, type: "invalid_request_error" } });
 }
@@ -426,13 +296,11 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   // （仅声明不初始化：门禁拒绝路径提前 return 不读它，放行路径由 gate.halfOpenHeld 首次赋值）
   let curHoldsHalfOpenSlot: boolean;
 
-  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS
-  // Responses 使用 max_output_tokens，Chat 使用 max_tokens/max_completion_tokens。
+  // TPM 预扣 token 数：统一走共享 estimateRequestTokens（三端同源同算法）。
+  // max_tokens 仅是输出上限，客户端可能传极大值，钳制到 MAX_ESTIMATED_TOKENS；
   // multipart（图片/音频）请求体无 token 字段且实际消耗达数千至数万 token，
   // 按上限预扣，防止 TPM 配额被以 1 token 的名义绕过
-  const est = multipart
-    ? MAX_ESTIMATED_TOKENS
-    : Math.min(MAX_ESTIMATED_TOKENS, Math.max(1, Number((body as any).max_output_tokens || body.max_tokens || body.max_completion_tokens) || 1));
+  const est = estimateRequestTokens(body, multipart !== null);
   // Anthropic 转换器的 message_start.usage.input_tokens：用转换前请求体的输入估算
   // （max_tokens 是输出上限，语义不符；仅限流 TPM 继续用 est）
   const anthropicInputEstimate = config.protocol === "anthropic" ? estimateInputTokens(rawBody) : est;
@@ -443,7 +311,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   const logGateRejection = async (stage: LimitGateStage): Promise<void> => {
     if (stage !== "platformRpm" && stage !== "platformTpm") return;
     try {
-      await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: GATE_STAGE_MESSAGES[stage], ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env });
+      await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: route.platform.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 429, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: LIMIT_GATE_MESSAGES[stage], ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env });
     } catch {}
   };
 
@@ -479,7 +347,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       case "keyRpm":
       case "platformTpm":
       case "keyTpm":
-        message = GATE_STAGE_MESSAGES[gate.stage];
+        message = LIMIT_GATE_MESSAGES[gate.stage];
         break;
     }
     sendV1Error(res, config, 429, message, "rate_limit_error", { retry_after: Math.ceil(((gate.resetAt ?? Date.now()) - Date.now()) / 1000) });
@@ -579,19 +447,15 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // Responses 端点不注入 stream_options（Responses 的流式 usage 由独立事件携带）
     if (isStream && cur.injectStreamOptions !== false && !upstreamIsAnthropic && effectiveUpstreamPath !== "/responses") upstreamBody.stream_options = { include_usage: true };
 
-    const fwd: Record<string, string> = {};
     // NextApiRequest.headers 是 IncomingHttpHeaders（可能含 string[] 多值头），
-    // 转成 Headers 以匹配 Worker 版 extractForwardableHeaders 签名
+    // 转成 Headers 以匹配 Worker 版 extractForwardableHeaders 签名；
+    // 合法名过滤 + 认证/语义关键头黑名单统一走共享 filterForwardHeaders
     const downstreamHeaders = new Headers();
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") downstreamHeaders.set(k, v);
-    for (const [k, v] of Object.entries(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders)))
-      // 认证类/语义类头名（大小写不敏感）直接丢弃：下游透传白名单不得覆盖
-      // 平台密钥与请求语义（见 FORBIDDEN_FORWARD_HEADERS 注释）
-      if (/^[a-zA-Z0-9-]+$/.test(k) && !FORBIDDEN_FORWARD_HEADERS.has(k.toLowerCase())) fwd[k] = v;
+    const fwd = filterForwardHeaders(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders));
 
-    const url = upstreamIsAnthropic
-      ? `${cur.baseUrl.replace(/\/+$/, "")}/v1/messages`
-      : `${cur.baseUrl.replace(/\/+$/, "")}${effectiveUpstreamPath}`;
+    // 上游 URL 构造统一走共享 resolveUpstreamUrl（三端同规则）
+    const url = resolveUpstreamUrl(cur.baseUrl, effectiveUpstreamPath, upstreamIsAnthropic);
     const check = isSafeUpstreamUrl(cur.baseUrl);
     if (!check.safe) {
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }).catch(() => {});
@@ -603,19 +467,17 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     let upRes: Response;
     const upstreamController = new AbortController();
     const upstreamTimeoutId = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
-    const headers = new Headers({
-      // multipart 请求：Content-Type 必须保留原始 boundary，否则上游无法解析表单
-      "Content-Type": multipart ? multipart.contentType : "application/json",
-      // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
-      // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
-      ...(upstreamIsAnthropic ? { "x-api-key": curKey, "anthropic-version": "2023-06-01" } : { Authorization: `Bearer ${curKey}` }),
-      ...fwd,
-      ...parseExtraHeaders(cur.extraHeaders),
-    });
-    // 高级设置：UA 复用（自定义 UA 优先级最高，覆盖 extraHeaders 中的 User-Agent）
-    if (cur.reuseUserAgent && cur.customUserAgent) {
-      headers.set("User-Agent", cur.customUserAgent);
-    }
+    // 请求头组装统一走共享 buildUpstreamFetchHeaders（优先级：基础头 < 透传头
+    // < extraHeaders < 自定义 UA，三端同序），再包 Headers 供 fetch 使用
+    const headers = new Headers(buildUpstreamFetchHeaders({
+      platformKey: curKey,
+      upstreamIsAnthropic,
+      contentType: multipart ? multipart.contentType : "application/json",
+      forwardHeaders: fwd,
+      extraHeaders: cur.extraHeaders,
+      reuseUserAgent: cur.reuseUserAgent,
+      customUserAgent: cur.customUserAgent,
+    }));
     // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
     let proxy: Awaited<ReturnType<typeof getUpstreamProxyForKey>> | null = null;
     try {
@@ -738,7 +600,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       if (isAutoModelRequest(requestedModel)) freezeAutoModel(tgt);
       res.setHeader("Content-Type", "application/json");
       if (config.protocol === "anthropic") {
-        res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
+        res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeUpstreamMessage(extractUpstreamErrorMessage(errText), upRes.status)));
       } else {
         res.status(upRes.status).send(sanitizeUpstreamError(errText, upRes.status));
       }
@@ -777,9 +639,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         void upRes.arrayBuffer().catch(() => {});
         // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
         // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
-        // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）
-        const backoffMs = Math.min(250 * Math.pow(2, attempt), 2000) + Math.random() * 250;
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）。
+        // 公式收敛至共享 retryBackoffMs（与 Worker 全量版同源）
+        await new Promise((resolve) => setTimeout(resolve, retryBackoffMs(attempt)));
         curKey = nk; continue;
       }
       const ops = getPlatformsForModel(tgt, triedP);
@@ -848,7 +710,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     }
     res.setHeader("Content-Type", "application/json");
     if (config.protocol === "anthropic") {
-      res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeMessage(extractUpstreamErrorMessage(errText), upRes.status)));
+      res.status(upRes.status).json(formatAnthropicError(upRes.status, sanitizeUpstreamMessage(extractUpstreamErrorMessage(errText), upRes.status)));
     } else {
       res.status(upRes.status).send(sanitizeUpstreamError(errText, upRes.status));
     }
