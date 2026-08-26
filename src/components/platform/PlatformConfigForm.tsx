@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, memo } from "react";
 import { Form, Input, InputNumber, Select, Popconfirm, Modal, Collapse } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -18,6 +18,195 @@ import {
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
 import { BrandAvatar, StatusDot, type Platform } from "@/components/platform/PlatformList";
+
+/**
+ * 单把密钥编辑行 — memo 化：页面层回调全部为稳定引用，密钥输入每次击键
+ * 只重渲染当前行，其余行经 props 浅比较跳过（大密钥量下输入卡顿的根因修复）
+ */
+const NamedKeyRow = memo(function NamedKeyRow({
+  namedKey,
+  index,
+  editing,
+  canRemove,
+  busy,
+  proxyOpen,
+  hasProxyChoices,
+  availableProxyUrls,
+  onUpdateName,
+  onUpdateValue,
+  onCopyKey,
+  onToggleWhitelist,
+  onToggleKey,
+  onRemove,
+  onToggleProxyPanel,
+  onUpdateProxyUrls,
+  onUpdateProxyStrict,
+}: {
+  namedKey: NamedApiKey;
+  index: number;
+  editing: boolean;
+  /** 列表多于一把时才允许删除 */
+  canRemove: boolean;
+  /** 该行启停开关请求进行中 */
+  busy: boolean;
+  /** 该行代理绑定面板是否展开 */
+  proxyOpen: boolean;
+  /** 部署存在可用代理 URL（决定绑定入口显隐） */
+  hasProxyChoices: boolean;
+  availableProxyUrls: Array<{ url: string; group: string; enabled: boolean }>;
+  onUpdateName: (i: number, v: string) => void;
+  onUpdateValue: (i: number, v: string) => void;
+  onCopyKey: (k: string) => void;
+  onToggleWhitelist: (i: number) => void;
+  onToggleKey: (i: number, enabled: boolean) => void;
+  onRemove: (i: number) => void;
+  onToggleProxyPanel: (i: number) => void;
+  onUpdateProxyUrls: (i: number, urls: string[]) => void;
+  onUpdateProxyStrict: (i: number, strict: boolean) => void;
+}) {
+  const { t } = useTranslation("platform");
+  return (
+    <div
+      className="p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700"
+    >
+      {/* 第一行：名称 + 密钥输入 */}
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={namedKey.name}
+          onChange={(e) => onUpdateName(index, e.target.value)}
+          placeholder={t("keyName")}
+          className="!w-20 sm:!w-24 !min-w-0 shrink-0"
+          size="small"
+        />
+        <Input.Password
+          value={namedKey.key}
+          onChange={(e) => onUpdateValue(index, e.target.value)}
+          placeholder={editing ? t("keyPlaceholderEdit") : t("keyPlaceholderAdd")}
+          className="!flex-1 !min-w-0 font-mono text-xs"
+          size="small"
+        />
+      </div>
+      {/* 第二行：操作按钮 */}
+      <div className="flex items-center gap-1 mt-1.5">
+      <button
+        type="button"
+        onClick={() => onToggleWhitelist(index)}
+        disabled={!namedKey.key}
+        title={namedKey.whitelisted ? t("whitelistRemoveTip") : t("whitelistAddTip")}
+        className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+          namedKey.whitelisted
+            ? "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/30"
+            : "text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+        }`}
+      >
+        {namedKey.whitelisted ? <ShieldCheck size={14} className="inline" /> : <ShieldOff size={14} className="inline" />}
+        <span className="hidden sm:inline ml-0.5">
+          {namedKey.whitelisted ? t("whitelistRemove") : t("whitelistAdd")}
+        </span>
+      </button>
+      {editing && namedKey.key && (
+        <>
+          {namedKey.errorCount && namedKey.errorCount > 0 ? (
+            <span
+              className={`shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+                namedKey.enabled === false
+                  ? "text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/30"
+                  : "text-orange-500 bg-orange-50 dark:text-orange-400 dark:bg-orange-900/20"
+              }`}
+              title={t("errorCountTip")}
+            >
+              <AlertCircle size={11} className="inline" />
+              {namedKey.errorCount}/5
+            </span>
+          ) : null}
+          <Switch
+            checked={namedKey.enabled !== false}
+            loading={busy}
+            onChange={(checked) => onToggleKey(index, checked)}
+            className="!h-[20px] !w-[36px]"
+          />
+        </>
+      )}
+      <button
+        type="button"
+        onClick={() => onCopyKey(namedKey.key)}
+        disabled={!namedKey.key}
+        className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        title={t("copyKeyTip")}
+      >
+        <Copy size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onRemove(index)}
+        disabled={!canRemove}
+        className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        title={t("removeKeyTip")}
+      >
+        <Trash2 size={13} />
+      </button>
+      {hasProxyChoices && (
+        <button
+          type="button"
+          onClick={() => onToggleProxyPanel(index)}
+          disabled={!namedKey.key}
+          className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+            namedKey.proxyUrls && namedKey.proxyUrls.length > 0
+              ? "text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30"
+              : "text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+          }`}
+          title={t("proxyBindTip")}
+        >
+          <Link2 size={14} className="inline" />
+          <span className="hidden sm:inline ml-0.5">{t("proxyBind")}</span>
+        </button>
+      )}
+      </div>
+      {/* 代理绑定面板（可折叠） */}
+      {proxyOpen && (
+        <div className="mt-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-700/40 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyBindLabel")}</span>
+            <Select
+              mode="multiple"
+              size="small"
+              value={namedKey.proxyUrls ?? []}
+              onChange={(v: string[]) => onUpdateProxyUrls(index, v.slice(0, 2))}
+              maxTagCount={2}
+              placeholder={t("proxyBindPlaceholder")}
+              className="flex-1"
+              options={availableProxyUrls.map((p) => ({
+                value: p.url,
+                label: (
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <span className="truncate max-w-[180px]">{p.url.replace(/^https?:\/\//, "").replace(/\/\/.*@/, "//***@")}</span>
+                    <span className="text-[10px] text-zinc-400 shrink-0">{p.group}</span>
+                    {!p.enabled && <span className="text-[10px] text-orange-400 shrink-0">off</span>}
+                  </span>
+                ),
+              }))}
+              disabled={!namedKey.key}
+              maxTagPlaceholder={(omitted) => `+${omitted.length}`}
+            />
+          </div>
+          {namedKey.proxyUrls && namedKey.proxyUrls.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyStrictLabel")}</span>
+              <Switch
+                checked={namedKey.proxyStrict !== false}
+                onChange={(checked) => onUpdateProxyStrict(index, checked)}
+                className="!h-[18px] !w-[32px]"
+              />
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                {namedKey.proxyStrict !== false ? t("proxyStrictOn") : t("proxyStrictOff")}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
 
 /**
  * 平台配置表单 — 单卡片可折叠，header 含品牌头像/名称/状态/启停开关
@@ -79,14 +268,19 @@ export function PlatformConfigForm({
 
   // 删除密钥行时同步修正展开态：expandedProxyIndex 按位置索引记录，
   // 删除位之前的行被移除后后续行前移，若不修正，代理绑定面板会错位到另一把密钥
-  const handleRemoveKey = (index: number) => {
+  const handleRemoveKey = useCallback((index: number) => {
     setExpandedProxyIndex((prev) => {
       if (prev === null || index > prev) return prev;
       if (index === prev) return null;
       return prev - 1;
     });
     onRemoveKey(index);
-  };
+  }, [onRemoveKey]);
+
+  // 代理绑定面板展开/收起（稳定引用供 memo 密钥行使用）
+  const toggleProxyPanel = useCallback((index: number) => {
+    setExpandedProxyIndex((prev) => (prev === index ? null : index));
+  }, []);
 
   // 认证类/协议管控头禁止透传（与代理层 FORBIDDEN_FORWARD_HEADERS 双端一致，W7）：
   // 透传白名单可覆盖平台密钥，导致 401 封禁循环或 BYOK 绕过计费
@@ -269,146 +463,26 @@ export function PlatformConfigForm({
                 <>
                   <div className="space-y-2 mb-3">
                     {namedKeys.map((namedKey, index) => (
-                      <div
+                      <NamedKeyRow
                         key={index}
-                        className="p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700"
-                      >
-                        {/* 第一行：名称 + 密钥输入 */}
-                        <div className="flex items-center gap-1.5">
-                          <Input
-                            value={namedKey.name}
-                            onChange={(e) => onUpdateKeyName(index, e.target.value)}
-                            placeholder={t("keyName")}
-                            className="!w-20 sm:!w-24 !min-w-0 shrink-0"
-                            size="small"
-                          />
-                          <Input.Password
-                            value={namedKey.key}
-                            onChange={(e) => onUpdateKeyValue(index, e.target.value)}
-                            placeholder={editing ? t("keyPlaceholderEdit") : t("keyPlaceholderAdd")}
-                            className="!flex-1 !min-w-0 font-mono text-xs"
-                            size="small"
-                          />
-                        </div>
-                        {/* 第二行：操作按钮 */}
-                        <div className="flex items-center gap-1 mt-1.5">
-                        <button
-                          type="button"
-                          onClick={() => onToggleWhitelist(index)}
-                          disabled={!namedKey.key}
-                          title={namedKey.whitelisted ? t("whitelistRemoveTip") : t("whitelistAddTip")}
-                          className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                            namedKey.whitelisted
-                              ? "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/30"
-                              : "text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
-                          }`}
-                        >
-                          {namedKey.whitelisted ? <ShieldCheck size={14} className="inline" /> : <ShieldOff size={14} className="inline" />}
-                          <span className="hidden sm:inline ml-0.5">
-                            {namedKey.whitelisted ? t("whitelistRemove") : t("whitelistAdd")}
-                          </span>
-                        </button>
-                        {editing && namedKey.key && (
-                          <>
-                            {namedKey.errorCount && namedKey.errorCount > 0 ? (
-                              <span
-                                className={`shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
-                                  namedKey.enabled === false
-                                    ? "text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/30"
-                                    : "text-orange-500 bg-orange-50 dark:text-orange-400 dark:bg-orange-900/20"
-                                }`}
-                                title={t("errorCountTip")}
-                              >
-                                <AlertCircle size={11} className="inline" />
-                                {namedKey.errorCount}/5
-                              </span>
-                            ) : null}
-                            <Switch
-                              checked={namedKey.enabled !== false}
-                              loading={togglingKeyIndex === index}
-                              onChange={(checked) => onToggleKey(index, checked)}
-                              className="!h-[20px] !w-[36px]"
-                            />
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => onCopyKey(namedKey.key)}
-                          disabled={!namedKey.key}
-                          className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title={t("copyKeyTip")}
-                        >
-                          <Copy size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveKey(index)}
-                          disabled={namedKeys.length <= 1}
-                          className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title={t("removeKeyTip")}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                        {availableProxyUrls.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedProxyIndex(expandedProxyIndex === index ? null : index)}
-                            disabled={!namedKey.key}
-                            className={`shrink-0 p-1.5 sm:px-2 sm:py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                              namedKey.proxyUrls && namedKey.proxyUrls.length > 0
-                                ? "text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30"
-                                : "text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                            }`}
-                            title={t("proxyBindTip")}
-                          >
-                            <Link2 size={14} className="inline" />
-                            <span className="hidden sm:inline ml-0.5">{t("proxyBind")}</span>
-                          </button>
-                        )}
-                        </div>
-                      {/* 代理绑定面板（可折叠） */}
-                      {expandedProxyIndex === index && (
-                        <div className="mt-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-700/40 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyBindLabel")}</span>
-                            <Select
-                              mode="multiple"
-                              size="small"
-                              value={namedKey.proxyUrls ?? []}
-                              onChange={(v: string[]) => onUpdateKeyProxyUrls(index, v.slice(0, 2))}
-                              maxTagCount={2}
-                              placeholder={t("proxyBindPlaceholder")}
-                              className="flex-1"
-                              options={availableProxyUrls.map((p) => ({
-                                value: p.url,
-                                label: (
-                                  <span className="flex items-center gap-1.5 text-xs">
-                                    <span className="truncate max-w-[180px]">{p.url.replace(/^https?:\/\//, "").replace(/\/\/.*@/, "//***@")}</span>
-                                    <span className="text-[10px] text-zinc-400 shrink-0">{p.group}</span>
-                                    {!p.enabled && <span className="text-[10px] text-orange-400 shrink-0">off</span>}
-                                  </span>
-                                ),
-                              }))}
-                              disabled={!namedKey.key}
-                              maxTagPlaceholder={(omitted) => `+${omitted.length}`}
-                            />
-                          </div>
-                          {namedKey.proxyUrls && namedKey.proxyUrls.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{t("proxyStrictLabel")}</span>
-                              <Switch
-                                checked={namedKey.proxyStrict !== false}
-                                onChange={(checked) => onUpdateKeyProxyStrict(index, checked)}
-                                className="!h-[18px] !w-[32px]"
-                              />
-                              <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                                {namedKey.proxyStrict !== false ? t("proxyStrictOn") : t("proxyStrictOff")}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      </div>
+                        namedKey={namedKey}
+                        index={index}
+                        editing={!!editing}
+                        canRemove={namedKeys.length > 1}
+                        busy={togglingKeyIndex === index}
+                        proxyOpen={expandedProxyIndex === index}
+                        hasProxyChoices={availableProxyUrls.length > 0}
+                        availableProxyUrls={availableProxyUrls}
+                        onUpdateName={onUpdateKeyName}
+                        onUpdateValue={onUpdateKeyValue}
+                        onCopyKey={onCopyKey}
+                        onToggleWhitelist={onToggleWhitelist}
+                        onToggleKey={onToggleKey}
+                        onRemove={handleRemoveKey}
+                        onToggleProxyPanel={toggleProxyPanel}
+                        onUpdateProxyUrls={onUpdateKeyProxyUrls}
+                        onUpdateProxyStrict={onUpdateKeyProxyStrict}
+                      />
                     ))}
                   </div>
                   <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3 flex gap-2">

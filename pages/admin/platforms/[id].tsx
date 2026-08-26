@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { Form, message } from "antd";
 import Switch from "@/components/ui/Switch";
@@ -45,8 +45,6 @@ export default function PlatformDetailPage() {
 
   // 模型操作状态
   const [refreshing, setRefreshing] = useState(false);
-  const [newModelId, setNewModelId] = useState("");
-  const [addModelLoading, setAddModelLoading] = useState(false);
   const [togglingAll, setTogglingAll] = useState(false);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
@@ -158,6 +156,14 @@ export default function PlatformDetailPage() {
   }, [platform, id, isNew, syncedForId, form, t, defaultKeyName]);
 
   // ---------- 密钥编辑 ----------
+  // namedKeysRef 承载最新列表：下方回调全部 useCallback 稳定引用，供
+  // PlatformConfigForm 的 memo 密钥行做 props 浅比较——否则每次击键都会
+  // 因回调换引用导致全部行重渲染（大密钥量下输入极端卡顿）
+  const namedKeysRef = useRef(namedKeys);
+  useEffect(() => {
+    namedKeysRef.current = namedKeys;
+  });
+
   const addNamedKey = () => {
     const names = namedKeys.map((k) => k.name);
     let i = 1;
@@ -190,57 +196,57 @@ export default function PlatformDetailPage() {
     }
   };
 
-  const removeNamedKey = (index: number) => {
-    if (namedKeys.length <= 1) {
+  const removeNamedKey = useCallback((index: number) => {
+    if (namedKeysRef.current.length <= 1) {
       message.warning(t("atLeastOneKey"));
       return;
     }
-    setNamedKeys(namedKeys.filter((_, i) => i !== index));
-  };
+    setNamedKeys(namedKeysRef.current.filter((_, i) => i !== index));
+  }, [t]);
 
-  const updateKeyName = (index: number, name: string) => {
-    const keys = [...namedKeys];
+  const updateKeyName = useCallback((index: number, name: string) => {
+    const keys = [...namedKeysRef.current];
     keys[index] = { ...keys[index], name };
     setNamedKeys(keys);
-  };
+  }, []);
 
-  const updateKeyValue = (index: number, key: string) => {
-    const keys = [...namedKeys];
+  const updateKeyValue = useCallback((index: number, key: string) => {
+    const keys = [...namedKeysRef.current];
     keys[index] = { ...keys[index], key };
     setNamedKeys(keys);
-  };
+  }, []);
 
   // 统一走共享剪贴板工具：HTTP（非 localhost）部署下 navigator.clipboard 不存在，
   // 直调会同步抛 TypeError 且 .catch 接不住，按钮表现为"点了没反应"
-  const copyKeyValue = async (key: string) => {
+  const copyKeyValue = useCallback(async (key: string) => {
     const ok = await copyToClipboard(key);
     if (ok) message.success(t("common:copied"));
     else message.error(t("common:copyFailed"));
-  };
+  }, [t]);
 
-  const handleToggleWhitelist = (index: number) => {
-    const next = [...namedKeys];
+  const handleToggleWhitelist = useCallback((index: number) => {
+    const next = [...namedKeysRef.current];
     const newState = !next[index].whitelisted;
     next[index] = { ...next[index], whitelisted: newState };
     setNamedKeys(next);
     message.info(newState ? t("whitelistAdded") : t("whitelistRemoved"));
-  };
+  }, [t]);
 
-  const handleUpdateKeyProxyUrls = (index: number, urls: string[]) => {
-    const next = [...namedKeys];
+  const handleUpdateKeyProxyUrls = useCallback((index: number, urls: string[]) => {
+    const next = [...namedKeysRef.current];
     next[index] = { ...next[index], proxyUrls: urls.length > 0 ? urls : undefined };
     setNamedKeys(next);
-  };
+  }, []);
 
-  const handleUpdateKeyProxyStrict = (index: number, strict: boolean) => {
-    const next = [...namedKeys];
+  const handleUpdateKeyProxyStrict = useCallback((index: number, strict: boolean) => {
+    const next = [...namedKeysRef.current];
     next[index] = { ...next[index], proxyStrict: strict ? undefined : false };
     setNamedKeys(next);
-  };
+  }, []);
 
-  const handleToggleKey = async (index: number, enabled: boolean) => {
+  const handleToggleKey = useCallback(async (index: number, enabled: boolean) => {
     if (!id || isNew) return;
-    const targetKey = namedKeys[index]?.key;
+    const targetKey = namedKeysRef.current[index]?.key;
     if (!targetKey) return;
     setTogglingKeyIndex(index);
     try {
@@ -252,7 +258,7 @@ export default function PlatformDetailPage() {
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         // 更新本地状态
-        const next = [...namedKeys];
+        const next = [...namedKeysRef.current];
         next[index] = { ...next[index], enabled };
         if (enabled) next[index].errorCount = 0;
         setNamedKeys(next);
@@ -267,7 +273,7 @@ export default function PlatformDetailPage() {
     } finally {
       setTogglingKeyIndex(null);
     }
-  };
+  }, [id, isNew, t, mutateDetail, mutateList]);
 
   // ---------- 保存 / 删除 / 启停 ----------
   const handleSubmit = async () => {
@@ -401,7 +407,9 @@ export default function PlatformDetailPage() {
   };
 
   // ---------- 模型操作 ----------
-  const handleTestModel = async (modelId: string) => {
+  // 全部 useCallback 稳定引用：ModelsPanel 为 memo 组件且内部持有搜索/新增输入框，
+  // 回调换引用会让输入每次击键都全量重渲染所有模型行
+  const handleTestModel = useCallback(async (modelId: string) => {
     if (!id || isNew) return;
     setTestLoading(true);
     setTestResults(null);
@@ -422,9 +430,9 @@ export default function PlatformDetailPage() {
     } finally {
       setTestLoading(false);
     }
-  };
+  }, [id, isNew, t]);
 
-  const handleRefreshModels = async () => {
+  const handleRefreshModels = useCallback(async () => {
     if (!id || isNew) return;
     setRefreshing(true);
     try {
@@ -441,35 +449,33 @@ export default function PlatformDetailPage() {
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [id, isNew, t, mutateModels]);
 
-  const handleAddModel = async () => {
-    if (!id || isNew || !newModelId.trim() || addModelLoading) return;
-    // in-flight 守卫：连点会发出重复 POST，第二个命中后端查重返回
-    // 「该模型已存在」，成功与失败 toast 先后弹出造成困惑
-    setAddModelLoading(true);
+  // 输入值由 ModelsPanel 内部持有：成功返回 true，面板据此清空输入框
+  const handleAddModel = useCallback(async (modelId: string): Promise<boolean> => {
+    if (!id || isNew || !modelId.trim()) return false;
     try {
       const res = await fetch(`/api/admin/platforms/${id}/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: newModelId.trim() }),
+        body: JSON.stringify({ modelId: modelId.trim() }),
       });
       const data = (await res.json()) as Record<string, any>;
       if (data.success) {
         message.success(data.message);
-        setNewModelId("");
         mutateModels();
+        return true;
       } else {
         message.error(data.error || t("common:error"));
+        return false;
       }
     } catch {
       message.error(t("common:error"));
-    } finally {
-      setAddModelLoading(false);
+      return false;
     }
-  };
+  }, [id, isNew, t, mutateModels]);
 
-  const handleDeleteModel = async (modelId: string) => {
+  const handleDeleteModel = useCallback(async (modelId: string) => {
     if (!id || isNew) return;
     try {
       const res = await fetch(
@@ -482,9 +488,9 @@ export default function PlatformDetailPage() {
     } catch {
       message.error(t("common:error"));
     }
-  };
+  }, [id, isNew, t, mutateModels]);
 
-  const handleToggleModel = async (modelId: string, enabled: boolean) => {
+  const handleToggleModel = useCallback(async (modelId: string, enabled: boolean) => {
     if (!id || isNew) return;
     setTogglingModelId(modelId);
     try {
@@ -508,9 +514,9 @@ export default function PlatformDetailPage() {
     } finally {
       setTogglingModelId(null);
     }
-  };
+  }, [id, isNew, t, mutateModels]);
 
-  const handleToggleAll = async (enabled: boolean) => {
+  const handleToggleAll = useCallback(async (enabled: boolean) => {
     if (!id || isNew) return;
     setTogglingAll(true);
     try {
@@ -533,7 +539,7 @@ export default function PlatformDetailPage() {
     } finally {
       setTogglingAll(false);
     }
-  };
+  }, [id, isNew, t, mutateModels]);
 
   // ---------- 渲染 ----------
   const configForm = (
@@ -683,8 +689,6 @@ export default function PlatformDetailPage() {
                   models={models ?? []}
                   loading={modelsLoading}
                   refreshing={refreshing}
-                  newModelId={newModelId}
-                  onNewModelIdChange={setNewModelId}
                   onAddModel={handleAddModel}
                   onRefreshModels={handleRefreshModels}
                   onDeleteModel={handleDeleteModel}

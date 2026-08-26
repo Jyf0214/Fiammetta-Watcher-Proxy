@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Input, InputNumber, Select, Alert, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
@@ -11,7 +11,7 @@ import {
   ProxyGroupList,
   type ProxyGroupSummary,
 } from "@/components/upstream-proxy/ProxyGroupList";
-import { renderHealthText, VALIDATION_KEYS } from "@/components/upstream-proxy/shared";
+import { ProxyHealthRow, VALIDATION_KEYS } from "@/components/upstream-proxy/shared";
 import {
   CONFIG_KEY,
   POOL_KEY,
@@ -22,7 +22,6 @@ import {
   parseHealthMap,
   parsePoolMap,
   collectGroupUrls,
-  displayProxyUrl,
   proxyStatKey,
   buildConfigJson,
   sumMaskedStats,
@@ -140,12 +139,13 @@ export default function UpstreamProxyPage() {
     setHealthIntervalMin(parsed.healthCheckIntervalMin ?? null);
   }
 
-  const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
-  const poolMap = parsePoolMap(config?.[POOL_KEY]);
-  const parsed = parseProxyConfig(config?.[CONFIG_KEY]);
+  // 解析结果 useMemo 化：引用随 config 稳定，供 memo 健康行跳过无关重渲染
+  const healthMap = useMemo(() => parseHealthMap(config?.[HEALTH_KEY]), [config]);
+  const poolMap = useMemo(() => parsePoolMap(config?.[POOL_KEY]), [config]);
+  const parsed = useMemo(() => parseProxyConfig(config?.[CONFIG_KEY]), [config]);
 
   /** 组列表行数据：候选代理数 + 健康摘要 + 请求可用率（拉取池 ∪ 手动代理） */
-  const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
+  const summaries: ProxyGroupSummary[] = useMemo(() => parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
     // 组可用率 = 组内各代理真实请求的 2xx 占比（聚合 total/ok；
     // stats 键为落库脱敏地址，同 host:port 不同凭据共享同一统计键只计一次）
@@ -161,7 +161,10 @@ export default function UpstreamProxyPage() {
       enabled: g.enabled,
       availability: groupTotal > 0 ? groupOk / groupTotal : undefined,
     };
-  });
+  }), [parsed, poolMap, healthMap, trafficStats]);
+
+  /** 统计降权代理键集合（Set 化避免每行 O(n) includes 扫描） */
+  const degradedKeySet = useMemo(() => new Set(degradedUrls), [degradedUrls]);
 
   /** 某份已解析配置 → 全组表单态（组数据来自已保存配置，仅全局字段可编辑） */
   const currentFormGroups = (src: ParsedConfig): GroupFormState[] =>
@@ -573,37 +576,18 @@ export default function UpstreamProxyPage() {
                         <ul className="space-y-1.5">
                           {groupUrls.map((url) => {
                             const entry = healthMap[url];
-                            const status = entry?.status ?? "none";
                             // 统计降权：健康点仍显示 ok 但路由已跳过（窗口内错误率过高，
                             // 窗口滑动自动恢复）——此前完全不可见；按代理级键匹配，
                             // 同 host:port 不同账号的降权状态互不误伤
-                            const degraded = degradedUrls.includes(proxyStatKey(url));
+                            const degraded = degradedKeySet.has(proxyStatKey(url));
                             return (
-                              <li key={url} className="flex items-center gap-2 text-xs">
-                                <span
-                                  className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                                    status === "ok"
-                                      ? "bg-emerald-500"
-                                      : status === "fail"
-                                        ? "bg-rose-500"
-                                        : "bg-zinc-300 dark:bg-zinc-600"
-                                  }`}
-                                />
-                                <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
-                                  {displayProxyUrl(url)}
-                                </span>
-                                {degraded && (
-                                  <span
-                                    className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400"
-                                    title={t("upstreamProxyDegradedTip")}
-                                  >
-                                    {t("upstreamProxyDegraded")}
-                                  </span>
-                                )}
-                                <span className="shrink-0 text-zinc-400 text-right">
-                                  {renderHealthText(status, entry, t)}
-                                </span>
-                              </li>
+                              <ProxyHealthRow
+                                key={url}
+                                url={url}
+                                entry={entry}
+                                degraded={degraded}
+                                t={t}
+                              />
                             );
                           })}
                         </ul>

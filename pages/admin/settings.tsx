@@ -8,7 +8,7 @@
  * 后续批次将在此页扩展：告警通知配置、两步验证（2FA）等系统级设置。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, memo } from "react";
 import { message } from "antd";
 import {
   Bell,
@@ -66,6 +66,54 @@ const DEFAULT_NOTIFICATIONS: NotificationsConfig = {
   },
   cooldownMinutes: 10,
 };
+
+/** 单行价格配置 — memo 化：更新回调为稳定引用，输入击键只重渲染当前行
+ *  （LiteLLM 导入后可达数千行，行内联渲染时每次击键全表重渲染导致卡顿） */
+const PricingRowItem = memo(function PricingRowItem({
+  row,
+  onUpdate,
+  onRemove,
+}: {
+  row: PricingRow;
+  onUpdate: (id: string, patch: Partial<PricingRow>) => void;
+  onRemove: (id: string) => void;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div
+      className="grid grid-cols-[1fr_100px_100px_32px] sm:grid-cols-[1fr_140px_140px_40px] gap-2 items-center"
+    >
+      <input
+        value={row.model}
+        onChange={(e) => onUpdate(row.id, { model: e.target.value })}
+        placeholder={t("pricingModelPlaceholder")}
+        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+      />
+      <input
+        value={row.input}
+        onChange={(e) => onUpdate(row.id, { input: e.target.value })}
+        inputMode="decimal"
+        placeholder="0.00"
+        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+      />
+      <input
+        value={row.output}
+        onChange={(e) => onUpdate(row.id, { output: e.target.value })}
+        inputMode="decimal"
+        placeholder="0.00"
+        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+      />
+      <button
+        type="button"
+        onClick={() => onRemove(row.id)}
+        title={t("common:delete")}
+        className="h-8 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+});
 
 function SettingsContent() {
   const { t } = useTranslation("settings");
@@ -285,13 +333,14 @@ function SettingsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const updateRow = (id: string, patch: Partial<PricingRow>) => {
+  // 稳定引用供 memo 价格行使用：函数式更新不依赖外部快照
+  const updateRow = useCallback((id: string, patch: Partial<PricingRow>) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  };
+  }, []);
 
-  const removeRow = (id: string) => {
+  const removeRow = useCallback((id: string) => {
     setRows((prev) => prev.filter((r) => r.id !== id));
-  };
+  }, []);
 
   const addRow = () => {
     setRows((prev) => [
@@ -421,39 +470,12 @@ function SettingsContent() {
             ) : (
               <div className="space-y-2">
                 {rows.map((row) => (
-                  <div
+                  <PricingRowItem
                     key={row.id}
-                    className="grid grid-cols-[1fr_100px_100px_32px] sm:grid-cols-[1fr_140px_140px_40px] gap-2 items-center"
-                  >
-                    <input
-                      value={row.model}
-                      onChange={(e) => updateRow(row.id, { model: e.target.value })}
-                      placeholder={t("pricingModelPlaceholder")}
-                      className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                    />
-                    <input
-                      value={row.input}
-                      onChange={(e) => updateRow(row.id, { input: e.target.value })}
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                    />
-                    <input
-                      value={row.output}
-                      onChange={(e) => updateRow(row.id, { output: e.target.value })}
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeRow(row.id)}
-                      title={t("common:delete")}
-                      className="h-8 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                    row={row}
+                    onUpdate={updateRow}
+                    onRemove={removeRow}
+                  />
                 ))}
                 {rows.length === 0 && (
                   <p className="text-sm text-zinc-400 py-4 text-center">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { Input, InputNumber, Select, Alert, message, Popconfirm, Switch } from "antd";
 import { Button } from "@/components/ui/Button";
@@ -12,7 +12,7 @@ import {
   ProxyGroupList,
   type ProxyGroupSummary,
 } from "@/components/upstream-proxy/ProxyGroupList";
-import { renderHealthText, VALIDATION_KEYS } from "@/components/upstream-proxy/shared";
+import { ProxyHealthRow, VALIDATION_KEYS } from "@/components/upstream-proxy/shared";
 import {
   CONFIG_KEY,
   POOL_KEY,
@@ -24,7 +24,6 @@ import {
   parsePoolMap,
   collectGroupUrls,
   parseUrlsText,
-  displayProxyUrl,
   proxyStatKey,
   buildConfigJson,
   sumMaskedStats,
@@ -201,9 +200,11 @@ export default function UpstreamProxyGroupPage() {
     };
   }, [isDocker]);
 
-  const healthMap = parseHealthMap(config?.[HEALTH_KEY]);
-  const poolMap = parsePoolMap(config?.[POOL_KEY]);
-  const parsed = parseProxyConfig(config?.[CONFIG_KEY]);
+  // 解析结果 useMemo 化：引用随 config 稳定，表单输入击键（formGroup 变化）
+  // 不再重建 healthMap/poolMap，下方 memo 健康行才能经 props 浅比较跳过重渲染
+  const healthMap = useMemo(() => parseHealthMap(config?.[HEALTH_KEY]), [config]);
+  const poolMap = useMemo(() => parsePoolMap(config?.[POOL_KEY]), [config]);
+  const parsed = useMemo(() => parseProxyConfig(config?.[CONFIG_KEY]), [config]);
   const currentGroup = isNew ? undefined : parsed.groups.find((g) => g.name === id);
 
   // 路由 id / 服务器配置值变化时回填表单（渲染期 prev 值比较；值未变时不覆盖未保存的编辑）
@@ -508,34 +509,43 @@ export default function UpstreamProxyGroupPage() {
     }
   };
 
-  const platformOptions = (platforms ?? []).map((p) => ({ label: p.name, value: p.id }));
+  const platformOptions = useMemo(
+    () => (platforms ?? []).map((p) => ({ label: p.name, value: p.id })),
+    [platforms]
+  );
 
   /** 组内候选代理（已保存配置的拉取池 ∪ 表单当前手动代理）与健康摘要；
    *  统计基于表单当前值（组名/手动代理），编辑后立即反映，不与标题脱节 */
-  const groupUrls = collectGroupUrls(
-    currentGroup ? (poolMap[currentGroup.name] ?? []) : [],
-    parseUrlsText(formGroup.urlsText)
+  const groupUrls = useMemo(
+    () => collectGroupUrls(
+      currentGroup ? (poolMap[currentGroup.name] ?? []) : [],
+      parseUrlsText(formGroup.urlsText)
+    ),
+    [currentGroup, poolMap, formGroup.urlsText]
   );
 
   /** 组级请求统计聚合（组内各代理分类计数求和；无请求数据时 availability 为 undefined）。
    *  trafficStats 键为落库的归一化统计键（requestLogs.proxyUrl 写入前归一化为
    *  去凭据 host:port），同 host:port 不同凭据共享同一统计键只计一次（防组级聚合翻倍） */
-  const groupTraffic: {
+  const groupTraffic = useMemo<{
     total: number;
     ok: number;
     err429: number;
     errOther: number;
     availability: number | undefined;
-  } = {
-    total: sumMaskedStats(groupUrls, trafficStats, (s) => s?.total ?? 0),
-    ok: sumMaskedStats(groupUrls, trafficStats, (s) => s?.ok ?? 0),
-    err429: sumMaskedStats(groupUrls, trafficStats, (s) => s?.err429 ?? 0),
-    errOther: sumMaskedStats(groupUrls, trafficStats, (s) => s?.errOther ?? 0),
-    availability: undefined,
-  };
-  if (groupTraffic.total > 0) groupTraffic.availability = groupTraffic.ok / groupTraffic.total;
+  }>(() => {
+    const agg = {
+      total: sumMaskedStats(groupUrls, trafficStats, (s) => s?.total ?? 0),
+      ok: sumMaskedStats(groupUrls, trafficStats, (s) => s?.ok ?? 0),
+      err429: sumMaskedStats(groupUrls, trafficStats, (s) => s?.err429 ?? 0),
+      errOther: sumMaskedStats(groupUrls, trafficStats, (s) => s?.errOther ?? 0),
+      availability: undefined as number | undefined,
+    };
+    if (agg.total > 0) agg.availability = agg.ok / agg.total;
+    return agg;
+  }, [groupUrls, trafficStats]);
 
-  const summary: ProxyGroupSummary = {
+  const summary: ProxyGroupSummary = useMemo(() => ({
     name: formGroup.name || currentGroup?.name || (isNew ? "" : id ?? ""),
     sourceUrl: formGroup.sourceUrl || currentGroup?.sourceUrl || "",
     proxyCount: groupUrls.length,
@@ -543,10 +553,10 @@ export default function UpstreamProxyGroupPage() {
     failCount: groupUrls.filter((u) => healthMap[u]?.status === "fail").length,
     enabled: formGroup.enabled,
     availability: groupTraffic.availability,
-  };
+  }), [formGroup.name, formGroup.sourceUrl, formGroup.enabled, currentGroup, isNew, id, groupUrls, healthMap, groupTraffic.availability]);
 
   /** 组列表行数据（侧栏与返回条摘要共用） */
-  const summaries: ProxyGroupSummary[] = parsed.groups.map((g) => {
+  const summaries: ProxyGroupSummary[] = useMemo(() => parsed.groups.map((g) => {
     const urls = collectGroupUrls(poolMap[g.name] ?? [], g.urls);
     const gTotal = sumMaskedStats(urls, trafficStats, (s) => s?.total ?? 0);
     const gOk = sumMaskedStats(urls, trafficStats, (s) => s?.ok ?? 0);
@@ -559,7 +569,10 @@ export default function UpstreamProxyGroupPage() {
       enabled: g.enabled,
       availability: gTotal > 0 ? gOk / gTotal : undefined,
     };
-  });
+  }), [parsed, poolMap, healthMap, trafficStats]);
+
+  /** 统计降权代理键集合（Set 化避免每行 O(n) includes 扫描） */
+  const degradedKeySet = useMemo(() => new Set(degradedUrls), [degradedUrls]);
 
   // 加载失败且无数据：渲染错误态
   if (error && !config) {
@@ -686,65 +699,21 @@ export default function UpstreamProxyGroupPage() {
           <ul className="space-y-1.5">
             {groupUrls.map((url) => {
               const entry = healthMap[url];
-              const status = entry?.status ?? "none";
               const stat = trafficStats?.[proxyStatKey(url)];
               // 统计降权：健康点仍显示 ok 但路由已跳过（窗口内错误率过高，
               // 窗口滑动自动恢复）——此前完全不可见；按代理级键匹配，
               // 同 host:port 不同账号的降权状态互不误伤
-              const degraded = degradedUrls.includes(proxyStatKey(url));
+              const degraded = degradedKeySet.has(proxyStatKey(url));
               return (
-                <li key={url} className="flex items-start gap-2 text-xs">
-                  <span
-                    className={`mt-1 inline-block h-2 w-2 rounded-full shrink-0 ${
-                      status === "ok"
-                        ? "bg-emerald-500"
-                        : status === "fail"
-                          ? "bg-rose-500"
-                          : "bg-zinc-300 dark:bg-zinc-600"
-                    }`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate min-w-0 flex-1">
-                        {displayProxyUrl(url)}
-                      </span>
-                      {degraded && (
-                        <span
-                          className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400"
-                          title={t("upstreamProxyDegradedTip")}
-                        >
-                          {t("upstreamProxyDegraded")}
-                        </span>
-                      )}
-                      <span className="shrink-0 text-zinc-400 text-right">
-                        {renderHealthText(status, entry, t)}
-                      </span>
-                    </div>
-                    {isDocker && (
-                      <div className="flex items-center gap-2.5 mt-0.5 text-[10px] text-zinc-400">
-                        {stat ? (
-                          <>
-                            <span>
-                              {t("upstreamProxyRequests")} {stat.total}
-                            </span>
-                            <span className="text-emerald-600 dark:text-emerald-400">
-                              {t("upstreamProxySuccess")} {stat.ok}
-                            </span>
-                            <span className="text-amber-600 dark:text-amber-500">429 {stat.err429}</span>
-                            <span className="text-rose-500">
-                              {t("upstreamProxyErrOther")} {stat.errOther}
-                            </span>
-                            <span className="text-zinc-500">
-                              {t("upstreamProxyAvailability")} {Math.round(stat.availability * 100)}%
-                            </span>
-                          </>
-                        ) : (
-                          <span>{t("upstreamProxyNoTrafficStats")}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </li>
+                <ProxyHealthRow
+                  key={url}
+                  url={url}
+                  entry={entry}
+                  degraded={degraded}
+                  stat={isDocker ? stat : undefined}
+                  noStatText={isDocker ? t("upstreamProxyNoTrafficStats") : undefined}
+                  t={t}
+                />
               );
             })}
           </ul>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
 import { Input, message } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -34,6 +34,75 @@ interface PlatformModel {
   platform: { name: string };
 }
 
+/** 单个模型行 — memo 化：搜索/开关更新只重渲染受影响的行
+ *  （多平台聚合可达数千行，行内联渲染时每次击键全列表重渲染导致卡顿） */
+const AutoModelRow = memo(function AutoModelRow({
+  model,
+  platforms,
+  enabled,
+  saving,
+  onToggle,
+}: {
+  model: PlatformModel;
+  /** 该模型出现的平台列表（引用由页面 useMemo 保持稳定） */
+  platforms: { name: string }[];
+  enabled: boolean;
+  /** 保存请求进行中（开关 loading 态） */
+  saving: boolean;
+  onToggle: (modelId: string, checked: boolean) => void;
+}) {
+  const { t } = useTranslation("system");
+  return (
+    <div
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
+        enabled
+          ? "bg-zinc-50 dark:bg-zinc-800/50 border-zinc-300 dark:border-zinc-700"
+          : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+      }`}
+    >
+      {/* 开关 */}
+      <Switch
+        checked={enabled}
+        onChange={(checked) => onToggle(model.modelId, checked)}
+        loading={saving}
+        className="shrink-0"
+      />
+
+      {/* 平台信息 */}
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <Database size={14} className="text-zinc-400 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+              {model.modelId}
+            </span>
+            <span
+              className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                model.source === "manual"
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                  : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              }`}
+            >
+              {model.source === "manual" ? t("platform:manual") : t("platform:auto")}
+            </span>
+          </div>
+          {platforms.length > 0 && (
+            <div className="flex items-center gap-1 mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+              <Router size={10} />
+              {platforms.map((p) => p.name).join(" · ")}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 更新时间 */}
+      <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500 hidden sm:block">
+        {formatDateTime(model.fetchedAt)}
+      </span>
+    </div>
+  );
+});
+
 export default function AutoModelPage() {
   const { t } = useTranslation("system");
 
@@ -50,24 +119,6 @@ export default function AutoModelPage() {
   // 最新启用集合镜像：防抖回调读取 ref 而非过期闭包，避免最后一次切换丢失
   const enabledModelIdsRef = useRef<Set<string>>(new Set());
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 卸载 flush 引用最新 persistEnabledModels（React Compiler 项目禁手动 useCallback，
-  // 用 ref 承载最新闭包，卸载 effect 保持空依赖）
-  const persistEnabledModelsRef = useRef(persistEnabledModels);
-  useEffect(() => {
-    persistEnabledModelsRef.current = persistEnabledModels;
-  });
-  useEffect(() => {
-    return () => {
-      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-      // 卸载时若 500ms 防抖窗口内还有未落盘的切换，立即 flush 保存，
-      // 避免「切换后立刻离开页面」丢失最后一次修改
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-        void persistEnabledModelsRef.current(enabledModelIdsRef.current);
-      }
-    };
-  }, []);
 
   // ===== 数据层（SWR）：config 与 platforms 并行拉取，平台模型并行批量请求 =====
 
@@ -233,8 +284,29 @@ export default function AutoModelPage() {
     }
   };
 
-  /** 切换模型启用状态（带防抖，避免频繁保存） */
-  const toggleModel = (modelId: string, checked: boolean) => {
+  // 卸载 flush 引用最新 persistEnabledModels：ref 承载最新闭包，
+  // 供卸载 effect 与 useCallback 化的 toggleModel 稳定调用（声明置于函数声明之后，
+  // 消除 use-before-declare；函数声明提升保证 useRef 初始值合法）
+  const persistEnabledModelsRef = useRef(persistEnabledModels);
+  useEffect(() => {
+    persistEnabledModelsRef.current = persistEnabledModels;
+  });
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      // 卸载时若 500ms 防抖窗口内还有未落盘的切换，立即 flush 保存，
+      // 避免「切换后立刻离开页面」丢失最后一次修改
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void persistEnabledModelsRef.current(enabledModelIdsRef.current);
+      }
+    };
+  }, []);
+
+  /** 切换模型启用状态（带防抖，避免频繁保存）；
+   *  经 persistEnabledModelsRef 取最新闭包，回调引用稳定供 memo 行使用 */
+  const toggleModel = useCallback((modelId: string, checked: boolean) => {
     setEnabledModelIds((prev) => {
       const next = new Set(prev);
       if (checked) next.add(modelId);
@@ -245,9 +317,9 @@ export default function AutoModelPage() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      persistEnabledModels(enabledModelIdsRef.current);
+      void persistEnabledModelsRef.current(enabledModelIdsRef.current);
     }, 500);
-  };
+  }, []);
 
   // 搜索过滤
   const [modelSearch, setModelSearch] = useState("");
@@ -384,60 +456,16 @@ export default function AutoModelPage() {
             </AsyncBoundary>
           ) : (
             <div className="space-y-2">
-              {uniqueModels.map((m) => {
-                const isOn = enabledModelIds.has(m.modelId);
-                const platforms = modelPlatforms.get(m.modelId) ?? [];
-                return (
-                  <div
-                    key={m.modelId}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
-                      isOn
-                        ? "bg-zinc-50 dark:bg-zinc-800/50 border-zinc-300 dark:border-zinc-700"
-                        : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
-                    }`}
-                  >
-                    {/* 开关 */}
-                    <Switch
-                      checked={isOn}
-                      onChange={(checked) => toggleModel(m.modelId, checked)}
-                      loading={saving}
-                      className="shrink-0"
-                    />
-
-                    {/* 平台信息 */}
-                    <div className="flex-1 min-w-0 flex items-center gap-2">
-                      <Database size={14} className="text-zinc-400 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                            {m.modelId}
-                          </span>
-                          <span
-                            className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                              m.source === "manual"
-                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                            }`}
-                          >
-                            {m.source === "manual" ? t("platform:manual") : t("platform:auto")}
-                          </span>
-                        </div>
-                        {platforms.length > 0 && (
-                          <div className="flex items-center gap-1 mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
-                            <Router size={10} />
-                            {platforms.map((p) => p.name).join(" · ")}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 更新时间 */}
-                    <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500 hidden sm:block">
-                      {formatDateTime(m.fetchedAt)}
-                    </span>
-                  </div>
-                );
-              })}
+              {uniqueModels.map((m) => (
+                <AutoModelRow
+                  key={m.modelId}
+                  model={m}
+                  platforms={modelPlatforms.get(m.modelId) ?? []}
+                  enabled={enabledModelIds.has(m.modelId)}
+                  saving={saving}
+                  onToggle={toggleModel}
+                />
+              ))}
             </div>
           )}
         </ProCard>

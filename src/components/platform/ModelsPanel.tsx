@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 import { Input, Popconfirm, message, Modal, Select, Alert } from "antd";
 import { Button } from "@/components/ui/Button";
 import Switch from "@/components/ui/Switch";
@@ -37,14 +37,91 @@ export interface TestResult {
 }
 
 /**
- * 模型管理面板 — sticky 标题工具条 + 类型 Tabs + 已启用/已禁用分组
+ * 单个模型行 — memo 化：搜索框/新增输入框每次击键只重渲染受影响的行，
+ * 其余行经 props 浅比较跳过（聚合平台数百模型时输入卡顿的根因修复）
  */
-export function ModelsPanel({
+const ModelRow = memo(function ModelRow({
+  model,
+  busy,
+  onCopy,
+  onDelete,
+  onToggle,
+}: {
+  model: ModelItem;
+  /** 该行启停开关请求进行中 */
+  busy: boolean;
+  onCopy: (modelId: string) => void;
+  onDelete: (modelId: string) => void;
+  onToggle: (modelId: string, enabled: boolean) => void;
+}) {
+  const { t } = useTranslation("platform");
+  const typeCfg = MODEL_TYPE_CONFIG[model.type] || MODEL_TYPE_CONFIG.chat;
+  const TypeIcon = typeCfg.icon;
+
+  return (
+    <div
+      className="group flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
+    >
+      <ModelIcon modelId={model.modelId} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onCopy(model.modelId)}
+            title={t("copyModelIdTip")}
+            className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+          >
+            {model.modelId}
+          </button>
+          <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:pointer-events-none lg:group-hover:pointer-events-auto transition-opacity">
+            <Popconfirm
+              title={t("deleteModelConfirm")}
+              onConfirm={() => onDelete(model.modelId)}
+              okText={t("common:confirm")}
+              cancelText={t("common:cancel")}
+            >
+              <button
+                type="button"
+                className="p-1 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            </Popconfirm>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-zinc-400">
+          <span>{model.source === "manual" ? t("manual") : t("auto")}</span>
+        </div>
+      </div>
+      <div className="shrink-0 flex items-center gap-2">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md",
+            typeCfg.bg,
+            typeCfg.color
+          )}
+        >
+          <TypeIcon size={10} />
+          {t(typeCfg.labelKey)}
+        </span>
+        <Switch
+          checked={model.enabled}
+          loading={busy}
+          onChange={(checked) => onToggle(model.modelId, checked)}
+        />
+      </div>
+    </div>
+  );
+});
+
+/**
+ * 模型管理面板 — sticky 标题工具条 + 类型 Tabs + 已启用/已禁用分组
+ * memo 包装：页面层回调全部为稳定引用，密钥区输入击键不再波及本面板
+ */
+export const ModelsPanel = memo(function ModelsPanel({
   models,
   loading,
   refreshing,
-  newModelId,
-  onNewModelIdChange,
   onAddModel,
   onRefreshModels,
   onDeleteModel,
@@ -59,9 +136,8 @@ export function ModelsPanel({
   models: ModelItem[];
   loading: boolean;
   refreshing: boolean;
-  newModelId: string;
-  onNewModelIdChange: (v: string) => void;
-  onAddModel: () => void;
+  /** 新增模型（值由面板内部持有），成功返回 true 面板据此清空输入框 */
+  onAddModel: (modelId: string) => Promise<boolean>;
   onRefreshModels: () => void;
   onDeleteModel: (modelId: string) => void;
   onToggleModel: (modelId: string, enabled: boolean) => void;
@@ -77,6 +153,10 @@ export function ModelsPanel({
   const [searchText, setSearchText] = useState("");
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testModelId, setTestModelId] = useState<string | undefined>(undefined);
+  // 新增模型输入框值由面板内部持有：避免每次击键把状态提升到页面级，
+  // 导致整页（含左侧平台列表与配置表单）跟着重渲染
+  const [newModelId, setNewModelId] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const chatModels = useMemo(() => models.filter((m) => m.type === "chat"), [models]);
 
@@ -111,72 +191,23 @@ export function ModelsPanel({
   ].filter((tab) => tab.key === "all" || (typeCounts[tab.key] && typeCounts[tab.key] > 0));
 
   // 统一走共享剪贴板工具：HTTP 部署下 navigator.clipboard 为 undefined，直调同步抛错且 .catch 接不住
-  const copyModelId = async (modelId: string) => {
+  const copyModelId = useCallback(async (modelId: string) => {
     const ok = await copyToClipboard(modelId);
     if (ok) message.success(t("modelIdCopied"));
     else message.error(t("common:copyFailed"));
-  };
+  }, [t]);
 
-  const renderModelRow = (model: ModelItem) => {
-    const typeCfg = MODEL_TYPE_CONFIG[model.type] || MODEL_TYPE_CONFIG.chat;
-    const TypeIcon = typeCfg.icon;
-
-    return (
-      <div
-        key={model.id}
-        className="group flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-      >
-        <ModelIcon modelId={model.modelId} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => copyModelId(model.modelId)}
-              title={t("copyModelIdTip")}
-              className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-            >
-              {model.modelId}
-            </button>
-            <div className="flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:pointer-events-none lg:group-hover:pointer-events-auto transition-opacity">
-              <Popconfirm
-                title={t("deleteModelConfirm")}
-                onConfirm={() => onDeleteModel(model.modelId)}
-                okText={t("common:confirm")}
-                cancelText={t("common:cancel")}
-              >
-                <button
-                  type="button"
-                  className="p-1 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </Popconfirm>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-zinc-400">
-            <span>{model.source === "manual" ? t("manual") : t("auto")}</span>
-          </div>
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md",
-              typeCfg.bg,
-              typeCfg.color
-            )}
-          >
-            <TypeIcon size={10} />
-            {t(typeCfg.labelKey)}
-          </span>
-          <Switch
-            checked={model.enabled}
-            loading={togglingModelId === model.modelId}
-            onChange={(checked) => onToggleModel(model.modelId, checked)}
-          />
-        </div>
-      </div>
-    );
-  };
+  // 新增模型：in-flight 守卫防连点重复 POST；成功后清空输入框
+  const handleAddClick = useCallback(async () => {
+    const value = newModelId.trim();
+    if (!value || adding) return;
+    setAdding(true);
+    try {
+      if (await onAddModel(value)) setNewModelId("");
+    } finally {
+      setAdding(false);
+    }
+  }, [newModelId, adding, onAddModel]);
 
   const renderGroupHeader = (
     label: string,
@@ -255,16 +286,17 @@ export function ModelsPanel({
           <Input
             placeholder={t("modelPlaceholder")}
             value={newModelId}
-            onChange={(e) => onNewModelIdChange(e.target.value)}
-            onPressEnter={onAddModel}
+            onChange={(e) => setNewModelId(e.target.value)}
+            onPressEnter={handleAddClick}
             className="flex-1"
             size="small"
           />
           <Button
             variant="primary"
             size="sm"
-            onClick={onAddModel}
-            disabled={!newModelId.trim()}
+            onClick={handleAddClick}
+            disabled={!newModelId.trim() || adding}
+            loading={adding}
             icon={<Plus size={13} />}
           >
             {t("addModel")}
@@ -318,7 +350,16 @@ export function ModelsPanel({
             <p className="text-center py-6 text-xs text-zinc-400">{t("noEnabledModels")}</p>
           ) : (
             <div className="space-y-0.5">
-              {enabledModels.map(renderModelRow)}
+              {enabledModels.map((m) => (
+                <ModelRow
+                  key={m.id}
+                  model={m}
+                  busy={togglingModelId === m.modelId}
+                  onCopy={copyModelId}
+                  onDelete={onDeleteModel}
+                  onToggle={onToggleModel}
+                />
+              ))}
             </div>
           )}
 
@@ -331,7 +372,16 @@ export function ModelsPanel({
             <p className="text-center py-6 text-xs text-zinc-400">{t("noDisabledModels")}</p>
           ) : (
             <div className="space-y-0.5">
-              {disabledModels.map(renderModelRow)}
+              {disabledModels.map((m) => (
+                <ModelRow
+                  key={m.id}
+                  model={m}
+                  busy={togglingModelId === m.modelId}
+                  onCopy={copyModelId}
+                  onDelete={onDeleteModel}
+                  onToggle={onToggleModel}
+                />
+              ))}
             </div>
           )}
         </>
@@ -426,4 +476,4 @@ export function ModelsPanel({
       </Modal>
     </div>
   );
-}
+});

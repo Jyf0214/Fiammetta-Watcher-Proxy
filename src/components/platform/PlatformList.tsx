@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { Input } from "antd";
@@ -162,8 +162,11 @@ interface PlatformListProps {
 /**
  * 平台列表 — 顶部搜索+新建工具条 + 全部/已启用/已禁用分组折叠行列表
  * 整行点击跳转独立路由 /admin/platforms/[id]
+ *
+ * memo 包装：详情页密钥输入每次击键重渲染页面时，props（SWR 数据与原始值）
+ * 引用不变，侧栏整体跳过重渲染
  */
-export function PlatformList({
+export const PlatformList = memo(function PlatformList({
   platforms,
   loading = false,
   activeId,
@@ -343,4 +346,4 @@ export function PlatformList({
       )}
     </div>
   );
-}
+});
