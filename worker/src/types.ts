@@ -21,8 +21,8 @@ export function classifyCronExpression(cron: string): CronTask | null {
   // 组合执行；Pages 部署仍可通过 /api/cron/backup 独立触发）
   if (trimmed === "0 3 * * *") return "log-archive";
   // 每 5 分钟 → 出站代理健康检查（Docker 部署且未禁用时生效）
+  // proxy-pull 无 cron 槽位：拉取仅 Docker 部署生效（非 docker 直接空返回），
+  // CF 上每分钟空转纯耗配额；Docker/Pages 走 /api/cron/proxy-pull 外部调度
   if (trimmed === "*/5 * * * *") return "proxy-health";
-  // 每分钟 → 出站代理列表拉取（按组内部周期判定是否到期，非每分钟都实际拉取）
-  if (trimmed === "* * * * *") return "proxy-pull";
   return null;
 }

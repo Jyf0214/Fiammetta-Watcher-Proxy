@@ -5,10 +5,12 @@
  * cron 分发）已收敛至 proxy-core/worker-entry.ts（与 lite 版共用同一实现），
  * 本文件仅注入全量版业务链路：
  * - /v1/* → handleV1Route（重试/熔断/评分/限流门禁全量代理）
- * - scheduled → 全部五类 cron 槽位（模型发现、Key 重置、日志归档 + 配置备份
- *   组合槽位、代理健康检查、代理列表拉取）
+ * - scheduled → 全部四类 cron 槽位（模型发现、Key 重置、日志归档 + 配置备份
+ *   组合槽位、代理健康检查）
  *   （备份无独立 cron 槽位：Cloudflare Workers 免费计划账户级 Cron Triggers
- *   上限为 5 条，第 6 条会使 deploy 更新 /schedules 被 API 拒绝）
+ *   上限为 5 条，第 6 条会使 deploy 更新 /schedules 被 API 拒绝；
+ *   代理拉取无 cron 槽位：仅 Docker 部署生效，CF 上空转纯耗配额，
+ *   Docker/Pages 走 /api/cron/proxy-pull 外部调度）
  *
  * D1 和 KV 通过 Wrangler Bindings 注入。
  */
@@ -17,7 +19,7 @@ import { handleV1Route } from "./v1-route";
 import { fetchAllPlatformModels } from "./model-fetcher";
 import { handleScheduledReset } from "./key-reset";
 import { runArchiveTask } from "./log-archiver";
-import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
+import { runProxyHealthCheck, isScheduledProxyHealthDisabled } from "@/lib/upstream-proxy";
 import { runBackupTask } from "@/lib/backup";
 import { syncWorkerEnv } from "./env-sync";
 import { dispatchCronTasks, handleWorkerFetch, type WorkerEntryEnv, type CronTaskMap } from "./proxy-core/worker-entry";
@@ -44,8 +46,8 @@ export default {
    * 日志归档 + 配置备份推送（每天凌晨 3 点，同一槽位组合执行——备份无独立
    * cron 槽位，Cloudflare Workers 免费计划账户级 Cron Triggers 上限为 5 条；
    * Pages 部署仍可通过 /api/cron/backup 独立触发）
-   * 出站代理健康检查（每 5 分钟，仅 Docker 部署且未禁用时生效）
-   * 出站代理列表拉取（每分钟触发，按组内部周期判定是否到期）
+   * 出站代理健康检查（每 5 分钟，仅 Docker 部署且未禁用时生效；
+   * 代理列表拉取仅 Docker 部署生效且无 cron 槽位，走 /api/cron/proxy-pull 外部调度）
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // 与 fetch 入口一致，先同步环境变量（Cron 触发时同样需要正确的数据库连接）
@@ -74,14 +76,6 @@ export default {
           return;
         }
         c.waitUntil(runProxyHealthCheck(env.DB, env));
-      },
-      // 设备级整体禁用（UPSTREAM_PROXY_DISABLED=all）时跳过，与 Pages Cron 行为一致
-      "proxy-pull": (c) => {
-        if (isUpstreamProxyDisabled()) {
-          console.log("[cron] proxy-pull 已跳过（设备级禁用）");
-          return;
-        }
-        c.waitUntil(pullProxyGroups(env.DB, env));
       },
     };
 
