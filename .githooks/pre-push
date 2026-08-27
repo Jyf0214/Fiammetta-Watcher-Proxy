@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -o pipefail
 # Pre-push: ESLint + TypeScript + 测试 + 完整构建（零容忍）
 
