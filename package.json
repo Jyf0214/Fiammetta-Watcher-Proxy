@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@lobehub/icons": "^5.16.0",
+    "@tanstack/react-virtual": "^3.13.6",
     "@prisma/adapter-d1": "^7.9.0",
     "@prisma/adapter-mariadb": "7.9.0",
     "@prisma/adapter-pg": "^7.9.0",

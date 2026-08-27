@@ -8,7 +8,8 @@
  * 后续批次将在此页扩展：告警通知配置、两步验证（2FA）等系统级设置。
  */
 
-import { useCallback, useEffect, useState, memo } from "react";
+import { useCallback, useEffect, useRef, useState, memo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { message } from "antd";
 import {
   Bell,
@@ -123,6 +124,18 @@ function SettingsContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  // 定价虚拟列表：rows 加载后可上千上万行，整表渲染会卡死浏览器，
+  // 改为按可视窗口 + overscan 渲染。父容器 max-h 决定 scroll 范围。
+  const pricingListRef = useRef<HTMLDivElement>(null);
+  // useVirtualizer 返回的函数不能安全 memo，react-hooks plugin 会跳过
+  // 本组件的 React Compiler memo 化；用 useCallback 包装消费侧避免误用即可。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => pricingListRef.current,
+    estimateSize: () => 40,
+    overscan: 8,
+  });
 
   // 通知配置
   const [notif, setNotif] = useState<NotificationsConfig>(DEFAULT_NOTIFICATIONS);
@@ -580,21 +593,46 @@ function SettingsContent() {
                   {t("common:retry")}
                 </Button>
               </div>
+            ) : rows.length === 0 ? (
+              <p className="text-sm text-zinc-400 py-4 text-center">
+                {t("pricingEmpty")}
+              </p>
             ) : (
-              <div className="space-y-2">
-                {rows.map((row) => (
-                  <PricingRowItem
-                    key={row.id}
-                    row={row}
-                    onUpdate={updateRow}
-                    onRemove={removeRow}
-                  />
-                ))}
-                {rows.length === 0 && (
-                  <p className="text-sm text-zinc-400 py-4 text-center">
-                    {t("pricingEmpty")}
-                  </p>
-                )}
+              <div
+                ref={pricingListRef}
+                className="max-h-[60vh] overflow-auto rounded-md border border-zinc-100 dark:border-zinc-800"
+              >
+                <div
+                  style={{
+                    height: `${rowVirtualizer.getTotalSize()}px`,
+                    width: "100%",
+                    position: "relative",
+                  }}
+                >
+                  {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                    const row = rows[virtualRow.index];
+                    if (!row) return null;
+                    return (
+                      <div
+                        key={row.id}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: `${virtualRow.size}px`,
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <PricingRowItem
+                          row={row}
+                          onUpdate={updateRow}
+                          onRemove={removeRow}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
