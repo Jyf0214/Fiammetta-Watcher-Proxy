@@ -185,8 +185,6 @@ Every API request is logged with:
 
 Supports filtering by date range, API Key, status code (200/400/401/402/429/500/502/503) and error/normal state.
 
-**Failed request traces**: error rows carry a "View" action showing the original request body and upstream response snippet with one-click copy. See [Playground & Failure Debugging](/en/guide/playground).
-
 ### Log Archival
 
 - Detailed logs older than 30 days are automatically aggregated into daily statistics

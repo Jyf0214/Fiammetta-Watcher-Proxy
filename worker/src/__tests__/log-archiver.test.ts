@@ -84,9 +84,6 @@ describe("runArchiveTask 归档单天日志", () => {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
-      requestDebugLogs: {
-        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
-      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -186,9 +183,6 @@ describe("runArchiveTask 归档单天日志", () => {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
-      requestDebugLogs: {
-        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
-      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -240,9 +234,6 @@ describe("runArchiveTask 归档单天日志", () => {
         create: vi.fn(() => Promise.resolve({})),
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
-      },
-      requestDebugLogs: {
-        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);

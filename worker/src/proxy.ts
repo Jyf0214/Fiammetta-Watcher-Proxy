@@ -10,9 +10,8 @@
  */
 
 import { routeRequest, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "./router";
-import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, recordKeyError } from "./platform-keys";
+import { getNextKey, getRandomKeyExcept, banKey, getAllKeys, isKeyBanned, isKeyDeprioritized, isKeyWhitelisted, isPlatformWhitelisted, recordKeyError } from "./platform-keys";
 import { sendNotification } from "@/lib/notifier";
-import { saveDebugLog } from "@/lib/debug-log";
 import { recordSuccess, recordFailure, selectPlatform, releaseHalfOpenPending, checkAndUpdateCircuitBreakerState, recordPlatform429 } from "./load-balancer";
 import { keyFingerprint } from "@/lib/key-status";
 import {
@@ -763,8 +762,9 @@ export async function proxyV1Request(
     }
     await banKey(currentKey, undefined, currentPlatform.id, env.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-    // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位
-    if (upstreamResponse.status === 429) recordPlatform429(currentPlatform.id);
+    // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位。
+    // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+    if (upstreamResponse.status === 429 && !isPlatformWhitelisted(currentPlatform.id)) recordPlatform429(currentPlatform.id);
     // 累加错误计数并持久化到数据库（429→+1, 401→+2, 402→+5, 其余→+1，达 5 次自动禁用）
     ctx.waitUntil(recordKeyError(currentKey, isEmptyResponse ? 502 : upstreamResponse.status, currentPlatform.id, env.DB, workerEnv).catch(() => {}));
     console.log(
@@ -920,16 +920,6 @@ export async function proxyV1Request(
     if (isAutoModelRequest(requestedModel)) {
       freezeAutoModel(currentTargetModel);
     }
-
-    // 失败请求留痕：置于空响应/协议分支之前，保证 anthropic 协议错误与
-    // 空响应两类失败同样落库（与 Pages 版位置语义对齐）
-    void saveDebugLog(env.DB, workerEnv?.DB_TYPE, {
-      model: currentTargetModel,
-      platformId: currentPlatform.id,
-      status: upstreamResponse.status,
-      requestBody: JSON.stringify(upstreamBody),
-      responseSnippet: errorText,
-    });
 
     // 空响应特判：绝不向下游透传空响应，返回 502 + 明确错误
     if (isEmptyResponse) {

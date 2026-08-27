@@ -70,4 +70,3 @@ A unified API entry for major AI platforms (OpenAI-compatible APIs connect direc
 ## Developer Debugging
 
 - **Playground**: Send real requests to any model from the admin panel through the full proxy chain
-- **Failed request traces**: Inspect and copy original request bodies and upstream responses for error rows

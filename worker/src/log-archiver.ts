@@ -427,16 +427,5 @@ async function archiveSingleDay(
     await prisma.dailyStats.createMany({ data: rows.slice(i, i + 100) });
   }
 
-  // 失败请求留痕同步清理：与日志保留期同窗（留痕仅服务排障，过期即弃）。
-  // 以当前时间为基准计算，不随归档游标日期漂移
-  try {
-    const debugCutoff = Math.floor(Date.now() / 1000) - RETENTION_DAYS * 86400;
-    await prisma.requestDebugLogs.deleteMany({
-      where: { createdAt: { lt: debugCutoff } },
-    });
-  } catch (err) {
-    console.error("[log-archiver] 调试留痕清理失败:", err instanceof Error ? err.message : String(err));
-  }
-
   return { processed, deleted };
 }

@@ -144,25 +144,6 @@ CREATE TABLE IF NOT EXISTS "configs" (
 );
 
 -- CreateTable
-CREATE TABLE IF NOT EXISTS "request_debug_logs" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "request_log_id" TEXT,
-    "model" TEXT NOT NULL,
-    "platform_id" TEXT,
-    "status" INTEGER NOT NULL DEFAULT 0,
-    "request_body" TEXT,
-    "response_snippet" TEXT,
-    "error_message" TEXT,
-    "created_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "request_debug_logs_request_log_id_idx" ON "request_debug_logs"("request_log_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "request_debug_logs_created_at_idx" ON "request_debug_logs"("created_at");
-
--- CreateTable
 CREATE TABLE IF NOT EXISTS "audit_logs" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "admin_id" TEXT,

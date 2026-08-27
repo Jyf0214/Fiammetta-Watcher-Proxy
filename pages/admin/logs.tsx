@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Tag, Select, Tabs, DatePicker, Tooltip, message, Modal, type TableColumnsType } from "antd";
+import { Tag, Select, Tabs, DatePicker, Tooltip, message, type TableColumnsType } from "antd";
 import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -77,13 +77,6 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
   const [keyFilter, setKeyFilter] = useState<string | undefined>();
-  // 失败请求留痕弹窗
-  const [debugModal, setDebugModal] = useState<{
-    open: boolean;
-    loading: boolean;
-    body: string;
-    snippet: string;
-  }>({ open: false, loading: false, body: "", snippet: "" });
   const [dateRange, setDateRange] = useState<
     [Dayjs | null, Dayjs | null] | null
   >(null);
@@ -280,61 +273,7 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
         return "-";
       },
     },
-    {
-      // 失败请求留痕入口：仅错误行可点，弹出该请求的请求体/响应片段
-      title: t("debugCol"),
-      key: "debug",
-      width: 70,
-      align: "center",
-      render: (_: unknown, record: LogEntry) =>
-        record.isError ? (
-          <button
-            type="button"
-            onClick={() => handleOpenDebug(record)}
-            className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 underline underline-offset-2"
-          >
-            {t("debugBtn")}
-          </button>
-        ) : (
-          "-"
-        ),
-    },
   ];
-
-  const handleOpenDebug = async (record: LogEntry) => {
-    setDebugModal({ open: true, loading: true, body: "", snippet: "" });
-    try {
-      const params = new URLSearchParams({
-        model: record.model,
-        at: String(Math.floor(new Date(record.createdAt).getTime() / 1000)),
-      });
-      const res = await fetch(`/api/admin/debug-log?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as {
-        success?: boolean;
-        data?: { requestBody?: string | null; responseSnippet?: string | null } | null;
-      };
-      if (!json?.success) throw new Error("load failed");
-      setDebugModal({
-        open: true,
-        loading: false,
-        body: json.data?.requestBody ?? "",
-        snippet: json.data?.responseSnippet ?? "",
-      });
-    } catch (err) {
-      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
-      setDebugModal({ open: false, loading: false, body: "", snippet: "" });
-    }
-  };
-
-  const copyDebugText = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success(t("common:copied"));
-    } catch {
-      message.error(t("common:copyFailed"));
-    }
-  };
 
   return (
     <>
@@ -429,51 +368,6 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
         scroll={{ x: 1300 }}
       />
 
-      {/* 失败请求留痕弹窗 */}
-      <Modal
-        open={debugModal.open}
-        onCancel={() => setDebugModal((m) => ({ ...m, open: false }))}
-        footer={null}
-        title={t("debugModalTitle")}
-        width={720}
-      >
-        {debugModal.loading ? (
-          <div className="py-8 text-center text-zinc-400">{t("common:loading")}</div>
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t("debugRequestBody")}</span>
-                <button
-                  type="button"
-                  onClick={() => copyDebugText(debugModal.body)}
-                  className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 underline underline-offset-2"
-                >
-                  {t("common:copy")}
-                </button>
-              </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-zinc-50 dark:bg-zinc-900 p-3 text-xs text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800">
-                {debugModal.body || "-"}
-              </pre>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t("debugResponseSnippet")}</span>
-                <button
-                  type="button"
-                  onClick={() => copyDebugText(debugModal.snippet)}
-                  className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 underline underline-offset-2"
-                >
-                  {t("common:copy")}
-                </button>
-              </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-zinc-50 dark:bg-zinc-900 p-3 text-xs text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800">
-                {debugModal.snippet || "-"}
-              </pre>
-            </div>
-          </div>
-        )}
-      </Modal>
     </>
   );
 }

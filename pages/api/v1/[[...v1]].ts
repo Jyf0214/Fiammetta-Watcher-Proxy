@@ -46,7 +46,6 @@ import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, rel
 import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/lib/upstream-proxy";
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { sendNotification } from "@/lib/notifier";
-import { saveDebugLog } from "@/lib/debug-log";
 import { convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
 import type { WorkerEnv } from "../../../worker/src/config";
 
@@ -538,14 +537,6 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         db: dummyDb,
         env,
       }).catch(() => {});
-      // 失败请求留痕：网络层失败无上游响应体，仅记录请求体供复现
-      void saveDebugLog(dummyDb, env?.DB_TYPE, {
-        model: requestedModel,
-        platformId: cur.id,
-        status: 502,
-        requestBody: JSON.stringify(rawBody),
-        errorMessage: e instanceof Error ? e.message : String(e),
-      });
       sendV1Error(res, config, 502, "上游请求失败（网络错误），请稍后重试", "upstream_error");
       return;
     }
@@ -556,7 +547,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo, rawBody);
+      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -585,15 +576,6 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
       try { await recordFailure(cur.id, dummyDb, env); } catch {}
       if (proxy?.url) recordProxyTraffic(proxy.url, upRes.status);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
-      // 失败请求留痕：下游请求体 + 上游响应片段（截断 16KB），供日志页复现排查
-      void saveDebugLog(dummyDb, env?.DB_TYPE, {
-        model: requestedModel,
-        platformId: cur.id,
-        status: upRes.status,
-        requestBody: JSON.stringify(rawBody),
-        responseSnippet: errText,
-        errorMessage: errText.substring(0, 1000),
-      });
       // 自动模型冻结：不可重试 5xx 同样证明目标模型故障，提前 return 路径也须冻结，
       // 否则自动模型在冻结机制之外反复撞上同一坏模型（守卫与重试耗尽路径一致；
       // 3xx 分支不冻结——baseUrl 配置错误非模型故障，且该平台所有模型都会失败）
@@ -618,8 +600,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     curHoldsHalfOpenSlot = false;
     await banKey(curKey, undefined, cur.id, env?.KV);
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-    // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位
-    if (upRes.status === 429) recordPlatform429(cur.id);
+    // 窗口内累计达阈值后平台进入冷却，调度层排除让上游限流窗口复位。
+    // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+    if (upRes.status === 429 && !isPlatformWhitelisted(cur.id)) recordPlatform429(cur.id);
     // 累加错误计数并持久化到数据库（429→+1, 401→+2, 其余→+1，达 5 次自动禁用）
     void recordKeyError(curKey, isEmptyResponse ? 502 : upRes.status, cur.id, dummyDb, env).catch(() => {});
     console.log(`${logTag} 上游 ${upRes.status}${isEmptyResponse ? "（空响应）" : ""} (平台: ${cur.name}, attempt: ${attempt + 1}/${MAX_UPSTREAM_RETRIES})，已封禁该 Key 5 分钟，尝试切换`);
@@ -686,15 +669,6 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 不再记上游的 200（此前记上游实际状态导致管理后台显示"成功"）
     void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: isEmptyResponse ? 502 : upRes.status, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000), ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, proxyUrl: proxy?.url ?? undefined, db: dummyDb, env }).catch(() => {});
     if (proxy?.url) recordProxyTraffic(proxy.url, isEmptyResponse ? 502 : upRes.status);
-    // 失败请求留痕：重试耗尽的最终失败同样落痕（含空响应场景，与 Worker 版位置语义对齐）
-    void saveDebugLog(dummyDb, env?.DB_TYPE, {
-      model: requestedModel,
-      platformId: cur.id,
-      status: isEmptyResponse ? 502 : upRes.status,
-      requestBody: JSON.stringify(rawBody),
-      responseSnippet: errText,
-      errorMessage: isEmptyResponse ? "上游返回空响应" : errText.substring(0, 1000),
-    });
     // 自动模型冻结：冻结实际发送的目标模型（tgt）——冻结 requestedModel（自动模型 ID）
     // 与 routeRequest 检查的候选具体模型名不相等，冻结机制从未命中
     if (isAutoModelRequest(requestedModel)) freezeAutoModel(tgt);
@@ -718,7 +692,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }, /** 下游原始请求体（JSON）：空闲超时/流内 error 失败留痕用，本函数作用域拿不到调用方的 rawBody */ requestBody?: Record<string, unknown>): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
   const upstreamIsAnthropic = platform.type === "anthropic";
   if (isStream) {
@@ -919,14 +893,6 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       try { await recordFailure(platform.id, dummyDb, env); } catch {}
       if (proxyUrl) recordProxyTraffic(proxyUrl, 504);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 504, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
-      // 失败请求留痕：无独立响应体可截取（挂起被切断），仅记录请求体供复现
-      void saveDebugLog(dummyDb, env?.DB_TYPE, {
-        model,
-        platformId: platform.id,
-        status: 504,
-        requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
-        errorMessage: `上游响应空闲超时（${UPSTREAM_IDLE_TIMEOUT_MS / 1000} 秒无数据）`,
-      });
     } else if (streamError) {
       // 流内 error：HTTP 头无法反映失败（下游实际收到 200 + error 流），
       // 按错误码记失败日志（不计 Key 用量）并触发平台熔断——此前只记日志不打分，
@@ -940,20 +906,12 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
         try { await banKey(platformKey, undefined, platform.id, env?.KV); } catch {}
         try { await recordKeyError(platformKey, streamError.code, platform.id, dummyDb, env); } catch {}
         // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
-        if (streamError.code === 429) recordPlatform429(platform.id);
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却。
+        // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+        if (streamError.code === 429 && !isPlatformWhitelisted(platform.id)) recordPlatform429(platform.id);
       }
       if (proxyUrl) recordProxyTraffic(proxyUrl, streamError.code);
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: streamError.code, tokens: 0, promptTokens: 0, completionTokens: 0, ttft, duration: Date.now() - start, isError: true, errorMessage: streamError.message, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
-      // 失败请求留痕：流内 error 无独立响应体可截取（错误信息已入日志 message），
-      // 仅记录请求体供复现（与网络错误路径同语义）
-      void saveDebugLog(dummyDb, env?.DB_TYPE, {
-        model,
-        platformId: platform.id,
-        status: streamError.code,
-        requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
-        errorMessage: streamError.message,
-      });
     } else if (!sawDone && !clientClosed) {
       // 上游流被截断：EOF 但未收到 [DONE]（如部分 zen-proxy 入口对长思考流 ~10s 截断）。
       // 客户端已收到 200 + 部分流无法改写状态码，但必须记失败并触发熔断，
