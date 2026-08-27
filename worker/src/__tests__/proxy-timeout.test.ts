@@ -69,6 +69,7 @@ vi.mock("../token", () => ({
   extractUsage: vi.fn(() => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })),
   updateKeyUsage: vi.fn(async () => {}),
   extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
+  detectReasoningInBody: vi.fn(() => false),
 }));
 
 vi.mock("@/lib/key-status", () => ({

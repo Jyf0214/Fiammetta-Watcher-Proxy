@@ -330,6 +330,43 @@ export function detectResponsesStreamEvent(parsed: unknown): { sawContent: boole
 }
 
 /**
+ * 检测非流式响应体中是否存在推理内容
+ *
+ * 覆盖所有已知格式：
+ * - choices[].message.reasoning（MiniMax、部分 OpenAI 兼容平台）
+ * - choices[].message.reasoning_details[].type === "reasoning.text"（MiniMax M3 等）
+ * - 顶层 reasoning / reasoning_summary（OpenAI o3/o4 等）
+ * - Responses API output[].type === "reasoning"（OpenAI o1-pro 等）
+ */
+export function detectReasoningInBody(body: Record<string, unknown>): boolean {
+  const b = body as any;
+  // choices[].message 中的 reasoning 字段
+  if (Array.isArray(b.choices)) {
+    for (const c of b.choices) {
+      const msg = c?.message;
+      if (msg) {
+        if (typeof msg.reasoning === "string" && msg.reasoning.length > 0) return true;
+        if (Array.isArray(msg.reasoning_details) && msg.reasoning_details.length > 0) {
+          for (const detail of msg.reasoning_details) {
+            if (detail && typeof detail.type === "string" && detail.type.includes("reasoning")) return true;
+          }
+        }
+      }
+    }
+  }
+  // 顶层 reasoning / reasoning_summary
+  if (typeof b.reasoning === "string" && b.reasoning.length > 0) return true;
+  if (typeof b.reasoning_summary === "string" && b.reasoning_summary.length > 0) return true;
+  // Responses API output 数组
+  if (Array.isArray(b.output)) {
+    for (const item of b.output) {
+      if (item && typeof item.type === "string" && item.type === "reasoning") return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 创建 Usage 提取 TransformStream
  *
  * 在流式响应中逐块解析 SSE 数据，提取最后一个 usage 对象，
@@ -423,6 +460,22 @@ export function createUsageTransformer(params: {
               }
               if (delta && typeof (delta as any).reasoning === "string" && (delta as any).reasoning.length > 0) {
                 sawReasoning = true;
+              }
+              // message 级思考检测：部分平台（如 MiniMax）在 SSE chunk 的
+              // message 对象中携带 reasoning / reasoning_details，而非 delta
+              const msg = c?.message;
+              if (msg) {
+                if (typeof (msg as any).reasoning === "string" && (msg as any).reasoning.length > 0) {
+                  sawReasoning = true;
+                }
+                if (Array.isArray((msg as any).reasoning_details) && (msg as any).reasoning_details.length > 0) {
+                  for (const detail of (msg as any).reasoning_details) {
+                    if (detail && typeof detail.type === "string" && detail.type.includes("reasoning")) {
+                      sawReasoning = true;
+                      break;
+                    }
+                  }
+                }
               }
             }
           }

@@ -51,7 +51,7 @@ import {
   createAnthropicStreamTransformer,
   createOpenAIStreamTransformer,
 } from "./proxy-core/stream-transformers";
-import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage } from "./token";
+import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage, detectReasoningInBody } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
 import { extractForwardableHeaders } from "./forward-headers";
@@ -1320,6 +1320,9 @@ async function handleUpstreamResponse(
     // JSON 解析失败不影响响应
   }
 
+  // 非流式响应思考检测：解析完响应体后检测 message.reasoning 等字段
+  const nonStreamHasReasoning = openaiBody ? detectReasoningInBody(openaiBody) : false;
+
   if (config.protocol === "anthropic") {
     // OpenAI chat.completion → Anthropic message（回显下游请求的模型名）
     try {
@@ -1349,6 +1352,7 @@ async function handleUpstreamResponse(
           ttft: 0,
           duration: Date.now() - startTime,
           isError: false,
+          hasReasoning: nonStreamHasReasoning,
           ipAddress: clientInfo?.ipAddress,
           userAgent: clientInfo?.userAgent,
           db: env.DB,
@@ -1418,6 +1422,7 @@ async function handleUpstreamResponse(
       ttft: 0,
       duration: Date.now() - startTime,
       isError: false,
+      hasReasoning: nonStreamHasReasoning,
       ipAddress: clientInfo?.ipAddress,
       userAgent: clientInfo?.userAgent,
       db: env.DB,
