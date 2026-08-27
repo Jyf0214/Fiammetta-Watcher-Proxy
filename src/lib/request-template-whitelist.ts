@@ -14,6 +14,8 @@ export const CHAT_MERGEBODY_ALLOWED_KEYS = new Set([
   "n", "logprobs", "top_logprobs", "response_format", "seed",
   // 思考控制类参数（deepseek/qwen 等厂商透传）
   "reasoning_effort", "chat_template_kwargs", "extra_body",
+  // 厂商私有顶层字段：用于特定上游的思考控制开关，具体取值/语义以厂商 API 文档为准
+  "thinking", "reasoning_split",
 ]);
 
 /** responses 模板白名单：基于 OpenAI Responses API 规范，解锁高阶思维链 reasoning */

@@ -29,7 +29,7 @@
 
 **Chat Completions 白名单**（`type=chat`，普通 `v1/chat` 代理）：
 
-`system`、`temperature`、`top_p`、`top_k`、`max_tokens`、`max_completion_tokens`、`frequency_penalty`、`presence_penalty`、`stop`、`stream`、`stream_options`、`n`、`logprobs`、`top_logprobs`、`response_format`、`seed`、`reasoning_effort`、`chat_template_kwargs`、`extra_body`
+`system`、`temperature`、`top_p`、`top_k`、`max_tokens`、`max_completion_tokens`、`frequency_penalty`、`presence_penalty`、`stop`、`stream`、`stream_options`、`n`、`logprobs`、`top_logprobs`、`response_format`、`seed`、`reasoning_effort`、`chat_template_kwargs`、`extra_body`、`thinking`、`reasoning_split`
 
 **Responses API 白名单**（`type=responses`，`v1/responses` 代理，解锁高阶思维链）：
 
@@ -46,6 +46,8 @@
 ## 与 Anthropic 平台的关系
 
 模板在协议转换**之前**应用：先注入 OpenAI 格式请求体，再转换为 Anthropic 原生协议。转换时 `stream_options` / `n` / `response_format` 等 OpenAI 专属字段会被剥离，避免 Anthropic 严格后端报 422；`system` / `temperature` / `top_p` / `top_k` / `max_tokens` / `stop` 等字段正常生效。
+
+厂商私有顶层字段（如 `thinking` / `reasoning_split`）同样会被转换层剥离，**仅在 OpenAI 协议上游生效**；若平台 `protocol=anthropic` 而模板注入这些字段，请求时会被静默丢弃且无日志提示，请将模板绑定到对应的 OpenAI 兼容平台。
 
 ## 下一步
 

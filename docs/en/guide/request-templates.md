@@ -29,7 +29,7 @@ Templates use a **type-specific whitelist**; **anything else is silently dropped
 
 **Chat Completions** (`type=chat`, normal `v1/chat` proxy):
 
-`system`, `temperature`, `top_p`, `top_k`, `max_tokens`, `max_completion_tokens`, `frequency_penalty`, `presence_penalty`, `stop`, `stream`, `stream_options`, `n`, `logprobs`, `top_logprobs`, `response_format`, `seed`, `reasoning_effort`, `chat_template_kwargs`, `extra_body`
+`system`, `temperature`, `top_p`, `top_k`, `max_tokens`, `max_completion_tokens`, `frequency_penalty`, `presence_penalty`, `stop`, `stream`, `stream_options`, `n`, `logprobs`, `top_logprobs`, `response_format`, `seed`, `reasoning_effort`, `chat_template_kwargs`, `extra_body`, `thinking`, `reasoning_split`
 
 **Responses API** (`type=responses`, `v1/responses` proxy, unlocks advanced reasoning chain):
 
@@ -46,6 +46,8 @@ Templates use a **type-specific whitelist**; **anything else is silently dropped
 ## Interaction with Anthropic Platforms
 
 Templates apply **before** protocol conversion: fields are injected into the OpenAI-format body, then the request is converted to the native Anthropic protocol. OpenAI-only fields (`stream_options`, `n`, `response_format`, etc.) are stripped during conversion to avoid 422 from strict Anthropic backends; `system`, `temperature`, `top_p`, `top_k`, `max_tokens`, `stop` etc. pass through normally.
+
+Vendor-specific top-level fields (e.g. `thinking`, `reasoning_split`) are also stripped by the conversion layer and **only take effect on OpenAI-protocol upstreams**. If a template injects these fields but the platform `protocol=anthropic`, they are silently dropped at request time with no log hint—bind such templates to OpenAI-compatible platforms instead.
 
 ## Next Steps
 

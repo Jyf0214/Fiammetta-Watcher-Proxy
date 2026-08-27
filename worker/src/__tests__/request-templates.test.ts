@@ -139,6 +139,20 @@ describe("applyTemplates", () => {
     expect(result).toEqual({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
   });
 
+  it("thinking/reasoning_split 顶层键在 chat 白名单内不被过滤", () => {
+    const body = { model: "minimax-text-01", messages: [] };
+    const templates: RequestTemplate[] = [
+      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { thinking: "adaptive", reasoning_split: true }, enabled: true },
+    ];
+    const result = applyTemplates(body, templates);
+    expect(result).toEqual({
+      model: "minimax-text-01",
+      messages: [],
+      thinking: "adaptive",
+      reasoning_split: true,
+    });
+  });
+
   it("思考控制类参数（reasoning_effort/chat_template_kwargs/extra_body）可生效", () => {
     const body = { model: "deepseek-r1", messages: [] };
     const templates: RequestTemplate[] = [
