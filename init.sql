@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS "request_logs" (
     "node_name" TEXT,
     "error_message" TEXT,
     "proxy_url" TEXT,
+    "has_reasoning" BOOLEAN NOT NULL DEFAULT false,
     "created_at" INTEGER NOT NULL DEFAULT 0
 );
 

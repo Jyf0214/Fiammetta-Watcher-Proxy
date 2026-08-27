@@ -154,6 +154,7 @@ model requestLogs {
   nodeName         String? @map("node_name")
   errorMessage     String? @map("error_message")
   proxyUrl         String? @map("proxy_url")
+  hasReasoning     Boolean @default(false) @map("has_reasoning")
   createdAt        Int     @default(0) @map("created_at")
 
   @@index([createdAt])

@@ -35,6 +35,7 @@ interface LogEntry {
   duration: number;
   isError: boolean;
   errorMessage: string | null;
+  hasReasoning?: boolean;
   nodeName: string | null;
   createdAt: string;
   key: { name: string } | null;
@@ -73,6 +74,14 @@ interface KeyOption {
 
 function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => void }) {
   const { t } = useTranslation("log");
+  // 开发模式状态：仅开启时显示「思考」列
+  const [devMode, setDevMode] = useState(false);
+  useEffect(() => {
+    fetch("/api/admin/dev-mode")
+      .then((r) => r.json())
+      .then((j) => setDevMode((j as { data?: { enabled?: boolean } })?.data?.enabled === true))
+      .catch(() => {});
+  }, []);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [errorFilter, setErrorFilter] = useState<string>("");
@@ -209,6 +218,24 @@ function DetailedLogsTab({ onRefreshRef }: { onRefreshRef: (fn: () => void) => v
           </Tooltip>
         ) : "-",
     },
+    // 开发模式开启时显示「思考」列：仅渲染有思考数据的行（hasReasoning=true），
+    // 关闭时不展示该列（含已记录的历史数据）
+    ...(devMode
+      ? [
+          {
+            title: t("reasoning"),
+            key: "hasReasoning",
+            width: 70,
+            align: "center" as const,
+            render: (_: unknown, record: LogEntry) =>
+              record.hasReasoning ? (
+                <Tag color="blue">{t("reasoningYes")}</Tag>
+              ) : (
+                <span className="text-zinc-400">{t("reasoningNo")}</span>
+              ),
+          },
+        ]
+      : []),
     {
       title: t("usage:promptTokens"),
       dataIndex: "promptTokens",

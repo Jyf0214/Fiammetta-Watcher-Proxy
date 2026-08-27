@@ -743,6 +743,8 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
     // 数十秒首字延迟"即此场景）
     let sawContent = false;
+    // 思考检测：delta.reasoning_content / delta.reasoning / reasoning 等字段非空
+    let sawReasoning = false;
     // SSE 行缓冲上限：防异常/恶意上游发送无换行的超长数据导致内存无限增长
     const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
     // 带背压的写入：write 返回 false（写缓冲超过 highWaterMark）时暂停读取，
@@ -838,6 +840,28 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                     const delta = c?.delta;
                     if (delta && ((typeof delta.content === "string" && delta.content.length > 0) || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0))) {
                       sawContent = true;
+                    }
+                    // 思考检测：delta.reasoning_content / delta.reasoning 任一非空即算
+                    if (delta && typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+                      sawReasoning = true;
+                    }
+                    if (delta && typeof (delta as any).reasoning === "string" && (delta as any).reasoning.length > 0) {
+                      sawReasoning = true;
+                    }
+                  }
+                }
+                // 顶层字段检测：reasoning / reasoning_summary
+                if (typeof (d as any).reasoning === "string" && (d as any).reasoning.length > 0) {
+                  sawReasoning = true;
+                }
+                if (typeof (d as any).reasoning_summary === "string" && (d as any).reasoning_summary.length > 0) {
+                  sawReasoning = true;
+                }
+                // Responses API 推理检测：output 数组中 type:"reasoning" 项
+                if (Array.isArray((d as any).output)) {
+                  for (const item of (d as any).output) {
+                    if (item && typeof item.type === "string" && item.type === "reasoning") {
+                      sawReasoning = true;
                     }
                   }
                 }
@@ -947,7 +971,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 客户端断开零留痕：与 Worker 版同场景一致不记成功日志（流被取消，
       // 记 200 成功会虚增平台成功样本）；代理流量统计非请求日志，照常记录
       if (!clientClosed) {
-        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, upstreamCost: uc, ttft, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
+        try { await recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: tt, promptTokens: pt, completionTokens: ct, upstreamCost: uc, ttft, duration: Date.now() - start, isError: false, hasReasoning: sawReasoning, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }); } catch {}
       }
     }
     try { res.end(); } catch { /* 客户端已断开，忽略结束写入错误 */ }

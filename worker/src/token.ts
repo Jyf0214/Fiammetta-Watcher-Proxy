@@ -209,6 +209,8 @@ export async function recordRequestLog(params: {
   userAgent?: string;
   /** 出站代理地址（仅 Docker 部署经代理的请求记录；直连/其他部署为空） */
   proxyUrl?: string;
+  /** 是否检测到模型思考内容（reasoning/reasoning_content 等字段非空） */
+  hasReasoning?: boolean;
   db: D1Database;
   env?: WorkerEnv;
 }): Promise<void> {
@@ -247,6 +249,7 @@ export async function recordRequestLog(params: {
     nodeName: resolveNodeName(params.env),
     ipAddress: params.ipAddress ?? null,
     userAgent: params.userAgent ?? null,
+    hasReasoning: params.hasReasoning ?? false,
   });
 }
 
@@ -375,6 +378,10 @@ export function createUsageTransformer(params: {
   // 空闲超时任何检测，此前被记成 200 成功（管理后台常见"200 + 0 tokens +
   // 数十秒首字延迟"即此场景），坏平台评分不降、负载均衡反复撞上它
   let sawContent = false;
+  // 开发模式下记录是否检测到模型思考内容（reasoning / reasoning_content /
+  // reasoning_summary / reasoning.text 等字段非空即算思考）。
+  // 仅在开发模式开启时写入 requestLogs.hasReasoning；关闭时恒 false。
+  let sawReasoning = false;
   let ttft = 0;
   let isFirstChunk = true;
   const decoder = new TextDecoder();
@@ -408,6 +415,29 @@ export function createUsageTransformer(params: {
               const delta = c?.delta;
               if (delta && ((typeof delta.content === "string" && delta.content.length > 0) || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0))) {
                 sawContent = true;
+              }
+              // 思考检测：delta.reasoning_content（DeepSeek/Qwen）、
+              // delta.reasoning（OpenAI o1）任一非空即算
+              if (delta && typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+                sawReasoning = true;
+              }
+              if (delta && typeof (delta as any).reasoning === "string" && (delta as any).reasoning.length > 0) {
+                sawReasoning = true;
+              }
+            }
+          }
+          // 顶层字段检测：reasoning / reasoning_summary（OpenAI o3/o4 等非流式增量格式）
+          if (typeof (parsed as any).reasoning === "string" && (parsed as any).reasoning.length > 0) {
+            sawReasoning = true;
+          }
+          if (typeof (parsed as any).reasoning_summary === "string" && (parsed as any).reasoning_summary.length > 0) {
+            sawReasoning = true;
+          }
+          // Responses API 推理检测：output 数组中 type:"reasoning" 项表示推理内容
+          if (Array.isArray((parsed as any).output)) {
+            for (const item of (parsed as any).output) {
+              if (item && typeof item.type === "string" && item.type === "reasoning") {
+                sawReasoning = true;
               }
             }
           }
@@ -475,8 +505,9 @@ export function createUsageTransformer(params: {
         try { await banKey(params.key, undefined, params.platformId, params.kv); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
         // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
-        if (keyErrorCode === 429) recordPlatform429(params.platformId);
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却。
+        // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+        if (keyErrorCode === 429 && !isPlatformWhitelisted(params.platformId)) recordPlatform429(params.platformId);
       }
 
       // 复用同一个 PrismaClient 完成所有 DB 操作
@@ -518,6 +549,7 @@ export function createUsageTransformer(params: {
         proxyUrl: null,
         ipAddress: params.ipAddress ?? null,
         userAgent: params.userAgent ?? null,
+        hasReasoning: sawReasoning,
       });
     },
   });

@@ -47,6 +47,7 @@ interface PendingLogEntry {
   proxyUrl: string | null;
   ipAddress: string | null;
   userAgent: string | null;
+  hasReasoning: boolean;
   createdAt: number;
 }
 
