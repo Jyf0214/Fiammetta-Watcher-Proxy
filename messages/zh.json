@@ -421,6 +421,7 @@
     "actionExportData": "导出数据",
     "actionUpdateModelPricing": "更新模型价格表",
     "actionUpdateNotifications": "更新通知配置",
+    "actionToggleDeveloperMode": "切换开发模式",
     "actionEnable2fa": "开启两步验证",
     "actionDisable2fa": "关闭两步验证",
     "actionPlaygroundCall": "调试台调用",
@@ -660,7 +661,18 @@
     "twofaDisable": "关闭两步验证",
     "twofaEnabled": "两步验证已启用",
     "twofaDisabled": "两步验证已关闭",
-    "twofaErrorNeedCode": "请输入 6 位动态码"
+    "twofaErrorNeedCode": "请输入 6 位动态码",
+    "devModeTitle": "开发模式",
+    "devModeDesc": "开启后启用服务器详细日志并暴露内部调试端点。默认关闭；仅在排查问题时启用。",
+    "devModeEnabled": "启用开发模式",
+    "devModeEnabledOn": "开发模式已开启 — 下方调试面板可用。",
+    "devModeEnabledOff": "开发模式已关闭。",
+    "devModePanelLogs": "最近请求日志（最近 60 分钟）",
+    "devModePanelPlatforms": "平台与 Key 清单",
+    "devModePanelLogDetail": "单条日志详情",
+    "devModeLogIdPlaceholder": "request_log id",
+    "devModeRefresh": "刷新",
+    "devModeEmpty": "所选窗口内无数据。"
   },
   "playground": {
     "title": "调试台",

@@ -421,6 +421,7 @@
     "actionExportData": "Export Data",
     "actionUpdateModelPricing": "Update Model Pricing",
     "actionUpdateNotifications": "Update Notification Config",
+    "actionToggleDeveloperMode": "Toggle Developer Mode",
     "actionEnable2fa": "Enable 2FA",
     "actionDisable2fa": "Disable 2FA",
     "actionPlaygroundCall": "Playground Call",
@@ -660,7 +661,18 @@
     "twofaDisable": "Disable 2FA",
     "twofaEnabled": "Two-factor authentication enabled",
     "twofaDisabled": "Two-factor authentication disabled",
-    "twofaErrorNeedCode": "Please enter the 6-digit code"
+    "twofaErrorNeedCode": "Please enter the 6-digit code",
+    "devModeTitle": "Developer Mode",
+    "devModeDesc": "Enables verbose server logs and exposes internal debug endpoints. Off by default; only enable when actively investigating an issue.",
+    "devModeEnabled": "Enable developer mode",
+    "devModeEnabledOn": "Developer mode is ON — debug panels below are available.",
+    "devModeEnabledOff": "Developer mode is OFF.",
+    "devModePanelLogs": "Recent Request Logs (last 60 min)",
+    "devModePanelPlatforms": "Platform & Key Inventory",
+    "devModePanelLogDetail": "Single Log Detail",
+    "devModeLogIdPlaceholder": "request_log id",
+    "devModeRefresh": "Refresh",
+    "devModeEmpty": "No data in the selected window."
   },
   "playground": {
     "title": "Playground",

@@ -13,6 +13,7 @@ import { message } from "antd";
 import {
   Bell,
   CircleDollarSign,
+  Code2,
   Download,
   KeyRound,
   Loader2,
@@ -136,6 +137,21 @@ function SettingsContent() {
   const [pendingUri, setPendingUri] = useState<string>("");
   const [confirmCode, setConfirmCode] = useState("");
   const [disableCode, setDisableCode] = useState("");
+
+  // 开发模式
+  const [devMode, setDevMode] = useState(false);
+  const [devModeLoading, setDevModeLoading] = useState(true);
+  const [devModeBusy, setDevModeBusy] = useState(false);
+  // 调试面板 1：最近请求日志
+  const [devLogs, setDevLogs] = useState<Array<Record<string, unknown>> | null>(null);
+  const [devLogsLoading, setDevLogsLoading] = useState(false);
+  // 调试面板 2：平台 Key 清单
+  const [devPlatforms, setDevPlatforms] = useState<Array<Record<string, unknown>> | null>(null);
+  const [devPlatformsLoading, setDevPlatformsLoading] = useState(false);
+  // 调试面板 3：单条日志详情
+  const [devLogId, setDevLogId] = useState("");
+  const [devLogDetail, setDevLogDetail] = useState<Record<string, unknown> | null>(null);
+  const [devLogDetailLoading, setDevLogDetailLoading] = useState(false);
 
   const loadPricing = useCallback(async () => {
     setLoading(true);
@@ -319,16 +335,113 @@ function SettingsContent() {
     }
   };
 
+  // ==================== 开发模式 ====================
+
+  const loadDevMode = useCallback(async () => {
+    setDevModeLoading(true);
+    try {
+      const res = await fetch("/api/admin/dev-mode");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { success?: boolean; data?: { enabled?: boolean } };
+      setDevMode(json?.data?.enabled === true);
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDevModeLoading(false);
+    }
+  }, [t]);
+
+  const handleToggleDevMode = async (next: boolean) => {
+    setDevModeBusy(true);
+    try {
+      const res = await fetch("/api/admin/dev-mode", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const json = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error?.message || `HTTP ${res.status}`);
+      }
+      setDevMode(next);
+      message.success(next ? t("devModeEnabledOn") : t("devModeEnabledOff"));
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDevModeBusy(false);
+    }
+  };
+
+  const loadDevLogs = useCallback(async () => {
+    setDevLogsLoading(true);
+    try {
+      const res = await fetch("/api/admin/dev-mode/logs?minutes=60&limit=100");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { items?: Array<Record<string, unknown>> };
+      };
+      setDevLogs(json?.data?.items ?? []);
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+      setDevLogs([]);
+    } finally {
+      setDevLogsLoading(false);
+    }
+  }, [t]);
+
+  const loadDevPlatforms = useCallback(async () => {
+    setDevPlatformsLoading(true);
+    try {
+      const res = await fetch("/api/admin/dev-mode/platforms");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { items?: Array<Record<string, unknown>> };
+      };
+      setDevPlatforms(json?.data?.items ?? []);
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+      setDevPlatforms([]);
+    } finally {
+      setDevPlatformsLoading(false);
+    }
+  }, [t]);
+
+  const loadDevLogDetail = useCallback(async () => {
+    if (!devLogId.trim()) return;
+    setDevLogDetailLoading(true);
+    try {
+      const res = await fetch(`/api/admin/dev-mode/log-detail?id=${encodeURIComponent(devLogId.trim())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: Record<string, unknown>;
+      };
+      setDevLogDetail(json?.data ?? null);
+    } catch (err) {
+      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
+      setDevLogDetail(null);
+    } finally {
+      setDevLogDetailLoading(false);
+    }
+  }, [devLogId, t]);
+
   useEffect(() => {
     // 延迟到宏任务执行：loadPricing 首行同步 setLoading 会触发
     // react-hooks/set-state-in-effect（effect 体内禁止同步 setState）
     const timer = setTimeout(loadPricing, 0);
     const notifTimer = setTimeout(loadNotifications, 0);
     const twofaTimer = setTimeout(load2fa, 0);
+    const devTimer = setTimeout(loadDevMode, 0);
     return () => {
       clearTimeout(timer);
       clearTimeout(notifTimer);
       clearTimeout(twofaTimer);
+      clearTimeout(devTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -669,6 +782,112 @@ function SettingsContent() {
                   {t("twofaEnable")}
                 </Button>
               </div>
+            )}
+          </div>
+        </ProCard>
+
+        {/* ========== 开发模式 ========== */}
+        <ProCard title={t("devModeTitle")}>
+          <div className="space-y-4">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("devModeDesc")}</p>
+
+            {devModeLoading ? (
+              <div className="flex items-center justify-center py-8 text-zinc-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            ) : (
+              <>
+                <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={devMode}
+                    onChange={(e) => handleToggleDevMode(e.target.checked)}
+                    disabled={devModeBusy}
+                    className="w-4 h-4 accent-zinc-700 dark:accent-zinc-300"
+                  />
+                  {t("devModeEnabled")}
+                  {devModeBusy && <Loader2 className="w-3 h-3 animate-spin ml-1" />}
+                </label>
+                <p className={`text-xs ${devMode ? "text-amber-600 dark:text-amber-400" : "text-zinc-400 dark:text-zinc-500"}`}>
+                  {devMode ? t("devModeEnabledOn") : t("devModeEnabledOff")}
+                </p>
+
+                {/* 调试面板：仅开启时渲染。关闭时整块折叠为隐藏，避免无意义请求 */}
+                {devMode && (
+                  <div className="space-y-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    {/* 面板 1：最近请求日志 */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                          {t("devModePanelLogs")}
+                        </p>
+                        <Button variant="ghost" size="sm" onClick={loadDevLogs} loading={devLogsLoading} icon={<Code2 className="w-3 h-3 mr-1" />}>
+                          {t("devModeRefresh")}
+                        </Button>
+                      </div>
+                      {devLogs === null ? (
+                        <p className="text-xs text-zinc-400 py-2">{t("devModeEmpty")}</p>
+                      ) : devLogs.length === 0 ? (
+                        <p className="text-xs text-zinc-400 py-2">{t("devModeEmpty")}</p>
+                      ) : (
+                        <pre className="max-h-64 overflow-auto rounded-md bg-zinc-50 dark:bg-zinc-950 p-2 text-[11px] text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800">
+                          {JSON.stringify(devLogs, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* 面板 2：平台 Key 清单 */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                          {t("devModePanelPlatforms")}
+                        </p>
+                        <Button variant="ghost" size="sm" onClick={loadDevPlatforms} loading={devPlatformsLoading} icon={<Code2 className="w-3 h-3 mr-1" />}>
+                          {t("devModeRefresh")}
+                        </Button>
+                      </div>
+                      {devPlatforms === null ? (
+                        <p className="text-xs text-zinc-400 py-2">{t("devModeEmpty")}</p>
+                      ) : devPlatforms.length === 0 ? (
+                        <p className="text-xs text-zinc-400 py-2">{t("devModeEmpty")}</p>
+                      ) : (
+                        <pre className="max-h-64 overflow-auto rounded-md bg-zinc-50 dark:bg-zinc-950 p-2 text-[11px] text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800">
+                          {JSON.stringify(devPlatforms, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* 面板 3：单条日志详情 */}
+                    <div>
+                      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">
+                        {t("devModePanelLogDetail")}
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <input
+                          value={devLogId}
+                          onChange={(e) => setDevLogId(e.target.value)}
+                          placeholder={t("devModeLogIdPlaceholder")}
+                          className="h-8 w-full sm:flex-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={loadDevLogDetail}
+                          loading={devLogDetailLoading}
+                          disabled={!devLogId.trim()}
+                        >
+                          {t("devModeRefresh")}
+                        </Button>
+                      </div>
+                      {devLogDetail && (
+                        <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-zinc-50 dark:bg-zinc-950 p-2 text-[11px] text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800">
+                          {JSON.stringify(devLogDetail, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </ProCard>
