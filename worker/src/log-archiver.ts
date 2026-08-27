@@ -242,12 +242,6 @@ async function archiveSingleDay(
 ): Promise<{ processed: number; deleted: number }> {
   const PAGE_SIZE = 10000;
 
-  // 归档幂等（重算语义）：该天日志仍存在时，先清空该天的旧聚合记录再全量重算。
-  // 归档中途失败（聚合写入后、日志删除前）次日重跑时，若不清空旧聚合而直接累加，
-  // 同一批日志会被计两次（daily_stats 纯加法无唯一约束，plan.md #27）；
-  // 完全成功归档后重跑时日志已删空，上方已提前返回，聚合记录不会被清除。
-  await prisma.dailyStats.deleteMany({ where: { date: dayStartTs } });
-
   // 按 key_id + model 分组聚合（跨分页合并同 key+model 的数据）
   const groups = new Map<
     string,
@@ -312,7 +306,16 @@ async function archiveSingleDay(
       take: PAGE_SIZE,
     });
 
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      return { processed, deleted };
+    }
+
+    // 归档幂等（重算语义）：该天日志仍存在时，先清空该天的旧聚合记录再全量重算。
+    // 仅在首批次发现日志时执行（空天不清除），避免无日志时多余清空；
+    // 若中途失败（聚合写入后、日志删除前）次日重跑，日志仍在，重新清除旧聚合并重算。
+    if (processed === 0) {
+      await prisma.dailyStats.deleteMany({ where: { date: dayStartTs } });
+    }
 
     // 立即聚合本批数据到 groups（跨批合并同 key+model 的统计）
     for (const log of batch) {

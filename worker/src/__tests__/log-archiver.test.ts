@@ -84,6 +84,9 @@ describe("runArchiveTask 归档单天日志", () => {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
+      requestDebugLogs: {
+        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
+      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -183,6 +186,9 @@ describe("runArchiveTask 归档单天日志", () => {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },
+      requestDebugLogs: {
+        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
+      },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
 
@@ -202,6 +208,7 @@ describe("runArchiveTask 归档单天日志", () => {
     const { createDb } = await import("@/lib/prisma");
     const mockCreateDb = vi.mocked(createDb);
     const deleteManyCalls: Array<{ where: Record<string, unknown> }> = [];
+    let findManyCalls = 0;
     const mockPrisma = {
       requestLogs: {
         deleteMany: vi.fn((args: { where: Record<string, unknown> }) => {
@@ -209,14 +216,13 @@ describe("runArchiveTask 归档单天日志", () => {
           return Promise.resolve({ count: 0 });
         }),
         findFirst: vi.fn(() => Promise.resolve({ createdAt: oldestTs })),
-        findMany: vi.fn((args: any) => {
-          const isTargetDay = args.where?.createdAt?.gte === dayStartTs;
-          const isFirstPage = args.skip === 0 || (args.skip === undefined && !args.where?.OR);
-          if (isTargetDay && isFirstPage && !args.where?.OR) {
-            // 上次归档删除阶段部分失败：残留 2 条（上次聚合已含全部 5 条）
+        findMany: vi.fn(() => {
+          findManyCalls++;
+          // call 1: 无 cursor，第一天首次查询 → 残留 2 条
+          // call 2+: cursor 或其他天 → 空
+          if (findManyCalls === 1) {
             return Promise.resolve([makeLog(3, dayStartTs), makeLog(4, dayStartTs)]);
           }
-          if (args.where?.OR) return Promise.resolve([]);
           return Promise.resolve([]);
         }),
       },
@@ -234,6 +240,9 @@ describe("runArchiveTask 归档单天日志", () => {
         create: vi.fn(() => Promise.resolve({})),
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
         deleteMany: vi.fn(() => Promise.resolve({ count: 1 })),
+      },
+      requestDebugLogs: {
+        deleteMany: vi.fn(() => Promise.resolve({ count: 0 })),
       },
     } as any;
     mockCreateDb.mockResolvedValue(mockPrisma);
