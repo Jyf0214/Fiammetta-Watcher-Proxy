@@ -9,13 +9,14 @@
  * - 写后立即失效本进程缓存，避免"自己刚开/关但当前请求仍按旧值走"的滞后；
  * - 关闭状态下所有调试能力（详细日志、调试面板）一律不输出/不暴露；
  * - 仅 admin 后端调用 isDevMode()；前端不可强制开启（避免客户端伪造）。
+ *
+ * 数据访问：内部调用 createDb(env) 获取 prisma client（跨 D1/TiDB/PG 等所有
+ * 方言统一），不经过 worker/src/config.ts 的 getConfig（避免 D1 binding 类型
+ * 不匹配 Pages 端调用的 bug）。
  */
 
-import { getConfig } from "../../worker/src/config";
+import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "../../worker/src/config";
-import type { Database } from "@/lib/prisma";
-
-type DbInput = D1Database | Database;
 
 /** configs 表中开发模式开关的存储键 */
 export const DEV_MODE_CONFIG_KEY = "system:developer_mode";
@@ -80,18 +81,21 @@ export function isDevModeCached(): boolean {
 /**
  * 异步读取（带 TTL 缓存与 DB 回退）。代理请求热路径可在异步上下文调用；
  * DB 失败时返回 false（默认关闭——保守起见，未确认开启前一律走生产路径）。
+ *
+ * 内部通过 createDb(env) 获取 prisma client（Pages/Worker 统一），
+ * 直接查 configs 表，不经过 worker/src/config.ts 的 getConfig。
  */
-export async function isDevMode(
-  db?: DbInput,
-  env?: WorkerEnv
-): Promise<boolean> {
+export async function isDevMode(env?: WorkerEnv): Promise<boolean> {
   if (cache && Date.now() - cache.loadedAt <= DEV_MODE_CACHE_TTL_MS) {
     return cache.enabled;
   }
-  if (!db) return false;
   try {
-    const raw = await getConfig(db as D1Database, DEV_MODE_CONFIG_KEY, env);
-    const enabled = parseDevMode(raw);
+    const prisma = await createDb(env as Record<string, unknown> | undefined);
+    const row = await prisma.configs.findFirst({
+      where: { key: DEV_MODE_CONFIG_KEY },
+      select: { value: true },
+    });
+    const enabled = parseDevMode(row?.value ?? null);
     cache = { enabled, loadedAt: Date.now() };
     return enabled;
   } catch (err) {

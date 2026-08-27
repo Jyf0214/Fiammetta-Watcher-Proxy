@@ -7,14 +7,15 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const getConfigMock = vi.hoisted(() => vi.fn());
+// isDevMode 内部调用 createDb(env) → prisma.configs.findFirst，
+// mock createDb 返回带 configs.findFirst 的 prisma client
+const createDbMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../../worker/src/config", () => ({
-  getConfig: (...args: unknown[]) => getConfigMock(...args),
+vi.mock("../../../lib/prisma", () => ({
+  createDb: (...args: unknown[]) => createDbMock(...args),
 }));
 
 import {
-  DEV_MODE_CONFIG_KEY,
   parseDevMode,
   serializeDevMode,
   isDevModeCached,
@@ -62,52 +63,62 @@ describe("serializeDevMode", () => {
 describe("isDevModeCached / isDevMode 缓存", () => {
   beforeEach(() => {
     invalidateDevModeCache();
-    getConfigMock.mockReset();
+    createDbMock.mockReset();
   });
 
   it("未加载时 isDevModeCached 返回 false", () => {
     expect(isDevModeCached()).toBe(false);
   });
 
-  it("未传 db 时 isDevMode 返回 false（保守关闭）", async () => {
+  it("未传 env 且 createDb 失败时 isDevMode 返回 false（保守关闭）", async () => {
+    createDbMock.mockRejectedValue(new Error("db down"));
     expect(await isDevMode()).toBe(false);
   });
 
   it("isDevMode 读取 DB 并写入缓存", async () => {
-    getConfigMock.mockResolvedValue(serializeDevMode(true));
-    const db = {} as unknown as D1Database;
-    const result = await isDevMode(db);
+    createDbMock.mockResolvedValue({
+      configs: { findFirst: vi.fn().mockResolvedValue({ value: serializeDevMode(true) }) },
+    });
+    const result = await isDevMode();
     expect(result).toBe(true);
     expect(isDevModeCached()).toBe(true);
-    expect(getConfigMock).toHaveBeenCalledWith(
-      db,
-      DEV_MODE_CONFIG_KEY,
-      undefined
-    );
+    expect(createDbMock).toHaveBeenCalledTimes(1);
+    expect(createDbMock).toHaveBeenCalledWith(undefined);
   });
 
-  it("缓存命中时不再调用 getConfig", async () => {
-    getConfigMock.mockResolvedValue(serializeDevMode(true));
-    const db = {} as unknown as D1Database;
-    await isDevMode(db);
-    const callCount = getConfigMock.mock.calls.length;
+  it("isDevMode 传入 env 参数时透传给 createDb", async () => {
+    createDbMock.mockResolvedValue({
+      configs: { findFirst: vi.fn().mockResolvedValue({ value: serializeDevMode(true) }) },
+    });
+    const env = { DB_TYPE: "pg" } as Record<string, unknown>;
+    const result = await isDevMode(env as any);
+    expect(result).toBe(true);
+    expect(createDbMock).toHaveBeenCalledWith(env);
+  });
+
+  it("缓存命中时不再调用 createDb", async () => {
+    createDbMock.mockResolvedValue({
+      configs: { findFirst: vi.fn().mockResolvedValue({ value: serializeDevMode(true) }) },
+    });
+    await isDevMode();
+    const callCount = createDbMock.mock.calls.length;
     // 第二次调用应命中缓存
-    const second = await isDevMode(db);
+    const second = await isDevMode();
     expect(second).toBe(true);
-    expect(getConfigMock.mock.calls.length).toBe(callCount);
+    expect(createDbMock.mock.calls.length).toBe(callCount);
   });
 
   it("DB 失败时返回 false 不抛", async () => {
-    getConfigMock.mockRejectedValue(new Error("db down"));
-    const db = {} as unknown as D1Database;
-    const result = await isDevMode(db);
+    createDbMock.mockRejectedValue(new Error("db down"));
+    const result = await isDevMode();
     expect(result).toBe(false);
   });
 
   it("invalidateDevModeCache 后下次会重读", async () => {
-    getConfigMock.mockResolvedValueOnce(serializeDevMode(true));
-    const db = {} as unknown as D1Database;
-    await isDevMode(db);
+    createDbMock.mockResolvedValueOnce({
+      configs: { findFirst: vi.fn().mockResolvedValue({ value: serializeDevMode(true) }) },
+    });
+    await isDevMode();
     expect(isDevModeCached()).toBe(true);
     invalidateDevModeCache();
     expect(isDevModeCached()).toBe(false);
@@ -126,18 +137,19 @@ describe("devLog", () => {
     spy.mockRestore();
   });
 
-  it("开启时输出带 scope 的日志", () => {
+  it("开启时输出带 scope 的日志", async () => {
     invalidateDevModeCache();
-    // 直接通过同步缓存注入状态：先走一次 DB 加载
-    const getConfigMockLocal = getConfigMock;
-    getConfigMockLocal.mockResolvedValue(serializeDevMode(true));
-    return isDevMode({} as unknown as D1Database).then(() => {
-      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-      devLog("proxy", "x hit", { id: 1 });
-      expect(spy).toHaveBeenCalledWith("[dev:proxy] x hit", { id: 1 });
-      devLog("proxy", "no meta");
-      expect(spy).toHaveBeenCalledWith("[dev:proxy] no meta");
-      spy.mockRestore();
+    // 先走一次 DB 加载注入缓存状态
+    createDbMock.mockResolvedValue({
+      configs: { findFirst: vi.fn().mockResolvedValue({ value: serializeDevMode(true) }) },
     });
+    await isDevMode();
+
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    devLog("proxy", "x hit", { id: 1 });
+    expect(spy).toHaveBeenCalledWith("[dev:proxy] x hit", { id: 1 });
+    devLog("proxy", "no meta");
+    expect(spy).toHaveBeenCalledWith("[dev:proxy] no meta");
+    spy.mockRestore();
   });
 });

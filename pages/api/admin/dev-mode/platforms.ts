@@ -34,8 +34,7 @@ export default async function handler(
     return;
   }
 
-  const db = await createDb();
-  const devOn = await isDevMode(db);
+  const devOn = await isDevMode();
   if (!devOn) {
     res.status(403).json({
       success: false,
@@ -45,6 +44,7 @@ export default async function handler(
   }
 
   try {
+    const db = await createDb();
     const platforms = await db.platforms.findMany({
       orderBy: { createdAt: "asc" },
     });

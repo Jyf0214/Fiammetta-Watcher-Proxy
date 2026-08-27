@@ -43,8 +43,7 @@ export default async function handler(
   }
 
   // 关闭开发模式直接 403：避免常态登录管理员绕过限制看到详细日志
-  const db = await createDb();
-  const devOn = await isDevMode(db);
+  const devOn = await isDevMode();
   if (!devOn) {
     res.status(403).json({
       success: false,
@@ -64,6 +63,7 @@ export default async function handler(
       : DEFAULT_LIMIT;
 
     const since = Math.floor(Date.now() / 1000) - minutes * 60;
+    const db = await createDb();
     const rows = await db.requestLogs.findMany({
       where: { createdAt: { gte: since } },
       orderBy: { createdAt: "desc" },

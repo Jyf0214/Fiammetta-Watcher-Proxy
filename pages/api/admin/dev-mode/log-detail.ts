@@ -44,8 +44,7 @@ export default async function handler(
     return;
   }
 
-  const db = await createDb();
-  const devOn = await isDevMode(db);
+  const devOn = await isDevMode();
   if (!devOn) {
     res.status(403).json({
       success: false,
@@ -55,6 +54,7 @@ export default async function handler(
   }
 
   try {
+    const db = await createDb();
     const row = await db.requestLogs.findFirst({ where: { id } });
     if (!row) {
       res.status(404).json({
