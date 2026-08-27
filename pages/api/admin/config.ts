@@ -48,7 +48,7 @@ const PROTECTED_CONFIG_KEYS = new Set<string>([
   // 互斥，使并发归档在锁 TTL 周期内同时执行——与 check_lock 同源同语义
   "system:log_archive_lock",
   // 请求模板整包存储（request-templates 模块内部写入）：直写会绕过专属端点
-  // /api/admin/request-templates 的 sanitizeMergeBody 白名单清洗与保存审计
+  // /api/admin/request-templates 的 sanitizeMergeBody 黑名单清洗与保存审计
   // （运行时有二次过滤兜底，写入侧仍须封堵）
   "system:request_templates",
 ]);

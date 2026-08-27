@@ -7,8 +7,7 @@
 
 import { createDb } from "@/lib/prisma";
 import {
-  CHAT_MERGEBODY_ALLOWED_KEYS,
-  RESPONSES_MERGEBODY_ALLOWED_KEYS,
+  MERGEBODY_BLOCKED_KEYS,
 } from "@/lib/request-template-whitelist";
 import type { WorkerEnv } from "./config";
 
@@ -43,33 +42,17 @@ export function invalidateTemplatesCache(): void {
 
 // ==================== 深度合并 ====================
 
-// mergeBody 字段白名单统一从 @/lib/request-template-whitelist 引入（单一来源），
-// 与管理后台 API 清洗共用同一集合。anthropic 上游平台模板在转换前应用，
-// OpenAI 专属字段（stream_options/n/response_format 等）会被转换白名单剥离，
-// 仅 system/temperature/top_p/top_k/max_tokens/stop/tools/tool_choice 生效。
+// mergeBody 字段黑名单统一从 @/lib/request-template-whitelist 引入（单一来源），
+// 与管理后台 API 清洗共用同一集合。默认放行所有字段，仅拦截 model/api_key 等
+// 可能被模板滥用的危险键。
 
 /**
- * 判断模板是否为 responses 类型（缺省兼容为 chat）
+ * 过滤掉黑名单字段（仅约束顶层键名）
  */
-function isResponsesTemplate(t: RequestTemplate): boolean {
-  return t.type === "responses";
-}
-
-/**
- * 获取模板对应的白名单集合
- */
-function getAllowedKeysForTemplate(t: RequestTemplate): Set<string> {
-  return isResponsesTemplate(t) ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
-}
-
-/**
- * 兼容旧模板：缺省 type 视为 chat，并提供过滤时的类型解析
- */
-function sanitizeMergeBodyForTemplate(body: Record<string, unknown>, template: RequestTemplate): Record<string, unknown> {
-  const allowed = getAllowedKeysForTemplate(template);
+function sanitizeMergeBody(body: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
-    if (allowed.has(key)) {
+    if (!MERGEBODY_BLOCKED_KEYS.has(key)) {
       sanitized[key] = value;
     }
   }
@@ -77,7 +60,7 @@ function sanitizeMergeBodyForTemplate(body: Record<string, unknown>, template: R
 }
 
 /**
- * 纯结构递归合并：白名单只在入口处过滤一次（仅约束顶层键名），
+ * 纯结构递归合并：黑名单只在入口处过滤一次（仅约束顶层键名），
  * 嵌套层不得重复过滤，否则 response_format.type 等子键会被误删，
  * 导致模板对客户端已有字段的覆盖静默失效。数组整体替换，不合并元素。
  */
@@ -109,13 +92,13 @@ function mergeSanitized(
 }
 
 /**
- * 按模板类型深度合并（模板内已携带 type，按模板自身白名单过滤）
+ * 深度合并模板到请求体（黑名单过滤后合并）
  */
 function deepMergeForTemplate(
   target: Record<string, unknown>,
   template: RequestTemplate
 ): Record<string, unknown> {
-  return mergeSanitized(target, sanitizeMergeBodyForTemplate(template.mergeBody, template));
+  return mergeSanitized(target, sanitizeMergeBody(template.mergeBody));
 }
 
 // ==================== 模型通配符匹配 ====================

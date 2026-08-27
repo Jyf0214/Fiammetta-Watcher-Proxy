@@ -940,7 +940,7 @@ const SKIP_IMPORT_CONFIG_KEYS = new Set<string>([
   // 日志归档 CAS 互斥锁（log-archiver 内部写入）：导入旧快照会使归档互斥失效
   "system:log_archive_lock",
   // 请求模板整包存储（request-templates 模块内部写入）：导入直写会绕过
-  // sanitizeMergeBody 白名单清洗与保存审计
+  // sanitizeMergeBody 黑名单清洗与保存审计
   "system:request_templates",
 ]);
 const IMPORT_CONFIG_PREFIX = "system:";

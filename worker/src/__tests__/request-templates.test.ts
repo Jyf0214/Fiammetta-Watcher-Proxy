@@ -129,17 +129,26 @@ describe("applyTemplates", () => {
     expect(result).toEqual({ model: "gpt-4o", temperature: 0.7 });
   });
 
-  it("非白名单字段被过滤", () => {
+  it("黑名单字段（model）被过滤，其余字段正常合并", () => {
     const body = { model: "gpt-4o", messages: [{ role: "user", content: "hi" }] };
     const templates: RequestTemplate[] = [
       { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { model: "claude-3", messages: [], tools: [{ type: "function" }] }, enabled: true },
     ];
     const result = applyTemplates(body, templates);
-    // model 和 messages 不在白名单，不应被覆盖；tools 不在白名单，应被过滤
-    expect(result).toEqual({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
+    // model 在黑名单中被过滤，保留原值；messages 和 tools 不在黑名单，正常合并
+    expect(result).toEqual({ model: "gpt-4o", messages: [], tools: [{ type: "function" }] });
   });
 
-  it("thinking/reasoning_split 顶层键在 chat 白名单内不被过滤", () => {
+  it("api_key/apikey/stream 均被黑名单过滤", () => {
+    const body = { model: "gpt-4o", stream: true };
+    const templates: RequestTemplate[] = [
+      { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { api_key: "sk-stolen", apikey: "sk-stolen2", stream: false, temperature: 0.9 }, enabled: true },
+    ];
+    const result = applyTemplates(body, templates);
+    expect(result).toEqual({ model: "gpt-4o", stream: true, temperature: 0.9 });
+  });
+
+  it("thinking/reasoning_split 等非黑名单字段正常通过", () => {
     const body = { model: "minimax-text-01", messages: [] };
     const templates: RequestTemplate[] = [
       { id: "1", name: "t1", description: "", models: ["*"], mergeBody: { thinking: "adaptive", reasoning_split: true }, enabled: true },

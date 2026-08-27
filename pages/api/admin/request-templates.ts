@@ -17,8 +17,7 @@ import { getAdminFromRequest } from "@/lib/admin-auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import {
-  CHAT_MERGEBODY_ALLOWED_KEYS,
-  RESPONSES_MERGEBODY_ALLOWED_KEYS,
+  MERGEBODY_BLOCKED_KEYS,
 } from "@/lib/request-template-whitelist";
 import { invalidateTemplatesCache } from "../../../worker/src/request-templates";
 
@@ -38,19 +37,17 @@ export interface RequestTemplate {
   type?: "chat" | "responses";
 }
 
-/** 校验 mergeBody 字段，按类型过滤不在白名单中的键；被丢弃的键收集进 droppedKeys 一并返回，供响应透出提示前端 */
+/** 校验 mergeBody 字段，过滤黑名单中的危险键（model/api_key/apikey/stream）；被丢弃的键收集进 droppedKeys 一并返回，供响应透出提示前端 */
 function sanitizeMergeBody(
-  body: Record<string, unknown>,
-  type: "chat" | "responses" = "chat"
+  body: Record<string, unknown>
 ): { sanitized: Record<string, unknown>; droppedKeys: string[] } {
-  const allowed = type === "responses" ? RESPONSES_MERGEBODY_ALLOWED_KEYS : CHAT_MERGEBODY_ALLOWED_KEYS;
   const sanitized: Record<string, unknown> = {};
   const droppedKeys: string[] = [];
   for (const [key, value] of Object.entries(body)) {
-    if (allowed.has(key)) {
-      sanitized[key] = value;
-    } else {
+    if (MERGEBODY_BLOCKED_KEYS.has(key)) {
       droppedKeys.push(key);
+    } else {
+      sanitized[key] = value;
     }
   }
   return { sanitized, droppedKeys };
@@ -198,11 +195,10 @@ export default async function handler(
       // 读取现有模板
       const templates = await loadTemplates(db);
 
-      // 白名单清洗：白名单外的键仍被丢弃（保持既有安全语义），但键名收集进
+      // 黑名单清洗：命中的危险键（model/api_key/apikey/stream）被丢弃并收集进
       // droppedKeys 随响应透出，避免"保存成功却静默丢字段"无任何提示
       const { sanitized: cleanMergeBody, droppedKeys } = sanitizeMergeBody(
-        mergeBody as Record<string, unknown>,
-        templateType
+        mergeBody as Record<string, unknown>
       );
 
       // 创建新模板
@@ -268,7 +264,7 @@ export default async function handler(
         return;
       }
 
-      // 白名单外被丢弃的键收集（mergeBody 重清洗 + 切换类型重清洗两条路径），
+      // 黑名单命中的被丢弃键收集（mergeBody 清洗 + 类型切换重清洗两条路径），
       // 响应透出给前端提示；Set 去重防止同键在两条路径中被计入两次
       const droppedKeys = new Set<string>();
 
@@ -305,8 +301,7 @@ export default async function handler(
           res.status(400).json({ success: false, error: "请求体内容不能为空" });
           return;
         }
-        const effectiveType = type ?? templates[idx].type ?? "chat";
-        const result = sanitizeMergeBody(mergeBody, effectiveType as "chat" | "responses");
+        const result = sanitizeMergeBody(mergeBody);
         templates[idx].mergeBody = result.sanitized;
         for (const key of result.droppedKeys) droppedKeys.add(key);
       }
@@ -319,8 +314,8 @@ export default async function handler(
       }
       if (type !== undefined) {
         templates[idx].type = type as "chat" | "responses";
-        // 切换类型后需按新白名单重新清洗已有 mergeBody，避免旧类型字段残留
-        const result = sanitizeMergeBody(templates[idx].mergeBody, templates[idx].type as "chat" | "responses");
+        // 切换类型后重新清洗已有 mergeBody，确保黑名单规则对新类型同样生效
+        const result = sanitizeMergeBody(templates[idx].mergeBody);
         templates[idx].mergeBody = result.sanitized;
         for (const key of result.droppedKeys) droppedKeys.add(key);
       }
