@@ -230,76 +230,17 @@ async function archiveLogs(
  *
  * 查询该天所有日志，按 key_id + model 分组聚合，
  * 合并或创建 daily_stats 记录，然后删除原始日志。
+ *
+ * 内存安全：游标分页内每批立即聚合+写入+删除，不全量加载到内存。
+ * groups 按 key+model 跨批合并（同一 key+model 可能出现在多个分页中）；
+ * deleted 累计计数，不逐批清零。
  */
 async function archiveSingleDay(
   prisma: Awaited<ReturnType<typeof createDb>>,
   dayStartTs: number,
   dayEndTs: number
 ): Promise<{ processed: number; deleted: number }> {
-  // TiDB Cloud Serverless 单次查询硬上限 10000 行，游标分页替代 OFFSET：
-  // OFFSET 会扫描并丢弃 skip 行，单日超 5 万日志时尾页延迟成倍增长；
-  // 游标利用 @@index([createdAt]) + 主键范围扫描，尾页仍为 ~30ms。
   const PAGE_SIZE = 10000;
-  const logs: Array<{
-    id: string;
-    keyId: string | null;
-    keyName: string | null;
-    platformId: string | null;
-    model: string;
-    tokens: number;
-    promptTokens: number;
-    completionTokens: number;
-    cost: number;
-    ttft: number;
-    latency: number;
-    isError: boolean;
-    createdAt: number;
-  }> = [];
-  const logIds: string[] = [];
-  {
-    let cursor: { createdAt: number; id: string } | null = null;
-    for (;;) {
-      const cursorWhere: any = cursor
-        ? {
-            OR: [
-              { createdAt: { gt: cursor.createdAt } },
-              { createdAt: cursor.createdAt, id: { gt: cursor.id } },
-            ],
-          }
-        : {};
-      const batch: any[] = await prisma.requestLogs.findMany({
-        where: {
-          createdAt: { gte: dayStartTs, lte: dayEndTs },
-          ...cursorWhere,
-        },
-        select: {
-          id: true,
-          keyId: true,
-          keyName: true,
-          platformId: true,
-          model: true,
-          tokens: true,
-          promptTokens: true,
-          completionTokens: true,
-          cost: true,
-          ttft: true,
-          latency: true,
-          isError: true,
-          createdAt: true,
-        },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        take: PAGE_SIZE,
-      });
-      logs.push(...batch.map(({ createdAt, ...rest }: any) => ({ ...rest, createdAt } as any)));
-      // 保留 createdAt 供游标推进（仅内存用，不落库）
-      for (const log of batch as any[]) logIds.push(log.id);
-      if (batch.length < PAGE_SIZE) break;
-      const last = batch[batch.length - 1];
-      cursor = { createdAt: last.createdAt, id: last.id };
-    }
-  }
-
-  if (logs.length === 0) return { processed: 0, deleted: 0 };
 
   // 归档幂等（重算语义）：该天日志仍存在时，先清空该天的旧聚合记录再全量重算。
   // 归档中途失败（聚合写入后、日志删除前）次日重跑时，若不清空旧聚合而直接累加，
@@ -307,7 +248,7 @@ async function archiveSingleDay(
   // 完全成功归档后重跑时日志已删空，上方已提前返回，聚合记录不会被清除。
   await prisma.dailyStats.deleteMany({ where: { date: dayStartTs } });
 
-  // 按 key_id + model 分组聚合
+  // 按 key_id + model 分组聚合（跨分页合并同 key+model 的数据）
   const groups = new Map<
     string,
     {
@@ -333,72 +274,125 @@ async function archiveSingleDay(
     }
   >();
 
-  for (const log of logs) {
-    const groupKey = `${log.keyId || "null"}|||${log.model}`;
-    let group = groups.get(groupKey);
-    if (!group) {
-      group = {
-        keyId: log.keyId,
-        keyName: log.keyName,
-        platformId: log.platformId,
-        model: log.model,
-        totalRequests: 0,
-        errorRequests: 0,
-        totalTokens: 0,
-        totalPromptTokens: 0,
-        totalCompletionTokens: 0,
-        totalCost: 0,
-        ttftSum: 0,
-        ttftCount: 0,
-        latencySum: 0,
-        latencyCount: 0,
-        maxTtft: 0,
-        maxLatency: 0,
-        tpsSum: 0,
-        tpsCount: 0,
-        maxTps: 0,
-      };
-      groups.set(groupKey, group);
+  let processed = 0;
+  let deleted = 0;
+  let cursor: { createdAt: number; id: string } | null = null;
+
+  // 游标分页：每批读取后立即聚合，不全量积累 logs 数组
+  for (;;) {
+    const cursorWhere: any = cursor
+      ? {
+          OR: [
+            { createdAt: { gt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+          ],
+        }
+      : {};
+    const batch: any[] = await prisma.requestLogs.findMany({
+      where: {
+        createdAt: { gte: dayStartTs, lte: dayEndTs },
+        ...cursorWhere,
+      },
+      select: {
+        id: true,
+        keyId: true,
+        keyName: true,
+        platformId: true,
+        model: true,
+        tokens: true,
+        promptTokens: true,
+        completionTokens: true,
+        cost: true,
+        ttft: true,
+        latency: true,
+        isError: true,
+        createdAt: true,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: PAGE_SIZE,
+    });
+
+    if (batch.length === 0) break;
+
+    // 立即聚合本批数据到 groups（跨批合并同 key+model 的统计）
+    for (const log of batch) {
+      const groupKey = `${log.keyId || "null"}|||${log.model}`;
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = {
+          keyId: log.keyId,
+          keyName: log.keyName,
+          platformId: log.platformId,
+          model: log.model,
+          totalRequests: 0,
+          errorRequests: 0,
+          totalTokens: 0,
+          totalPromptTokens: 0,
+          totalCompletionTokens: 0,
+          totalCost: 0,
+          ttftSum: 0,
+          ttftCount: 0,
+          latencySum: 0,
+          latencyCount: 0,
+          maxTtft: 0,
+          maxLatency: 0,
+          tpsSum: 0,
+          tpsCount: 0,
+          maxTps: 0,
+        };
+        groups.set(groupKey, group);
+      }
+
+      group.totalRequests++;
+      if (log.isError) {
+        group.errorRequests++;
+        continue;
+      }
+
+      group.totalTokens += log.tokens || 0;
+      group.totalPromptTokens += log.promptTokens || 0;
+      group.totalCompletionTokens += log.completionTokens || 0;
+      group.totalCost += log.cost || 0;
+      if (log.ttft > 0) {
+        group.ttftSum += log.ttft;
+        group.ttftCount++;
+      }
+      if (log.latency > 0) {
+        group.latencySum += log.latency;
+        group.latencyCount++;
+      }
+      if (log.ttft > group.maxTtft) group.maxTtft = log.ttft;
+      if (log.latency > group.maxLatency) group.maxLatency = log.latency;
+      if (log.latency > 0 && log.completionTokens > 0) {
+        const tps = log.completionTokens / (log.latency / 1000);
+        group.tpsSum += tps;
+        group.tpsCount++;
+        if (tps > group.maxTps) group.maxTps = tps;
+      }
     }
 
-    // 总请求数含错误请求（与 stats.ts detailAgg 无 isError 过滤的口径一致）
-    group.totalRequests++;
-
-    // 错误请求只计入 errorRequests，不贡献 tokens/ttft/latency/tps：
-    // 与明细统计口径一致（stats.ts/trend.ts 的 perfAgg 按 isError:false 过滤，
-    // 错误请求 tokens 恒为 0、ttft=0 会稀释均值）。此前未读 isError 字段导致
-    // errorRequests 恒为 0，历史部分 perfCount=totalRequests 把错误请求误当样本。
-    if (log.isError) {
-      group.errorRequests++;
-      continue;
+    // 立即删除本批日志（不等全量读完再删，减少内存占用）
+    const batchIds = batch.map((log: any) => log.id);
+    const DELETE_BATCH = 100;
+    for (let i = 0; i < batchIds.length; i += DELETE_BATCH) {
+      const r = await prisma.requestLogs.deleteMany({
+        where: { id: { in: batchIds.slice(i, i + DELETE_BATCH) } },
+      });
+      deleted += r.count;
     }
 
-    group.totalTokens += log.tokens || 0;
-    group.totalPromptTokens += log.promptTokens || 0;
-    group.totalCompletionTokens += log.completionTokens || 0;
-    // 成本与 tokens 同口径：错误请求 cost 恒为 0，累加亦无影响
-    group.totalCost += log.cost || 0;
-    if (log.ttft > 0) {
-      group.ttftSum += log.ttft;
-      group.ttftCount++;
-    }
-    if (log.latency > 0) {
-      group.latencySum += log.latency;
-      group.latencyCount++;
-    }
-    if (log.ttft > group.maxTtft) group.maxTtft = log.ttft;
-    if (log.latency > group.maxLatency) group.maxLatency = log.latency;
-    // TPS = 每秒输出 Token 数（completionTokens / latency_seconds）
-    // 只对有有效耗时和输出 token 的请求计算
-    if (log.latency > 0 && log.completionTokens > 0) {
-      const tps = log.completionTokens / (log.latency / 1000);
-      group.tpsSum += tps;
-      group.tpsCount++;
-      if (tps > group.maxTps) group.maxTps = tps;
-    }
+    processed += batch.length;
+
+    if (batch.length < PAGE_SIZE) break;
+    const last = batch[batch.length - 1];
+    cursor = { createdAt: last.createdAt, id: last.id };
   }
 
-  // 批量写入：串行 create 需 N 次往返，改为 createMany 分批（D1 单批 100 行内）
+  if (groups.size === 0) {
+    return { processed: 0, deleted };
+  }
+
+  // 批量写入聚合结果（分批 D1 100 行限制）
   const nowSec = Math.floor(Date.now() / 1000);
   const rows = Array.from(groups.values()).map((group) => {
     const avgTtft = group.ttftCount > 0 ? group.ttftSum / group.ttftCount : 0;
@@ -430,19 +424,6 @@ async function archiveSingleDay(
     await prisma.dailyStats.createMany({ data: rows.slice(i, i + 100) });
   }
 
-  // 删除该天已归档的原始日志（按已收集的 id 分批删除，
-  // 避免按整天时间范围误删未被分页拉取到的部分）
-  let deleted = 0;
-  // D1 官方限制：单条查询绑定参数上限 100（developers.cloudflare.com/d1/platform/limits/），
-  // id IN (...) 每个值占一个绑定参数——分批必须 ≤100，此前 5000 在 D1 部署下 deleteMany 直接失败
-  const DELETE_BATCH = 100;
-  for (let i = 0; i < logIds.length; i += DELETE_BATCH) {
-    const r = await prisma.requestLogs.deleteMany({
-      where: { id: { in: logIds.slice(i, i + DELETE_BATCH) } },
-    });
-    deleted += r.count;
-  }
-
   // 失败请求留痕同步清理：与日志保留期同窗（留痕仅服务排障，过期即弃）。
   // 以当前时间为基准计算，不随归档游标日期漂移
   try {
@@ -451,12 +432,8 @@ async function archiveSingleDay(
       where: { createdAt: { lt: debugCutoff } },
     });
   } catch (err) {
-    // 留痕清理失败不阻断归档主流程（下次 cron 重试）
     console.error("[log-archiver] 调试留痕清理失败:", err instanceof Error ? err.message : String(err));
   }
 
-  return {
-    processed: logs.length,
-    deleted,
-  };
+  return { processed, deleted };
 }
