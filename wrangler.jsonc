@@ -9,7 +9,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "binding": "STATIC_ASSETS"
   },
   // vars 由 deploy/init.py post-deploy 通过 Cloudflare API 设置
   // wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值，故此处不能放 vars
