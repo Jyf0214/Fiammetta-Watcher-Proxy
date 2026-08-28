@@ -80,7 +80,7 @@
     "typescript-eslint": "^8.65.0",
     "vitepress": "^1.6.4",
     "vitest": "^4.1.10",
-    "wrangler": "^4.113.0"
+    "wrangler": "4.113.0"
   },
   "overrides": {
     "cloudflare": "4.4.1",

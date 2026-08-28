@@ -41,6 +41,7 @@ id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
 #   0 */1 * * *   每小时：API Key 用量重置检查
 #   0 3 * * *     每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行）
 #   */5 * * * *   每 5 分钟：出站代理健康检查（仅 Docker 部署生效）
+[observability]
 enabled = true
 head_sampling_rate = 1
 
