@@ -201,6 +201,21 @@ jobs:
           HYPERDRIVE_ID: ${{ steps.init.outputs.HYPERDRIVE_ID }}
         run: python3 deploy/init.py post-deploy
 
+      # ==================== 部署后：Worker Cron 触发器独立配置 ====================
+      # 必须在 Deploy Pages 之后：CF API 覆盖式 PUT crons 到 Worker，若放在 wrangler
+      # deploy 之前会被部署覆盖；从 wrangler.toml 顶部 [triggers] 段移出后改为
+      # init.py 逐条 PUT，单条失败不阻断其他，避免 CF 免费计划账户级 Cron Triggers
+      # 上限 5 条硬限——再加一条 wrangler deploy 直接报错
+
+      - name: Run cron-setup
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          # 传入 VERSION（仓库变量）让 init.py cron-setup 阶段按 latest/lite
+          # 裁剪注入条数：lite 仅 1 条（model-fetch），避免占满 5 条配额
+          VERSION: ${{ vars.VERSION || 'latest' }}
+        run: python3 deploy/init.py cron-setup
+
       # ==================== 完成 ====================
 
       - name: Done

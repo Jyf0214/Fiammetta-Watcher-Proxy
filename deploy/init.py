@@ -6,6 +6,7 @@ Cloudflare 资源统一初始化脚本 (严谨修复版)
   python3 deploy/init.py pre          — 部署前：创建 D1/KV/Hyperdrive + 替换配置文件占位符
   python3 deploy/init.py post         — 部署后：创建 Pages + 绑定 Secrets
   python3 deploy/init.py post-deploy  — 部署后：统一同步 Pages & Worker 的绑定与环境变量
+  python3 deploy/init.py cron-setup   — 部署后：PUT Worker Cron 触发器（CF 部署专用；按全量逐次降级，失败剥离末位重试）
   python3 deploy/init.py check        — 本地/CI 检查：校验 Schema 与 Client 生成产物
 """
 import os
@@ -448,11 +449,73 @@ def run_check():
     print("  ✓ 全部产物校验通过")
 
 
+# ==================== Cron 触发器独立配置 ====================
+
+# 4 条 cron 表达式（与 worker/wrangler.toml 顶部注释、Worker src/types.ts classifyCronExpression 严格一致）：
+#   0 */6 * * *   每 6 小时：平台模型发现
+#   0 */1 * * *   每小时：API Key 用量重置检查
+#   0 3 * * *     每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行）
+#   */5 * * * *   每 5 分钟：出站代理健康检查（仅 Docker 部署生效）
+WORKER_CRON_EXPRESSIONS = [
+    "0 */6 * * *",
+    "0 */1 * * *",
+    "0 3 * * *",
+    "*/5 * * * *",
+]
+
+
+def run_cron_setup() -> None:
+    """
+    通过 Cloudflare REST API 设置 Worker Cron 触发器（端点为 /schedules，body 为数组）。
+
+    策略：先按全量表达式单次 PUT（成功即返回）；若失败则按索引顺序依次剥离最后一条
+    表达式重试（最不重要的代理健康检查先剥），逐次降级到 0 条仍失败才 fail——既保持
+    「失败不影响其他」的容错精神（一次成功就只调一次 API），又避免 CF 账户级 Cron
+    Triggers 上限 5 条硬限。剥离的顺序与「重要性」无关，仅按列表倒序机械剥（最末位
+    先剥），保证每次失败的子集都包含原列表的前缀子集。
+
+    与 worker-lite 的 deploy 流程解耦——避免 wrangler.toml 顶部 [triggers] 段让
+    `wrangler deploy` 在新增 cron 时超过免费计划账户级 Cron Triggers 上限（5）直接报错。
+    """
+    print(f"\n配置 Worker Cron 触发器（按全量逐次降级 PUT）...")
+
+    # 按 VERSION 裁剪：lite 仅需模型发现（其他 3 条被 index-lite.ts 不注册，
+    # CF 仍占用配额且永远不触发，纯浪费；latest 走全量）
+    env_version = os.environ.get("VERSION", "latest").strip().lower()
+    if env_version == "lite":
+        target_expressions = [WORKER_CRON_EXPRESSIONS[0]]  # 仅 "0 */6 * * *" 模型发现
+        print(f"  VERSION=lite：注入 1 条 cron（仅模型发现）")
+    else:
+        target_expressions = list(WORKER_CRON_EXPRESSIONS)
+        print(f"  VERSION={env_version}：注入 {len(target_expressions)} 条 cron（全量）")
+
+    last_error: str = ""
+    # 从全量开始，失败则剥最后一条重试；剩余 0 条还失败才报错
+    while target_expressions:
+        body = [{"cron": expr} for expr in target_expressions]
+        try:
+            cf_api(
+                "PUT",
+                f"/accounts/{ACCOUNT_ID}/workers/scripts/{WORKER_NAME}/schedules",
+                body,
+            )
+            print(f"  ✓ Cron 触发器已设置（{len(target_expressions)} 条）: {target_expressions}")
+            return
+        except SystemExit:
+            last_error = f"剩余 {len(target_expressions)} 条 PUT 失败"
+        except Exception as e:
+            last_error = f"剩余 {len(target_expressions)} 条 PUT 异常: {e}"
+        # 失败：剥最后一条再试（最末位先剥）
+        dropped = target_expressions.pop()
+        print(f"  ✗ {last_error}；已剥离 {dropped}，剩余 {len(target_expressions)} 条继续重试")
+    fail("全部 cron 表达式组合均设置失败，请检查 API 权限与 Worker 状态")
+
+
 # ==================== 程序主入口 ====================
 
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
-    if phase not in ("pre", "post", "post-deploy", "check"):
+    if phase not in ("pre", "post", "post-deploy", "check", "cron-setup"):
         fail("用法: python3 deploy/init.py [pre|post|post-deploy|check]")
 
     if phase == "check":
@@ -483,6 +546,9 @@ def main():
 
     elif phase == "post-deploy":
         sync_env_and_bindings(d1_id, kv_id, hyperdrive_id, db_type)
+
+    elif phase == "cron-setup":
+        run_cron_setup()
 
     print(f"\n✓ [{phase}] 阶段顺利完成！")
 

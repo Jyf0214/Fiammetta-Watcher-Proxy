@@ -32,18 +32,15 @@ id = "placeholder-kv-id"  # 部署时由 Terraform/CI 替换
 binding = "HYPERDRIVE"
 id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
 
-# Cron 定时任务（4 条：Cloudflare Workers 免费计划账户级 Cron Triggers 上限为 5，
-# 且代理拉取/健康检查仅 Docker 部署生效（pullProxyGroups 对 DEPLOY_PLATFORM!=docker
-# 直接空返回），CF 上保留只会在配额内空转）
-# 每小时：Key 用量重置检查
-# 每 6 小时：平台模型发现
-# 每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行；
-#   备份需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY，未配置自动跳过。
-#   原独立槽位 3:17 因配额上限移除，两任务操作不同表、waitUntil 独立执行）
-# 每 5 分钟：出站代理健康检查（仅 Docker 部署且未禁用时生效）
-[observability]
+# Cron 定时任务：已从 [triggers] 段移除，CF 部署下由 deploy/init.py 的 cron-setup
+# 阶段通过 Cloudflare REST API 逐条 PUT 到 Worker（单条失败不阻断其他）；
+# DEPLOY_PLATFORM=edgeone/docker 下 CF cron 本就不生效，分别走 EO 调度器 /
+# 主项目 pages/api/cron/[[...cron]].ts + 外部调度器。
+# 4 条 cron 表达式（供 cron-setup 调用与文档参考）：
+#   0 */6 * * *   每 6 小时：平台模型发现
+#   0 */1 * * *   每小时：API Key 用量重置检查
+#   0 3 * * *     每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行）
+#   */5 * * * *   每 5 分钟：出站代理健康检查（仅 Docker 部署生效）
 enabled = true
 head_sampling_rate = 1
 
-[triggers]
-crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *", "*/5 * * * *"]

@@ -35,9 +35,11 @@ WORKER_DIR="$PROJECT_ROOT/worker"
 # 1. 主入口：index.ts → index-lite.ts
 sed -i 's|^main = "src/index.ts"|main = "src/index-lite.ts"|' "$WORKER_DIR/wrangler.toml"
 
-# 2. Cron：仅保留模型发现（评分/Key 重置/日志归档全部移除）
-sed -i 's|^crons = .*|crons = ["0 */6 * * *"]|' "$WORKER_DIR/wrangler.toml"
+# 2. Cron：lite 部署下由 deploy/init.py cron-setup 阶段按 VERSION=lite 注入
+# （仅 model-fetch，节省 3 条 CF 账户级 Cron Triggers 配额）；wrangler.toml 顶部
+# 已不再持有 [triggers] 段（见 worker/wrangler.toml 注释），此处不再 sed 替换
+# 任何 crons 字段（之前依赖的 crons = 行已不存在，sed 静默失效）。
 
 # 3. 输出生效配置，便于 CI 日志核对
-grep -E '^(main|crons)' "$WORKER_DIR/wrangler.toml"
-echo "  ✓ Worker 已切换为 lite 配置"
+grep -E '^main' "$WORKER_DIR/wrangler.toml"
+echo "  ✓ Worker 已切换为 lite 配置（Cron 触发器由 init.py cron-setup 阶段注入）"
