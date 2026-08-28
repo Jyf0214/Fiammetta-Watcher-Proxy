@@ -70,7 +70,10 @@ const DEFAULT_NOTIFICATIONS: NotificationsConfig = {
 };
 
 /** 单行价格配置 — memo 化：更新回调为稳定引用，输入击键只重渲染当前行
- *  （LiteLLM 导入后可达数千行，行内联渲染时每次击键全表重渲染导致卡顿） */
+ *  （LiteLLM 导入后可达数千行，行内联渲染时每次击键全表重渲染导致卡顿）
+ *  移动端采用垂直堆叠卡片（模型名 / 输入 / 输出 / 删除分四行 + 列头小字），
+ *  避免桌面端 4 列 grid 在窄屏把 1fr 列挤成空 pill、价格列溢出右侧；桌面 sm+
+ *  仍走 4 列 grid 保证信息密度。 */
 const PricingRowItem = memo(function PricingRowItem({
   row,
   onUpdate,
@@ -82,38 +85,91 @@ const PricingRowItem = memo(function PricingRowItem({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div
-      className="grid grid-cols-[1fr_100px_100px_32px] sm:grid-cols-[1fr_140px_140px_40px] gap-2 items-center"
-    >
-      <input
-        value={row.model}
-        onChange={(e) => onUpdate(row.id, { model: e.target.value })}
-        placeholder={t("pricingModelPlaceholder")}
-        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-      />
-      <input
-        value={row.input}
-        onChange={(e) => onUpdate(row.id, { input: e.target.value })}
-        inputMode="decimal"
-        placeholder="0.00"
-        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-      />
-      <input
-        value={row.output}
-        onChange={(e) => onUpdate(row.id, { output: e.target.value })}
-        inputMode="decimal"
-        placeholder="0.00"
-        className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-      />
-      <button
-        type="button"
-        onClick={() => onRemove(row.id)}
-        title={t("common:delete")}
-        className="h-8 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
-    </div>
+    <>
+      {/* 移动端：垂直堆叠卡片 */}
+      <div className="sm:hidden space-y-2 rounded-md border border-zinc-100 dark:border-zinc-800 p-2">
+        <div>
+          <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            {t("pricingModel")}
+          </span>
+          <input
+            value={row.model}
+            onChange={(e) => onUpdate(row.id, { model: e.target.value })}
+            placeholder={t("pricingModelPlaceholder")}
+            className="mt-1 h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              {t("pricingInputPrice")}
+            </span>
+            <input
+              value={row.input}
+              onChange={(e) => onUpdate(row.id, { input: e.target.value })}
+              inputMode="decimal"
+              placeholder="0.00"
+              className="mt-1 h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+            />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              {t("pricingOutputPrice")}
+            </span>
+            <input
+              value={row.output}
+              onChange={(e) => onUpdate(row.id, { output: e.target.value })}
+              inputMode="decimal"
+              placeholder="0.00"
+              className="mt-1 h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onRemove(row.id)}
+            title={t("common:delete")}
+            className="h-8 px-2 flex items-center gap-1 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="text-xs">{t("common:delete")}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 桌面端：原 4 列 grid */}
+      <div className="hidden sm:grid grid-cols-[1fr_140px_140px_40px] gap-2 items-center">
+        <input
+          value={row.model}
+          onChange={(e) => onUpdate(row.id, { model: e.target.value })}
+          placeholder={t("pricingModelPlaceholder")}
+          className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+        />
+        <input
+          value={row.input}
+          onChange={(e) => onUpdate(row.id, { input: e.target.value })}
+          inputMode="decimal"
+          placeholder="0.00"
+          className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+        />
+        <input
+          value={row.output}
+          onChange={(e) => onUpdate(row.id, { output: e.target.value })}
+          inputMode="decimal"
+          placeholder="0.00"
+          className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+        />
+        <button
+          type="button"
+          onClick={() => onRemove(row.id)}
+          title={t("common:delete")}
+          className="h-8 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </>
   );
 });
 
@@ -133,7 +189,11 @@ function SettingsContent() {
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => pricingListRef.current,
-    estimateSize: () => 40,
+    // 移动端行是垂直堆叠卡片（~120px），桌面端是 40px 行；估算取较大值避免
+    // 移动端初次定位偏差（测量前 ResizeObserver 尚未触发）。默认 measureElement
+    // 已用 getBoundingClientRect 读取实测高度，外部加 data-index + ref 即可，
+    // 不需自写覆盖
+    estimateSize: () => 120,
     overscan: 8,
   });
 
@@ -615,12 +675,13 @@ function SettingsContent() {
                     return (
                       <div
                         key={row.id}
+                        data-index={virtualRow.index}
+                        ref={rowVirtualizer.measureElement}
                         style={{
                           position: "absolute",
                           top: 0,
                           left: 0,
                           right: 0,
-                          height: `${virtualRow.size}px`,
                           transform: `translateY(${virtualRow.start}px)`,
                         }}
                       >
