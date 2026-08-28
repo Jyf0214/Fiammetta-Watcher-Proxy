@@ -1,7 +1,7 @@
 /**
  * 定时备份任务
  *
- * 构建系统级配置快照（平台/模型映射/配置/API Keys）→ AES-GCM 加密 →
+ * 构建系统级配置快照（平台/配置/API Keys）→ AES-GCM 加密 →
  * POST 到 BACKUP_WEBHOOK_URL 指定的专用接收端。
  *
  * 安全门控（强制）：

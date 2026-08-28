@@ -2,42 +2,37 @@
  * 路由引擎 — 为请求选择最佳上游平台
  *
  * 核心功能：
- * - 内存缓存平台列表和模型映射，120 秒 TTL
- * - 模型名称解析（精确匹配 + 通配符）
+ * - 内存缓存平台列表，120 秒 TTL
  * - 自动模型支持（配置自动模型 ID 后，所有请求自动路由）
  * - 加权轮询选择平台
  */
 
 import { createDb } from "@/lib/prisma";
-import { parseApiKeys, parseApiKeyObjects, isPlatformWhitelisted } from "./platform-keys";
+import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import {
   selectPlatform,
   cleanupStaleBreakers,
   syncCircuitBreakersFromDatabase,
   checkAndUpdateCircuitBreakerState,
-  isHighErrorRate,
-  isPlatform429Cooldown,
-  isHalfOpenProbeFull,
 } from "./load-balancer";
-import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
+import type { PlatformConfig, RouteDecision, ApiType } from "@/lib/types";
 import { getConfig } from "./config";
 import type { WorkerEnv } from "./config";
 
 // ==================== 缓存 ====================
 
 let platformCache: PlatformConfig[] = [];
-let modelMapCache: ModelMapConfig[] = [];
 let platformModelCache: Map<string, Set<string>> = new Map();
 let autoModelId: string | null = null;
 /** 自动模型分流白名单（system:auto_model_selected 配置的模型 ID 集合）；null 表示未配置（全部参与） */
 let autoModelSelected: Set<string> | null = null;
 let lastRefresh = 0;
-/** 路由缓存 TTL：模型映射和平台配置极少变化，延长至 120 秒减少 DB 查询 */
+/** 路由缓存 TTL：平台配置极少变化，延长至 120 秒减少 DB 查询 */
 const CACHE_TTL = 120_000;
 const EMPTY_CACHE_RETRY = 5_000;
 
 /**
- * 主动失效路由缓存（管理后台保存平台/模型映射/自动模型配置后调用）
+ * 主动失效路由缓存（管理后台保存平台/自动模型配置后调用）
  */
 export function invalidateRouterCache(): void {
   lastRefresh = 0;
@@ -90,7 +85,7 @@ export function isAutoModelRequest(model: string): boolean {
 let refreshPromise: Promise<void> | null = null;
 
 /**
- * 刷新平台和模型映射缓存（带防并发穿透锁）
+ * 刷新平台缓存（带防并发穿透锁）
  */
 export async function refreshCache(db: D1Database, env?: WorkerEnv): Promise<void> {
   if (refreshPromise) return refreshPromise;
@@ -134,14 +129,12 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-    const [platformRows, modelMapRows, platformModelRows, autoConfigValue, autoSelectedValue] =
+    const [platformRows, platformModelRows, autoConfigValue, autoSelectedValue] =
       await Promise.all([
         // 查询启用的平台
         prisma.platforms.findMany({
           where: { enabled: true },
         }),
-        // 查询所有模型映射
-        prisma.modelMappings.findMany(),
         // 查询平台模型关联（仅启用的模型）
         prisma.platformModels.findMany({
           where: { enabled: true },
@@ -179,19 +172,11 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
       cooldownEnd: p.cooldownEnd,
     }));
 
-    const newModelMaps: ModelMapConfig[] = modelMapRows.map((m) => ({
-      id: m.id,
-      alias: m.alias,
-      targetModel: m.targetModel,
-      platformId: m.platformId,
-    }));
-
     // 构建平台模型缓存
     const newPlatformModelCache = buildPlatformModelCache(platformModelRows);
 
     // 原子赋值
     platformCache = newPlatforms;
-    modelMapCache = newModelMaps;
     platformModelCache = newPlatformModelCache;
     autoModelId = autoConfigValue;
     // 解析分流白名单：键不存在 / 非法 JSON / 非数组 → null（全部参与，兼容旧配置）；
@@ -226,52 +211,6 @@ export async function forceRefreshRouterCache(db: D1Database, env?: WorkerEnv): 
   await refreshCache(db, env);
 }
 
-// ==================== 模型映射 ====================
-
-/**
- * 解析模型映射：客户端请求的模型名 → 实际目标模型 + 目标平台
- */
-function resolveModelMapping(
-  requestedModel: string,
-  platformId?: string | null
-): { targetModel: string; targetPlatformId: string | null } {
-  // 校验模型名称格式
-  const MODEL_NAME_PATTERN = /^[a-zA-Z0-9._\-/]{1,200}$/;
-  if (!MODEL_NAME_PATTERN.test(requestedModel)) {
-    return { targetModel: requestedModel, targetPlatformId: null };
-  }
-
-  // 精确匹配
-  const exactMatch = modelMapCache.find(
-    (m) =>
-      m.alias === requestedModel &&
-      (platformId ? m.platformId === platformId : true)
-  );
-  if (exactMatch) {
-    return {
-      targetModel: exactMatch.targetModel,
-      targetPlatformId: exactMatch.platformId,
-    };
-  }
-
-  // 通配符匹配
-  const wildcardMatch = modelMapCache.find(
-    (m) =>
-      m.alias.endsWith("*") &&
-      requestedModel.startsWith(m.alias.slice(0, -1)) &&
-      (platformId ? m.platformId === platformId : true)
-  );
-  if (wildcardMatch) {
-    const suffix = requestedModel.slice(wildcardMatch.alias.length - 1);
-    return {
-      targetModel: wildcardMatch.targetModel + suffix,
-      targetPlatformId: wildcardMatch.platformId,
-    };
-  }
-
-  return { targetModel: requestedModel, targetPlatformId: null };
-}
-
 // ==================== 路由入口 ====================
 
 /**
@@ -285,8 +224,7 @@ export interface WorkerRouteDecision extends RouteDecision {
   /**
    * 本次选择是否占用了目标平台的半开探测槽位（halfOpenPending++）。
    *
-   * 仅当平台经 selectPlatform 选中、且选中时熔断器处于 half-open 状态时为 true；
-   * 模型映射直选等不经 selectPlatform 的路径不占用槽位，恒为 false。
+   * 仅当平台经 selectPlatform 选中、且选中时熔断器处于 half-open 状态时为 true。
    *
    * 调用方约定：请求被 RPM/TPM 门禁拒绝时，仅当此值为 true 才应调用
    * releaseHalfOpenPending —— 否则会误减其他并发探测请求持有的槽位，
@@ -353,83 +291,34 @@ export async function routeRequest(
     };
   }
 
-  // 模型映射（别名 → 目标模型）
-  const resolved = resolveModelMapping(requestedModel, null);
-  const targetModel = resolved.targetModel;
-  const targetPlatformId = resolved.targetPlatformId;
-
-  // 选择平台
+  // 选择平台：按客户端请求的模型名匹配所有支持的平台，做负载均衡
   let selectedPlatform: PlatformConfig | null;
-  // 本次选择是否经 selectPlatform 占用了半开探测槽位：
-  // 仅负载均衡路径（selectPlatform 内部对 half-open 选中平台 halfOpenPending++）
-  // 可能为 true；映射直选不经过 selectPlatform，恒为 false（bug L5）
+  // 本次选择是否经 selectPlatform 占用了半开探测槽位
   let halfOpenHeld = false;
 
-  if (targetPlatformId) {
-    // 映射指定了平台，但仍需检查熔断器状态，避免绕过保护机制
-    const candidate = platformCache.find(
-      (p) => p.id === targetPlatformId && p.enabled
-    ) ?? null;
-
-    if (candidate) {
-      // 白名单平台：跳过所有排除检查直接选中（与 selectPlatform 白名单豁免对齐）。
-      // 映射直选不经过 selectPlatform，需单独豁免，否则熔断器/429冷却/高错误率
-      // 仍会把白名单平台排除，白名单语义被架空
-      if (isPlatformWhitelisted(candidate.id)) {
-        selectedPlatform = candidate;
-      } else {
-        const breakerState = checkAndUpdateCircuitBreakerState(candidate.id);
-        if (breakerState === "open") {
-          // 熔断器打开状态：平台不可用，直选失败（置空后由下方统一返回 null，不回退负载均衡）
-          selectedPlatform = null;
-        } else if (breakerState === "half-open" && isHalfOpenProbeFull(candidate.id)) {
-          // 半开状态且探测配额已满：不再新开探测，直选失败（不回退负载均衡）
-          selectedPlatform = null;
-        } else if (isHighErrorRate(candidate.id)) {
-          // 高错误率降级：滑动窗口失败率超阈值，直选失败（不回退负载均衡）
-          selectedPlatform = null;
-        } else if (isPlatform429Cooldown(candidate.id)) {
-          // 429 冷却期：平台过载，直选失败（不回退负载均衡）
-          selectedPlatform = null;
-        } else if (candidate.cooldownEnd !== null && candidate.cooldownEnd * 1000 > Date.now()) {
-          // 管理员/系统设置的持久化冷却期未到（库中为 Unix 秒）：与 selectPlatform
-          // 的冷却过滤对齐，避免指定路由绕过解禁时间把请求打进已知故障平台
-          selectedPlatform = null;
-        } else {
-          selectedPlatform = candidate;
-        }
-      }
-    } else {
-      selectedPlatform = null;
+  const candidatePlatforms: PlatformConfig[] = [];
+  for (const platform of platformCache) {
+    const models = platformModelCache.get(platform.id);
+    if (models && models.has(requestedModel)) {
+      candidatePlatforms.push(platform);
     }
+  }
+
+  if (candidatePlatforms.length > 0) {
+    selectedPlatform = selectPlatform(candidatePlatforms);
+    // 必须紧随 selectPlatform 同步调用（无 await 间隔），见 heldHalfOpenSlot 注释
+    halfOpenHeld =
+      selectedPlatform !== null && heldHalfOpenSlot(selectedPlatform.id);
   } else {
-    // 收集所有支持该模型的平台，做负载均衡
-    // 用 targetModel 匹配：模型映射的别名（如 my-deepseek）不在平台模型缓存中，
-    // 缓存里存的是真实上游模型名（如 deepseek-chat），与 429 重试路径 getPlatformsForModel 一致
-    const candidatePlatforms: PlatformConfig[] = [];
-    for (const platform of platformCache) {
-      const models = platformModelCache.get(platform.id);
-      if (models && models.has(targetModel)) {
-        candidatePlatforms.push(platform);
-      }
-    }
-
-    if (candidatePlatforms.length > 0) {
-      selectedPlatform = selectPlatform(candidatePlatforms);
-      // 必须紧随 selectPlatform 同步调用（无 await 间隔），见 heldHalfOpenSlot 注释
-      halfOpenHeld =
-        selectedPlatform !== null && heldHalfOpenSlot(selectedPlatform.id);
-    } else {
-      // 没有任何平台支持该模型（系统中不存在的模型）：不请求上游，直接视为无可用平台
-      selectedPlatform = null;
-    }
+    // 没有任何平台支持该模型（系统中不存在的模型）：不请求上游，直接视为无可用平台
+    selectedPlatform = null;
   }
 
   if (!selectedPlatform) return null;
 
   return {
     platform: selectedPlatform,
-    targetModel,
+    targetModel: requestedModel,
     sourceApi,
     halfOpenHeld,
   };

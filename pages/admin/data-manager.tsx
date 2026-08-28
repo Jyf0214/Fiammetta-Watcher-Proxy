@@ -60,7 +60,6 @@ interface ErrorEvent {
 
 const STEP_LABELS: Record<string, { labelKey: string }> = {
   platforms: { labelKey: "dmStepPlatforms" },
-  modelMaps: { labelKey: "dmStepModelMaps" },
   configs: { labelKey: "dmStepConfigs" },
   apiKeys: { labelKey: "dmStepApiKeys" },
   auditLogs: { labelKey: "dmStepAuditLogs" },
@@ -89,9 +88,6 @@ const PREVIEW_RULES: Record<
   { required: string[]; unique?: string | string[]; masked?: string; platformKeysMasked?: boolean }
 > = {
   platforms: { required: ["name", "baseUrl"], unique: "name", platformKeysMasked: true },
-  // 与后端 @@unique([alias, platformId]) 对齐：同一别名映射到不同平台是合法数据，
-  // 按 alias 单字段全局去重会把正常导出误标为重复异常
-  modelMaps: { required: ["alias"], unique: ["alias", "platformId"] },
   configs: { required: ["key", "value"], unique: "key" },
   apiKeys: { required: ["key"], unique: "key", masked: "key" },
   auditLogs: { required: ["action"] },

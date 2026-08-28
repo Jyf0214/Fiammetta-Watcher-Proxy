@@ -16,7 +16,6 @@ import { buildConfigBackup } from "../backup-builder";
 function stubDb() {
   return {
     platforms: { findMany: async () => [] },
-    modelMappings: { findMany: async () => [] },
     platformModels: { findMany: async () => [] },
     configs: { findMany: async () => [{ key: "system:x", value: "{}" }] },
     apiKeys: { findMany: async () => [] },
@@ -24,11 +23,10 @@ function stubDb() {
 }
 
 describe("backup-builder", () => {
-  it("config-backup 含系统级四表 + apiKeys，不含日志/统计/审计", async () => {
+  it("config-backup 含系统级三表 + apiKeys，不含日志/统计/审计", async () => {
     const snap = await buildConfigBackup(stubDb());
     expect(snap.exportType).toBe("config-backup");
     expect(snap.platforms).toEqual([]);
-    expect(snap.modelMaps).toEqual([]);
     expect(snap.platformModels).toEqual([]);
     expect(snap.configs).toEqual([{ key: "system:x", value: "{}" }]);
     expect(snap.apiKeys).toEqual([]);

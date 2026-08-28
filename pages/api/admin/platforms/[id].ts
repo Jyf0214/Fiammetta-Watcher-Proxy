@@ -490,9 +490,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
 /**
  * DELETE /api/admin/platforms/:id — 删除平台
  *
- * 删除前校验：
- * - 检查是否被模型映射（model_mappings）引用，被引用时拒绝删除
- * - 清理关联的请求日志、每日统计和平台模型
+ * 清理关联的请求日志、每日统计和平台模型
  */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: string) {
   const admin = await getAdminFromRequest(req);
@@ -504,18 +502,6 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse, id: strin
 
   try {
     const db = await createDb();
-
-    // 检查是否存在关联的 model_mappings 记录
-    const relatedMappings = await db.modelMappings.findMany({
-      where: { platformId: id },
-    });
-
-    if (relatedMappings.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `该平台被 ${relatedMappings.length} 个模型映射引用，无法删除。请先删除相关映射。`,
-      });
-    }
 
     // 统计并清理关联数据
     // 删除关联的请求日志

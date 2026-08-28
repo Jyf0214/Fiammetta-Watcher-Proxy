@@ -48,12 +48,10 @@ function makePlatform(overrides: Partial<PlatformConfig> = {}): PlatformConfig {
 function makeFakePrisma(
   platforms: any[],
   platformModels: { platformId: string; modelId: string }[],
-  mappings: any[] = [],
   autoModelId: string | null = null
 ) {
   return {
     platforms: { findMany: async () => platforms },
-    modelMappings: { findMany: async () => mappings },
     platformModels: { findMany: async () => platformModels },
     configs: {
       findFirst: async () => (autoModelId ? { value: autoModelId } : null),
@@ -111,7 +109,7 @@ describe("selectPlatformLite 纯负载均衡", () => {
 });
 
 describe("routeRequestLite 路由", () => {
-  it("按 targetModel 匹配候选平台（别名映射）", async () => {
+  it("按 requestedModel 匹配候选平台", async () => {
     mockCreateDb.mockResolvedValue(
       makeFakePrisma(
         [
@@ -122,13 +120,12 @@ describe("routeRequestLite 路由", () => {
           { platformId: "p-a", modelId: "deepseek-chat" },
           { platformId: "p-b", modelId: "deepseek-chat" },
           { platformId: "p-b", modelId: "claude-3" },
-        ],
-        [{ id: "m1", alias: "my-deepseek", targetModel: "deepseek-chat", platformId: null }]
+        ]
       ) as any
     );
     await forceRefreshRouterCacheLite(dummyDb, env);
 
-    const route = await routeRequestLite("my-deepseek", dummyDb, env);
+    const route = await routeRequestLite("deepseek-chat", dummyDb, env);
     expect(route).not.toBeNull();
     expect(["p-a", "p-b"]).toContain(route!.platform.id);
     expect(route!.targetModel).toBe("deepseek-chat");
@@ -162,65 +159,4 @@ describe("routeRequestLite 路由", () => {
     expect(route).toBeNull();
   });
 
-  it("模型映射指定平台时返回该平台（映射优先）", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [
-          makePlatform({ id: "p-a" }),
-          makePlatform({ id: "p-b" }),
-        ],
-        [
-          { platformId: "p-a", modelId: "gpt-4o" },
-          { platformId: "p-b", modelId: "gpt-4o" },
-        ],
-        [{ id: "m1", alias: "fixed", targetModel: "gpt-4o", platformId: "p-b" }]
-      ) as any
-    );
-    await forceRefreshRouterCacheLite(dummyDb, env);
-
-    const route = await routeRequestLite("fixed", dummyDb, env);
-    expect(route!.platform.id).toBe("p-b");
-    expect(route!.targetModel).toBe("gpt-4o");
-  });
-
-  it("映射钉定平台处于冷却期时不被直选（返回不可用，不回退其他平台）", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [
-          makePlatform({
-            id: "p-pinned",
-            cooldownEnd: Math.floor((Date.now() + 60_000) / 1000),
-          }),
-          makePlatform({ id: "p-other" }),
-        ],
-        [
-          { platformId: "p-pinned", modelId: "gpt-4o" },
-          { platformId: "p-other", modelId: "gpt-4o" },
-        ],
-        [{ id: "m1", alias: "fixed", targetModel: "gpt-4o", platformId: "p-pinned" }]
-      ) as any
-    );
-    await forceRefreshRouterCacheLite(dummyDb, env);
-
-    // 钉定平台在冷却期内：与全量版 router.ts 同场景语义一致，直接返回不可用，
-    // 不回退到同样支持该模型的 p-other
-    const route = await routeRequestLite("fixed", dummyDb, env);
-    expect(route).toBeNull();
-  });
-
-  it("映射钉定平台冷却到期后恢复直选", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform({ id: "p-pinned", cooldownEnd: Math.floor(Date.now() / 1000) - 60 })],
-        [{ platformId: "p-pinned", modelId: "gpt-4o" }],
-        [{ id: "m1", alias: "fixed", targetModel: "gpt-4o", platformId: "p-pinned" }]
-      ) as any
-    );
-    await forceRefreshRouterCacheLite(dummyDb, env);
-
-    const route = await routeRequestLite("fixed", dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.platform.id).toBe("p-pinned");
-    expect(route!.targetModel).toBe("gpt-4o");
-  });
 });

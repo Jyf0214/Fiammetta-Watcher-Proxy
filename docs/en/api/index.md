@@ -131,10 +131,6 @@ Admin APIs support two authentication methods: an admin JWT (via `admin_token` c
 | `/api/admin/keys/{id}` | PUT | Update key |
 | `/api/admin/keys/{id}` | DELETE | Delete key |
 
-### Model Mapping
-
-Model mappings (`model_maps`) have no dedicated admin API — maintain them via [Data Management](/en/guide/usage) export/import.
-
 ### Request Templates
 
 | Endpoint | Method | Description |

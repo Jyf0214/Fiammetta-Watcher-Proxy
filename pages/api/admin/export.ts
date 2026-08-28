@@ -5,7 +5,7 @@
  *
  * 查询参数：
  * - type: 导出类型（system/data/all），默认 all
- *   - system: 平台、模型映射、配置
+ *   - system: 平台、配置
  *   - data: API Keys、请求日志、每日统计、审计日志
  *   - all: 以上全部
  *

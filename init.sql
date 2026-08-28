@@ -64,16 +64,6 @@ CREATE TABLE IF NOT EXISTS "system_api_keys" (
 );
 
 -- CreateTable
-CREATE TABLE IF NOT EXISTS "model_maps" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "alias" TEXT NOT NULL,
-    "target_model" TEXT NOT NULL,
-    "platform_id" TEXT,
-    "created_at" INTEGER NOT NULL DEFAULT 0,
-    "updated_at" INTEGER NOT NULL DEFAULT 0
-);
-
--- CreateTable
 CREATE TABLE IF NOT EXISTS "platform_models" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "platform_id" TEXT NOT NULL,
@@ -174,9 +164,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "system_api_keys_key_key" ON "system_api_keys"
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "system_api_keys_key_idx" ON "system_api_keys"("key");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "model_maps_alias_platform_id_key" ON "model_maps"("alias", "platform_id");
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "platform_models_platform_id_idx" ON "platform_models"("platform_id");

@@ -111,31 +111,6 @@ The status column in the admin key list shows **Enabled / Disabled** only; "Expi
 - **Expired**: Requests are rejected after the expiry date (returns 401)
 - **Over Limit**: Rejects requests when token or call limits are reached (returns 429)
 
-## Model Mapping
-
-Model mappings map client-requested model names to actual upstream model names (including `*` wildcard prefix matching, e.g. `gpt-4*`). There is **no dedicated management page** — maintain mappings via Export/Import JSON in the "Data Manager": add records (`alias` / `targetModel` / `platformId`) in the exported `modelMaps` array and import; mappings whose `alias` + platform combination already exists are skipped on import (the same alias mapped to different platforms is valid and not skipped).
-
-### Configuration
-
-| Field | Description |
-|-------|-------------|
-| Alias | Client-requested model name |
-| Target Model | Actual model name forwarded to upstream |
-| Platform | Limit to specific platform (empty = auto-select via router) |
-
-### Usage Examples
-
-| Alias | Target Model | Platform | Effect |
-|-------|--------------|----------|--------|
-| `gpt-4` | `gpt-4o` | — | Applies to all platforms |
-| `claude-3` | `claude-3-5-sonnet` | Anthropic platform | Only applies to Anthropic |
-
-### Use Cases
-
-1. **Model upgrade**: Map old model names to new ones (e.g. `gpt-4` -> `gpt-4o`)
-2. **Cost optimization**: Map expensive models to more cost-effective alternatives
-3. **Compatibility**: Keep fixed model names on the client side while switching backends
-
 ### Auto Model
 
 Auto Model is an advanced routing feature:
@@ -209,7 +184,7 @@ Each entry includes operator, action type, details, and client IP.
 ### Export
 
 Three export types:
-- **System Config**: Platforms, model maps, config entries
+- **System Config**: Platforms, config entries
 - **Business Data**: API keys, request logs, daily stats, audit logs
 - **All**: Everything above
 
@@ -226,7 +201,7 @@ Import uses a **preview-then-confirm** flow: it shows per-type counts and issues
 
 ### Scheduled Backup
 
-Beyond manual export, a daily automatic backup pushes a config snapshot (platforms, model maps, system config, API Keys) AES-GCM-encrypted to your own receiver at 3:17 AM. Requires the `BACKUP_WEBHOOK_URL` and `BACKUP_ENCRYPTION_KEY` environment variables — see [Environment Variables → Backup Push](/en/deployment/env#backup-push-optional).
+Beyond manual export, a daily automatic backup pushes a config snapshot (platforms, system config, API Keys) AES-GCM-encrypted to your own receiver at 3:17 AM. Requires the `BACKUP_WEBHOOK_URL` and `BACKUP_ENCRYPTION_KEY` environment variables — see [Environment Variables → Backup Push](/en/deployment/env#backup-push-optional).
 
 ## System Settings
 

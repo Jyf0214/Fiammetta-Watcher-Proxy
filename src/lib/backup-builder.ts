@@ -47,16 +47,6 @@ async function collectSystemSection(db: DbClient): Promise<Record<string, unknow
     whitelisted: p.whitelisted,
   }));
 
-  // 模型映射（id 必须导出：导入时保留原始 id 才能恢复 platformId 关联）
-  const modelMaps = await db.modelMappings.findMany();
-
-  const modelMapRows = modelMaps.map((m) => ({
-    id: m.id,
-    alias: m.alias,
-    targetModel: m.targetModel,
-    platformId: m.platformId,
-  }));
-
   // 平台模型（自动发现结果）：不导出则跨环境恢复后路由缓存无模型，
   // v1 请求全部「模型不存在」，直到下一轮 model-fetch 才重建
   const platformModels = await db.platformModels.findMany();
@@ -78,7 +68,6 @@ async function collectSystemSection(db: DbClient): Promise<Record<string, unknow
 
   return {
     platforms: platformMaps,
-    modelMaps: modelMapRows,
     platformModels: platformModelRows,
     configs: configs.map((c) => ({ key: c.key, value: c.value })),
   };

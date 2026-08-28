@@ -131,10 +131,6 @@ Docker 部署由容器内部定时器自动执行；其他部署通过外部服�
 | `/api/admin/keys/{id}` | PUT | 更新 Key 配置 |
 | `/api/admin/keys/{id}` | DELETE | 删除 Key |
 
-### 模型映射
-
-模型映射（`model_maps`）没有独立的管理 API，通过[数据管理](/guide/usage)的导出/导入维护。
-
 ### 请求模板 API
 
 | 端点 | 方法 | 说明 |

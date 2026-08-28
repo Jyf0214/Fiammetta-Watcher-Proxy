@@ -45,7 +45,6 @@ interface FullImportResult {
   message: string;
   details: {
     platforms?: ImportResult;
-    modelMaps?: ImportResult;
     platformModels?: ImportResult;
     apiKeys?: ImportResult;
     configs?: ImportResult;
@@ -72,7 +71,6 @@ function generateId(): string {
 /** 单次导入各类型数量上限（避免超大导入导致 Cloudflare Workers CPU 超时 CF1102） */
 const MAX_PER_TYPE: Record<string, number> = {
   platforms: 500,
-  modelMaps: 1000,
   platformModels: 5000,
   apiKeys: 5000,
   configs: 200,
@@ -182,7 +180,7 @@ export default async function handler(
 
     // 定义导入步骤（保持依赖顺序）
     type DbClient = Awaited<ReturnType<typeof createDb>>;
-    // 请求私有集合：本批导入产生的新 id 按步骤顺序传递（platforms → modelMaps/
+    // 请求私有集合：本批导入产生的新 id 按步骤顺序传递（platforms →
     // requestLogs/platformModels 的外键校验需要知道「本次导入的 platform id」，
     // 仅查已有库会把新导入的引用误判为悬空置 null）。每请求独立创建，
     // 并发导入互不干扰
@@ -194,7 +192,6 @@ export default async function handler(
       fn: (db: DbClient, data: Array<Record<string, unknown>>) => Promise<ImportResult>;
     }> = [
       { key: "platforms", data: body.platforms, fn: (db, data) => importPlatforms(db, data, importedPlatformIds) },
-      { key: "modelMaps", data: body.modelMaps, fn: (db, data) => importModelMaps(db, data, importedPlatformIds) },
       { key: "platformModels", data: body.platformModels, fn: (db, data) => importPlatformModels(db, data, importedPlatformIds) },
       { key: "configs", data: body.configs, fn: importConfigs },
       { key: "apiKeys", data: body.apiKeys, fn: (db, data) => importApiKeys(db, data, importedApiKeyIds) },
@@ -549,7 +546,7 @@ async function importPlatforms(
   for (let i = 0; i < validPlatforms.length; i += BATCH_SIZE) {
     const batch = validPlatforms.slice(i, i + BATCH_SIZE);
     const batchData = batch.map((p) => {
-      // 保留导出时的原始 id：跨环境恢复时 modelMaps/requestLogs 的 platformId
+      // 保留导出时的原始 id：跨环境恢复时 requestLogs/platformModels 的 platformId
       // 引用才能继续成立；id 已存在（目标库冲突）或缺失时重生成
       let platformId: string;
       const rawId = sanitizeNullableString(p.id);
@@ -590,104 +587,11 @@ async function importPlatforms(
     try {
       const result = await db.platforms.createMany({ data: batchData });
       imported += result.count;
-      // 记录本次导入成功的平台 id，供后续步骤（modelMaps/requestLogs/platformModels）外键校验
+      // 记录本次导入成功的平台 id，供后续步骤（requestLogs/platformModels）外键校验
       for (const row of batchData) importedPlatformIds.add(row.id as string);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[import] 批量导入平台失败:", errMsg);
-      const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
-      skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
-      skipped += batch.length;
-    }
-  }
-
-  return { imported, skipped, skipReasons };
-}
-
-/**
- * 导入模型映射
- *
- * 按 alias 去重，使用 createMany 批量执行
- */
-async function importModelMaps(
-  db: DbClient,
-  modelMaps: Array<Record<string, unknown>>,
-  importedPlatformIds: Set<string> = moduleImportedPlatformIds
-): Promise<ImportResult> {
-  let imported = 0;
-  let skipped = 0;
-  const skipReasons: Record<string, number> = {};
-
-  // 预加载已有 (alias, platformId)，用于去重（DB 唯一约束为 @@unique([alias, platformId])，
-  // 同一 alias 映射到不同平台是合法数据，不能按 alias 全局去重）
-  const existingAliases = await db.modelMappings.findMany({ select: { alias: true, platformId: true } });
-  const existingAliasSet = new Set(existingAliases.map((r) => `${r.alias}|${r.platformId ?? ""}`));
-  // 批内去重：同一次导入中的重复 (alias, platformId) 只保留第一条
-  const batchSeenAliases = new Set<string>();
-
-  // 外键校验：platformId 不存在时置 null，避免悬空引用导致路由 500（此模型不存在）
-  // 校验集合 = 已有平台 id ∪ 本次导入的平台 id（导入保留原始 id，新平台引用必须保留）
-  const existingPlatforms = await db.platforms.findMany({ select: { id: true } });
-  const validPlatformIds = new Set(existingPlatforms.map((r) => r.id));
-  for (const pid of importedPlatformIds) validPlatformIds.add(pid);
-
-  // 已有 modelMappings id（保留原始 id 时避免主键冲突）
-  const existingMapIds = await db.modelMappings.findMany({ select: { id: true } });
-  const existingMapIdSet = new Set(existingMapIds.map((r) => r.id));
-  const batchSeenMapIds = new Set<string>();
-
-  const validMaps: Array<Record<string, unknown>> = [];
-  for (const m of modelMaps) {
-    const alias = sanitizeString(m.alias);
-    const rawPlatformId = sanitizeNullableString(m.platformId);
-    if (!alias) {
-      skipReasons["缺少 alias 字段"] = (skipReasons["缺少 alias 字段"] || 0) + 1;
-      skipped++;
-      continue;
-    }
-    if (existingAliasSet.has(`${alias}|${rawPlatformId ?? ""}`) || batchSeenAliases.has(`${alias}|${rawPlatformId ?? ""}`)) {
-      skipReasons["alias 已存在"] = (skipReasons["alias 已存在"] || 0) + 1;
-      skipped++;
-      continue;
-    }
-    batchSeenAliases.add(`${alias}|${rawPlatformId ?? ""}`);
-    validMaps.push(m);
-  }
-
-  if (validMaps.length === 0) {
-    return { imported, skipped, skipReasons };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  for (let i = 0; i < validMaps.length; i += BATCH_SIZE) {
-    const batch = validMaps.slice(i, i + BATCH_SIZE);
-    const batchData = batch.map((m) => {
-      const rawPlatformId = sanitizeNullableString(m.platformId);
-      // 保留导出时的原始 id（冲突时重生成）
-      let mapId: string;
-      const rawMapId = sanitizeNullableString(m.id);
-      if (rawMapId && !existingMapIdSet.has(rawMapId) && !batchSeenMapIds.has(rawMapId)) {
-        mapId = rawMapId;
-      } else {
-        mapId = generateId();
-      }
-      batchSeenMapIds.add(mapId);
-      return {
-        id: mapId,
-        alias: sanitizeString(m.alias),
-        targetModel: sanitizeString(m.targetModel) || sanitizeString(m.alias),
-        platformId: rawPlatformId && validPlatformIds.has(rawPlatformId) ? rawPlatformId : null,
-        createdAt: now,
-        updatedAt: now,
-      };
-    });
-
-    try {
-      const result = await db.modelMappings.createMany({ data: batchData });
-      imported += result.count;
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[import] 批量导入模型映射失败:", errMsg);
       const shortErr = errMsg.length > 100 ? errMsg.slice(0, 100) + "..." : errMsg;
       skipReasons[shortErr] = (skipReasons[shortErr] || 0) + batch.length;
       skipped += batch.length;

@@ -56,17 +56,6 @@ export interface PlatformApiKeyObject {
   proxyStrict?: boolean;
 }
 
-// ==================== 模型映射类型 ====================
-
-export interface ModelMapConfig {
-  id: string;
-  alias: string;
-  targetModel: string;
-  platformId: string | null;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
 // ==================== 路由决策类型 ====================
 
 export type ApiType = "chat" | "responses";

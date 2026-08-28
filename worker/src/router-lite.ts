@@ -2,8 +2,7 @@
  * Lite 版路由引擎 — 纯负载均衡，无评分/优先级/熔断器
  *
  * VERSION=lite 时构建使用（见 scripts/worker-lite-gate.sh），以最小化 CPU 运行时间：
- * - 内存缓存平台列表与模型映射（120 秒 TTL），只拉取平台信息
- * - 模型名称解析（精确匹配 + 通配符，与全量版语义一致）
+ * - 内存缓存平台列表（120 秒 TTL），只拉取平台信息
  * - 平台选择：仅按权重加权随机（不读 platform_scores、不按优先级分组、
  *   不维护熔断器状态、不写平台状态）
  * - 冷却期（cooldownEnd）为只读被动过滤：平台处于管理后台设置/全量版遗留的
@@ -15,13 +14,12 @@
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
 import { getConfig } from "./config";
-import type { PlatformConfig, RouteDecision, ModelMapConfig, ApiType } from "@/lib/types";
+import type { PlatformConfig, RouteDecision, ApiType } from "@/lib/types";
 import type { WorkerEnv } from "./config";
 
 // ==================== 缓存 ====================
 
 let platformCache: PlatformConfig[] = [];
-let modelMapCache: ModelMapConfig[] = [];
 let platformModelCache: Map<string, Set<string>> = new Map();
 let autoModelId: string | null = null;
 // 自动模型分流白名单（system:auto_model_selected 配置的模型 ID 集合）；null 表示未配置（全部参与）
@@ -35,7 +33,7 @@ const EMPTY_CACHE_RETRY = 5_000;
 let refreshPromise: Promise<void> | null = null;
 
 /**
- * 刷新平台和模型映射缓存（带防并发穿透锁）
+ * 刷新平台缓存（带防并发穿透锁）
  */
 export async function refreshCacheLite(db: D1Database, env?: WorkerEnv): Promise<void> {
   if (refreshPromise) return refreshPromise;
@@ -59,14 +57,12 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
 
   try {
-    const [platformRows, modelMapRows, platformModelRows, autoConfigValue, autoSelectedValue] =
+    const [platformRows, platformModelRows, autoConfigValue, autoSelectedValue] =
       await Promise.all([
         // 查询启用的平台
         prisma.platforms.findMany({
           where: { enabled: true },
         }),
-        // 查询所有模型映射
-        prisma.modelMappings.findMany(),
         // 查询平台模型关联（仅启用的模型）
         prisma.platformModels.findMany({
           where: { enabled: true },
@@ -106,13 +102,6 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
       cooldownEnd: p.cooldownEnd,
     }));
 
-    const newModelMaps: ModelMapConfig[] = modelMapRows.map((m) => ({
-      id: m.id,
-      alias: m.alias,
-      targetModel: m.targetModel,
-      platformId: m.platformId,
-    }));
-
     // 构建平台模型缓存
     const newPlatformModelCache = new Map<string, Set<string>>();
     for (const pm of platformModelRows) {
@@ -126,7 +115,6 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
 
     // 原子赋值
     platformCache = newPlatforms;
-    modelMapCache = newModelMaps;
     platformModelCache = newPlatformModelCache;
     autoModelId = autoConfigValue;
     // 解析分流白名单：键不存在 / 非法 JSON / 非数组 → null（全部参与，兼容旧配置）；
@@ -157,52 +145,6 @@ export async function forceRefreshRouterCacheLite(
 ): Promise<void> {
   lastRefresh = 0;
   await refreshCacheLite(db, env);
-}
-
-// ==================== 模型映射 ====================
-
-/**
- * 解析模型映射：客户端请求的模型名 → 实际目标模型 + 目标平台
- */
-function resolveModelMapping(
-  requestedModel: string,
-  platformId?: string | null
-): { targetModel: string; targetPlatformId: string | null } {
-  // 校验模型名称格式
-  const MODEL_NAME_PATTERN = /^[a-zA-Z0-9._\-/]{1,200}$/;
-  if (!MODEL_NAME_PATTERN.test(requestedModel)) {
-    return { targetModel: requestedModel, targetPlatformId: null };
-  }
-
-  // 精确匹配
-  const exactMatch = modelMapCache.find(
-    (m) =>
-      m.alias === requestedModel &&
-      (platformId ? m.platformId === platformId : true)
-  );
-  if (exactMatch) {
-    return {
-      targetModel: exactMatch.targetModel,
-      targetPlatformId: exactMatch.platformId,
-    };
-  }
-
-  // 通配符匹配
-  const wildcardMatch = modelMapCache.find(
-    (m) =>
-      m.alias.endsWith("*") &&
-      requestedModel.startsWith(m.alias.slice(0, -1)) &&
-      (platformId ? m.platformId === platformId : true)
-  );
-  if (wildcardMatch) {
-    const suffix = requestedModel.slice(wildcardMatch.alias.length - 1);
-    return {
-      targetModel: wildcardMatch.targetModel + suffix,
-      targetPlatformId: wildcardMatch.platformId,
-    };
-  }
-
-  return { targetModel: requestedModel, targetPlatformId: null };
 }
 
 // ==================== 平台选择（纯负载均衡） ====================
@@ -282,48 +224,25 @@ export async function routeRequestLite(
     };
   }
 
-  // 模型映射（别名 → 目标模型）
-  const resolved = resolveModelMapping(requestedModel, null);
-  const targetModel = resolved.targetModel;
-  const targetPlatformId = resolved.targetPlatformId;
-
-  // 选择平台
-  let selectedPlatform: PlatformConfig | null;
-
-  if (targetPlatformId) {
-    // 映射指定了平台：过滤口径与 selectPlatformLite 一致（enabled + 冷却期已过）。
-    // 钉定平台处于冷却期时不直选、也不回退其他平台（返回不可用），与全量版
-    // router.ts 同场景语义对齐，避免映射路由绕过解禁时间把请求打进已知故障平台
-    selectedPlatform =
-      platformCache.find(
-        (p) =>
-          p.id === targetPlatformId &&
-          p.enabled &&
-          (p.cooldownEnd === null || p.cooldownEnd * 1000 <= Date.now())
-      ) ?? null;
-  } else {
-    // 收集所有支持该模型的平台，按权重负载均衡
-    const candidatePlatforms: PlatformConfig[] = [];
-    for (const platform of platformCache) {
-      const models = platformModelCache.get(platform.id);
-      if (models && models.has(targetModel)) {
-        candidatePlatforms.push(platform);
-      }
-    }
-
-    if (candidatePlatforms.length > 0) {
-      selectedPlatform = selectPlatformLite(candidatePlatforms);
-    } else {
-      // 没有任何平台支持该模型（系统中不存在的模型）：不请求上游，直接视为无可用平台
-      selectedPlatform = null;
+  // 选择平台：按客户端请求的模型名匹配所有支持的平台，按权重负载均衡
+  const candidatePlatforms: PlatformConfig[] = [];
+  for (const platform of platformCache) {
+    const models = platformModelCache.get(platform.id);
+    if (models && models.has(requestedModel)) {
+      candidatePlatforms.push(platform);
     }
   }
+
+  const selectedPlatform =
+    candidatePlatforms.length > 0
+      ? selectPlatformLite(candidatePlatforms)
+      : null;
 
   if (!selectedPlatform) return null;
 
   return {
     platform: selectedPlatform,
-    targetModel,
+    targetModel: requestedModel,
     sourceApi,
   };
 }

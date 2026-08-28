@@ -47,12 +47,11 @@ On the "Auto Model" page you can generate an auto-model ID (format `fwp-auto-mod
 FWP periodically (every 6 hours by default) discovers models supported by each platform:
 
 1. Understand platform capabilities
-2. Configure model mappings
-3. Monitor model availability
+2. Monitor model availability
 
 Discovery calls the OpenAI-compatible `/models` endpoint: OpenAI-compatible platforms (`openai` / `azure` / `custom`) discover normally; **Anthropic-type platforms do not support auto-discovery** (no `/models` endpoint in the native protocol).
 
-See the [Admin Panel Usage Guide](/en/guide/usage) for model name resolution (exact match and wildcards) and data-management maintenance, and the [Deployment Guide](/en/deployment/) / [Cron Tasks](/en/api/cron) for scheduling.
+See the [Admin Panel Usage Guide](/en/guide/usage) for data-management maintenance, and the [Deployment Guide](/en/deployment/) / [Cron Tasks](/en/api/cron) for scheduling.
 
 ## Next Steps
 

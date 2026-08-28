@@ -4,7 +4,6 @@
  * 覆盖（2026-08-18 审计 A6 回归）：
  * - DELETE 级联清理 daily_stats（此前只删 requestLogs + platformModels，
  *   daily_stats 残留导致仪表盘历史统计与日志页数据矛盾）
- * - DELETE 被 model_mappings 引用时拒绝删除
  *
  * Mock 外部依赖：@/lib/prisma、@/lib/admin-auth、@/lib/admin-security、
  * @/lib/admin-rate-limit、@/lib/key-status、@opennextjs/cloudflare
@@ -21,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   platformFindFirst: vi.fn(),
   platformUpdate: vi.fn(),
   platformDelete: vi.fn(),
-  mappingsFindMany: vi.fn(),
   requestLogsDeleteMany: vi.fn(),
   dailyStatsDeleteMany: vi.fn(),
   platformModelsDeleteMany: vi.fn(),
@@ -39,9 +37,6 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mocks.platformFindFirst,
       update: mocks.platformUpdate,
       delete: mocks.platformDelete,
-    },
-    modelMappings: {
-      findMany: mocks.mappingsFindMany,
     },
     requestLogs: {
       deleteMany: mocks.requestLogsDeleteMany,
@@ -128,7 +123,6 @@ beforeEach(() => {
   mocks.checkCsrfOrigin.mockReturnValue(true);
   mocks.isSafeUrl.mockResolvedValue({ safe: true, reason: "" });
   mocks.checkRateLimit.mockResolvedValue(true);
-  mocks.mappingsFindMany.mockResolvedValue([]);
   mocks.requestLogsDeleteMany.mockResolvedValue({ count: 5 });
   mocks.dailyStatsDeleteMany.mockResolvedValue({ count: 3 });
   mocks.platformModelsDeleteMany.mockResolvedValue({ count: 2 });
@@ -144,16 +138,6 @@ describe("DELETE /api/admin/platforms/[id]", () => {
     mocks.getAdmin.mockResolvedValue(null);
     const { res } = await call("DELETE");
     expect(res.statusCode).toBe(401);
-  });
-
-  it("被 model_mappings 引用时拒绝删除且不清理任何数据", async () => {
-    mocks.mappingsFindMany.mockResolvedValue([{ id: "mm1", platformId: "p1" }]);
-    const { res } = await call("DELETE");
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toContain("映射");
-    expect(mocks.requestLogsDeleteMany).not.toHaveBeenCalled();
-    expect(mocks.dailyStatsDeleteMany).not.toHaveBeenCalled();
-    expect(mocks.platformDelete).not.toHaveBeenCalled();
   });
 
   it("删除时级联清理 daily_stats（A6 回归：此前残留导致统计与日志矛盾）", async () => {

@@ -45,7 +45,6 @@ function makePlatform(id: string, name: string) {
 function makeFakePrisma(
   platforms: any[],
   platformModels: { platformId: string; modelId: string }[],
-  mappings: any[] = [],
   autoModelId: string | null = null,
   autoModelSelectedConfig: string | null = null
 ) {
@@ -56,7 +55,6 @@ function makeFakePrisma(
       // 内存状态不受影响（halfOpenHeld 测试依赖）
       update: async () => ({}),
     },
-    modelMappings: { findMany: async () => mappings },
     platformModels: { findMany: async () => platformModels },
     configs: {
       findFirst: async ({ where }: { where: { key: string } }) => {
@@ -141,105 +139,6 @@ describe("routeRequest 对不存在模型的 fallback 行为", () => {
     expect(route).not.toBeNull();
     expect(["p-a", "p-b"]).toContain(route!.platform.id);
   });
-
-  it("模型映射指定平台时返回该平台（映射优先于平台模型缓存）", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform("p-a", "A")],
-        [{ platformId: "p-a", modelId: "gpt-4o" }],
-        [
-          {
-            id: "m1",
-            alias: "my-deepseek",
-            targetModel: "deepseek-chat",
-            platformId: "p-a",
-          },
-        ]
-      ) as any
-    );
-    await forceRefreshRouterCache(dummyDb, env);
-
-    const route = await routeRequest("my-deepseek", dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.platform.id).toBe("p-a");
-    expect(route!.targetModel).toBe("deepseek-chat");
-  });
-
-  it("无平台 ID 的模型映射按 targetModel 路由（别名不在平台模型缓存中）", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform("p-a", "A"), makePlatform("p-b", "B")],
-        [
-          { platformId: "p-a", modelId: "deepseek-chat" },
-          { platformId: "p-b", modelId: "claude-3" },
-        ],
-        [
-          {
-            id: "m1",
-            alias: "my-deepseek",
-            targetModel: "deepseek-chat",
-            platformId: null,
-          },
-        ]
-      ) as any
-    );
-    await forceRefreshRouterCache(dummyDb, env);
-
-    // 必须命中支持 targetModel 的 p-a；旧 fallback 会随机选中 p-a/p-b 导致不稳定
-    const route = await routeRequest("my-deepseek", dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.platform.id).toBe("p-a");
-    expect(route!.targetModel).toBe("deepseek-chat");
-  });
-
-  it("无平台 ID 的通配符映射按拼接后的 targetModel 路由", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform("p-a", "A"), makePlatform("p-b", "B")],
-        [
-          { platformId: "p-a", modelId: "gpt-4o" },
-          { platformId: "p-b", modelId: "claude-3" },
-        ],
-        [
-          {
-            id: "m1",
-            alias: "oai-*",
-            targetModel: "gpt-",
-            platformId: null,
-          },
-        ]
-      ) as any
-    );
-    await forceRefreshRouterCache(dummyDb, env);
-
-    // 请求名 "oai-4o" 不在任何平台缓存中，但拼接后的 targetModel "gpt-4o" 在 p-a：
-    // 必须按 targetModel 路由到 p-a；旧 fallback 会随机选中 p-a/p-b 导致不稳定
-    const route = await routeRequest("oai-4o", dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.platform.id).toBe("p-a");
-    expect(route!.targetModel).toBe("gpt-4o");
-  });
-
-  it("映射的目标模型无平台支持时返回 null", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform("p-a", "A")],
-        [{ platformId: "p-a", modelId: "gpt-4o" }],
-        [
-          {
-            id: "m1",
-            alias: "my-deepseek",
-            targetModel: "deepseek-chat",
-            platformId: null,
-          },
-        ]
-      ) as any
-    );
-    await forceRefreshRouterCache(dummyDb, env);
-
-    const route = await routeRequest("my-deepseek", dummyDb, env);
-    expect(route).toBeNull();
-  });
 });
 
 // ==================== 自动模型分流白名单（system:auto_model_selected） ====================
@@ -255,7 +154,6 @@ describe("routeRequest 自动模型分流白名单", () => {
           { platformId: "p-a", modelId: "gpt-4o" },
           { platformId: "p-b", modelId: "claude-3" },
         ],
-        [],
         AUTO
       ) as any
     );
@@ -275,7 +173,6 @@ describe("routeRequest 自动模型分流白名单", () => {
           { platformId: "p-a", modelId: "gpt-4o" },
           { platformId: "p-b", modelId: "claude-3" },
         ],
-        [],
         AUTO,
         JSON.stringify(["gpt-4o"])
       ) as any
@@ -293,7 +190,6 @@ describe("routeRequest 自动模型分流白名单", () => {
       makeFakePrisma(
         [makePlatform("p-a", "A")],
         [{ platformId: "p-a", modelId: "gpt-4o" }],
-        [],
         AUTO,
         JSON.stringify([])
       ) as any
@@ -309,7 +205,6 @@ describe("routeRequest 自动模型分流白名单", () => {
       makeFakePrisma(
         [makePlatform("p-a", "A")],
         [{ platformId: "p-a", modelId: "gpt-4o" }],
-        [],
         AUTO,
         JSON.stringify([1, 2])
       ) as any
@@ -334,7 +229,6 @@ describe("routeRequest 自动模型分流白名单", () => {
           { platformId: "p-a", modelId: "gpt-4o" },
           { platformId: "p-b", modelId: "claude-3" },
         ],
-        [],
         AUTO,
         JSON.stringify(["claude-3"])
       ) as any
@@ -352,8 +246,7 @@ describe("routeRequest 自动模型分流白名单", () => {
 
 /**
  * 行为约定：halfOpenHeld 仅在「平台经 selectPlatform 选中且选中时处于
- * half-open」时为 true（selectPlatform 内部执行了 halfOpenPending++）；
- * 模型映射直选不经 selectPlatform、不占槽位，恒为 false。
+ * half-open」时为 true（selectPlatform 内部执行了 halfOpenPending++）。
  * 消费方（proxy.ts / [[...v1]].ts）据此决定门禁拒绝时是否 releaseHalfOpenPending。
  */
 describe("routeRequest halfOpenHeld 半开探测槽位归属标记", () => {
@@ -387,31 +280,4 @@ describe("routeRequest halfOpenHeld 半开探测槽位归属标记", () => {
     expect(route!.halfOpenHeld).toBe(true);
   });
 
-  it("半开平台经模型映射直选时返回 halfOpenHeld=false（未占用槽位）", async () => {
-    mockCreateDb.mockResolvedValue(
-      makeFakePrisma(
-        [makePlatform("p-half-map", "HalfMap")],
-        [{ platformId: "p-half-map", modelId: "deepseek-chat" }],
-        [
-          {
-            id: "m1",
-            alias: "my-deepseek",
-            targetModel: "deepseek-chat",
-            platformId: "p-half-map",
-          },
-        ]
-      ) as any
-    );
-    await forceRefreshRouterCache(dummyDb, env);
-
-    await tripToHalfOpen("p-half-map");
-
-    // 直选分支：half-open 且探测配额未满时允许直选，但不经过 selectPlatform，
-    // 从未占用槽位 —— 门禁拒绝时不得释放他人持有的槽位（bug L5 的路由侧根源）
-    const route = await routeRequest("my-deepseek", dummyDb, env);
-    expect(route).not.toBeNull();
-    expect(route!.platform.id).toBe("p-half-map");
-    expect(route!.targetModel).toBe("deepseek-chat");
-    expect(route!.halfOpenHeld).toBe(false);
-  });
 });

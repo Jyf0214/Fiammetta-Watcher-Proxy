@@ -98,20 +98,6 @@ model systemApiKeys {
   @@map("system_api_keys")
 }
 
-// ==================== 模型映射 ====================
-
-model modelMappings {
-  id          String  @id
-  alias       String
-  targetModel String  @map("target_model")
-  platformId  String? @map("platform_id")
-  createdAt   Int     @default(0) @map("created_at")
-  updatedAt   Int     @default(0) @map("updated_at")
-
-  @@unique([alias, platformId])
-  @@map("model_maps")
-}
-
 // ==================== 平台模型（自动发现） ====================
 
 model platformModels {
