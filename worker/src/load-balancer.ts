@@ -10,6 +10,7 @@
 
 import { createDb } from "@/lib/prisma";
 import { sendNotification } from "@/lib/notifier";
+import { isPlatformWhitelisted } from "./platform-keys";
 import type { WorkerEnv } from "./config";
 import type { PlatformConfig, CircuitBreakerState } from "@/lib/types";
 
@@ -272,6 +273,12 @@ export async function recordFailure(
   db: D1Database,
   env?: WorkerEnv
 ): Promise<void> {
+  // 白名单平台：不记录失败、不触发熔断（永不排除调度语义）。
+  // 与 selectPlatform 白名单豁免、banKey/recordKeyError 白名单分支对齐——
+  // 白名单 = 永不封禁/排除，失败仍由调用方记日志（request_logs isError=true），
+  // 但不推进熔断器状态，避免渐进降级/熔断把白名单平台排除出调度
+  if (isPlatformWhitelisted(platformId)) return;
+
   const now = Date.now();
   // 错误率窗口记录失败样本（与熔断状态机并行）：供 isHighErrorRate 以失败
   // 比例降级——间歇故障（成功穿插）不会触发连续失败熔断，但窗口能识别
@@ -519,6 +526,12 @@ export function selectPlatform(
   // 过滤可用平台
   const available = platforms.filter((p) => {
     if (!p.enabled) return false;
+
+    // 白名单平台：永不排除调度（与 banKey/recordKeyError 的白名单豁免对齐）。
+    // 密钥级豁免只保护单个 Key 不被封禁，但平台级熔断器/429冷却/高错误率
+    // 仍会把整个平台排除出调度，白名单语义被架空。此处跳过所有排除检查，
+    // 仅保留 enabled 判断（管理员显式禁用不受白名单保护）
+    if (isPlatformWhitelisted(p.id)) return true;
 
     const breakerState = checkAndUpdateCircuitBreakerState(p.id);
     if (breakerState === "open") return false;

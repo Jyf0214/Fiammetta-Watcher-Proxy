@@ -11,7 +11,7 @@
  */
 
 import { routeRequestLite } from "./router-lite";
-import { getNextKey, recordKeyError, banKey } from "./platform-keys";
+import { getNextKey, recordKeyError, banKey, isPlatformWhitelisted } from "./platform-keys";
 import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClientInfo } from "./token";
 import { recordPlatform429 } from "./load-balancer";
 import { sendNotification } from "@/lib/notifier";
@@ -201,8 +201,9 @@ function createLiteUsageTransformer(params: {
         try { await banKey(params.key, undefined, params.platformId, params.kv); } catch {}
         try { await recordKeyError(params.key, keyErrorCode, params.platformId, params.db, params.env); } catch {}
         // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却
-        if (keyErrorCode === 429) recordPlatform429(params.platformId);
+        // 与 HTTP 429 路径 recordPlatform429 对齐——流内 429 同样计入平台冷却。
+        // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+        if (keyErrorCode === 429 && !isPlatformWhitelisted(params.platformId)) recordPlatform429(params.platformId);
       }
 
       try {
@@ -600,8 +601,9 @@ export async function proxyV1RequestLite(
     ctx.waitUntil(banKey(currentKey, undefined, route.platform.id, env.KV).catch(() => {}));
     ctx.waitUntil(recordKeyError(currentKey, upstreamResponse.status, route.platform.id, env.DB, workerEnv).catch(() => {}));
     // 平台级 429 冷却：429 是平台过载信号（区别于 Key 失效/越权），
-    // 与全量版 HTTP 429 路径对齐——lite 无重试，冷却由调度层（selectPlatform）生效
-    if (upstreamResponse.status === 429) recordPlatform429(route.platform.id);
+    // 与全量版 HTTP 429 路径对齐——lite 无重试，冷却由调度层（selectPlatform）生效。
+    // 白名单平台跳过：selectPlatform 已豁免，429 冷却记录无意义
+    if (upstreamResponse.status === 429 && !isPlatformWhitelisted(route.platform.id)) recordPlatform429(route.platform.id);
   }
 
   try {

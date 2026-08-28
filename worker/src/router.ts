@@ -9,7 +9,7 @@
  */
 
 import { createDb } from "@/lib/prisma";
-import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
+import { parseApiKeys, parseApiKeyObjects, isPlatformWhitelisted } from "./platform-keys";
 import {
   selectPlatform,
   cleanupStaleBreakers,
@@ -372,25 +372,32 @@ export async function routeRequest(
     ) ?? null;
 
     if (candidate) {
-      const breakerState = checkAndUpdateCircuitBreakerState(candidate.id);
-      if (breakerState === "open") {
-        // 熔断器打开状态：平台不可用，直选失败（置空后由下方统一返回 null，不回退负载均衡）
-        selectedPlatform = null;
-      } else if (breakerState === "half-open" && isHalfOpenProbeFull(candidate.id)) {
-        // 半开状态且探测配额已满：不再新开探测，直选失败（不回退负载均衡）
-        selectedPlatform = null;
-      } else if (isHighErrorRate(candidate.id)) {
-        // 高错误率降级：滑动窗口失败率超阈值，直选失败（不回退负载均衡）
-        selectedPlatform = null;
-      } else if (isPlatform429Cooldown(candidate.id)) {
-        // 429 冷却期：平台过载，直选失败（不回退负载均衡）
-        selectedPlatform = null;
-      } else if (candidate.cooldownEnd !== null && candidate.cooldownEnd * 1000 > Date.now()) {
-        // 管理员/系统设置的持久化冷却期未到（库中为 Unix 秒）：与 selectPlatform
-        // 的冷却过滤对齐，避免指定路由绕过解禁时间把请求打进已知故障平台
-        selectedPlatform = null;
-      } else {
+      // 白名单平台：跳过所有排除检查直接选中（与 selectPlatform 白名单豁免对齐）。
+      // 映射直选不经过 selectPlatform，需单独豁免，否则熔断器/429冷却/高错误率
+      // 仍会把白名单平台排除，白名单语义被架空
+      if (isPlatformWhitelisted(candidate.id)) {
         selectedPlatform = candidate;
+      } else {
+        const breakerState = checkAndUpdateCircuitBreakerState(candidate.id);
+        if (breakerState === "open") {
+          // 熔断器打开状态：平台不可用，直选失败（置空后由下方统一返回 null，不回退负载均衡）
+          selectedPlatform = null;
+        } else if (breakerState === "half-open" && isHalfOpenProbeFull(candidate.id)) {
+          // 半开状态且探测配额已满：不再新开探测，直选失败（不回退负载均衡）
+          selectedPlatform = null;
+        } else if (isHighErrorRate(candidate.id)) {
+          // 高错误率降级：滑动窗口失败率超阈值，直选失败（不回退负载均衡）
+          selectedPlatform = null;
+        } else if (isPlatform429Cooldown(candidate.id)) {
+          // 429 冷却期：平台过载，直选失败（不回退负载均衡）
+          selectedPlatform = null;
+        } else if (candidate.cooldownEnd !== null && candidate.cooldownEnd * 1000 > Date.now()) {
+          // 管理员/系统设置的持久化冷却期未到（库中为 Unix 秒）：与 selectPlatform
+          // 的冷却过滤对齐，避免指定路由绕过解禁时间把请求打进已知故障平台
+          selectedPlatform = null;
+        } else {
+          selectedPlatform = candidate;
+        }
       }
     } else {
       selectedPlatform = null;
