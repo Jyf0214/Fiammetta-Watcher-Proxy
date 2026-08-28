@@ -243,41 +243,43 @@ export const ModelsPanel = memo(function ModelsPanel({
     <div className="flex flex-col gap-3">
       {/* sticky 标题区 — 移动端吸在返回条下方（64px 顶栏 + 52px 固定返回条），桌面端返回条隐藏直接对齐顶栏；-mx 抵消外层 padding 撑满 */}
       <div className="sticky top-[116px] lg:top-16 z-10 bg-white dark:bg-zinc-900 -mx-4 lg:-mx-6 px-4 lg:px-6 pt-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+          <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 shrink-0">
             {t("models")}
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
             <Input
               prefix={<Search size={14} className="text-zinc-400" />}
               placeholder={t("searchPlaceholder")}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               allowClear
-              className="w-32 lg:w-40"
+              className="hidden sm:inline-block w-full sm:w-40"
               size="small"
             />
-            <Button
-              variant="default"
-              size="sm"
-              icon={<RefreshCw size={13} />}
-              onClick={onRefreshModels}
-              loading={refreshing}
-            >
-              {t("refreshModels")}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              icon={<Zap size={13} />}
-              onClick={() => {
-                setTestModelId(chatModels[0]?.modelId);
-                setTestModalOpen(true);
-              }}
-              disabled={chatModels.length === 0}
-            >
-              {t("testModel")}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                icon={<RefreshCw size={13} />}
+                onClick={onRefreshModels}
+                loading={refreshing}
+              >
+                {t("refreshModels")}
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                icon={<Zap size={13} />}
+                onClick={() => {
+                  setTestModelId(chatModels[0]?.modelId);
+                  setTestModalOpen(true);
+                }}
+                disabled={chatModels.length === 0}
+              >
+                {t("testModel")}
+              </Button>
+            </div>
           </div>
         </div>
 
