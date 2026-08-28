@@ -170,5 +170,82 @@ export async function recordHistory(entry: HistoryEntryInput): Promise<void> {
   }
 }
 
+/** 查询发送历史（管理后台"发送历史"页使用） */
+export interface HistoryQueryOptions {
+  limit?: number;
+  channelId?: string;
+  event?: string;
+  sinceSentAt?: number;
+}
+
+export interface HistoryRecord {
+  id: string;
+  channelId: string;
+  channelName: string;
+  channelType: string;
+  event: string;
+  title: string;
+  body: string;
+  status: string;
+  httpStatus: number | null;
+  error: string | null;
+  sizeBytes: number;
+  durationMs: number;
+  sentAt: number;
+}
+
+export async function queryHistory(
+  opts: HistoryQueryOptions = {}
+): Promise<HistoryRecord[]> {
+  const where: Record<string, unknown> = {};
+  if (opts.channelId) where.channelId = opts.channelId;
+  if (opts.event) where.event = opts.event;
+  if (opts.sinceSentAt !== undefined) where.sentAt = { gte: opts.sinceSentAt };
+  const db = await createDb();
+  const rows = await db.notificationHistory.findMany({
+    where,
+    orderBy: { sentAt: "desc" },
+    take: opts.limit ?? 50,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    channelId: r.channelId,
+    channelName: r.channelName,
+    channelType: r.channelType,
+    event: r.event,
+    title: r.title,
+    body: r.body,
+    status: r.status,
+    httpStatus: r.httpStatus ?? null,
+    error: r.error ?? null,
+    sizeBytes: r.sizeBytes,
+    durationMs: r.durationMs,
+    sentAt: r.sentAt,
+  }));
+}
+
+/**
+ * 清理过期发送历史（cron 调用，按 retentionDays 阈值）
+ *
+ * @returns 删除条数（删除失败时返回 -1，不抛错）
+ */
+export async function purgeHistory(retentionDays: number): Promise<number> {
+  if (retentionDays <= 0) return 0;
+  const cutoff = Math.floor(Date.now() / 1000) - retentionDays * 86400;
+  try {
+    const db = await createDb();
+    const r = await db.notificationHistory.deleteMany({
+      where: { sentAt: { lt: cutoff } },
+    });
+    return r.count;
+  } catch (err) {
+    console.error(
+      "[notification-store] 历史清理失败:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return -1;
+  }
+}
+
 /** 配额档位常量 re-export（便于消费方 import） */
 export { QUOTA_THRESHOLDS };

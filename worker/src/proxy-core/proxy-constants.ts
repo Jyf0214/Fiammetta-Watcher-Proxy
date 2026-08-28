@@ -96,11 +96,15 @@ export function estimateRequestTokens(
 
 /**
  * 重试指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
- * 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+ 0~250ms
+ * 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 10s）+ 0~250ms
  * 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）
+ *
+ * 上限 10s 的依据：上游 429 限流窗口常见 30~60s，少量重试最多容忍 2~3s 退避；
+ * 拉到 10s 允许同平台重试覆盖更宽的限流窗口，避免在限流峰顶连续打挂同一上游。
+ * 仍远低于"盲目等待上游 Retry-After"那种十几小时的失控（与本代理无关）。
  */
 export function retryBackoffMs(attempt: number): number {
-  return Math.min(250 * Math.pow(2, attempt), 2000) + Math.random() * 250;
+  return Math.min(250 * Math.pow(2, attempt), 10000) + Math.random() * 250;
 }
 
 /**
