@@ -9,6 +9,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getConfigMock = vi.hoisted(() => vi.fn());
 const fetchMock = vi.hoisted(() => vi.fn());
+const checkCooldownMock = vi.hoisted(() => vi.fn().mockResolvedValue(false));
+const recordSentMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const recordHistoryMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("../../../worker/src/config", () => ({
   getConfig: (...args: unknown[]) => getConfigMock(...args),
@@ -17,6 +20,17 @@ vi.mock("../../../worker/src/config", () => ({
 // batched-writer 引入 prisma 依赖链，测试中 mock 掉绑定获取
 vi.mock("../../../worker/src/batched-writer", () => ({
   getBatchedWriterBindings: () => null,
+}));
+
+// 持久化 store 在测试中 mock 掉，避免依赖 prisma client
+vi.mock("../notification-store", () => ({
+  checkCooldown: (...args: unknown[]) => checkCooldownMock(...args),
+  recordSent: (...args: unknown[]) => recordSentMock(...args),
+  recordHistory: (...args: unknown[]) => recordHistoryMock(...args),
+  checkQuotaNotified: vi.fn(),
+  markQuotaNotified: vi.fn(),
+  clearQuotaNotified: vi.fn(),
+  QUOTA_THRESHOLDS: [80, 95, 100],
 }));
 
 import {
@@ -200,7 +214,13 @@ describe("sendNotification", () => {
     resetNotifierForTests();
     getConfigMock.mockReset();
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) });
+    checkCooldownMock.mockReset();
+    checkCooldownMock.mockResolvedValue(false);
+    recordSentMock.mockReset();
+    recordSentMock.mockResolvedValue(undefined);
+    recordHistoryMock.mockReset();
+    recordHistoryMock.mockResolvedValue(undefined);
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -220,6 +240,58 @@ describe("sendNotification", () => {
     );
     await sendNotification("key_banned", "t", "b", { db: {} as never });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("持久化冷却：checkCooldown 返回 true 时直接返回，不发请求", async () => {
+    checkCooldownMock.mockResolvedValueOnce(true);
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never, eventKey: "k1" });
+    expect(checkCooldownMock).toHaveBeenCalledWith("key_banned:k1", 10);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("持久化冷却放行时 recordSent 写入 eventKey 复合键", async () => {
+    checkCooldownMock.mockResolvedValueOnce(false);
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never, eventKey: "platformA" });
+    expect(recordSentMock).toHaveBeenCalledWith("key_banned:platformA");
+  });
+
+  it("每次成功发送都写入 notificationHistory（每通道一条）", async () => {
+    getConfigMock.mockResolvedValue(
+      JSON.stringify(validConfig({ channels: [
+        { name: "a", type: "generic", url: "https://a.example/hook" },
+        { name: "b", type: "generic", url: "https://b.example/hook" },
+      ] }))
+    );
+    await sendNotification("key_banned", "标题", "正文", { db: {} as never });
+    expect(recordHistoryMock).toHaveBeenCalledTimes(2);
+    const first = recordHistoryMock.mock.calls[0][0];
+    expect(first.status).toBe("success");
+    expect(first.httpStatus).toBe(200);
+    expect(first.channelName).toBe("a");
+    expect(first.event).toBe("key_banned");
+    expect(first.title).toBe("标题");
+    expect(typeof first.durationMs).toBe("number");
+  });
+
+  it("HTTP 非 2xx 写 history 状态为 failed，httpStatus 透传", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 502, arrayBuffer: async () => new ArrayBuffer(0) });
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    const entry = recordHistoryMock.mock.calls[0][0];
+    expect(entry.status).toBe("failed");
+    expect(entry.httpStatus).toBe(502);
+    expect(entry.error).toBe("HTTP 502");
+  });
+
+  it("fetch 抛错时 history 状态为 failed，error 透传", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("net down"));
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    const entry = recordHistoryMock.mock.calls[0][0];
+    expect(entry.status).toBe("failed");
+    expect(entry.error).toBe("net down");
   });
 
   it("启用时按配置 POST 到所有通道，payload 含 event/title/body/timestamp", async () => {
@@ -268,6 +340,13 @@ describe("sendNotification", () => {
   });
 
   it("同类事件在冷却窗口内去重（不同 eventKey 互不影响）", async () => {
+    // 模拟 store：第一次 checkCooldown 放行，相同 eventKey 后续命中去重
+    // 不同 eventKey 互不影响（key 不重叠）
+    const sentKeys = new Set<string>();
+    checkCooldownMock.mockImplementation((key: string) => sentKeys.has(key));
+    recordSentMock.mockImplementation((key: string) => {
+      sentKeys.add(key);
+    });
     getConfigMock.mockResolvedValue(JSON.stringify(validConfig({ cooldownMinutes: 10 })));
     const db = {} as never;
     await sendNotification("key_banned", "t", "b", { db, eventKey: "p1" });

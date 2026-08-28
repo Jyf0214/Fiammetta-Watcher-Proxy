@@ -41,6 +41,7 @@ import {
 } from "./notification-types";
 import { renderNotificationRequest } from "./notification-channels";
 import { isSafeUpstreamUrl } from "./ssrf";
+import { checkCooldown, recordSent, recordHistory } from "./notification-store";
 
 export {
   CHANNEL_TYPE_LABELS,
@@ -291,23 +292,17 @@ async function ensureConfigLoaded(db: D1Database | Database, env?: WorkerEnv): P
   return cachedConfig ?? parseNotificationsConfig(null);
 }
 
-// ==================== 冷却去重 ====================
-
-const lastSentAt = new Map<string, number>();
-
-function isCoolingDown(eventKey: string, cooldownMs: number): boolean {
-  const last = lastSentAt.get(eventKey);
-  if (last && Date.now() - last < cooldownMs) return true;
-  lastSentAt.set(eventKey, Date.now());
-  return false;
-}
+// ==================== 冷却去重（v2：持久化到 DB） ====================
+//
+// 冷却状态从 notification_cooldowns 表读取/写入，多实例部署保持一致。
+// 原进程内 lastSentAt Map 已弃用（v1 行为），由 v2 store 替代。
+// 详见 src/lib/notification-store.ts。
 
 // 测试钩子
 export function resetNotifierForTests(): void {
   cachedConfig = null;
   configLoadedAt = 0;
   loadingPromise = null;
-  lastSentAt.clear();
 }
 
 // ==================== 发送 ====================
@@ -356,11 +351,16 @@ export async function sendNotification(
       backup_failed: config.events.backupFailed,
     };
     if (!eventEnabled[event]) return;
-    if (isCoolingDown(`${event}:${opts.eventKey ?? ""}`, config.cooldownMinutes * 60_000)) return;
 
     // backup 类型通道不走 sendNotification — 由 src/lib/backup.ts 内部直接处理
     const notifiableChannels = config.channels.filter((c) => c.enabled && c.type !== "backup");
     if (notifiableChannels.length === 0) return;
+
+    // 持久化冷却去重：DB 写一次（失败仅 console.error，不阻塞）；同实例下轮调用
+    // 都会因 checkCooldown 命中而被拦截；多实例部署同步生效
+    const cooldownKey = `${event}:${opts.eventKey ?? ""}`;
+    if (await checkCooldown(cooldownKey, config.cooldownMinutes)) return;
+    await recordSent(cooldownKey);
 
     await Promise.allSettled(
       notifiableChannels.map(async (channel) => {
@@ -369,8 +369,34 @@ export async function sendNotification(
           console.error(`[notifier] 通道 ${channel.name} 类型 ${channel.type} 渲染失败，跳过`);
           return;
         }
+        // 二次 SSRF 校验：parse 阶段已拦截一次，但管理员可能在缓存窗口内通过
+        // 外部直接改 DB 注入内网 URL；这里再次确认防御
+        const ssrf = isSafeUpstreamUrl(rendered.url);
+        if (!ssrf.safe) {
+          console.error(
+            `[notifier] 通道 ${channel.name} 的 URL 在发送时拦截（${ssrf.reason ?? "不安全"}）`
+          );
+          await recordHistory({
+            channelId: channel.id,
+            channelName: channel.name,
+            channelType: channel.type,
+            event,
+            title,
+            body,
+            status: "failed",
+            httpStatus: null,
+            error: `SSRF 拦截: ${ssrf.reason ?? "内网或本地地址"}`,
+            sizeBytes: 0,
+            durationMs: 0,
+          });
+          return;
+        }
+        const start = Date.now();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+        let status: "success" | "failed" = "failed";
+        let httpStatus: number | null = null;
+        let error: string | null = null;
         try {
           const res = await fetch(rendered.url, {
             method: "POST",
@@ -378,17 +404,41 @@ export async function sendNotification(
             body: rendered.body,
             signal: controller.signal,
           });
+          // 必须消费响应体释放 keep-alive 连接（同 backup / upstream-proxy 修复）
+          if (typeof res.arrayBuffer === "function") {
+            try {
+              await res.arrayBuffer();
+            } catch {
+              await res.body?.cancel().catch(() => {});
+            }
+          }
+          httpStatus = res.status;
           if (!res.ok) {
+            error = `HTTP ${res.status}`;
             console.error(`[notifier] 通道 ${channel.name} 返回 HTTP ${res.status}`);
+          } else {
+            status = "success";
           }
         } catch (err) {
-          console.error(
-            `[notifier] 通道 ${channel.name} 发送失败:`,
-            err instanceof Error ? err.message : String(err)
-          );
+          error = err instanceof Error ? err.message : String(err);
+          console.error(`[notifier] 通道 ${channel.name} 发送失败:`, error);
         } finally {
           clearTimeout(timer);
         }
+        // 写发送历史（旁路：失败仅 console.error，不影响其他通道）
+        await recordHistory({
+          channelId: channel.id,
+          channelName: channel.name,
+          channelType: channel.type,
+          event,
+          title,
+          body,
+          status,
+          httpStatus,
+          error,
+          sizeBytes: new TextEncoder().encode(rendered.body).length,
+          durationMs: Date.now() - start,
+        });
       })
     );
   } catch (err) {

@@ -15,6 +15,8 @@
 
 import { createDb } from "@/lib/prisma";
 import { sendNotification } from "@/lib/notifier";
+import { checkQuotaNotified, markQuotaNotified } from "@/lib/notification-store";
+import type { QuotaThreshold } from "@/lib/notification-types";
 import type { WorkerEnv } from "./config";
 import { incrementCallLimitCount } from "./auth";
 
@@ -109,23 +111,22 @@ export function bufferRequestLog(entry: Omit<PendingLogEntry, "id" | "createdAt"
 
 // ==================== 内部实现 ====================
 
-/** 已触发过 80% 配额告警的 Key（进程生命周期去重，重启后最多重报一次） */
-const quotaNotifiedKeys = new Set<string>();
-
 /**
- * 配额阈值检测：tokenLimit 或 callLimit 用量达 80% 时触发一次配额告警。
+ * 配额阈值检测：tokenLimit 或 callLimit 用量达 80/95/100% 时触发一次配额告警。
  * 行数据来自 flush 的 update 回读，零额外查询；未设限额的维度跳过。
+ *
+ * 多档位（80/95/100）持久化去重：每档单独记录到 quota_notified 表，
+ * 跨实例/重启一致；不再用进程内 Set（双实例部署会重复发送）。
  */
-function checkQuotaThreshold(row: {
+async function checkQuotaThreshold(row: {
   id: string;
   name?: string | null;
   tokenLimit?: number | null;
   usedTokens?: number | bigint;
   callLimit?: number | null;
   callUsed?: number;
-}): void {
+}): Promise<void> {
   try {
-    if (quotaNotifiedKeys.has(row.id)) return;
     const tokenRatio =
       row.tokenLimit && row.tokenLimit > 0
         ? Number(row.usedTokens ?? 0) / row.tokenLimit
@@ -134,16 +135,22 @@ function checkQuotaThreshold(row: {
       row.callLimit && row.callLimit > 0
         ? (row.callUsed ?? 0) / row.callLimit
         : 0;
-    if (tokenRatio < 0.8 && callRatio < 0.8) return;
-    quotaNotifiedKeys.add(row.id);
+    const maxRatio = Math.max(tokenRatio, callRatio);
+    if (maxRatio < 0.8) return;
+
+    // 按 tokenRatio / callRatio 实际跨越的最高档位发一次（80/95/100 互不重复）
+    const threshold: QuotaThreshold = maxRatio >= 1 ? 100 : maxRatio >= 0.95 ? 95 : 80;
+    if (await checkQuotaNotified(row.id, threshold)) return;
+    await markQuotaNotified(row.id, threshold);
+
     const parts: string[] = [];
-    if (tokenRatio >= 0.8) parts.push(`Token ${Math.round(tokenRatio * 100)}%`);
-    if (callRatio >= 0.8) parts.push(`调用次数 ${Math.round(callRatio * 100)}%`);
+    if (tokenRatio >= threshold / 100) parts.push(`Token ${Math.round(tokenRatio * 100)}%`);
+    if (callRatio >= threshold / 100) parts.push(`调用次数 ${Math.round(callRatio * 100)}%`);
     void sendNotification(
       "quota_threshold",
       `API Key 用量预警: ${row.name ?? row.id}`,
-      `Key "${row.name ?? row.id}" 已用 ${parts.join("、")}，接近配置上限`,
-      { eventKey: row.id }
+      `Key "${row.name ?? row.id}" 已用 ${parts.join("、")}，达到 ${threshold}% 阈值`,
+      { eventKey: `${row.id}:${threshold}` }
     );
   } catch {
     // 阈值检测异常不影响用量写入主流程
@@ -222,8 +229,8 @@ async function flushNow(): Promise<void> {
               updatedAt: Math.floor(Date.now() / 1000),
             },
           })
-          // 配额阈值告警：update 回读整行，token/call 任一达 80% 即边沿触发
-          // （进程内 Set 去重，重启后最多重报一次）；失败路径不影响原 catch
+          // 配额阈值告警：update 回读整行，token/call 任一达 80/95/100% 即边沿触发
+          // （DB quota_notified 表持久化去重，跨实例/重启一致）；失败路径不影响原 catch
           .then((row) => checkQuotaThreshold(row))
           .catch((err) => {
             console.error(
