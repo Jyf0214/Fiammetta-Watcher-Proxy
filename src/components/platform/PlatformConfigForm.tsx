@@ -485,15 +485,21 @@ export function PlatformConfigForm({
                       />
                     ))}
                   </div>
-                  <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3 flex gap-2">
-                    <Button variant="default" onClick={onAddKey} icon={<Plus size={14} />} block size="sm">
+                  <div className="border-t border-zinc-200/70 dark:border-zinc-700/50 pt-3 flex flex-col sm:flex-row gap-2">
+                    <Button
+                      variant="default"
+                      onClick={onAddKey}
+                      icon={<Plus size={14} />}
+                      className="sm:flex-1 min-w-0"
+                      size="sm"
+                    >
                       {t("addKey")}
                     </Button>
                     <Button
                       variant="ghost"
                       onClick={() => setBatchModalOpen(true)}
                       icon={<ClipboardPaste size={14} />}
-                      block
+                      className="sm:flex-1 min-w-0"
                       size="sm"
                     >
                       {t("batchAddKey")}
