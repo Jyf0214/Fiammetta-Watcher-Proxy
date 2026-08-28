@@ -316,7 +316,7 @@ export async function recordFailure(
     await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
     // 告警：半开探测失败回到熔断（旁路发送，失败静默）
     void sendNotification(
-      "platform_open",
+      "platform_circuit_tripped",
       `平台熔断（半开失败）: ${platformId}`,
       `平台 ${platformId} 半开探测失败，重新进入熔断，冷却至 ${new Date(entry.cooldownEnd).toISOString()}`,
       { db, env, eventKey: platformId }
@@ -335,7 +335,7 @@ export async function recordFailure(
     await updatePlatformStatus(platformId, "down", entry.failureCount, entry.cooldownEnd, db, env);
     // 告警：连续失败达到阈值触发熔断
     void sendNotification(
-      "platform_open",
+      "platform_circuit_tripped",
       `平台熔断: ${platformId}`,
       `平台 ${platformId} 连续失败 ${entry.failureCount} 次达到阈值，熔断至 ${new Date(entry.cooldownEnd).toISOString()}`,
       { db, env, eventKey: platformId }

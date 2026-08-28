@@ -18,55 +18,163 @@ import { getConfig } from "../../worker/src/config";
 import type { WorkerEnv } from "../../worker/src/config";
 import { getBatchedWriterBindings } from "../../worker/src/batched-writer";
 import type { Database } from "@/lib/prisma";
+import {
+  CHANNEL_TYPE_LABELS,
+  COOLDOWN_MAX,
+  COOLDOWN_MIN,
+  DEFAULT_EVENTS,
+  FALLBACK_CONFIG,
+  HEADER_KEY_MAX_LENGTH,
+  HEADER_VALUE_MAX_LENGTH,
+  MAX_CHANNELS,
+  NAME_MAX_LENGTH,
+  OPTIONS_KEY_MAX_LENGTH,
+  OPTIONS_VALUE_MAX_LENGTH,
+  RETENTION_MAX,
+  RETENTION_MIN,
+  URL_MAX_LENGTH,
+  type ChannelType,
+  type EventConfig,
+  type NotificationChannel,
+  type NotificationEvent,
+  type NotificationsConfig,
+} from "./notification-types";
+import { renderNotificationRequest } from "./notification-channels";
+import { isSafeUpstreamUrl } from "./ssrf";
+
+export {
+  CHANNEL_TYPE_LABELS,
+  DEFAULT_EVENTS,
+  FALLBACK_CONFIG,
+  MAX_CHANNELS,
+  URL_MAX_LENGTH,
+  type ChannelType,
+  type EventConfig,
+  type NotificationChannel,
+  type NotificationEvent,
+  type NotificationsConfig,
+};
 
 /** configs 表中通知配置的存储键 */
 export const NOTIFICATIONS_CONFIG_KEY = "system:notifications";
 
-/** 通知事件类型 */
-export type NotificationEvent =
-  | "key_banned"
-  | "platform_open"
-  | "platform_degraded"
-  | "all_unavailable"
-  | "quota_threshold";
-
-interface NotificationsEventsConfig {
-  keyBanned: boolean;
-  platformOpen: boolean;
-  platformDegraded: boolean;
-  allUnavailable: boolean;
-  quotaThreshold: boolean;
-}
-
-interface NotificationChannel {
-  name: string;
-  url: string;
-}
-
-export interface NotificationsConfig {
-  enabled: boolean;
-  channels: NotificationChannel[];
-  events: NotificationsEventsConfig;
-  /** 同类事件冷却分钟数（1-1440），默认 10 */
-  cooldownMinutes: number;
-}
-
-const DEFAULT_EVENTS: NotificationsEventsConfig = {
-  keyBanned: true,
-  platformOpen: true,
-  platformDegraded: false,
-  allUnavailable: true,
-  quotaThreshold: true,
+/** 旧版本事件名映射（兼容已保存的旧配置） */
+const LEGACY_EVENT_NAME_MAP: Record<string, keyof EventConfig> = {
+  platform_open: "platformCircuitTripped",
+  platform_recovered: "platformRecovered",
+  key_manually_disabled: "keyManuallyDisabled",
+  backup_failed: "backupFailed",
 };
 
-const MAX_CHANNELS = 20;
-const URL_MAX_LENGTH = 2048;
+const VALID_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set<ChannelType>([
+  "telegram",
+  "bark",
+  "serverchan",
+  "lark",
+  "wecom",
+  "slack",
+  "generic",
+  "backup",
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function clampString(value: unknown, max: number, fallback = ""): string {
+  if (typeof value !== "string") return fallback;
+  return value.trim().slice(0, max);
+}
+
+function parseStringMap(
+  value: unknown,
+  keyMax: number,
+  valueMax: number,
+  parentName: string,
+  strict: boolean
+): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== "string") {
+      const msg = `通道 ${parentName} 的 ${k} 不是字符串，已丢弃`;
+      if (strict) throw new Error(msg);
+      console.warn(`[notifier] ${msg}`);
+      continue;
+    }
+    const kk = k.trim().slice(0, keyMax);
+    if (!kk) continue;
+    out[kk] = v.slice(0, valueMax);
+  }
+  return out;
+}
+
+function parseChannel(
+  item: unknown,
+  index: number,
+  strict: boolean
+): NotificationChannel | null {
+  if (typeof item !== "object" || item === null) {
+    if (strict) throw new Error("通道条目必须是对象");
+    return null;
+  }
+  const c = item as Record<string, unknown>;
+  const rawType = typeof c.type === "string" ? c.type.trim() : "generic";
+  if (!VALID_CHANNEL_TYPES.has(rawType as ChannelType)) {
+    if (strict) throw new Error(`通道 #${index + 1} 的类型 ${rawType} 非法`);
+    return null;
+  }
+  const type = rawType as ChannelType;
+  const name = clampString(c.name, NAME_MAX_LENGTH);
+  const url = typeof c.url === "string" ? c.url.trim() : "";
+  const idRaw = typeof c.id === "string" ? c.id.trim() : "";
+  const id = UUID_RE.test(idRaw) ? idRaw : crypto.randomUUID();
+  // enabled=false 通道允许 url 暂时为空（占位禁用态），strict 模式下也允许；
+  // 启用态必须 url 非空且通过 http(s) + SSRF 校验
+  const enabled = c.enabled === undefined ? true : c.enabled === true;
+  if (!url && enabled) {
+    if (strict) throw new Error(`通道 #${index + 1} 的 URL 不能为空`);
+    return null;
+  }
+  if (url) {
+    if (url.length > URL_MAX_LENGTH || !/^https?:\/\//i.test(url)) {
+      if (strict) throw new Error(`通道 ${name || url.slice(0, 32)} 的 URL 非法（仅支持 http/https）`);
+      return null;
+    }
+    // SSRF 防御（复用 src/lib/ssrf.ts 同步校验）：拦截指向内网/云元数据/localhost 的 URL
+    // 仅对启用通道生效——禁用通道即便内网也不发起请求，无实际风险
+    if (enabled) {
+      const ssrf = isSafeUpstreamUrl(url);
+      if (!ssrf.safe) {
+        if (strict) throw new Error(`通道 ${name || url.slice(0, 32)} 的 URL 不安全：${ssrf.reason ?? "内网或本地地址"}`);
+        console.warn(`[notifier] 通道 ${name || url.slice(0, 32)} 的 URL 跳过（${ssrf.reason ?? "内网或本地地址"}）`);
+        return null;
+      }
+    }
+  }
+  const channelLabel = name || `channel-${index + 1}`;
+  const options = parseStringMap(c.options, OPTIONS_KEY_MAX_LENGTH, OPTIONS_VALUE_MAX_LENGTH, channelLabel, strict);
+  const headers = parseStringMap(c.headers, HEADER_KEY_MAX_LENGTH, HEADER_VALUE_MAX_LENGTH, channelLabel, strict);
+  return {
+    id,
+    name: channelLabel,
+    type,
+    url,
+    enabled,
+    options,
+    headers,
+  };
+}
 
 /**
  * 解析并校验通知配置。
  *
  * 写入路径（管理 API PUT）strict=true 抛错拒绝；读取路径宽松——非法字段
  * 回退默认值，不因历史脏数据阻断请求路径。
+ *
+ * 旧版本（v1）配置自动迁移：
+ * - 通道缺 type → generic
+ * - 通道缺 id → 生成 uuid
+ * - 通道缺 enabled/options/headers → 默认值
+ * - events.platformOpen → events.platformCircuitTripped
  */
 export function parseNotificationsConfig(
   raw: string | null | undefined,
@@ -74,10 +182,9 @@ export function parseNotificationsConfig(
 ): NotificationsConfig {
   const strict = opts.strict ?? false;
   const fallback: NotificationsConfig = {
-    enabled: false,
+    ...FALLBACK_CONFIG,
+    events: { ...FALLBACK_CONFIG.events },
     channels: [],
-    events: { ...DEFAULT_EVENTS },
-    cooldownMinutes: 10,
   };
   if (raw == null || raw === "") return fallback;
   let data: unknown;
@@ -100,41 +207,41 @@ export function parseNotificationsConfig(
     return fallback;
   }
   const channels: NotificationChannel[] = [];
-  for (const item of channelsRaw) {
-    if (typeof item !== "object" || item === null) {
-      if (strict) throw new Error("通道条目必须是对象");
-      continue;
-    }
-    const c = item as Record<string, unknown>;
-    const name = typeof c.name === "string" ? c.name.trim().slice(0, 100) : "";
-    const url = typeof c.url === "string" ? c.url.trim() : "";
-    if (!url) {
-      if (strict) throw new Error("通道 URL 不能为空");
-      continue;
-    }
-    if (url.length > URL_MAX_LENGTH || !/^https?:\/\//i.test(url)) {
-      if (strict) throw new Error(`通道 ${name || url.slice(0, 32)} 的 URL 非法（仅支持 http/https）`);
-      continue;
-    }
-    channels.push({ name: name || `channel-${channels.length + 1}`, url });
+  for (let i = 0; i < channelsRaw.length; i++) {
+    const ch = parseChannel(channelsRaw[i], i, strict);
+    if (ch) channels.push(ch);
   }
 
   const eventsRaw = typeof v.events === "object" && v.events !== null ? (v.events as Record<string, unknown>) : {};
-  const events: NotificationsEventsConfig = {
-    keyBanned: typeof eventsRaw.keyBanned === "boolean" ? eventsRaw.keyBanned : DEFAULT_EVENTS.keyBanned,
-    platformOpen: typeof eventsRaw.platformOpen === "boolean" ? eventsRaw.platformOpen : DEFAULT_EVENTS.platformOpen,
-    platformDegraded: typeof eventsRaw.platformDegraded === "boolean" ? eventsRaw.platformDegraded : DEFAULT_EVENTS.platformDegraded,
-    allUnavailable: typeof eventsRaw.allUnavailable === "boolean" ? eventsRaw.allUnavailable : DEFAULT_EVENTS.allUnavailable,
-    quotaThreshold: typeof eventsRaw.quotaThreshold === "boolean" ? eventsRaw.quotaThreshold : DEFAULT_EVENTS.quotaThreshold,
-  };
+  const events: EventConfig = { ...DEFAULT_EVENTS };
+  for (const [key, mapped] of Object.entries(LEGACY_EVENT_NAME_MAP)) {
+    if (typeof eventsRaw[key] === "boolean") {
+      (events as unknown as Record<string, unknown>)[mapped] = eventsRaw[key];
+    }
+  }
+  for (const [k, v] of Object.entries(events)) {
+    if (typeof eventsRaw[k] === "boolean") {
+      (events as unknown as Record<string, boolean>)[k] = eventsRaw[k];
+    }
+  }
 
-  let cooldownMinutes = 10;
+  let cooldownMinutes = FALLBACK_CONFIG.cooldownMinutes;
   if (v.cooldownMinutes !== undefined) {
     const n = Number(v.cooldownMinutes);
-    if (!Number.isFinite(n) || n < 1 || n > 1440) {
-      if (strict) throw new Error("cooldownMinutes 必须是 1-1440 的数字");
+    if (!Number.isFinite(n) || n < COOLDOWN_MIN || n > COOLDOWN_MAX) {
+      if (strict) throw new Error(`cooldownMinutes 必须是 ${COOLDOWN_MIN}-${COOLDOWN_MAX} 的数字`);
     } else {
       cooldownMinutes = Math.floor(n);
+    }
+  }
+
+  let backupRetentionDays = FALLBACK_CONFIG.backupRetentionDays;
+  if (v.backupRetentionDays !== undefined) {
+    const n = Number(v.backupRetentionDays);
+    if (!Number.isFinite(n) || n < RETENTION_MIN || n > RETENTION_MAX) {
+      if (strict) throw new Error(`backupRetentionDays 必须是 ${RETENTION_MIN}-${RETENTION_MAX} 的数字`);
+    } else {
+      backupRetentionDays = Math.floor(n);
     }
   }
 
@@ -143,6 +250,7 @@ export function parseNotificationsConfig(
     channels,
     events,
     cooldownMinutes,
+    backupRetentionDays,
   };
 }
 
@@ -236,36 +344,38 @@ export async function sendNotification(
     }
 
     const config = await ensureConfigLoaded(db, env);
-    if (!config.enabled || config.channels.length === 0) return;
+    if (!config.enabled) return;
     const eventEnabled: Record<NotificationEvent, boolean> = {
       key_banned: config.events.keyBanned,
-      platform_open: config.events.platformOpen,
+      platform_circuit_tripped: config.events.platformCircuitTripped,
+      platform_recovered: config.events.platformRecovered,
       platform_degraded: config.events.platformDegraded,
       all_unavailable: config.events.allUnavailable,
       quota_threshold: config.events.quotaThreshold,
+      key_manually_disabled: config.events.keyManuallyDisabled,
+      backup_failed: config.events.backupFailed,
     };
     if (!eventEnabled[event]) return;
     if (isCoolingDown(`${event}:${opts.eventKey ?? ""}`, config.cooldownMinutes * 60_000)) return;
 
-    const payload = JSON.stringify({
-      event,
-      title,
-      body,
-      timestamp: Math.floor(Date.now() / 1000),
-    });
+    // backup 类型通道不走 sendNotification — 由 src/lib/backup.ts 内部直接处理
+    const notifiableChannels = config.channels.filter((c) => c.enabled && c.type !== "backup");
+    if (notifiableChannels.length === 0) return;
 
     await Promise.allSettled(
-      config.channels.map(async (channel) => {
+      notifiableChannels.map(async (channel) => {
+        const rendered = renderNotificationRequest({ title, body, event, channel });
+        if (!rendered) {
+          console.error(`[notifier] 通道 ${channel.name} 类型 ${channel.type} 渲染失败，跳过`);
+          return;
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
         try {
-          const res = await fetch(channel.url, {
+          const res = await fetch(rendered.url, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "User-Agent": "FWP-Notifier/1.0",
-            },
-            body: payload,
+            headers: rendered.headers,
+            body: rendered.body,
             signal: controller.signal,
           });
           if (!res.ok) {

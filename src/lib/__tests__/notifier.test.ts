@@ -31,8 +31,9 @@ function validConfig(overrides: Record<string, unknown> = {}): Record<string, un
   return {
     enabled: true,
     channels: [{ name: "tg", url: "https://example.com/hook" }],
-    events: { keyBanned: true, platformOpen: true, platformDegraded: false, allUnavailable: true, quotaThreshold: true },
+    events: { keyBanned: true, platformCircuitTripped: true, platformRecovered: true, platformDegraded: false, allUnavailable: true, quotaThreshold: true, keyManuallyDisabled: false, backupFailed: true },
     cooldownMinutes: 10,
+    backupRetentionDays: 30,
     ...overrides,
   };
 }
@@ -43,6 +44,7 @@ describe("parseNotificationsConfig", () => {
     expect(c.enabled).toBe(false);
     expect(c.channels).toEqual([]);
     expect(c.cooldownMinutes).toBe(10);
+    expect(c.backupRetentionDays).toBe(30);
     expect(c.events.keyBanned).toBe(true);
     expect(c.events.platformDegraded).toBe(false);
   });
@@ -50,7 +52,28 @@ describe("parseNotificationsConfig", () => {
   it("解析合法配置", () => {
     const c = parseNotificationsConfig(JSON.stringify(validConfig()));
     expect(c.enabled).toBe(true);
-    expect(c.channels).toEqual([{ name: "tg", url: "https://example.com/hook" }]);
+    expect(c.channels).toHaveLength(1);
+    expect(c.channels[0].name).toBe("tg");
+    expect(c.channels[0].type).toBe("generic");
+    expect(c.channels[0].url).toBe("https://example.com/hook");
+    expect(c.channels[0].enabled).toBe(true);
+    expect(c.channels[0].options).toEqual({});
+    expect(c.channels[0].headers).toEqual({});
+    expect(c.channels[0].id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("v1 旧配置自动迁移：缺 type/id/options/headers → 默认值", () => {
+    const old = JSON.stringify({
+      enabled: true,
+      channels: [{ name: "tg", url: "https://example.com/hook" }],
+      events: { keyBanned: true, platformOpen: true, platformDegraded: false, allUnavailable: true, quotaThreshold: true },
+      cooldownMinutes: 10,
+    });
+    const c = parseNotificationsConfig(old);
+    expect(c.channels[0].type).toBe("generic");
+    expect(c.channels[0].id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(c.channels[0].enabled).toBe(true);
+    expect(c.events.platformCircuitTripped).toBe(true);
   });
 
   it("非法 JSON：strict 抛错，宽松回退默认", () => {
@@ -64,6 +87,20 @@ describe("parseNotificationsConfig", () => {
     expect(parseNotificationsConfig(bad).channels.map((c) => c.name)).toEqual(["y"]);
   });
 
+  it("非法 channel.type：strict 抛错，宽松跳过该通道", () => {
+    const bad = JSON.stringify(validConfig({ channels: [{ name: "x", type: "rocket", url: "https://x" }, { name: "y", url: "https://ok" }] }));
+    expect(() => parseNotificationsConfig(bad, { strict: true })).toThrow(/rocket/);
+    expect(parseNotificationsConfig(bad).channels.map((c) => c.name)).toEqual(["y"]);
+  });
+
+  it("所有 8 种 channel.type 合法", () => {
+    const types = ["telegram", "bark", "serverchan", "lark", "wecom", "slack", "generic", "backup"];
+    for (const t of types) {
+      const c = parseNotificationsConfig(JSON.stringify(validConfig({ channels: [{ name: t, type: t, url: "https://x" }] })));
+      expect(c.channels[0].type).toBe(t);
+    }
+  });
+
   it("通道数超上限拒绝", () => {
     const channels = Array.from({ length: 21 }, (_, i) => ({ name: `c${i}`, url: "https://x" }));
     expect(() => parseNotificationsConfig(JSON.stringify(validConfig({ channels })), { strict: true })).toThrow(/上限/);
@@ -75,11 +112,86 @@ describe("parseNotificationsConfig", () => {
     expect(parseNotificationsConfig(bad).cooldownMinutes).toBe(10);
   });
 
+  it("backupRetentionDays 越界：strict 抛错，宽松回退默认", () => {
+    const bad = JSON.stringify(validConfig({ backupRetentionDays: 0 }));
+    expect(() => parseNotificationsConfig(bad, { strict: true })).toThrow();
+    expect(parseNotificationsConfig(bad).backupRetentionDays).toBe(30);
+  });
+
   it("serialize 往返一致", () => {
-    const raw = JSON.stringify(validConfig());
-    expect(serializeNotificationsConfig(parseNotificationsConfig(raw))).toBe(
-      serializeNotificationsConfig(parseNotificationsConfig(raw))
-    );
+    // 给通道预填稳定 id 避免每次 parse 重新生成导致字符串比较失败
+    const raw = JSON.stringify(validConfig({
+      channels: [{
+        id: "11111111-1111-1111-1111-111111111111",
+        name: "tg", type: "generic", url: "https://example.com/hook",
+      }],
+    }));
+    const first = serializeNotificationsConfig(parseNotificationsConfig(raw));
+    const second = serializeNotificationsConfig(parseNotificationsConfig(raw));
+    expect(first).toBe(second);
+  });
+
+  it("options/headers 字符串裁剪到长度上限", () => {
+    const longValue = "x".repeat(2000);
+    const c = parseNotificationsConfig(JSON.stringify(validConfig({
+      channels: [{
+        name: "tg", type: "telegram", url: "https://x",
+        options: { chatId: "123" },
+        headers: { "X-Token": "abc" },
+      }],
+    })));
+    expect(c.channels[0].options.chatId).toBe("123");
+    expect(c.channels[0].headers["X-Token"]).toBe("abc");
+    // 故意传长字符串验证裁剪
+    const c2 = parseNotificationsConfig(JSON.stringify(validConfig({
+      channels: [{ name: "tg", type: "telegram", url: "https://x", options: { chatId: longValue } }],
+    })));
+    expect(c2.channels[0].options.chatId!.length).toBeLessThanOrEqual(1024);
+  });
+
+  it("options/headers 含非字符串元素：strict 抛错，宽松丢弃并告警", () => {
+    const bad = JSON.stringify(validConfig({
+      channels: [{ name: "tg", type: "telegram", url: "https://x", options: { chatId: 12345 } }],
+    }));
+    expect(() => parseNotificationsConfig(bad, { strict: true })).toThrow(/chatId/);
+    // 宽松模式：丢弃非字符串元素
+    const c = parseNotificationsConfig(bad);
+    expect(c.channels[0].options.chatId).toBeUndefined();
+  });
+
+  it("SSRF：enabled 通道指向内网/localhost/云元数据：strict 抛错，宽松跳过", () => {
+    const badUrls = [
+      "http://10.0.0.1/hook",
+      "http://192.168.1.1/hook",
+      "http://127.0.0.1:8000/hook",
+      "http://169.254.169.254/latest/meta-data",
+      "http://localhost/hook",
+      "http://[::1]/hook",
+    ];
+    for (const url of badUrls) {
+      const bad = JSON.stringify(validConfig({ channels: [{ name: "x", type: "generic", url }] }));
+      expect(() => parseNotificationsConfig(bad, { strict: true }), `url=${url}`).toThrow(/不安全|内网/);
+      const c = parseNotificationsConfig(bad);
+      expect(c.channels, `url=${url}`).toEqual([]);
+    }
+  });
+
+  it("SSRF：disabled 通道允许指向内网（占位禁用，不实际请求）", () => {
+    const c = parseNotificationsConfig(JSON.stringify(validConfig({
+      channels: [{ name: "x", type: "generic", url: "http://127.0.0.1/hook", enabled: false }],
+    })));
+    expect(c.channels).toHaveLength(1);
+    expect(c.channels[0].url).toBe("http://127.0.0.1/hook");
+    expect(c.channels[0].enabled).toBe(false);
+  });
+
+  it("disabled 通道允许 url 暂时为空（占位禁用态）", () => {
+    const c = parseNotificationsConfig(JSON.stringify(validConfig({
+      channels: [{ name: "x", type: "generic", url: "", enabled: false }],
+    })));
+    expect(c.channels).toHaveLength(1);
+    expect(c.channels[0].url).toBe("");
+    expect(c.channels[0].enabled).toBe(false);
   });
 });
 
@@ -104,7 +216,7 @@ describe("sendNotification", () => {
 
   it("事件开关关闭不发请求", async () => {
     getConfigMock.mockResolvedValue(
-      JSON.stringify(validConfig({ events: { keyBanned: false, platformOpen: true, platformDegraded: false, allUnavailable: true, quotaThreshold: true } }))
+      JSON.stringify(validConfig({ events: { keyBanned: false, platformCircuitTripped: true, platformRecovered: true, platformDegraded: false, allUnavailable: true, quotaThreshold: true, keyManuallyDisabled: false, backupFailed: true } }))
     );
     await sendNotification("key_banned", "t", "b", { db: {} as never });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -113,20 +225,46 @@ describe("sendNotification", () => {
   it("启用时按配置 POST 到所有通道，payload 含 event/title/body/timestamp", async () => {
     getConfigMock.mockResolvedValue(
       JSON.stringify(validConfig({ channels: [
-        { name: "a", url: "https://a.example/hook" },
-        { name: "b", url: "https://b.example/hook" },
+        { name: "a", type: "generic", url: "https://a.example/hook" },
+        { name: "b", type: "generic", url: "https://b.example/hook" },
       ] }))
     );
-    await sendNotification("platform_open", "标题", "正文", { db: {} as never });
+    await sendNotification("platform_circuit_tripped", "标题", "正文", { db: {} as never });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://a.example/hook");
     expect(init.method).toBe("POST");
     const payload = JSON.parse(init.body);
-    expect(payload.event).toBe("platform_open");
+    expect(payload.event).toBe("platform_circuit_tripped");
     expect(payload.title).toBe("标题");
     expect(payload.body).toBe("正文");
     expect(typeof payload.timestamp).toBe("number");
+  });
+
+  it("backup 类型通道不参与通知发送（不调 fetch）", async () => {
+    getConfigMock.mockResolvedValue(
+      JSON.stringify(validConfig({ channels: [
+        { name: "notif", type: "generic", url: "https://a.example/hook" },
+        { name: "bk", type: "backup", url: "https://b.example/backup" },
+      ] }))
+    );
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://a.example/hook");
+  });
+
+  it("禁用通道（enabled=false）不参与发送", async () => {
+    getConfigMock.mockResolvedValue(
+      JSON.stringify(validConfig({ channels: [
+        { name: "on", type: "generic", url: "https://a.example/hook", enabled: true },
+        { name: "off", type: "generic", url: "https://b.example/hook", enabled: false },
+      ] }))
+    );
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://a.example/hook");
   });
 
   it("同类事件在冷却窗口内去重（不同 eventKey 互不影响）", async () => {

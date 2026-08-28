@@ -209,3 +209,51 @@ CREATE INDEX IF NOT EXISTS "audit_logs_created_at_idx" ON "audit_logs"("created_
 -- 登录限流"先写后查"与预检按 action+ip+createdAt 查询，复合索引避免全表扫描
 CREATE INDEX IF NOT EXISTS "audit_logs_action_ip_created_at_idx" ON "audit_logs"("action", "ip", "created_at");
 
+-- CreateTable
+-- 事件冷却去重（替换原进程内 lastSentAt Map，多实例一致）
+CREATE TABLE IF NOT EXISTS "notification_cooldowns" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "event_key" TEXT NOT NULL,
+    "last_sent_at" INTEGER NOT NULL DEFAULT 0,
+    "updated_at" INTEGER NOT NULL DEFAULT 0
+);
+
+-- CreateTable
+-- Key 用量配额一次性提醒（80/95/100 档位分别记录，重启/多实例不重发）
+CREATE TABLE IF NOT EXISTS "quota_notified" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "key_id" TEXT NOT NULL,
+    "threshold" INTEGER NOT NULL,
+    "notified_at" INTEGER NOT NULL DEFAULT 0
+);
+
+-- CreateTable
+-- 通知 / 备份发送历史（管理后台"发送历史"页数据源；保留 N 天由 cron 清理）
+CREATE TABLE IF NOT EXISTS "notification_history" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "channel_id" TEXT NOT NULL,
+    "channel_name" TEXT NOT NULL,
+    "channel_type" TEXT NOT NULL,
+    "event" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "http_status" INTEGER,
+    "error" TEXT,
+    "size_bytes" INTEGER NOT NULL DEFAULT 0,
+    "duration_ms" INTEGER NOT NULL DEFAULT 0,
+    "sent_at" INTEGER NOT NULL DEFAULT 0
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "notification_cooldowns_event_key_key" ON "notification_cooldowns"("event_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "quota_notified_key_id_threshold_key" ON "quota_notified"("key_id", "threshold");
+CREATE INDEX IF NOT EXISTS "quota_notified_key_id_idx" ON "quota_notified"("key_id");
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "notification_history_sent_at_idx" ON "notification_history"("sent_at");
+CREATE INDEX IF NOT EXISTS "notification_history_channel_id_sent_at_idx" ON "notification_history"("channel_id", "sent_at");
+CREATE INDEX IF NOT EXISTS "notification_history_event_sent_at_idx" ON "notification_history"("event", "sent_at");
+

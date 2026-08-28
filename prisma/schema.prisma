@@ -208,3 +208,49 @@ model auditLogs {
   @@index([action, ip, createdAt])
   @@map("audit_logs")
 }
+
+// ==================== 通知系统（v2 持久化去重 + 发送历史） ====================
+
+// 事件冷却去重（替换原进程内 lastSentAt Map，多实例一致）
+model notificationCooldowns {
+  id        String @id
+  eventKey  String @unique @map("event_key")
+  lastSentAt Int   @default(0) @map("last_sent_at")
+  updatedAt Int    @default(0) @map("updated_at")
+
+  @@map("notification_cooldowns")
+}
+
+// Key 用量配额一次性提醒（80/95/100 档位分别记录，重启/多实例不重发）
+model quotaNotified {
+  id        String @id
+  keyId     String @map("key_id")
+  threshold Int    @map("threshold")
+  notifiedAt Int   @default(0) @map("notified_at")
+
+  @@unique([keyId, threshold])
+  @@index([keyId])
+  @@map("quota_notified")
+}
+
+// 通知 / 备份发送历史（管理后台"发送历史"页数据源；保留 N 天由 cron 清理）
+model notificationHistory {
+  id         String  @id
+  channelId  String  @map("channel_id")
+  channelName String @map("channel_name")
+  channelType String @map("channel_type")
+  event      String
+  title      String
+  body       String
+  status     String
+  httpStatus Int?    @map("http_status")
+  error      String?
+  sizeBytes  Int     @default(0) @map("size_bytes")
+  durationMs Int     @default(0) @map("duration_ms")
+  sentAt     Int     @default(0) @map("sent_at")
+
+  @@index([sentAt])
+  @@index([channelId, sentAt])
+  @@index([event, sentAt])
+  @@map("notification_history")
+}
