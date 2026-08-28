@@ -34,6 +34,32 @@ export default function AdminLoginPage() {
     };
   }, []);
 
+  // 已登录访问登录页：调 GET /api/admin/auth 验证 cookie 有效性，
+  // 200 即视为已登录，跳转到 /admin（带 cookie 旧/失效则 401 留在登录页）。
+  // 依赖 cookie 而非 localStorage 是因为登录态完全存在 HttpOnly cookie 里
+  // （pages/api/admin/auth.ts setAuthCookie），前端无法读 HttpOnly，仅能
+  // 走 /api/admin/auth 端到端验证。失败路径不展示错误——让登录表单自然呈现
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/auth", { method: "GET" })
+      .then(async (res): Promise<{ success?: boolean; data?: { username?: string } } | null> => {
+        if (!res.ok) return null;
+        return (await res.json()) as { success?: boolean; data?: { username?: string } };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.success && data?.data?.username) {
+          router.replace("/admin");
+        }
+      })
+      .catch(() => {
+        // 网络/服务异常：静默忽略，留在登录页（不影响正常使用）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
   // 登录限流倒计时：每秒刷新剩余秒数，到期自动清除锁定提示
   useEffect(() => {
     if (lockUntil === null) return;
