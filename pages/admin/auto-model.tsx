@@ -47,7 +47,7 @@ const AutoModelRow = memo(function AutoModelRow({
   /** 该模型出现的平台列表（引用由页面 useMemo 保持稳定） */
   platforms: { name: string }[];
   enabled: boolean;
-  /** 保存请求进行中（开关 loading 态） */
+  /** 当前行是否在保存请求进行中（开关 loading 态；行级，避免整页 spinner 闪烁） */
   saving: boolean;
   onToggle: (modelId: string, checked: boolean) => void;
 }) {
@@ -112,7 +112,10 @@ export default function AutoModelPage() {
 
   // 已启用的 modelId 集合（唯一键，同一 modelId 多平台行联动）
   const [enabledModelIds, setEnabledModelIds] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
+  // 行级保存状态：保存请求 in-flight 的 modelId 集合；行内 Switch 仅在所属 modelId 在集合内时显示 loading
+  // 取代单一 boolean saving——避免整页所有行同时进入 loading 态（数千行时整页 spinner 闪烁）
+  const pendingModelIdsRef = useRef<Set<string>>(new Set());
+  const [pendingModelIds, setPendingModelIds] = useState<Set<string>>(new Set());
 
   // 防抖：快速多次切换时合并保存
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -237,7 +240,15 @@ export default function AutoModelPage() {
   /** 保存当前启用集合到 config（函数声明：卸载 effect 在渲染期之后执行，
    *  需提升声明消除 no-use-before-define，闭包捕获与 const 版一致） */
   async function persistEnabledModels(ids: Set<string>) {
-    setSaving(true);
+    // 行级 saving：仅把"本次保存涉及的 modelId"加入集合；行内 Switch 据此显示 loading
+    // 取代全页单一 boolean saving——避免整页所有行同时进入 loading 态闪烁
+    const affected = new Set(
+      (models ?? [])
+        .filter((m) => ids.has(m.modelId))
+        .map((m) => m.modelId)
+    );
+    for (const id of affected) pendingModelIdsRef.current.add(id);
+    setPendingModelIds(new Set(pendingModelIdsRef.current));
     try {
       const visibleIds = new Set(
         (models ?? [])
@@ -280,7 +291,8 @@ export default function AutoModelPage() {
       enabledModelIdsRef.current = rollback;
       setEnabledModelIds(rollback);
     } finally {
-      setSaving(false);
+      for (const id of affected) pendingModelIdsRef.current.delete(id);
+      setPendingModelIds(new Set(pendingModelIdsRef.current));
     }
   };
 
@@ -462,7 +474,7 @@ export default function AutoModelPage() {
                   model={m}
                   platforms={modelPlatforms.get(m.modelId) ?? []}
                   enabled={enabledModelIds.has(m.modelId)}
-                  saving={saving}
+                  saving={pendingModelIds.has(m.modelId)}
                   onToggle={toggleModel}
                 />
               ))}

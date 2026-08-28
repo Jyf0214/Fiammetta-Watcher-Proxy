@@ -274,6 +274,8 @@ export default async function handler(
     res.end();
   } catch (err) {
     console.error("[POST /api/admin/import] 导入数据失败:", err instanceof Error ? err.message : String(err));
+    // 流已 end 后再 write 会抛 ERR_STREAM_WRITE_AFTER_END；守卫避免重复报错
+    if (res.writableEnded) return;
     // 尝试发送错误事件
     try {
       if (!res.headersSent) {

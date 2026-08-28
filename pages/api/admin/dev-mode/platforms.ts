@@ -14,6 +14,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { isDevMode } from "@/lib/dev-mode";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 export default async function handler(
   req: NextApiRequest,
@@ -34,6 +35,8 @@ export default async function handler(
     return;
   }
 
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
+
   const devOn = await isDevMode();
   if (!devOn) {
     res.status(403).json({
@@ -50,33 +53,14 @@ export default async function handler(
     });
 
     // 聚合每个平台的 Key 数量（不返回 Key 明文）
-    const platformIds = platforms.map((p) => p.id);
+    // 平台 Key 存储在 platforms.apiKeys JSON 字段中，按平台维度解析
     const keyCounts = new Map<string, number>();
-    for (const pid of platformIds) keyCounts.set(pid, 0);
-    if (platformIds.length > 0) {
-      // 平台 Key 存储在 configs.apiKeys JSON 数组中，按 platform 维度聚合
-      const apiKeyRows = await db.configs.findMany({
-        where: { key: "apiKeys" },
-        select: { value: true },
-      });
-      for (const row of apiKeyRows) {
-        try {
-          const parsed = JSON.parse(row.value) as unknown;
-          if (!Array.isArray(parsed)) continue;
-          for (const entry of parsed) {
-            if (
-              typeof entry === "object" &&
-              entry !== null &&
-              !Array.isArray(entry) &&
-              typeof (entry as Record<string, unknown>).platformId === "string"
-            ) {
-              const pid = (entry as Record<string, unknown>).platformId as string;
-              keyCounts.set(pid, (keyCounts.get(pid) ?? 0) + 1);
-            }
-          }
-        } catch {
-          // 单条 JSON 解析失败不影响整体聚合
-        }
+    for (const p of platforms) {
+      try {
+        const parsed = JSON.parse(p.apiKeys) as unknown;
+        keyCounts.set(p.id, Array.isArray(parsed) ? parsed.length : 0);
+      } catch {
+        keyCounts.set(p.id, 0);
       }
     }
 

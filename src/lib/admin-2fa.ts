@@ -92,16 +92,13 @@ async function decryptSecret(stored: Stored2FA, adminJwtSecret: string): Promise
 }
 
 /**
- * 查询 2FA 是否已启用（管理设置页展示用：配置缺失/解析失败/读库失败
- * 一律按未启用，不抛错——避免配置脏数据让设置页报错）
+ * 查询 2FA 是否已启用（管理设置页展示用：DB 读取异常时向上抛错而非吞错
+ * 返回 false——与 is2faEnabledStrict 对齐 fail-closed 语义，避免一次瞬时
+ * DB 抖动让管理设置页误判 2FA 未启用。配置缺失/JSON 损坏仍按未启用）。
  */
 export async function is2faEnabled(db: D1Database | Database, env?: WorkerEnv): Promise<boolean> {
-  try {
-    const stored = await readStored(db, env);
-    return stored?.enabled === true;
-  } catch {
-    return false;
-  }
+  const stored = await readStored(db, env);
+  return stored?.enabled === true;
 }
 
 /**

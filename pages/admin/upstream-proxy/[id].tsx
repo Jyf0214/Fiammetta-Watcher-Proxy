@@ -868,7 +868,7 @@ export default function UpstreamProxyGroupPage() {
             groups={summaries}
             loading={isValidating}
             activeName={isNew ? undefined : id}
-            className="h-[calc(100vh-100px)] overflow-y-auto"
+            className="h-[calc(100vh-6rem)] overflow-y-auto"
           />
         </div>
 

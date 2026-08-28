@@ -14,6 +14,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { isDevMode } from "@/lib/dev-mode";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 export default async function handler(
   req: NextApiRequest,
@@ -33,6 +34,8 @@ export default async function handler(
     res.status(401).json({ success: false, error: "未授权" });
     return;
   }
+
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   const id =
     typeof req.query.id === "string" ? req.query.id.trim() : "";

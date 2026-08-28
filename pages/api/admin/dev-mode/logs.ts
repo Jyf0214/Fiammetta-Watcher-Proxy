@@ -15,6 +15,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/admin-auth";
 import { isDevMode } from "@/lib/dev-mode";
+import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 
 const MAX_MINUTES = 24 * 60;
 const MIN_MINUTES = 1;
@@ -41,6 +42,8 @@ export default async function handler(
     res.status(401).json({ success: false, error: "未授权" });
     return;
   }
+
+  if (!(await checkAdminRateLimit(admin.adminId, res))) return;
 
   // 关闭开发模式直接 403：避免常态登录管理员绕过限制看到详细日志
   const devOn = await isDevMode();

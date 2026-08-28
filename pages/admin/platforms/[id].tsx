@@ -579,7 +579,7 @@ export default function PlatformDetailPage() {
             platforms={platforms ?? []}
             loading={listLoading}
             activeId={typeof id === "string" ? id : undefined}
-            className="h-[calc(100vh-100px)] overflow-y-auto"
+            className="h-[calc(100vh-6rem)] overflow-y-auto"
           />
         </div>
 

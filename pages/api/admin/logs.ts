@@ -158,6 +158,7 @@ export default async function handler(
             ? { name: platformMap.get(log.platformId) ?? null }
             : null,
           cost: log.cost,
+          hasReasoning: log.hasReasoning,
           createdAt: new Date(log.createdAt * 1000).toISOString(),
         })),
         total,
