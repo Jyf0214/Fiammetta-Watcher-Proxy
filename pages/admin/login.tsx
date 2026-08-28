@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
@@ -34,8 +34,25 @@ export default function AdminLoginPage() {
     };
   }, []);
 
+  // 401 踢出前的深链恢复：仅接受 /admin 开头的站内路径（防开放重定向，// 开头视为外链）。
+  // GET effect（已登录直接跳）与 POST 成功路径共用同一解析逻辑，避免两条跳转路径
+  // 行为不一致（已登录访问 /admin/login?redirect=/admin/foo 时也应跳到深链）
+  const resolveRedirect = useCallback(
+    (raw: string | string[] | undefined): string => {
+      if (
+        typeof raw === "string" &&
+        raw.startsWith("/admin") &&
+        !raw.startsWith("//")
+      ) {
+        return raw;
+      }
+      return "/admin";
+    },
+    []
+  );
+
   // 已登录访问登录页：调 GET /api/admin/auth 验证 cookie 有效性，
-  // 200 即视为已登录，跳转到 /admin（带 cookie 旧/失效则 401 留在登录页）。
+  // 200 即视为已登录，跳转到目标（带 cookie 旧/失效则 401 留在登录页）。
   // 依赖 cookie 而非 localStorage 是因为登录态完全存在 HttpOnly cookie 里
   // （pages/api/admin/auth.ts setAuthCookie），前端无法读 HttpOnly，仅能
   // 走 /api/admin/auth 端到端验证。失败路径不展示错误——让登录表单自然呈现
@@ -49,7 +66,7 @@ export default function AdminLoginPage() {
       .then((data) => {
         if (cancelled) return;
         if (data?.success && data?.data?.username) {
-          router.replace("/admin");
+          router.replace(resolveRedirect(router.query.redirect));
         }
       })
       .catch(() => {
@@ -58,7 +75,7 @@ export default function AdminLoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, resolveRedirect]);
 
   // 登录限流倒计时：每秒刷新剩余秒数，到期自动清除锁定提示
   useEffect(() => {
@@ -152,12 +169,8 @@ export default function AdminLoginPage() {
         loginSucceeded = true;
         setSuccess(data.message || t("loginSuccess"));
         const hide = message.loading(t("redirecting"), 1.5);
-        // 401 踢出前的深链恢复：仅接受 /admin 开头的站内路径（防开放重定向，// 开头视为外链）
-        const rawRedirect = router.query.redirect;
-        const target =
-          typeof rawRedirect === "string" && rawRedirect.startsWith("/admin") && !rawRedirect.startsWith("//")
-            ? rawRedirect
-            : "/admin";
+        // 401 踢出前的深链恢复：与已登录 GET effect 共用 resolveRedirect，两条跳转路径行为一致
+        const target = resolveRedirect(router.query.redirect);
         redirectTimerRef.current = setTimeout(() => {
           hide();
           router.push(target);
