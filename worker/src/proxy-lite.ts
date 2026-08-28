@@ -12,7 +12,7 @@
 
 import { routeRequestLite } from "./router-lite";
 import { getNextKey, recordKeyError, banKey, isPlatformWhitelisted } from "./platform-keys";
-import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClientInfo } from "./token";
+import { recordRequestLog, extractUsage, resolveStreamErrorStatus, extractClientInfo, enrichUsageWithCost } from "./token";
 import { recordPlatform429 } from "./load-balancer";
 import { sendNotification } from "@/lib/notifier";
 import { withIdleTimeout } from "./stream-guard";
@@ -1163,7 +1163,7 @@ async function handleUpstreamResponseLite(
   // Content-Type 固定 application/json（与全量版/Pages 版对齐：此前透传上游
   // 原始 content-type，同一上游在 lite 与全量部署下响应头不一致）
   const finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
-  return new Response(finalBody, {
+  return new Response(enrichUsageWithCost(finalBody, responseUpstreamCost), {
     status: upstreamResponse.status,
     headers: { "Content-Type": "application/json" },
   });

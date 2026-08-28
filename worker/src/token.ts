@@ -29,6 +29,32 @@ function extractUpstreamCost(usage: Record<string, unknown>): number | null {
 }
 
 /**
+ * 把上游实时成本注入响应体 usage.cost 字段
+ *
+ * OpenAI Chat/Responses/OpenRouter 均在 usage.cost 返回本次请求实际费用（美元）。
+ * 上游未自报或非法值时 cost 为 null：调用方已走价格表估算兜底，但价格表估算值
+ * 不入 usage.cost（仅记日志/统计），避免把估算与上游实时计费混在一起给客户端造成误读。
+ *
+ * 不可序列化值/usage 缺失/非对象等异常一律忽略——usage.cost 是增强字段，
+ * 注入失败必须不影响主响应体下发。
+ */
+export function enrichUsageWithCost(bodyText: string, cost: number | null): string {
+  if (cost === null) return bodyText;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+  if (!parsed || typeof parsed !== "object") return bodyText;
+  const obj = parsed as Record<string, unknown>;
+  const usage = obj.usage;
+  if (!usage || typeof usage !== "object") return bodyText;
+  (usage as Record<string, unknown>).cost = cost;
+  return JSON.stringify(obj);
+}
+
+/**
  * 从 OpenAI 格式的 usage 对象中提取 token 数
  *
  * @param maxTokensEstimate - 请求体中的 max_tokens 预估值，用于防止上游返回 0 绕过配额

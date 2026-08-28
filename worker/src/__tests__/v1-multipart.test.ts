@@ -88,6 +88,7 @@ vi.mock("../token", () => ({
   updateKeyUsage: vi.fn(async () => {}),
   resolveStreamErrorStatus: vi.fn(() => null),
   extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
+  enrichUsageWithCost: (b: string) => b,
 }));
 
 vi.mock("../auth", () => ({

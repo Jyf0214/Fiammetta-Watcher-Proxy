@@ -39,7 +39,7 @@ import {
   resolveModelDetailOwner,
 } from "../../../worker/src/proxy-core/v1-route-core";
 import { getEndpointConfig, type ProxyConfig } from "../../../worker/src/endpoints";
-import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent } from "../../../worker/src/token";
+import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent, enrichUsageWithCost } from "../../../worker/src/token";
 import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
@@ -1041,7 +1041,12 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   // chat↔responses 互转已移除，非流式响应原样透传
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
-  res.status(upRes.status).send(upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : body);
+  // 非 anthropic 协议分支：注入 usage.cost（OpenAI Chat/Responses/OpenRouter 标准字段）
+  res.status(upRes.status).send(
+    upstreamIsAnthropic && openaiBody
+      ? JSON.stringify(openaiBody)
+      : enrichUsageWithCost(body, ruc)
+  );
 }
 
 /** 提取 API Key：兼容 Anthropic 客户端（x-api-key 头）与 OpenAI 客户端（Authorization: Bearer） */

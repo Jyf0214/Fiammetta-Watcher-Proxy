@@ -51,7 +51,7 @@ import {
   createAnthropicStreamTransformer,
   createOpenAIStreamTransformer,
 } from "./proxy-core/stream-transformers";
-import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage } from "./token";
+import { createUsageTransformer, recordRequestLog, extractClientInfo, updateKeyUsage, enrichUsageWithCost } from "./token";
 import { withIdleTimeout } from "./stream-guard";
 import type { ProxyConfig } from "./endpoints";
 import { extractForwardableHeaders } from "./forward-headers";
@@ -1433,7 +1433,7 @@ async function handleUpstreamResponse(
   // 时保持透传原文，与 OpenAI 上游非 JSON 响应行为一致）
   // chat↔responses 互转已移除，非流式响应原样透传
   const finalBody = upstreamIsAnthropic && openaiBody ? JSON.stringify(openaiBody) : responseBody;
-  return new Response(finalBody, {
+  return new Response(enrichUsageWithCost(finalBody, responseUpstreamCost), {
     status: upstreamResponse.status,
     headers: { "Content-Type": "application/json" },
   });

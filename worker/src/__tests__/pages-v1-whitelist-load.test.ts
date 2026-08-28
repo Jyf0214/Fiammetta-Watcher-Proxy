@@ -90,6 +90,7 @@ vi.mock("../../../worker/src/token", async () => {
     updateKeyUsage: vi.fn(async () => {}),
     extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
     detectResponsesStreamEvent: actual.detectResponsesStreamEvent,
+    enrichUsageWithCost: (b: string) => b,
   };
 });
 
