@@ -88,7 +88,6 @@ vi.mock("../token", () => ({
   updateKeyUsage: vi.fn(async () => {}),
   resolveStreamErrorStatus: vi.fn(() => null),
   extractClientInfo: vi.fn(() => ({ ipAddress: "127.0.0.1", userAgent: "vitest" })),
-  detectReasoningInBody: vi.fn(() => false),
 }));
 
 vi.mock("../auth", () => ({

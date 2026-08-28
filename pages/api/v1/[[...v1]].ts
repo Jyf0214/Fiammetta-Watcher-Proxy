@@ -39,7 +39,7 @@ import {
   resolveModelDetailOwner,
 } from "../../../worker/src/proxy-core/v1-route-core";
 import { getEndpointConfig, type ProxyConfig } from "../../../worker/src/endpoints";
-import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent, detectReasoningInBody } from "../../../worker/src/token";
+import { extractUsage, updateKeyUsage, recordRequestLog, extractClientInfo, detectResponsesStreamEvent } from "../../../worker/src/token";
 import { extractForwardableHeaders } from "../../../worker/src/forward-headers";
 import { loadTemplates, getApplicableTemplates, applyTemplates } from "../../../worker/src/request-templates";
 import { checkPlatformRpm, checkPlatformTpm, checkApiKeyRpm, checkApiKeyTpm, releasePlatformRpm, releasePlatformTpm } from "@/lib/v1-rate-limit";
@@ -848,22 +848,6 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
                     if (delta && typeof (delta as any).reasoning === "string" && (delta as any).reasoning.length > 0) {
                       sawReasoning = true;
                     }
-                    // message 级思考检测：部分平台（如 MiniMax）在 SSE chunk 的
-                    // message 对象中携带 reasoning / reasoning_details，而非 delta
-                    const msg = c?.message;
-                    if (msg) {
-                      if (typeof (msg as any).reasoning === "string" && (msg as any).reasoning.length > 0) {
-                        sawReasoning = true;
-                      }
-                      if (Array.isArray((msg as any).reasoning_details) && (msg as any).reasoning_details.length > 0) {
-                        for (const detail of (msg as any).reasoning_details) {
-                          if (detail && typeof detail.type === "string" && detail.type.includes("reasoning")) {
-                            sawReasoning = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
                   }
                 }
                 // 顶层字段检测：reasoning / reasoning_summary
@@ -1028,8 +1012,6 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
     const ex = extractUsage(openaiBody.usage as Record<string, unknown> | undefined, est);
     rt = ex.totalTokens; rpt = ex.promptTokens; rct = ex.completionTokens; ruc = ex.upstreamCost;
   } catch {}
-  // 非流式响应思考检测：解析完响应体后检测 message.reasoning 等字段
-  const nonStreamHasReasoning = openaiBody ? detectReasoningInBody(openaiBody) : false;
   res.setHeader("Content-Type", "application/json");
   if (config.protocol === "anthropic") {
     // OpenAI chat.completion → Anthropic message（回显下游请求的模型名）
@@ -1039,7 +1021,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
       // 转换成功后才记成功日志/用量，避免转换失败时留下"200 成功"的误导记录
       if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
       if (proxyUrl) recordProxyTraffic(proxyUrl, 200);
-      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, hasReasoning: nonStreamHasReasoning, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+      void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: 200, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
       void recordSuccess(platform.id, dummyDb, env).catch(() => {});
       res.status(200).send(converted);
     } catch {
@@ -1054,7 +1036,7 @@ async function handleUpstreamResponsePages(upRes: Response, platform: { id: stri
   // 非流式直通成功记账：与流式分支（tt>0）和 anthropic 转换分支（rt>0）对齐，
   // 此前缺失导致 stream:false 请求绕过 tokenLimit/callUsed 扣减（计费漏洞）
   if (rt > 0) void updateKeyUsage(apiKey.id, rt, dummyDb, env).catch(() => {});
-  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, hasReasoning: nonStreamHasReasoning, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
+  void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: platform.id, model, endpoint: config.upstreamPath, method: "POST", status: upRes.status, tokens: rt, promptTokens: rpt, completionTokens: rct, upstreamCost: ruc, ttft: 0, duration: Date.now() - start, isError: false, ipAddress: clientInfo?.ipAddress, userAgent: clientInfo?.userAgent, proxyUrl, db: dummyDb, env }).catch(() => {});
   void recordSuccess(platform.id, dummyDb, env).catch(() => {});
   // chat↔responses 互转已移除，非流式响应原样透传
   // 上游为 Anthropic 协议时下游收到的是转换后的 OpenAI 格式（openaiBody 解析失败
