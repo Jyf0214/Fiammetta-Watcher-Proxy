@@ -13,6 +13,15 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+// Mock platform-keys — recordFailure/sync 会调 isPlatformWhitelisted
+const { mockIsPlatformWhitelisted } = vi.hoisted(() => {
+  const fn = vi.fn(() => false);
+  return { mockIsPlatformWhitelisted: fn };
+});
+vi.mock("../platform-keys", () => ({
+  isPlatformWhitelisted: mockIsPlatformWhitelisted,
+}));
+
 // Mock prisma — recordFailure/recordSuccess/sync 会调 updatePlatformStatus
 const mockUpdate = vi.fn(async () => {});
 const mockFindMany = vi.fn(async (): Promise<any[]> => []);
@@ -70,6 +79,7 @@ function makePlatform(overrides: Partial<PlatformConfig> = {}): PlatformConfig {
 describe("熔断器状态机", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     // 重置内部 breakers Map：通过连续 recordFailure 触发 open 后再 recordSuccess 恢复
     // 或者直接利用模块状态——cleanupStaleBreakers([]) 清除所有
     cleanupStaleBreakers([]);
@@ -225,6 +235,7 @@ describe("熔断器状态机", () => {
 
 describe("selectPlatform", () => {
   beforeEach(() => {
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -324,6 +335,7 @@ describe("selectPlatform", () => {
 describe("cleanupStaleBreakers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -355,6 +367,7 @@ describe("cleanupStaleBreakers", () => {
 describe("syncCircuitBreakersFromDatabase", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -397,6 +410,89 @@ describe("syncCircuitBreakersFromDatabase", () => {
     await syncCircuitBreakersFromDatabase(mockDb);
     expect(checkAndUpdateCircuitBreakerState("p1")).toBe("closed");
   });
+
+  it("白名单平台：数据库 down 不同步为熔断状态（永不封禁语义）", async () => {
+    mockIsPlatformWhitelisted.mockReturnValue(true);
+    const now = Date.now();
+    // 数据库中白名单平台状态为 down（历史遗留或手动失误）
+    mockFindMany.mockResolvedValueOnce([
+      { id: "whitelist-p", status: "down", failCount: 5, cooldownEnd: Math.floor((now + 30000) / 1000) },
+    ]);
+    await syncCircuitBreakersFromDatabase(mockDb);
+    // 白名单平台永远不进入熔断状态
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("closed");
+    // 同步过程未操作 breakers Map（没有条目需要设置）
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("白名单平台：数据库 degraded 不同步（recordFailure 不记录，永不降级）", async () => {
+    mockIsPlatformWhitelisted.mockReturnValue(true);
+    mockFindMany.mockResolvedValueOnce([
+      { id: "whitelist-p", status: "degraded", failCount: 3, cooldownEnd: null },
+    ]);
+    await syncCircuitBreakersFromDatabase(mockDb);
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("closed");
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("白名单平台：已有熔断条目时同步清除（数据库 down → 内存清除）", async () => {
+    mockIsPlatformWhitelisted.mockReturnValue(false);
+    // 先用非白名单状态创建熔断条目
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("whitelist-p", mockDb);
+    }
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("open");
+
+    // 同步时该平台变成白名单
+    mockIsPlatformWhitelisted.mockReturnValue(true);
+    mockFindMany.mockResolvedValueOnce([
+      { id: "whitelist-p", status: "down", failCount: 5, cooldownEnd: Math.floor((Date.now() + 30000) / 1000) },
+    ]);
+    await syncCircuitBreakersFromDatabase(mockDb);
+    // 白名单平台熔断条目被清除，永不封禁
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("closed");
+  });
+
+  it("白名单平台：同步清除熔断条目、高错误率窗口和 429 冷却（设计一致性）", async () => {
+    mockIsPlatformWhitelisted.mockReturnValue(false);
+    // 创建熔断条目
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("whitelist-p", mockDb);
+    }
+    // 创建高错误率窗口（触发窗口错误率）
+    for (let i = 0; i < 10; i++) {
+      if (i % 5 < 3) await recordFailure("whitelist-p", mockDb);
+      else await recordSuccess("whitelist-p", mockDb);
+    }
+    expect(isHighErrorRate("whitelist-p")).toBe(true);
+    // 创建 429 冷却记录
+    for (let i = 0; i < 5; i++) recordPlatform429("whitelist-p");
+    expect(isPlatform429Cooldown("whitelist-p")).toBe(true);
+
+    // 同步时该平台变成白名单
+    mockIsPlatformWhitelisted.mockReturnValue(true);
+    mockFindMany.mockResolvedValueOnce([
+      { id: "whitelist-p", status: "down", failCount: 5, cooldownEnd: Math.floor((Date.now() + 30000) / 1000) },
+    ]);
+    await syncCircuitBreakersFromDatabase(mockDb);
+
+    // 所有内存态均被清除
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("closed");
+    expect(isHighErrorRate("whitelist-p")).toBe(false);
+    expect(isPlatform429Cooldown("whitelist-p")).toBe(false);
+  });
+
+  it("白名单平台：recordFailure 不记录失败（熔断器永不推进）", async () => {
+    mockIsPlatformWhitelisted.mockReturnValue(true);
+    // 白名单平台 5 次失败
+    for (let i = 0; i < 5; i++) {
+      await recordFailure("whitelist-p", mockDb);
+    }
+    // 白名单平台永远保持 closed
+    expect(checkAndUpdateCircuitBreakerState("whitelist-p")).toBe("closed");
+    // 没有写 DB degraded（recordFailure 直接 return）
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
 });
 
 // ==================== #9 渐进降级（degraded） ====================
@@ -404,6 +500,7 @@ describe("syncCircuitBreakersFromDatabase", () => {
 describe("渐进降级（#9）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -464,6 +561,7 @@ describe("渐进降级（#9）", () => {
 describe("resetCircuitBreaker（#10）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -498,6 +596,7 @@ describe("resetCircuitBreaker（#10）", () => {
 describe("滑动窗口错误率", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 
@@ -585,6 +684,7 @@ describe("滑动窗口错误率", () => {
 describe("平台级 429 冷却", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsPlatformWhitelisted.mockReturnValue(false);
     cleanupStaleBreakers([]);
   });
 

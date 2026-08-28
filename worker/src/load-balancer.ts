@@ -398,6 +398,12 @@ async function updatePlatformStatus(
  * - down：按 cooldownEnd 是否过期映射为 open / half-open
  * - degraded：closed（半失败状态，仅记录失败计数）
  * - healthy：清除内存中的熔断条目（手动恢复或熔断恢复后，避免与库不一致）
+ *
+ * 注意：白名单平台跳过熔断同步——白名单平台在 recordFailure 中直接 return，
+ * 永不推进熔断器状态，数据库中 status=down 是历史遗留或手动设置（如管理后台
+ * 修复时忘记同步清零），不应同步为熔断条目；selectPlatform 对白名单跳过所有
+ * 排除检查，熔断条目无效但会污染内存态（如 isHighErrorRate 仍会降级白名单平台）。
+ * 跳过同步同时清除已有熔断条目，保持白名单平台永远可用。
  */
 export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: WorkerEnv): Promise<void> {
   const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
@@ -415,6 +421,28 @@ export async function syncCircuitBreakersFromDatabase(db: D1Database, env?: Work
     let syncedCount = 0;
 
     for (const p of platforms) {
+      // 白名单平台跳过熔断同步：永不进入熔断状态（recordFailure 不推进），
+      // 数据库中 down/degraded 是历史遗留或手动失误，同步清除所有内存态。
+      // 保留设计一致性：熔断条目、高错误率窗口、429 冷却同步清理，
+      // 与 resetCircuitBreaker/cleanupStaleBreakers 的清理口径对齐。
+      if (isPlatformWhitelisted(p.id)) {
+        let cleared = false;
+        if (breakers.has(p.id)) {
+          breakers.delete(p.id);
+          cleared = true;
+        }
+        if (errorRates.has(p.id)) {
+          errorRates.delete(p.id);
+          cleared = true;
+        }
+        if (platform429s.has(p.id)) {
+          platform429s.delete(p.id);
+          cleared = true;
+        }
+        if (cleared) syncedCount++;
+        continue;
+      }
+
       if (p.status === "down") {
         // 库中 cooldownEnd 为秒级时间戳，先转为毫秒再比较
         const cooldownMs = (p.cooldownEnd ?? 0) * 1000;
