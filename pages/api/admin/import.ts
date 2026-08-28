@@ -1010,6 +1010,8 @@ const VALID_AUDIT_ACTIONS = new Set([
   "import_model_pricing",
   "update_notifications",
   "test_model_call",
+  "test_notification_send",
+  "test_backup_push",
 ]);
 
 /**

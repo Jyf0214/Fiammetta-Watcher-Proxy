@@ -7,14 +7,14 @@
  * - 配额一次性提醒：按 (keyId, threshold) 唯一索引持久化
  *   取代原 `quotaNotifiedKeys: Set<string>`；重启/多实例不重发
  * - 发送历史：所有通知发送的 status/httpStatus/error/size/duration
- *   落库供管理后台"发送历史"页查询（queryHistory 接口在提交 5 admin API 接入）
+ *   落库供管理后台"发送历史"页查询（queryHistory 接口已接入）
  *
  * 设计要点：
  * - 内部统一调用 createDb()，与 prisma multi-dialect factory 兼容；
  *   消费方无需关心 db 绑定传递
  * - 冷却/配额写入采用 upsert + lastSentAt 时间戳；TTL 过期后下次调用放行
  * - history 写入失败不阻塞通知主流程（旁路能力）
- * - 清理过期 history 在提交 5 admin API 接入；当前仅保留 30 天基线
+ * - 历史清理由 /api/cron/notification-history-purge 任务接入，固定 30 天保留窗口
  */
 
 import { createDb } from "@/lib/prisma";

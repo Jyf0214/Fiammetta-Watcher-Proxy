@@ -427,7 +427,9 @@
     "actionEnable2fa": "Enable 2FA",
     "actionDisable2fa": "Disable 2FA",
     "actionPlaygroundCall": "Playground Call",
-    "actionTestModelCall": "Model Connectivity Test"
+    "actionTestModelCall": "Model Connectivity Test",
+    "actionTestNotificationSend": "Test Notification Send",
+    "actionTestBackupPush": "Test Backup Push"
   },
   "system": {
     "autoModelTitle": "Auto Model",

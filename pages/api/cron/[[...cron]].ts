@@ -8,6 +8,7 @@
  *   GET/POST /api/cron/proxy-health → 出站代理健康检查（仅 Docker 部署有代理配置时生效）
  *   GET/POST /api/cron/proxy-pull   → 出站代理列表拉取（仅 Docker 部署配置了拉取源的组生效）
  *   GET/POST /api/cron/backup       → 加密配置备份推送（需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY）
+ *   GET/POST /api/cron/notification-history-purge → 清理 30 天前的通知发送历史（防 notificationHistory 表无限增长）
  *
  * 认证：必须配置 CRON_SECRET 环境变量并携带 Authorization: Bearer <CRON_SECRET>；
  * 未配置 CRON_SECRET 时端点禁用（403），防止无鉴权触发定时任务。
@@ -19,6 +20,7 @@ import { handleScheduledReset } from "../../../worker/src/key-reset";
 import { runArchiveTask } from "../../../worker/src/log-archiver";
 import { runProxyHealthCheck, pullProxyGroups, isScheduledProxyHealthDisabled, isUpstreamProxyDisabled } from "@/lib/upstream-proxy";
 import { runBackupTask } from "@/lib/backup";
+import { purgeHistory as purgeNotificationHistory } from "@/lib/notification-store";
 
 const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) => Promise<unknown>> = {
   "model-fetch": fetchAllPlatformModels,
@@ -37,6 +39,9 @@ const CRON_ROUTES: Record<string, (db: D1Database, env?: { DB_TYPE?: string }) =
   // 备份推送目标/加密钥来自 BACKUP_WEBHOOK_URL / BACKUP_ENCRYPTION_KEY 环境变量；
   // 未配置时返回 skipped 而非失败，外部调度器不会误判重试
   "backup": (db, env) => runBackupTask(db, env),
+  // 通知发送历史清理：固定 30 天保留窗口（与 notification-store 注释基线一致）。
+  // purgeNotificationHistory 内部用 createDb()，不依赖入参 db
+  "notification-history-purge": () => purgeNotificationHistory(30),
 };
 
 /** 常量时间字符串比较，防止通过响应时差枚举 CRON_SECRET（与 auth.ts 实现一致） */
@@ -75,7 +80,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const task = Array.isArray(param) ? param[0] : param;
   // 与 CRON_ROUTES 键保持一致：此前遗漏 "backup" 导致 /api/cron/backup 恒 404，
   // 非 CF Worker 部署（外部调度器触发）的定时加密备份静默失效
-  const VALID_TASKS = ["model-fetch", "key-reset", "log-archive", "proxy-health", "proxy-pull", "backup"];
+  const VALID_TASKS = ["model-fetch", "key-reset", "log-archive", "proxy-health", "proxy-pull", "backup", "notification-history-purge"];
   if (!task || !VALID_TASKS.includes(task)) {
     return res.status(404).json({ error: "Not Found" });
   }

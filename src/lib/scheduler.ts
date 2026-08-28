@@ -23,6 +23,7 @@ import {
   isScheduledProxyHealthDisabled,
   PROXY_HEALTH_INTERVAL_MIN_RANGE,
 } from "./upstream-proxy";
+import { purgeHistory } from "./notification-store";
 
 /** 供测试与文档断言健康检查间隔允许范围（与 upstream-proxy 常量一致） */
 export { PROXY_HEALTH_INTERVAL_MIN_RANGE };
@@ -212,6 +213,9 @@ export function __resetSchedulerForTests(): void {
  *   动态 spec 每次 tick 从进程内配置缓存读取，修改保存后于下一次检查生效）
  * - proxy-pull   代理列表拉取 每分钟 tick（组级自动更新：按每组的开关与周期
  *   判定是否到期，未到期组跳过；最小组周期 1 分钟）
+ * - notification-history-purge 通知历史清理 每天 3:40（错开 log-archive(3:10)
+ *   避免同小时双写抖动；与 HTTP 端点 /api/cron/notification-history-purge 共用
+ *   purgeHistory，外部 cron 用户需自行选择入口——两处都注册为幂等 DELETE WHERE）
  */
 // 与 /api/cron/[[...cron]].ts 端点一致：非 d1 方言下 createDb 忽略传入的 DB
 // binding，仅用 process.env（DB_TYPE / DATABASE_URL）建立连接
@@ -258,6 +262,13 @@ export const DOCKER_TASKS: ScheduledTask[] = [
     spec: {},
     run: () => pullProxyGroups(db, env),
   },
+  {
+    name: "notification-history-purge",
+    // 每天 3:40 清理 30 天前的通知发送历史，与 /api/cron/notification-history-purge
+    // 端点共用 purgeHistory；错开 log-archive(3:10) 避免同时段双写抖动
+    spec: { minutes: new Set([40]), hours: new Set([3]) },
+    run: () => purgeHistory(30),
+  },
 ];
 
 /**
@@ -269,7 +280,7 @@ export function startScheduler(): void {
   schedulerStarted = true;
 
   const scheduler = createScheduler(DOCKER_TASKS);
-  console.log("[scheduler] Docker 内部定时器已启动（model-fetch / key-reset / log-archive / proxy-health / proxy-pull）");
+  console.log("[scheduler] Docker 内部定时器已启动（model-fetch / key-reset / log-archive / proxy-health / proxy-pull / notification-history-purge）");
   scheduler.start();
 
   // 容器重启后立即拉取一次代理列表：proxy-pull 的首个触发周期最长要等

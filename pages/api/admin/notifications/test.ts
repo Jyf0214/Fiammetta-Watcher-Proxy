@@ -11,8 +11,8 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "@/lib/admin-auth";
-import { checkCsrfOrigin } from "@/lib/admin-security";
+import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
+import { checkCsrfOrigin, isSafeUrl } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import {
   parseNotificationsConfig,
@@ -20,7 +20,7 @@ import {
 } from "@/lib/notifier";
 import { renderNotificationRequest } from "@/lib/notification-channels";
 import { recordHistory } from "@/lib/notification-store";
-import { isSafeUpstreamUrl } from "@/lib/ssrf";
+import { getClientIp } from "../auth";
 
 const NOTIFICATIONS_CONFIG_KEY = "system:notifications";
 const SEND_TIMEOUT_MS = 5_000;
@@ -120,8 +120,10 @@ export default async function handler(
       return;
     }
 
-    // SSRF 二次防御（虽然 parse 阶段已挡，但管理员可能直接改 DB）
-    const ssrf = isSafeUpstreamUrl(rendered.url);
+    // SSRF 二次防御（虽然 parse 阶段已挡，但管理员可能直接改 DB）。
+    // 用 isSafeUrl 含 DNS 解析层，拦截 DNS Rebinding / AAAA-only 内网域名，
+    // 与 import / platforms / test-model 等其他 admin 端点策略一致
+    const ssrf = await isSafeUrl(rendered.url);
     if (!ssrf.safe) {
       res.status(400).json({
         success: false,
@@ -177,6 +179,29 @@ export default async function handler(
       error,
       sizeBytes: new TextEncoder().encode(rendered.body).length,
       durationMs,
+    });
+
+    // 审计：测试发送对外部 webhook 发起真实请求，必须留痕可追溯。
+    // 与 test_model_call / playground_call 同构：直接 await 不吞异常，
+    // 写失败由外层 catch 返回 500，避免"已发送但无审计"的假成功
+    await db.auditLogs.create({
+      data: {
+        id: crypto.randomUUID(),
+        adminId: getAuditAdminId(admin),
+        action: "test_notification_send",
+        detail: JSON.stringify({
+          channelId: channel.id,
+          channelName: channel.name,
+          channelType: channel.type,
+          event,
+          status,
+          httpStatus,
+          durationMs,
+          ...(error ? { error } : {}),
+        }),
+        ip: getClientIp(req),
+        createdAt: Math.floor(Date.now() / 1000),
+      },
     });
 
     if (status === "success") {

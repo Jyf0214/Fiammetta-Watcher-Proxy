@@ -2,7 +2,7 @@
  * notification-store 单元测试
  *
  * 覆盖：冷却去重（DB upsert）、配额一次性（按 keyId+threshold 唯一）、
- * 发送历史写入。queryHistory / purgeHistory 在提交 5 admin API 接入时补。
+ * 发送历史写入、queryHistory 过滤/排序/limit、purgeHistory 截止时间。
  *
  * Mock @/lib/prisma 的 createDb，验证各方法被以正确参数调用
  */
@@ -15,6 +15,8 @@ const mockQuotaFindUnique = vi.hoisted(() => vi.fn());
 const mockQuotaUpsert = vi.hoisted(() => vi.fn());
 const mockQuotaDeleteMany = vi.hoisted(() => vi.fn());
 const mockHistoryCreate = vi.hoisted(() => vi.fn());
+const mockHistoryFindMany = vi.hoisted(() => vi.fn());
+const mockHistoryDeleteMany = vi.hoisted(() => vi.fn());
 
 const createDbMock = vi.hoisted(() => vi.fn(async () => ({
   notificationCooldowns: {
@@ -28,6 +30,8 @@ const createDbMock = vi.hoisted(() => vi.fn(async () => ({
   },
   notificationHistory: {
     create: mockHistoryCreate,
+    findMany: mockHistoryFindMany,
+    deleteMany: mockHistoryDeleteMany,
   },
 })));
 
@@ -42,6 +46,8 @@ import {
   markQuotaNotified,
   clearQuotaNotified,
   recordHistory,
+  queryHistory,
+  purgeHistory,
 } from "../notification-store";
 
 beforeEach(() => {
@@ -50,6 +56,7 @@ beforeEach(() => {
   mockQuotaUpsert.mockResolvedValue(undefined);
   mockQuotaDeleteMany.mockResolvedValue({ count: 0 });
   mockHistoryCreate.mockResolvedValue(undefined);
+  mockHistoryDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 describe("checkCooldown", () => {
@@ -203,5 +210,86 @@ describe("recordHistory", () => {
         event: "x", title: "t", body: "b", status: "failed", durationMs: 0,
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("queryHistory", () => {
+  const fakeRow = {
+    id: "r-1",
+    channelId: "ch-1",
+    channelName: "tg",
+    channelType: "telegram",
+    event: "key_banned",
+    title: "T",
+    body: "B",
+    status: "success",
+    httpStatus: 200,
+    error: null,
+    sizeBytes: 10,
+    durationMs: 50,
+    sentAt: 1700000000,
+  };
+
+  it("默认 take=50，orderBy sentAt desc", async () => {
+    mockHistoryFindMany.mockResolvedValueOnce([fakeRow]);
+    await queryHistory({});
+    const [args] = mockHistoryFindMany.mock.calls[0];
+    expect(args.take).toBe(50);
+    expect(args.orderBy).toEqual({ sentAt: "desc" });
+  });
+
+  it("filter 透传：channelId + event + sinceSentAt 全部进入 where", async () => {
+    mockHistoryFindMany.mockResolvedValueOnce([]);
+    await queryHistory({ channelId: "ch-1", event: "key_banned", sinceSentAt: 1000, limit: 10 });
+    const [args] = mockHistoryFindMany.mock.calls[0];
+    expect(args.where).toEqual({
+      channelId: "ch-1",
+      event: "key_banned",
+      sentAt: { gte: 1000 },
+    });
+    expect(args.take).toBe(10);
+  });
+
+  it("sinceSentAt=undefined 不写入 where.sentAt（不影响其他过滤）", async () => {
+    mockHistoryFindMany.mockResolvedValueOnce([]);
+    await queryHistory({ channelId: "ch-1" });
+    const [args] = mockHistoryFindMany.mock.calls[0];
+    expect(args.where).toEqual({ channelId: "ch-1" });
+  });
+
+  it("返回 HistoryRecord 形态（含所有字段）", async () => {
+    mockHistoryFindMany.mockResolvedValueOnce([fakeRow]);
+    const out = await queryHistory({});
+    expect(out).toEqual([fakeRow]);
+  });
+});
+
+describe("purgeHistory", () => {
+  it("retentionDays=0 短路返回 0 不查 DB", async () => {
+    expect(await purgeHistory(0)).toBe(0);
+    expect(mockHistoryDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("retentionDays<0 短路返回 0", async () => {
+    expect(await purgeHistory(-5)).toBe(0);
+    expect(mockHistoryDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("按 sentAt lt cutoff 删除（cutoff = now - retentionDays*86400）", async () => {
+    mockHistoryDeleteMany.mockResolvedValueOnce({ count: 42 });
+    const before = Math.floor(Date.now() / 1000);
+    const out = await purgeHistory(30);
+    const after = Math.floor(Date.now() / 1000);
+    expect(out).toBe(42);
+    const [args] = mockHistoryDeleteMany.mock.calls[0];
+    const cutoff = args.where.sentAt.lt;
+    // 30 天 = 2592000 秒，前后各允许 1 秒误差
+    expect(cutoff).toBeGreaterThanOrEqual(before - 30 * 86400);
+    expect(cutoff).toBeLessThanOrEqual(after - 30 * 86400);
+  });
+
+  it("DB 抛错返回 -1 不抛错（cron 任务不阻塞）", async () => {
+    mockHistoryDeleteMany.mockRejectedValueOnce(new Error("db down"));
+    expect(await purgeHistory(30)).toBe(-1);
   });
 });

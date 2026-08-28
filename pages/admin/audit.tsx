@@ -52,6 +52,8 @@ const ACTION_LABELS: Record<string, string> = {
   disable_2fa: "actionDisable2fa",
   playground_call: "actionPlaygroundCall",
   test_model_call: "actionTestModelCall",
+  test_notification_send: "actionTestNotificationSend",
+  test_backup_push: "actionTestBackupPush",
 };
 
 // ==================== 语义颜色映射 ====================
@@ -82,6 +84,8 @@ const ACTION_COLOR: Record<string, string> = {
   disable_2fa: "red",
   playground_call: "blue",
   test_model_call: "blue",
+  test_notification_send: "blue",
+  test_backup_push: "blue",
 };
 
 // ==================== 页面组件 ====================

@@ -427,7 +427,9 @@
     "actionEnable2fa": "开启两步验证",
     "actionDisable2fa": "关闭两步验证",
     "actionPlaygroundCall": "调试台调用",
-    "actionTestModelCall": "模型连通性测试"
+    "actionTestModelCall": "模型连通性测试",
+    "actionTestNotificationSend": "测试通知发送",
+    "actionTestBackupPush": "测试备份推送"
   },
   "system": {
     "autoModelTitle": "自动模型",

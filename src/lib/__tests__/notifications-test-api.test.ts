@@ -12,9 +12,13 @@ const mocks = vi.hoisted(() => ({
   configsFindFirst: vi.fn(),
   historyCreate: vi.fn(),
   historyFindMany: vi.fn(),
+  auditLogsCreate: vi.fn(),
   getAdmin: vi.fn(),
+  getAuditAdminId: vi.fn(),
+  getClientIp: vi.fn(),
   csrf: vi.fn(),
   rateLimit: vi.fn(),
+  isSafeUrl: vi.fn(),
 }));
 
 const createDbMock = vi.hoisted(() => vi.fn(async () => ({
@@ -23,6 +27,7 @@ const createDbMock = vi.hoisted(() => vi.fn(async () => ({
     create: mocks.historyCreate,
     findMany: mocks.historyFindMany,
   },
+  auditLogs: { create: mocks.auditLogsCreate },
 })));
 
 vi.mock("@/lib/prisma", () => ({
@@ -31,14 +36,20 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/admin-auth", () => ({
   getAdminFromRequest: mocks.getAdmin,
+  getAuditAdminId: mocks.getAuditAdminId,
 }));
 
 vi.mock("@/lib/admin-security", () => ({
   checkCsrfOrigin: mocks.csrf,
+  isSafeUrl: mocks.isSafeUrl,
 }));
 
 vi.mock("@/lib/admin-rate-limit", () => ({
   checkAdminRateLimit: mocks.rateLimit,
+}));
+
+vi.mock("../../../pages/api/admin/auth", () => ({
+  getClientIp: mocks.getClientIp,
 }));
 
 const fetchMock = vi.hoisted(() => vi.fn());
@@ -46,15 +57,23 @@ const fetchMock = vi.hoisted(() => vi.fn());
 beforeEach(() => {
   mocks.getAdmin.mockReset();
   mocks.getAdmin.mockResolvedValue({ adminId: "admin-1", authMethod: "jwt" });
+  mocks.getAuditAdminId.mockReset();
+  mocks.getAuditAdminId.mockReturnValue("admin-1");
+  mocks.getClientIp.mockReset();
+  mocks.getClientIp.mockReturnValue("127.0.0.1");
   mocks.csrf.mockReset();
   mocks.csrf.mockReturnValue(true);
   mocks.rateLimit.mockReset();
   mocks.rateLimit.mockResolvedValue(true);
+  mocks.isSafeUrl.mockReset();
+  mocks.isSafeUrl.mockResolvedValue({ safe: true });
   mocks.configsFindFirst.mockReset();
   mocks.historyCreate.mockReset();
   mocks.historyCreate.mockResolvedValue(undefined);
   mocks.historyFindMany.mockReset();
   mocks.historyFindMany.mockResolvedValue([]);
+  mocks.auditLogsCreate.mockReset();
+  mocks.auditLogsCreate.mockResolvedValue(undefined);
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) });
   vi.stubGlobal("fetch", fetchMock);
@@ -184,7 +203,7 @@ describe("POST /api/admin/notifications/test", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("成功路径：渲染 + fetch + 写 history", async () => {
+  it("成功路径：渲染 + fetch + 写 history + 写 auditLogs", async () => {
     mocks.configsFindFirst.mockResolvedValueOnce({ value: JSON.stringify(validConfig()) });
     const { req, res } = makeReqRes("POST", {
       channelId: "11111111-1111-1111-1111-111111111111",
@@ -199,6 +218,15 @@ describe("POST /api/admin/notifications/test", () => {
     expect(entry.channelName).toBe("tg-bot (测试)");
     expect(entry.status).toBe("success");
     expect(entry.httpStatus).toBe(200);
+    // 审计：成功路径必须写 auditLogs（test_notification_send）
+    expect(mocks.auditLogsCreate).toHaveBeenCalledTimes(1);
+    const audit = mocks.auditLogsCreate.mock.calls[0][0].data;
+    expect(audit.action).toBe("test_notification_send");
+    expect(audit.adminId).toBe("admin-1");
+    const detail = JSON.parse(audit.detail);
+    expect(detail.channelId).toBe("11111111-1111-1111-1111-111111111111");
+    expect(detail.status).toBe("success");
+    expect(detail.httpStatus).toBe(200);
   });
 
   it("HTTP 4xx/5xx 写 history 状态为 failed，API 返回 502", async () => {
@@ -214,6 +242,12 @@ describe("POST /api/admin/notifications/test", () => {
     const entry = mocks.historyCreate.mock.calls[0][0].data;
     expect(entry.status).toBe("failed");
     expect(entry.error).toBe("HTTP 500");
+    // 审计：失败路径也必须留痕（已发送但失败）
+    expect(mocks.auditLogsCreate).toHaveBeenCalledTimes(1);
+    const auditDetail = JSON.parse(mocks.auditLogsCreate.mock.calls[0][0].data.detail);
+    expect(auditDetail.status).toBe("failed");
+    expect(auditDetail.httpStatus).toBe(500);
+    expect(auditDetail.error).toBe("HTTP 500");
   });
 });
 
@@ -313,6 +347,7 @@ describe("POST /api/admin/backup/test", () => {
   });
 
   it("内网 URL 拒绝", async () => {
+    mocks.isSafeUrl.mockResolvedValueOnce({ safe: false, reason: "URL 不能指向内网或本地地址" });
     const { req, res } = makeReqRes("POST", { url: "http://10.0.0.1/b", secret: "k" });
     const handler = (await import("../../../pages/api/admin/backup/test")).default;
     await handler(req, res);
@@ -333,6 +368,14 @@ describe("POST /api/admin/backup/test", () => {
     expect(env.kdf).toBeUndefined(); // v1 不带 kdf
     expect(env.alg).toBe("AES-GCM-256");
     expect(typeof env.iv).toBe("string");
+    // 审计：成功路径必须写 auditLogs（test_backup_push），URL 只记 host
+    expect(mocks.auditLogsCreate).toHaveBeenCalledTimes(1);
+    const audit = mocks.auditLogsCreate.mock.calls[0][0].data;
+    expect(audit.action).toBe("test_backup_push");
+    const detail = JSON.parse(audit.detail);
+    expect(detail.urlHost).toBe("recv.example");
+    expect(detail.status).toBe("success");
+    expect(detail.kdf).toBe("raw-sha256");
   });
 
   it("v2 pbkdf2-sha256 成功路径含 kdf/iter/salt", async () => {
@@ -347,6 +390,10 @@ describe("POST /api/admin/backup/test", () => {
     expect(env.kdf).toBe("pbkdf2-sha256");
     expect(env.iter).toBe(100000);
     expect(typeof env.salt).toBe("string");
+    // 审计：v2 路径 kdf 也记录
+    const detail = JSON.parse(mocks.auditLogsCreate.mock.calls[0][0].data.detail);
+    expect(detail.kdf).toBe("pbkdf2-sha256");
+    expect(detail.iterations).toBe(100000);
   });
 
   it("接收端 HTTP 4xx/5xx 时 API 返回 502", async () => {
@@ -357,5 +404,9 @@ describe("POST /api/admin/backup/test", () => {
     const handler = (await import("../../../pages/api/admin/backup/test")).default;
     await handler(req, res);
     expect(res.statusCode).toBe(502);
+    // 审计：失败路径也留痕
+    const detail = JSON.parse(mocks.auditLogsCreate.mock.calls[0][0].data.detail);
+    expect(detail.status).toBe("failed");
+    expect(detail.httpStatus).toBe(404);
   });
 });

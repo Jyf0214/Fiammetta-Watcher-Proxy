@@ -340,13 +340,14 @@ describe("DOCKER_TASKS 任务表与文档频率一致", () => {
     ];
   };
 
-  it("5 个任务齐全，name/spec 与文档建议频率一致", () => {
+  it("6 个任务齐全，name/spec 与文档建议频率一致", () => {
     expect(DOCKER_TASKS.map(normalize)).toEqual([
       ["model-fetch", [5], [0, 6, 12, 18]], // 每 6 小时（:05）
       ["key-reset", [0], []], // 每小时（:00）
       ["log-archive", [10], [3]], // 每天 3:10（错开整点 key-reset）
       ["proxy-health", [2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57], []], // 每 5 分钟
       ["proxy-pull", [], []], // 每分钟 tick（组级自动更新按每组周期判定到期）
+      ["notification-history-purge", [40], [3]], // 每天 3:40 清理 30 天前历史（错开 log-archive）
     ]);
   });
 
