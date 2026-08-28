@@ -170,16 +170,34 @@ def update_config_files(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: str
         print(f"  ✓ 已更新配置文件: {os.path.relpath(path, PROJECT_ROOT)}")
 
 
-def set_secret(key: str, value: str, extra_args: list):
-    """通过 Wrangler CLI 设置 Secret"""
-    res = subprocess.run(
-        ["npx", "wrangler"] + extra_args + [key],
-        input=value.encode(), capture_output=True, timeout=60
+def set_pages_secret(key: str, value: str):
+    """通过 Cloudflare Pages API 直接设置 Secret（避免 wrangler 读取互斥配置文件）"""
+    # GET 现有变量，PATCH 时必须带上全部变量，否则未传变量会被清空
+    data, _, _ = cf_api(
+        "GET", f"/pages/projects/{PAGES_PROJECT}/environments/production/variables", ok_codes=[800000]
     )
-    if res.returncode == 0:
-        print(f"  Secret 已设置: {key}")
-    else:
-        fail(f"Secret {key} 设置失败 (returncode={res.returncode})")
+    existing = {}
+    if data.get("success"):
+        for var in data.get("result", {}).get("variables", []):
+            existing[var["key"]] = var
+
+    # 构建更新后的变量列表：保留非 secret_text 类型，新增/覆盖 secret_text
+    variables = []
+    for k, v in existing.items():
+        if v.get("type") != "secret_text":
+            variables.append(v)
+    # 覆盖或新增 secret_text
+    variables.append({"key": key, "value": value, "type": "secret_text"})
+    cf_api("PATCH", f"/pages/projects/{PAGES_PROJECT}/environments/production/variables",
+           {"variables": variables})
+    print(f"  Secret 已设置: {key}")
+
+
+def set_worker_secret(key: str, value: str):
+    """通过 Cloudflare Workers API 直接设置 Secret"""
+    cf_api("PUT", f"/accounts/{ACCOUNT_ID}/workers/scripts/{WORKER_NAME}/secrets/{key}",
+           {"key": key, "value": value, "type": "secret_text"})
+    print(f"  Secret 已设置: {key}")
 
 
 # ==================== 阶段实现 ====================
@@ -373,7 +391,7 @@ def sync_env_and_bindings(d1_id: str, kv_id: str, hyperdrive_id: str, db_type: s
     # Worker Secret 同步（非 D1 外部数据库模式下需要设置 DATABASE_URL）
     print(f"\n同步 Worker Secret (DB_TYPE={db_type})...")
     if db_type != "d1" and DATABASE_URL:
-        set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
+        set_worker_secret("DATABASE_URL", DATABASE_URL)
     else:
         print(f"   跳过 Worker DATABASE_URL Secret（DB_TYPE={db_type}，非外部数据库模式）")
 
@@ -405,10 +423,10 @@ def run_post(db_type: str):
         secrets_dict["DATABASE_URL"] = DATABASE_URL
 
     for k, v in secrets_dict.items():
-        set_secret(k, v, ["pages", "secret", "put", "--project-name", PAGES_PROJECT, "--env", "production"])
+        set_pages_secret(k, v)
 
     if db_type != "d1" and DATABASE_URL:
-        set_secret("DATABASE_URL", DATABASE_URL, ["secret", "put", "--config", WRANGLER_TOML, "--name", WORKER_NAME])
+        set_worker_secret("DATABASE_URL", DATABASE_URL)
 
 
 def run_check():
