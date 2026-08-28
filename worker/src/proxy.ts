@@ -812,7 +812,7 @@ export async function proxyV1Request(
           // 读取失败（如 signal 超时）不影响重试流程
         }
         // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
-        // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
+        // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 10s）+
         // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）。
         // 公式收敛至共享 retryBackoffMs（与 Pages 版同源）
         await new Promise((resolve) => setTimeout(resolve, retryBackoffMs(attempt)));

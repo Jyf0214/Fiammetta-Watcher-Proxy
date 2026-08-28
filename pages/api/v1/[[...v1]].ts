@@ -621,7 +621,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
         // 已被 handleUpstreamResponsePages 消费过，此处 arrayBuffer 会 reject 被吞，安全）
         void upRes.arrayBuffer().catch(() => {});
         // 指数退避 + 抖动（防重试风暴）：同平台换 Key 后立即重打同一过载平台只会
-        // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 2s）+
+        // 加剧 429（上游限流窗口未复位），等待 250ms×2^attempt（上限 10s）+
         // 0~250ms 随机抖动错峰后再发下一轮；换平台路径不加（新平台可能不忙）。
         // 公式收敛至共享 retryBackoffMs（与 Worker 全量版同源）
         await new Promise((resolve) => setTimeout(resolve, retryBackoffMs(attempt)));
