@@ -292,22 +292,99 @@ async function ensureConfigLoaded(db: D1Database | Database, env?: WorkerEnv): P
   return cachedConfig ?? parseNotificationsConfig(null);
 }
 
-// ==================== 冷却去重（v2：持久化到 DB） ====================
+// ==================== 冷却去重（v2：持久化到 DB + 进程内回退） ====================
 //
 // 冷却状态从 notification_cooldowns 表读取/写入，多实例部署保持一致。
 // 原进程内 lastSentAt Map 已弃用（v1 行为），由 v2 store 替代。
+// P1-2 修复：DB 不可用时回退到进程内 Map，保证本实例冷却仍生效（避免重试风暴）。
 // 详见 src/lib/notification-store.ts。
+
+/** 进程内回退冷却表：DB 写入失败时使用，仅本实例有效 */
+const fallbackCooldowns = new Map<string, number>();
+
+/**
+ * 检查冷却：先查 DB（最权威，多实例一致），DB 抛错时回退到进程内 Map
+ *
+ * @returns true = 在冷却中（应跳过）
+ */
+async function checkCooldownWithFallback(
+  eventKey: string,
+  cooldownMinutes: number
+): Promise<boolean> {
+  if (cooldownMinutes <= 0) return false;
+  // 间歇性故障处理：DB 与 fallback map 取并集——任意一边命中冷却即视为冷却中。
+  // 场景：上一次 recordSent 抛错写了 fallback map（DB 写入失败），
+  // 下次 checkCooldown 查 DB 可能成功（间歇恢复）但找不到记录，
+  // 此时必须看 fallback map 才能保留冷却状态。
+  let dbCooling = false;
+  let dbAvailable = true;
+  try {
+    dbCooling = await checkCooldown(eventKey, cooldownMinutes);
+  } catch (err) {
+    dbAvailable = false;
+    console.error(
+      "[notifier] 冷却查询失败，回退到进程内:",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+  if (dbCooling) return true;
+  // fallback 命中即视为冷却（DB 写失败留下的本实例冷却状态）
+  const last = fallbackCooldowns.get(eventKey);
+  if (last) return Date.now() - last < cooldownMinutes * 60_000;
+  // DB 抛错 + fallback 无记录 → 放行（无任何冷却证据）
+  if (!dbAvailable) return false;
+  // DB 成功 + 无冷却 + fallback 无记录 → 放行
+  return false;
+}
+
+/**
+ * 记录冷却：先写 DB（多实例同步），DB 失败时回退到进程内 Map；
+ * 写 DB 成功时清理本实例 fallback（避免"成功写入但 fallback 残留导致
+ * 下次 checkCooldown 误命中"）
+ */
+async function recordSentWithFallback(eventKey: string): Promise<void> {
+  try {
+    await recordSent(eventKey);
+    fallbackCooldowns.delete(eventKey);
+  } catch (err) {
+    console.error(
+      "[notifier] 冷却写入失败，回退到进程内:",
+      err instanceof Error ? err.message : String(err)
+    );
+    fallbackCooldowns.set(eventKey, Date.now());
+  }
+}
 
 // 测试钩子
 export function resetNotifierForTests(): void {
   cachedConfig = null;
   configLoadedAt = 0;
   loadingPromise = null;
+  fallbackCooldowns.clear();
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ==================== 发送 ====================
 
 const SEND_TIMEOUT_MS = 5_000;
+/** 重试次数：除首次外再尝试 2 次（共 3 次），覆盖瞬时网络抖动 */
+const SEND_MAX_RETRIES = 2;
+/** 指数退避基础值（ms）：第 1 次重试 1×，第 2 次 2× */
+const RETRY_BACKOFF_BASE_MS = 1_000;
+/** 4xx 不重试（请求本身错误，重试无用）；5xx/网络错误才重试 */
+function shouldRetryHttpStatus(status: number): boolean {
+  return status >= 500 && status < 600;
+}
+
+/** 等待指定毫秒（测试时可被覆写） */
+let sleepImpl: (ms: number) => Promise<void> = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 测试钩子：替换 sleep（fake timer 不兼容 AbortController 时使用） */
+export function _setSleepForTests(fn: (ms: number) => Promise<void>): void {
+  sleepImpl = fn;
+}
+const sleep = (ms: number): Promise<void> => sleepImpl(ms);
 
 /**
  * 发送事件通知
@@ -358,9 +435,10 @@ export async function sendNotification(
 
     // 持久化冷却去重：DB 写一次（失败仅 console.error，不阻塞）；同实例下轮调用
     // 都会因 checkCooldown 命中而被拦截；多实例部署同步生效
+    // P1-2 修复：DB 写失败时回退到进程内 lastSentAt Map，保证本实例冷却仍生效
     const cooldownKey = `${event}:${opts.eventKey ?? ""}`;
-    if (await checkCooldown(cooldownKey, config.cooldownMinutes)) return;
-    await recordSent(cooldownKey);
+    if (await checkCooldownWithFallback(cooldownKey, config.cooldownMinutes)) return;
+    await recordSentWithFallback(cooldownKey);
 
     await Promise.allSettled(
       notifiableChannels.map(async (channel) => {
@@ -392,38 +470,70 @@ export async function sendNotification(
           return;
         }
         const start = Date.now();
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
         let status: "success" | "failed" = "failed";
         let httpStatus: number | null = null;
         let error: string | null = null;
-        try {
-          const res = await fetch(rendered.url, {
-            method: "POST",
-            headers: rendered.headers,
-            body: rendered.body,
-            signal: controller.signal,
-          });
-          // 必须消费响应体释放 keep-alive 连接（同 backup / upstream-proxy 修复）
-          if (typeof res.arrayBuffer === "function") {
-            try {
-              await res.arrayBuffer();
-            } catch {
-              await res.body?.cancel().catch(() => {});
+
+        // 重试循环：SEND_MAX_RETRIES + 1 次总尝试；5xx/网络错误/超时触发重试，
+        // 4xx 不重试（请求体错），3xx/2xx 直接成功/失败
+        outer: for (let attempt = 0; attempt <= SEND_MAX_RETRIES; attempt++) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+          try {
+            const res = await fetch(rendered.url, {
+              method: "POST",
+              headers: rendered.headers,
+              body: rendered.body,
+              signal: controller.signal,
+            });
+            // 必须消费响应体释放 keep-alive 连接（同 backup / upstream-proxy 修复）
+            if (typeof res.arrayBuffer === "function") {
+              try {
+                await res.arrayBuffer();
+              } catch {
+                await res.body?.cancel().catch(() => {});
+              }
             }
-          }
-          httpStatus = res.status;
-          if (!res.ok) {
+            httpStatus = res.status;
+            if (res.ok) {
+              status = "success";
+              break;
+            }
+            // 非 2xx
             error = `HTTP ${res.status}`;
-            console.error(`[notifier] 通道 ${channel.name} 返回 HTTP ${res.status}`);
-          } else {
-            status = "success";
+            if (!shouldRetryHttpStatus(res.status) || attempt === SEND_MAX_RETRIES) {
+              console.error(
+                attempt === SEND_MAX_RETRIES
+                  ? `[notifier] 通道 ${channel.name} 重试 ${SEND_MAX_RETRIES} 次后仍返回 HTTP ${res.status}`
+                  : `[notifier] 通道 ${channel.name} 返回 HTTP ${res.status}（不重试）`
+              );
+              break;
+            }
+            // 5xx 且还有重试机会：继续循环前先等待
+            console.error(
+              `[notifier] 通道 ${channel.name} 第 ${attempt + 1} 次返回 HTTP ${res.status}，准备重试`
+            );
+          } catch (err) {
+            // 网络/超时/Abort：判定为可重试
+            error = err instanceof Error ? err.message : String(err);
+            if (attempt === SEND_MAX_RETRIES) {
+              console.error(
+                `[notifier] 通道 ${channel.name} 重试 ${SEND_MAX_RETRIES} 次后仍失败: ${error}`
+              );
+              break;
+            }
+            console.error(
+              `[notifier] 通道 ${channel.name} 第 ${attempt + 1} 次失败: ${error}，准备重试`
+            );
+            // fallthrough 到重试等待（finally 清 timer + 循环底 sleep）
+          } finally {
+            clearTimeout(timer);
           }
-        } catch (err) {
-          error = err instanceof Error ? err.message : String(err);
-          console.error(`[notifier] 通道 ${channel.name} 发送失败:`, error);
-        } finally {
-          clearTimeout(timer);
+          // 重试退避：attempt=0 → 1s, attempt=1 → 2s（指数）
+          if (attempt < SEND_MAX_RETRIES) {
+            await sleep(RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt));
+            continue outer;
+          }
         }
         // 写发送历史（旁路：失败仅 console.error，不影响其他通道）
         await recordHistory({

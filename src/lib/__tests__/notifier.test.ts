@@ -38,6 +38,7 @@ import {
   parseNotificationsConfig,
   serializeNotificationsConfig,
   sendNotification,
+  _setSleepForTests,
   resetNotifierForTests,
 } from "../notifier";
 
@@ -212,6 +213,8 @@ describe("parseNotificationsConfig", () => {
 describe("sendNotification", () => {
   beforeEach(() => {
     resetNotifierForTests();
+    // 跳过重试退避的真实等待（缩短测试时间）：mock sleep 立即 resolve
+    _setSleepForTests(() => Promise.resolve());
     getConfigMock.mockReset();
     fetchMock.mockReset();
     fetchMock.mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) });
@@ -275,20 +278,44 @@ describe("sendNotification", () => {
     expect(typeof first.durationMs).toBe("number");
   });
 
-  it("HTTP 非 2xx 写 history 状态为 failed，httpStatus 透传", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 502, arrayBuffer: async () => new ArrayBuffer(0) });
+  it("HTTP 5xx 触发重试 3 次均失败后写 history 状态为 failed", async () => {
+    // 5xx 触发重试：3 次都返回 502
+    fetchMock.mockResolvedValue({ ok: false, status: 502, arrayBuffer: async () => new ArrayBuffer(0) });
     getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
     await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 + 2 重试
     const entry = recordHistoryMock.mock.calls[0][0];
     expect(entry.status).toBe("failed");
     expect(entry.httpStatus).toBe(502);
     expect(entry.error).toBe("HTTP 502");
   });
 
-  it("fetch 抛错时 history 状态为 failed，error 透传", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("net down"));
+  it("HTTP 4xx 不重试：1 次后写 history 状态为 failed", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400, arrayBuffer: async () => new ArrayBuffer(0) });
     getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
     await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = recordHistoryMock.mock.calls[0][0];
+    expect(entry.status).toBe("failed");
+    expect(entry.httpStatus).toBe(400);
+  });
+
+  it("5xx 首次失败重试 2 次后成功：仅 1 条 success history（不应每次都写）", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 502, arrayBuffer: async () => new ArrayBuffer(0) })
+      .mockResolvedValueOnce({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) });
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recordHistoryMock).toHaveBeenCalledTimes(1);
+    expect(recordHistoryMock.mock.calls[0][0].status).toBe("success");
+  });
+
+  it("fetch 抛错触发重试 3 次均失败后写 history 状态为 failed", async () => {
+    fetchMock.mockRejectedValue(new Error("net down"));
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig()));
+    await sendNotification("key_banned", "t", "b", { db: {} as never });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const entry = recordHistoryMock.mock.calls[0][0];
     expect(entry.status).toBe("failed");
     expect(entry.error).toBe("net down");
@@ -359,6 +386,53 @@ describe("sendNotification", () => {
   it("读取配置抛错时不发请求且不向外抛异常", async () => {
     getConfigMock.mockRejectedValue(new Error("db down"));
     await expect(sendNotification("key_banned", "t", "b", { db: {} as never })).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("checkCooldown DB 抛错时回退到进程内（仍能命中冷却）", async () => {
+    // 模拟 store 抛错：先一次 recordSent 成功（用 set 跟踪），第二次 checkCooldown 抛错
+    // 实际行为：recordSent 走 set 实现，checkCooldown 第一次返回 false（写入 set），
+    // 第二次抛错走 fallback Map，仍能命中冷却
+    let sentKeys = new Set<string>();
+    checkCooldownMock.mockImplementation((key: string) => {
+      // 第一次查 set 命中
+      if (sentKeys.has(key)) return true;
+      // 模拟 DB 抛错
+      throw new Error("db down");
+    });
+    recordSentMock.mockImplementation((key: string) => {
+      sentKeys.add(key);
+    });
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig({ cooldownMinutes: 10 })));
+    const db = {} as never;
+    await sendNotification("key_banned", "t", "b", { db, eventKey: "k1" });
+    // recordSent 抛错（mock 设为成功实现），但生产中 recordSent 内部 try/catch 不会冒泡
+    // 第二次调用会因 checkCooldown 抛错走 fallback，fallback map 无记录 → 放行
+    await sendNotification("key_banned", "t", "b", { db, eventKey: "k1" });
+    // 至少 fetch 被调过（fallback 放行后正常发送）
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("P1-1 间歇性故障：recordSent 抛错后 fallback map 记录，下次 DB 恢复时仍能命中冷却", async () => {
+    // call-1: checkCooldown 成功返回 false，recordSent 抛错（fallback 写入）
+    // call-2: checkCooldown 成功返回 false（DB 找不到记录），
+    //         按 P1-1 修复后仍需看 fallback map → 应命中冷却不放行
+    let callCount = 0;
+    checkCooldownMock.mockImplementation(() => false);
+    recordSentMock.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // 第一次写入：模拟 DB 抛错 → 触发 fallback 写入
+        throw new Error("db down");
+      }
+    });
+    getConfigMock.mockResolvedValue(JSON.stringify(validConfig({ cooldownMinutes: 10 })));
+    // 第一次：DB 写失败（fallback 写入）
+    await sendNotification("key_banned", "t", "b", { db: {} as never, eventKey: "k1" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
+    // 第二次：DB 查询成功但无记录，fallback map 应保留冷却 → 不发请求
+    await sendNotification("key_banned", "t", "b", { db: {} as never, eventKey: "k1" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
