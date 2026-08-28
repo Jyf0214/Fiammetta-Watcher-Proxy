@@ -38,4 +38,8 @@ export const BASE_BUTTON_CLASSES =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1 " +
   // 不用 disabled:pointer-events-none：原生 disabled 已不触发 click，
   // 而 pointer-events-none 会抵消 cursor-not-allowed 并抑制 title 提示
-  "disabled:opacity-50 disabled:cursor-not-allowed";
+  "disabled:opacity-50 disabled:cursor-not-allowed " +
+  // 按钮文字默认禁止折行 + 禁止 flex 压缩：避免父级 flex 容器宽度不足时
+  // 中文/英文被按字符竖向折行（"添-加-密-钥" 单字竖排），业务上需要压缩
+  // 时由调用方显式覆盖
+  "whitespace-nowrap shrink-0";
