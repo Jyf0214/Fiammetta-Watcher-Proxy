@@ -136,81 +136,9 @@ jobs:
       - name: Deploy Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
-          # 让 wrangler 在本地日志输出脱敏后的 API 响应体（含 deployment 失败详情，token 自动打码）
-          WRANGLER_LOG_SANITIZE: "false"
         run: |
           set -o pipefail
-          npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -vE "https://|commit_message|commit_hash|commit_dirty" || {
-            echo "✗ wrangler pages deploy 失败，wrangler 本地日志尾部（脱敏）："
-            ls -t ~/.config/.wrangler/logs/wrangler-*.log 2>/dev/null | head -1 | xargs -I{} sh -c 'tail -120 "{}" | grep -vE "^Uploading|https://|commit_message|commit_hash|commit_dirty" | tail -50'
-            echo "✗ wrangler pages deploy 失败，最近部署的 Cloudflare 构建日志："
-            python3 - "$CLOUDFLARE_ACCOUNT_ID" "$CLOUDFLARE_API_TOKEN" <<'PYEOF' | grep -vE "https://|commit_message|commit_hash|commit_dirty" | tail -60
-          import json, sys, urllib.request
-
-          account_id, token = sys.argv[1], sys.argv[2]
-
-          def api(path):
-              req = urllib.request.Request(
-                  f"https://api.cloudflare.com/client/v4/accounts/{account_id}{path}",
-                  headers={"Authorization": f"Bearer {token}"},
-              )
-              return json.load(urllib.request.urlopen(req))
-
-          # 敏感字段脱敏（commit 信息可能含凭据/内部 ID/用户输入，CI 日志只展示
-          # "commit <hash 前 7 位>" 这种人类可读标识，详细信息按需追溯源码即可）.
-          # deployment_trigger / stages 内部结构均走 _redact_dep 清洗.
-          def _redact_dep(obj, depth=0):
-              if depth > 8:
-                  return "<truncated>"
-              if isinstance(obj, dict):
-                  out = {}
-                  for k, v in obj.items():
-                      if k in ("commit_message", "commit_dirty", "created_on", "modified_on", "started_on", "ended_on"):
-                          out[k] = "<redacted>" if k != "commit_dirty" else None
-                      elif k == "commit_hash":
-                          out[k] = v[:7] + "..." if isinstance(v, str) and len(v) >= 7 else "<redacted>"
-                      elif k == "id" and isinstance(v, str) and len(v) >= 12:
-                          out[k] = v[:8] + "..." + v[-4:]
-                      elif k == "url":
-                          continue  # https:// 整行会被脱敏管道吞，不如直接删
-                      else:
-                          out[k] = _redact_dep(v, depth + 1)
-                  return out
-              if isinstance(obj, list):
-                  return [_redact_dep(x, depth + 1) for x in obj]
-              return obj
-
-          try:
-              deps = api("/pages/projects/fiammetta-watcher/deployments?per_page=3")["result"]
-              for dep in deps:
-                  stage = dep.get("latest_stage", {})
-                  print(f"deployment {dep['id']} stage={stage.get('name')} status={stage.get('status')}")
-                  # 完整 dump 经 _redact_dep 清洗：commit_* / id / url 字段去除
-                  print("  dep full:", json.dumps(_redact_dep(dep), default=str)[:1500])
-                  dep_err = dep.get("error")
-                  stage_err = stage.get("error")
-                  if dep_err:
-                      print("  ! deployment error:", json.dumps(_redact_dep(dep_err))[:400])
-                  if stage_err:
-                      print("  ! stage error:", json.dumps(_redact_dep(stage_err))[:400])
-                  try:
-                      resp = api(f"/pages/projects/fiammetta-watcher/deployments/{dep['id']}/history/logs?size=200")
-                      logs = resp.get("result") or {}
-                      data = logs.get("data") or []
-                      if not data:
-                          print("  ! history/logs 无日志，响应:", json.dumps(resp)[:400])
-                      for item in data[-15:]:
-                          line = (item.get("line") or "").strip()
-                          if line:
-                              print("  |", line[:400])
-                  except Exception as err:
-                      print("  ! 构建日志获取失败:", err)
-          except Exception as err:
-              print("! 部署列表获取失败:", err)
-          PYEOF
-            exit 1
-          }
+          npx wrangler pages deploy .open-next --project-name fiammetta-watcher --branch main 2>&1 | grep -vE "https://|commit_message|commit_hash|commit_dirty"
           echo "✓ Pages 部署完成"
 
       # ==================== 部署后：设置 Pages 环境变量（必须在 pages deploy 之后） ====================
