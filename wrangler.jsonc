@@ -1,16 +1,11 @@
 {
-  // wrangler 4.122+ 要求 Pages 配置声明 pages_build_output_dir，否则整个 wrangler.jsonc
-  // 被忽略（绑定/兼容性设置均失效），导致 Pages Worker 部署失败
+  // Pages 项目（4.122+）不允许声明 main / assets 键（与 pages_build_output_dir 互斥）；
+  // build:cf 已将产物重命名为 _worker.js 并把静态资源提升到 .open-next 根目录，
+  // Pages 会从 pages_build_output_dir 指向的目录自动识别入口与静态资源。
   "pages_build_output_dir": ".open-next",
-  // build:cf 会把 OpenNext 产物 mv 为 _worker.js（见 package.json），main 必须指向改后文件名
-  "main": ".open-next/_worker.js",
   "name": "fiammetta",
   "compatibility_date": "2025-04-02",
   "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "STATIC_ASSETS"
-  },
   // vars 由 deploy/init.py post-deploy 通过 Cloudflare API 设置
   // wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值，故此处不能放 vars
   "d1_databases": [
