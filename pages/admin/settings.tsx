@@ -10,11 +10,13 @@
 
 import { useCallback, useEffect, useRef, useState, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import Link from "next/link";
 import { message } from "antd";
 import {
   Bell,
   CircleDollarSign,
   Code2,
+  Database,
   Download,
   KeyRound,
   Loader2,
@@ -197,10 +199,11 @@ function SettingsContent() {
     overscan: 8,
   });
 
-  // 通知配置
+  // 通知配置 — 仅用于系统设置页"告警通知" ProCard 的摘要展示（启用状态 +
+  // 通道数）。完整配置入口已迁移到独立 /admin/notifications 页面，避免
+  // settings 页成为"通知功能的最小实现"（参见 [project memory] 形同虚设 bug）
   const [notif, setNotif] = useState<NotificationsConfig>(DEFAULT_NOTIFICATIONS);
   const [notifLoading, setNotifLoading] = useState(true);
-  const [notifSaving, setNotifSaving] = useState(false);
 
   // 两步验证（2FA）
   const [twofaEnabled, setTwofaEnabled] = useState(false);
@@ -275,53 +278,6 @@ function SettingsContent() {
       setNotifLoading(false);
     }
   }, [t]);
-
-  const handleSaveNotifications = async () => {
-    // 前端预校验（与服务端 strict 校验同规则）：启用时至少一条通道
-    if (notif.enabled && notif.channels.length === 0) {
-      message.error(t("notifErrorNoChannel"));
-      return;
-    }
-    for (const c of notif.channels) {
-      if (!/^https?:\/\//i.test(c.url.trim())) {
-        message.error(t("notifErrorBadUrl", { name: c.name }));
-        return;
-      }
-    }
-    const cooldown = Number(notif.cooldownMinutes);
-    if (!Number.isFinite(cooldown) || cooldown < 1 || cooldown > 1440) {
-      message.error(t("notifErrorCooldown"));
-      return;
-    }
-    setNotifSaving(true);
-    try {
-      const res = await fetch("/api/admin/notifications", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          config: {
-            ...notif,
-            cooldownMinutes: Math.floor(cooldown),
-            channels: notif.channels.map((c) => ({ name: c.name.trim(), url: c.url.trim() })),
-          },
-        }),
-      });
-      const json = (await res.json().catch(() => null)) as { success?: boolean; error?: { message?: string } } | null;
-      if (!res.ok || !json?.success) throw new Error(json?.error?.message || `HTTP ${res.status}`);
-      message.success(t("notifSaved"));
-    } catch (err) {
-      message.error(`${t("common:error")}: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setNotifSaving(false);
-    }
-  };
-
-  const updateChannel = (idx: number, patch: Partial<NotificationChannel>) => {
-    setNotif((prev) => ({
-      ...prev,
-      channels: prev.channels.map((c, i) => (i === idx ? { ...c, ...patch } : c)),
-    }));
-  };
 
   // ==================== 两步验证（2FA） ====================
 
@@ -724,95 +680,32 @@ function SettingsContent() {
               </div>
             ) : (
               <>
-                {/* 启用开关 */}
-                <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={notif.enabled}
-                    onChange={(e) => setNotif((prev) => ({ ...prev, enabled: e.target.checked }))}
-                    className="w-4 h-4 accent-zinc-700 dark:accent-zinc-300"
-                  />
-                  {t("notifEnabled")}
-                </label>
-
-                {/* 事件开关 */}
-                <div>
-                  <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">{t("notifEvents")}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {([
-                      ["keyBanned", "notifEventKeyBanned"],
-                      ["platformOpen", "notifEventPlatformOpen"],
-                      ["platformDegraded", "notifEventPlatformDegraded"],
-                      ["allUnavailable", "notifEventAllUnavailable"],
-                      ["quotaThreshold", "notifEventQuotaThreshold"],
-                    ] as const).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={notif.events[key]}
-                          onChange={(e) => setNotif((prev) => ({ ...prev, events: { ...prev.events, [key]: e.target.checked } }))}
-                          className="w-4 h-4 accent-zinc-700 dark:accent-zinc-300"
-                        />
-                        {t(label)}
-                      </label>
-                    ))}
-                  </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs ${
+                      notif.enabled
+                        ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                    }`}
+                  >
+                    {notif.enabled ? t("notif:enabled") : t("notif:disabled")}
+                  </span>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {t("notifChannels")}: <strong className="text-zinc-900 dark:text-zinc-100">{notif.channels.length}</strong>
+                  </span>
                 </div>
 
-                {/* 通道列表 */}
-                <div>
-                  <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">{t("notifChannels")}</p>
-                  <div className="space-y-2">
-                    {notif.channels.map((c, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                        <input
-                          value={c.name}
-                          onChange={(e) => updateChannel(idx, { name: e.target.value })}
-                          placeholder={t("notifChannelName")}
-                          className="h-8 w-full sm:w-36 shrink-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                        />
-                        <input
-                          value={c.url}
-                          onChange={(e) => updateChannel(idx, { url: e.target.value })}
-                          placeholder="https://..."
-                          className="h-8 w-full min-w-0 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setNotif((prev) => ({ ...prev, channels: prev.channels.filter((_, i) => i !== idx) }))}
-                          title={t("common:delete")}
-                          className="h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                    {notif.channels.length === 0 && (
-                      <p className="text-sm text-zinc-400 py-1">{t("notifNoChannels")}</p>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={() => setNotif((prev) => ({ ...prev, channels: [...prev.channels, { name: "", url: "" }] }))}>
-                      <Plus className="w-4 h-4 mr-1" />
-                      {t("notifAddChannel")}
+                <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                  <Link href="/admin/notifications" className="flex-1">
+                    <Button variant="primary" size="sm" icon={<Bell className="w-4 h-4 mr-1" />} block>
+                      {t("notifOpenPage")}
                     </Button>
-                  </div>
-                </div>
-
-                {/* 冷却时间 */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-zinc-700 dark:text-zinc-300">{t("notifCooldown")}</label>
-                  <input
-                    value={String(notif.cooldownMinutes)}
-                    onChange={(e) => setNotif((prev) => ({ ...prev, cooldownMinutes: Number(e.target.value) || 0 }))}
-                    inputMode="numeric"
-                    className="h-8 w-20 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm text-right text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
-                  />
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">{t("notifCooldownUnit")}</span>
-                </div>
-
-                <div className="flex justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                  <Button variant="primary" size="sm" onClick={handleSaveNotifications} loading={notifSaving} icon={<Bell className="w-4 h-4 mr-1" />} disabled={notifSaving || notifLoading}>
-                    {notifSaving ? t("notifSaving") : t("common:save")}
-                  </Button>
+                  </Link>
+                  <Link href="/admin/backup">
+                    <Button variant="secondary" size="sm" icon={<Database className="w-4 h-4 mr-1" />}>
+                      {t("notifOpenBackup")}
+                    </Button>
+                  </Link>
                 </div>
               </>
             )}

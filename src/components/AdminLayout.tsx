@@ -24,6 +24,8 @@ import {
   Settings,
   Globe,
   FlaskConical,
+  Bell,
+  Archive,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -49,6 +51,8 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "systemKeys", icon: Key, href: "/admin/system-keys", group: "system", order: 11 },
   { key: "upstreamProxy", icon: Globe, href: "/admin/upstream-proxy", group: "system", order: 12 },
   { key: "settings", icon: Settings, href: "/admin/settings", group: "system", order: 13 },
+  { key: "notifications", icon: Bell, href: "/admin/notifications", group: "system", order: 14 },
+  { key: "backup", icon: Archive, href: "/admin/backup", group: "system", order: 15 },
   { key: "playground", icon: FlaskConical, href: "/admin/playground", group: "manage", order: 6 },
 ];
 
@@ -222,6 +226,8 @@ function TopHeader({
     "/admin/system-keys": "systemKeys",
     "/admin/upstream-proxy": "upstreamProxy",
     "/admin/settings": "settings",
+    "/admin/notifications": "notifications",
+    "/admin/backup": "backup",
     "/admin/upstream-proxy/[id]": "upstreamProxy",
   };
 
