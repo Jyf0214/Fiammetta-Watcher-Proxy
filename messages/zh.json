@@ -310,7 +310,16 @@
     "updateSuccess": "更新成功",
     "noApiKey": "暂无 API Key",
     "baseUrlCfHint": "使用此密钥时，Base URL 请填写系统配套的 Cloudflare Workers 地址（如 https://your-worker.workers.dev），而非上游平台地址。",
-    "baseUrlSelfHint": "使用此密钥时，Base URL 请填写本系统部署地址（如 https://your-domain.com），而非上游平台地址。"
+    "baseUrlSelfHint": "使用此密钥时，Base URL 请填写本系统部署地址（如 https://your-domain.com），而非上游平台地址。",
+    "allowedIps": "允许 IP",
+    "allowedIpsPlaceholder": "每行一个，例如 192.168.1.0/24 或 10.0.0.1",
+    "allowedIpsDesc": "限制该 Key 仅允许指定客户端 IP 调用。支持 CIDR 或单 IP。留空表示不限制。",
+    "allowedModels": "允许模型",
+    "allowedModelsPlaceholder": "输入模型 ID 后回车添加",
+    "allowedModelsDesc": "限制该 Key 仅允许调用指定模型。留空表示不限制。",
+    "allowlist": "限制",
+    "allowlistIp": "IP",
+    "allowlistModel": "模型"
   },
   "log": {
     "model": "模型",

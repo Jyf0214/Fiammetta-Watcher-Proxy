@@ -124,6 +124,8 @@ const apiKey = {
   callUsed: 0,
   tokenLimit: null,
   resetPeriod: null,
+  allowedIps: null,
+  allowedModels: null,
   status: "active",
   expiresAt: null,
   createdAt: 0,

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "call_limit" INTEGER,
     "call_used" INTEGER NOT NULL DEFAULT 0,
     "reset_period" TEXT DEFAULT 'monthly',
+    "allowed_ips" TEXT,
+    "allowed_models" TEXT,
     "status" TEXT NOT NULL DEFAULT 'active',
     "expires_at" INTEGER,
     "created_at" INTEGER NOT NULL DEFAULT 0,

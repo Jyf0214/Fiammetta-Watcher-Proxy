@@ -14,6 +14,8 @@ import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { getClientIp } from "./auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { checkCsrfOrigin } from "@/lib/admin-security";
+import { invalidateApiKeyCache } from "../../../worker/src/auth";
+import { resetAllowlistCache } from "../../../worker/src/api-key-allowlist";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -44,6 +46,30 @@ function parseOffsetParam(raw: string | string[] | undefined): number {
   const n = parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
   if (Number.isNaN(n)) return 0;
   return Math.max(0, n);
+}
+
+/**
+ * 解析白名单字段（IP 段或模型 ID 列表）
+ * - null/undefined → null（不限制）
+ * - 字符串数组 → JSON 字符串存储
+ * - 空数组 → null（视为不限制，与空字符串等价）
+ * - 非数组 → 拒绝
+ */
+function parseAllowlistField(value: unknown, fieldName: string): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === null || value === undefined) return { ok: true, value: null };
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} 必须是字符串数组` };
+  }
+  if (value.length === 0) return { ok: true, value: null };
+  for (const item of value) {
+    if (typeof item !== "string" || item.length === 0) {
+      return { ok: false, error: `${fieldName} 数组元素必须是非空字符串` };
+    }
+    if (item.length > 200) {
+      return { ok: false, error: `${fieldName} 数组元素长度不能超过 200 字符` };
+    }
+  }
+  return { ok: true, value: JSON.stringify(value) };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -94,13 +120,22 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const body = req.body as any;
-    const { name, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt } = body;
+    const { name, rpmLimit, tpmLimit, callLimit, tokenLimit, resetPeriod, expiresAt, allowedIps, allowedModels } = body;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return res.status(400).json({ success: false, error: { message: "Key 名称不能为空", type: "invalid_request_error" } });
     }
     if (name.length > 100) {
       return res.status(400).json({ success: false, error: { message: "Key 名称不能超过 100 个字符", type: "invalid_request_error" } });
+    }
+
+    const allowedIpsParse = parseAllowlistField(allowedIps, "allowedIps");
+    if (!allowedIpsParse.ok) {
+      return res.status(400).json({ success: false, error: { message: allowedIpsParse.error, type: "invalid_request_error" } });
+    }
+    const allowedModelsParse = parseAllowlistField(allowedModels, "allowedModels");
+    if (!allowedModelsParse.ok) {
+      return res.status(400).json({ success: false, error: { message: allowedModelsParse.error, type: "invalid_request_error" } });
     }
 
     const validResetPeriods = ["monthly", "daily", "never"];
@@ -153,10 +188,17 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         usedTokens: 0, rpmLimit: rpmLimit ?? null,
         tpmLimit: tpmLimit ?? null, callLimit: callLimit ?? null, callUsed: 0,
         tokenLimit: tokenLimit ?? null, resetPeriod: resetPeriod || "monthly",
+        allowedIps: allowedIpsParse.value,
+        allowedModels: allowedModelsParse.value,
         status: "active", expiresAt: expiresAtTimestamp,
         createdAt: currentTime, updatedAt: currentTime,
       },
     });
+
+    // 创建后立即失效该 Key 的进程内缓存（5s TTL 内仍会按过期白名单拒绝/放行）
+    invalidateApiKeyCache(keyValue);
+    // 白名单解析缓存（CIDR 规则 + 模型列表）进程内全量清除：廉价且按需触发
+    resetAllowlistCache();
 
     return res.status(200).json({ success: true, data: { ...newKey, usedTokens: Number(newKey.usedTokens) }, message: "API Key 创建成功" });
   } catch (err) {

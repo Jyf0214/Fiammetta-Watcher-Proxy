@@ -47,6 +47,7 @@ import { getUpstreamProxyForKey, markProxyFailure, recordProxyTraffic } from "@/
 import { isSafeUpstreamUrl } from "@/lib/ssrf";
 import { sendNotification } from "@/lib/notifier";
 import { convertOpenAIResponse, OpenAIToAnthropicStream, estimateInputTokens, formatAnthropicError, AnthropicRequestError, convertOpenAIRequest, OpenAIRequestError, convertAnthropicResponse, AnthropicToOpenAIStream } from "@/lib/anthropic";
+import { getClientIp } from "../admin/auth";
 import type { WorkerEnv } from "../../../worker/src/config";
 
 /**
@@ -1099,12 +1100,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const v1 = (req.query.v1 as string[])?.join("/") || "";
     const full = `/v1/${v1}`;
+    // 提取客户端 IP（用于 per-key IP 白名单校验）。
+    // Pages 端 model 白名单有意不在此处校验：NextApiRequest body 是 for-await
+    // 一次性消费流，提前 peek 二次消费会破坏现有单测与 mock；model 白名单仅
+    // 在 Worker 部署（handleV1RouteCore + peekModelFromRequest）生效，Pages
+    // 部署（EdgeOne / Docker / Vercel）只校验 IP 白名单。
+    const pagesClientIp = getClientIp(req);
     // Anthropic /v1/messages/count_tokens：不转发上游，直接估算 token 数
     if (full === "/v1/messages/count_tokens" && req.method === "POST") {
       // 该分支提前 return，先给 cfg 赋值：意外异常也被外层 catch 按 anthropic 协议格式化
       cfg = getEndpointConfig("/v1/messages") ?? undefined;
       const env = await createPagesEnv();
-      const auth = await validateApiKey(getApiKeyHeader(req) || null, dummyDb, env);
+      const auth = await validateApiKey(getApiKeyHeader(req) || null, dummyDb, env, {
+        clientIp: pagesClientIp,
+      });
       if ("error" in auth) {
         const e = auth.error;
         const errBody = await e.json().catch(() => ({})) as { error?: { message?: string } };
@@ -1130,7 +1139,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!cfgResolved) { res.status(404).json({ error: { message: "不支持的 API 端点", type: "invalid_request_error" } }); return; }
     cfg = cfgResolved;
     const env = await createPagesEnv();
-    const auth = await validateApiKey(getApiKeyHeader(req) || null, dummyDb, env);
+    // 第一次鉴权：仅 IP 白名单（不 peek model，避 Pages 端 body 单次消费约束）
+    const auth = await validateApiKey(getApiKeyHeader(req) || null, dummyDb, env, {
+      clientIp: pagesClientIp,
+    });
     if ("error" in auth) {
       if (cfg.protocol === "anthropic") {
         const e = auth.error;
