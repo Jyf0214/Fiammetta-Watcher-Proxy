@@ -86,15 +86,35 @@ export function buildUpstreamFetchHeaders(opts: UpstreamHeaderOptions): Record<s
 }
 
 /**
- * 构造上游请求 URL：Anthropic 协议上游统一指向 /v1/messages（请求体已在
- * 调用方转换为 Anthropic 格式），其余端点 baseUrl + 原样路径
+ * 构造上游请求 URL：
+ * - Anthropic 协议上游统一指向 /v1/messages（请求体已在调用方转换为 Anthropic 格式）
+ * - Gemini 协议上游指向 /v1beta/models/{model}:generateContent（请求体已在调用方
+ *   转换为 Gemini 格式，模型名作为 URL 段携带）。流式请求调用方需在 fetch 时
+ *   额外追加 ?alt=sse 查询参数；本函数不预设以避免与已有查询参数冲突
+ * - 其余端点 baseUrl + 原样路径
  */
 export function resolveUpstreamUrl(
   baseUrl: string,
   upstreamPath: string,
-  upstreamIsAnthropic: boolean
+  upstreamIsAnthropic: boolean,
+  upstreamIsGemini: boolean = false,
+  targetModel: string | null = null
 ): string {
-  return upstreamIsAnthropic
-    ? `${baseUrl.replace(/\/+$/, "")}/v1/messages`
-    : `${baseUrl.replace(/\/+$/, "")}${upstreamPath}`;
+  const base = baseUrl.replace(/\/+$/, "");
+  if (upstreamIsAnthropic) return `${base}/v1/messages`;
+  if (upstreamIsGemini) {
+    // Gemini API 路径段：models/{model}，模型名原始透传（不做 URL 编码——Gemini
+    // 模型 ID 均为 ASCII 安全字符如 gemini-2.0-flash / models/gemini-2.5-pro）
+    // 严格白名单防御路径注入：即便 targetModel 来自内部 router/平台映射，
+    // 一旦未来允许外部配置平台/自定义模型名，含 /、?、# 等会破坏 URL 语义。
+    // 不通过白名单时直接 throw，调用方以 500 透传，避免静默落到 "unknown" 模糊化错误。
+    const modelSegment = targetModel ?? "unknown";
+    if (!/^[A-Za-z0-9._:-]+$/.test(modelSegment)) {
+      throw new Error(
+        `Gemini 模型名含非法字符，拒绝构造上游 URL：${JSON.stringify(modelSegment)}`
+      );
+    }
+    return `${base}/v1beta/models/${modelSegment}:generateContent`;
+  }
+  return `${base}${upstreamPath}`;
 }
