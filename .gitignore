@@ -38,6 +38,7 @@ tsconfig.tsbuildinfo
 # wrangler
 .wrangler/
 .dev.vars
+worker/worker-configuration.d.ts
 
 # OpenNext build output
 .open-next/
