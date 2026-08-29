@@ -23,8 +23,10 @@ loadEnvLocal();
 export default defineConfig({
   resolve: {
     alias: {
-      // 与 tsconfig paths（@/* -> ./src/*）一致，让测试能直接 import 生产模块（@/lib/... 等）
+      // 与 tsconfig paths（@/* -> ./src/*，@/lib/* -> ./lib/*）一致。lib 端代码用
+      // 相对路径（../../lib/gemini）直接命中，src 端测试代码用 @/lib/... / @/... 命中。
       "@": resolve(__dirname, "src"),
+      "@/lib": resolve(__dirname, "lib"),
     },
   },
   plugins: [
