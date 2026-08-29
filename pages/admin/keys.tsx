@@ -33,6 +33,20 @@ interface ApiKeyItem {
   // 数据库存秒级 Unix 时间戳（number），非 ISO 字符串
   expiresAt: number | null;
   createdAt: number;
+  // 白名单：JSON 字符串（数组），null 表示不限制
+  allowedIps: string | null;
+  allowedModels: string | null;
+}
+
+/** 解析白名单 JSON 字符串为数组（数据库返回 null 或非法 JSON 时返回空数组） */
+function parseAllowlist(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** 移动端 API Key 卡片 — 与平台管理风格统一 */
@@ -206,6 +220,9 @@ export default function KeysPage() {
       resetPeriod: item.resetPeriod,
       // 数据库存秒级时间戳，转换为 dayjs 供 DatePicker 回显；null 表示未设置过期
       expiresAt: item.expiresAt ? dayjs.unix(item.expiresAt) : null,
+      // 白名单：JSON 字符串解析为数组，空数组 = 留空 = 不限制
+      allowedIps: parseAllowlist(item.allowedIps).join("\n"),
+      allowedModels: parseAllowlist(item.allowedModels),
     });
     setModalOpen(true);
   };
@@ -215,13 +232,24 @@ export default function KeysPage() {
       const values = await form.validateFields();
       setSubmitting(true);
 
+      // 白名单：IP 段按行分割 + 去空 + 去重；模型列表由 antd Select mode="tags" 直接给数组
+      const allowedIpsList = typeof values.allowedIps === "string"
+        ? values.allowedIps.split("\n").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const allowedModelsList = Array.isArray(values.allowedModels)
+        ? (values.allowedModels as string[]).filter((s) => typeof s === "string" && s.length > 0)
+        : [];
+
       // 过期时间：dayjs 转 ISO 字符串提交（后端 new Date() 解析后存秒级时间戳，
       // 不能直接传秒数——new Date(秒) 会按毫秒解析出 1970 年）；null/空 = 无过期
       //（编辑时后端将 null 解释为清除过期时间）
       const payload = {
         ...values,
         expiresAt: values.expiresAt ? values.expiresAt.toISOString() : null,
+        allowedIps: allowedIpsList,
+        allowedModels: allowedModelsList,
       };
+      // 提交前剔除表单里的 allowedIps 字符串字段已被覆盖，无需 unset
 
       if (editItem) {
         const res = await fetch(`/api/admin/keys/${editItem.id}`, {
@@ -344,6 +372,23 @@ export default function KeysPage() {
       render: (v: string) => (
         <span className="font-mono text-xs whitespace-nowrap overflow-hidden text-ellipsis">{v}</span>
       ),
+    },
+    {
+      // 白名单状态：null = 不限制；任一字段非空 = 已配置。展示紧凑 Tag 让管理员一眼看出受限 Key
+      title: t("allowlist"),
+      key: "allowlist",
+      width: 130,
+      render: (_: unknown, item: ApiKeyItem) => {
+        const hasIps = parseAllowlist(item.allowedIps).length > 0;
+        const hasModels = parseAllowlist(item.allowedModels).length > 0;
+        if (!hasIps && !hasModels) return <span className="text-zinc-400 text-xs">—</span>;
+        return (
+          <div className="flex items-center justify-center gap-1">
+            {hasIps && <Tag color="blue" className="!text-[10px] !m-0">{t("allowlistIp")}</Tag>}
+            {hasModels && <Tag color="purple" className="!text-[10px] !m-0">{t("allowlistModel")}</Tag>}
+          </div>
+        );
+      },
     },
     {
       title: t("usedTokens"),
@@ -572,6 +617,29 @@ export default function KeysPage() {
                 className="w-full"
                 showTime
                 placeholder={t("expiresAtPlaceholder")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="allowedIps"
+              label={t("allowedIps")}
+              extra={t("allowedIpsDesc")}
+            >
+              <Input.TextArea
+                rows={3}
+                placeholder={t("allowedIpsPlaceholder")}
+                autoSize={{ minRows: 3, maxRows: 6 }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="allowedModels"
+              label={t("allowedModels")}
+              extra={t("allowedModelsDesc")}
+            >
+              <Select
+                mode="tags"
+                placeholder={t("allowedModelsPlaceholder")}
+                tokenSeparators={[",", " "]}
+                maxTagCount={20}
               />
             </Form.Item>
           </Form>

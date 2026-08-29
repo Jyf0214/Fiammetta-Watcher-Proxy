@@ -75,6 +75,10 @@ model apiKeys {
   callLimit       Int?     @map("call_limit")
   callUsed        Int      @default(0) @map("call_used")
   resetPeriod     String?  @default("monthly") @map("reset_period")
+  // 允许调用的客户端 IP 白名单（CIDR 列表，JSON 字符串，空/null=不限制）
+  allowedIps      String?  @map("allowed_ips")
+  // 允许调用的模型白名单（模型 ID 列表，JSON 字符串，空/null=不限制）
+  allowedModels   String?  @map("allowed_models")
   status          String   @default("active")
   expiresAt       Int?     @map("expires_at")
   createdAt       Int      @default(0) @map("created_at")

@@ -21,6 +21,7 @@ import { formatAnthropicError, estimateInputTokens } from "@/lib/anthropic";
 import type { PlatformConfig } from "@/lib/types";
 import type { WorkerEnv } from "../config";
 import { MAX_BODY_BYTES } from "./proxy-constants";
+import { peekModelFromRequest } from "./peek-model";
 
 // 兼容旧导入路径（测试与外部模块从 ./v1-route 引用端点配置）
 export { getEndpointConfig, type ProxyConfig };
@@ -197,7 +198,24 @@ export async function handleV1RouteCore(
 
   // 验证 API Key（models 端点同样需要认证，防止匿名枚举模型/平台名——
   // 与 Pages 入口一致，认证通过后才处理 /v1/models 与 /v1/models/:model）
-  const authResult = await validateApiKey(getWorkerApiKeyHeader(request), env.DB, env);
+  // clientIp 与 requestedModel 用于 per-key 白名单校验（allowedIps/allowedModels）。
+  // 两者 peek 失败不影响认证主体，仅跳过对应白名单校验（保守不误杀）。
+  const clientIp =
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("eo-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    null;
+  // 仅在非流式方法上 peek：流式 body 已被消费或不可重复读
+  let peekedModel: string | null = null;
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    peekedModel = await peekModelFromRequest(request);
+  }
+  const authResult = await validateApiKey(
+    getWorkerApiKeyHeader(request),
+    env.DB,
+    env,
+    { clientIp, requestedModel: peekedModel }
+  );
   if ("error" in authResult) {
     // Anthropic 协议分支用 Anthropic 错误格式（{type:"error",error:{type,message}}）
     if (endpointConfig.protocol === "anthropic") {

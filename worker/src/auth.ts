@@ -8,6 +8,7 @@
 import { createDb } from "@/lib/prisma";
 import type { WorkerEnv } from "./config";
 import { getPeriodStart } from "./key-reset";
+import { isClientIpAllowed, isModelAllowed } from "./api-key-allowlist";
 
 // ==================== API Key 验证缓存 ====================
 
@@ -93,6 +94,8 @@ export interface ApiKeyRecord {
   tokenLimit: number | null;
   callUsed: number;
   resetPeriod: string | null;
+  allowedIps: string | null;
+  allowedModels: string | null;
   status: string;
   expiresAt: number | null;
   updatedAt: number;
@@ -188,12 +191,15 @@ export function incrementCallLimitCount(keyId: string): void {
  * @param authorizationHeader - 认证头原始值：OpenAI 客户端的 "Bearer <key>"
  *   或 Anthropic 客户端经 x-api-key 透传的裸密钥（无前缀，原样参与校验）
  * @param db - D1 数据库绑定
+ * @param context - 可选上下文：clientIp（IP 白名单校验）、requestedModel（模型白名单校验）
+ *   不传则跳过白名单检查（向后兼容：管理后台等场景无需白名单）
  * @returns apiKey（验证通过）或 { error: Response }（验证失败）
  */
 export async function validateApiKey(
   authorizationHeader: string | null,
   db: D1Database,
-  env?: WorkerEnv
+  env?: WorkerEnv,
+  context?: { clientIp?: string | null; requestedModel?: string | null }
 ): Promise<{ apiKey: ApiKeyRecord } | { error: Response }> {
   let apiKeyStr: string | null = null;
   if (authorizationHeader) {
@@ -239,6 +245,8 @@ export async function validateApiKey(
           callLimit: true,
           callUsed: true,
           resetPeriod: true,
+          allowedIps: true,
+          allowedModels: true,
           status: true,
           expiresAt: true,
           updatedAt: true,
@@ -264,6 +272,26 @@ export async function validateApiKey(
         error: Response.json(
           { error: { message: "API Key 已过期", type: "invalid_request_error" } },
           { status: 401 }
+        ),
+      };
+    }
+
+    // IP 白名单（仅当 context.clientIp 显式传入时校验：管理后台等场景无需白名单）
+    if (context?.clientIp !== undefined && !isClientIpAllowed(context.clientIp, apiKey.allowedIps)) {
+      return {
+        error: Response.json(
+          { error: { message: "客户端 IP 不在 API Key 允许范围内", type: "invalid_request_error" } },
+          { status: 403 }
+        ),
+      };
+    }
+
+    // 模型白名单（仅当 context.requestedModel 显式传入时校验）
+    if (context?.requestedModel !== undefined && !isModelAllowed(context.requestedModel, apiKey.allowedModels)) {
+      return {
+        error: Response.json(
+          { error: { message: `模型 ${context.requestedModel} 不在 API Key 允许范围内`, type: "invalid_request_error" } },
+          { status: 403 }
         ),
       };
     }

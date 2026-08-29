@@ -16,10 +16,37 @@ import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "@/lib/adm
 import { getClientIp } from "../auth";
 import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { invalidateApiKeyCache } from "../../../../worker/src/auth";
+import { resetAllowlistCache } from "../../../../worker/src/api-key-allowlist";
 
 function maskKey(key: string): string {
   if (key.length > 12) return key.substring(0, 8) + "..." + key.substring(key.length - 4);
   return "***";
+}
+
+/**
+ * 解析白名单字段（IP 段或模型 ID 列表）
+ * - null → null（清空白名单，不限制）
+ * - 字符串数组 → JSON 字符串存储
+ * - 空数组 → null（视为不限制）
+ * - 非数组 → 拒绝
+ */
+function parseAllowlistField(value: unknown, fieldName: string): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === null) return { ok: true, value: null };
+  if (value === undefined) return { ok: true, value: undefined as unknown as string | null };
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} 必须是字符串数组` };
+  }
+  if (value.length === 0) return { ok: true, value: null };
+  for (const item of value) {
+    if (typeof item !== "string" || item.length === 0) {
+      return { ok: false, error: `${fieldName} 数组元素必须是非空字符串` };
+    }
+    if (item.length > 200) {
+      return { ok: false, error: `${fieldName} 数组元素长度不能超过 200 字符` };
+    }
+  }
+  return { ok: true, value: JSON.stringify(value) };
 }
 
 function generateId(): string { return crypto.randomUUID(); }
@@ -118,6 +145,16 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
       }
     }
 
+    // 解析白名单字段：null 表示清空，undefined 表示不更新
+    const allowedIpsResult = parseAllowlistField(body.allowedIps, "allowedIps");
+    if (!allowedIpsResult.ok) {
+      return res.status(400).json({ success: false, error: { message: allowedIpsResult.error, type: "invalid_request_error" } });
+    }
+    const allowedModelsResult = parseAllowlistField(body.allowedModels, "allowedModels");
+    if (!allowedModelsResult.ok) {
+      return res.status(400).json({ success: false, error: { message: allowedModelsResult.error, type: "invalid_request_error" } });
+    }
+
     const currentTime = now();
     const updateData: Record<string, unknown> = { updatedAt: currentTime };
     if (body.name !== undefined) updateData.name = body.name.trim();
@@ -128,6 +165,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     if (body.resetPeriod !== undefined) updateData.resetPeriod = body.resetPeriod;
     if (body.status !== undefined) updateData.status = body.status;
     if (expiresAtTimestamp !== undefined) updateData.expiresAt = expiresAtTimestamp;
+    // 白名单：undefined = 不更新（PATCH 语义），null = 清空（显式设空），数组 = 覆盖
+    if (body.allowedIps !== undefined) updateData.allowedIps = allowedIpsResult.value;
+    if (body.allowedModels !== undefined) updateData.allowedModels = allowedModelsResult.value;
+    // parseAllowlistField 用哨兵值 undefined-as-null 区分"不更新"与"显式清空"；
+    // 上面已通过 body.allowedIps !== undefined 过滤，此处同步保证 updateData.value 一致
 
     // 审计先于写入（config.ts 不变量）：审计失败时抛错返回 500，update 不执行，
     // 避免「配置已生效但无审计」的假成功。changes 引用的是即将写入的请求体数据
@@ -144,6 +186,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, admin: { adm
     });
 
     const updated = await db.apiKeys.update({ where: { id }, data: updateData });
+
+    // 更新后立即失效该 Key 的进程内缓存（5s TTL 内的旧白名单会继续生效）
+    invalidateApiKeyCache(updated.key);
+    // 白名单解析缓存全量清除
+    resetAllowlistCache();
 
     return res.status(200).json({ success: true, data: { ...updated, key: maskKey(updated.key), usedTokens: Number(updated.usedTokens) }, message: "API Key 更新成功" });
   } catch (err) {

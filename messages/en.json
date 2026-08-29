@@ -310,7 +310,16 @@
     "updateSuccess": "Updated successfully",
     "noApiKey": "No API keys yet",
     "baseUrlCfHint": "When using this key, set Base URL to the companion Cloudflare Workers address (e.g. https://your-worker.workers.dev), not the upstream platform address.",
-    "baseUrlSelfHint": "When using this key, set Base URL to this system's deployment address (e.g. https://your-domain.com), not the upstream platform address."
+    "baseUrlSelfHint": "When using this key, set Base URL to this system's deployment address (e.g. https://your-domain.com), not the upstream platform address.",
+    "allowedIps": "Allowed IPs",
+    "allowedIpsPlaceholder": "One per line, e.g. 192.168.1.0/24 or 10.0.0.1",
+    "allowedIpsDesc": "Restrict which client IPs can call this key. CIDR or single IP. Leave empty to allow all.",
+    "allowedModels": "Allowed Models",
+    "allowedModelsPlaceholder": "Type and press Enter to add model ID",
+    "allowedModelsDesc": "Restrict which models this key can call. Leave empty to allow all.",
+    "allowlist": "Restrictions",
+    "allowlistIp": "IP",
+    "allowlistModel": "Model"
   },
   "log": {
     "model": "Model",
