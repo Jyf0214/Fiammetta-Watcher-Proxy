@@ -6,6 +6,7 @@ Cloudflare 资源统一初始化脚本 (严谨修复版)
   python3 deploy/init.py pre          — 部署前：创建 D1/KV/Hyperdrive + 替换配置文件占位符
   python3 deploy/init.py post         — 部署后：创建 Pages + 绑定 Secrets
   python3 deploy/init.py post-deploy  — 部署后：统一同步 Pages & Worker 的绑定与环境变量
+  python3 deploy/init.py cron-setup   — 部署后：PUT Worker Cron 触发器（CF 部署专用；按全量逐次降级，失败剥离末位重试）
   python3 deploy/init.py check        — 本地/CI 检查：校验 Schema 与 Client 生成产物
 """
 import os
@@ -448,12 +449,169 @@ def run_check():
     print("  ✓ 全部产物校验通过")
 
 
+# ==================== Cron 触发器独立配置 ====================
+
+# 4 条 cron 表达式（与 worker/wrangler.toml 顶部注释、Worker src/types.ts classifyCronExpression 严格一致）：
+#   0 */6 * * *   每 6 小时：平台模型发现
+#   0 */1 * * *   每小时：API Key 用量重置检查
+#   0 3 * * *     每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行）
+#   */5 * * * *   每 5 分钟：出站代理健康检查（仅 Docker 部署生效）
+WORKER_CRON_EXPRESSIONS = [
+    "0 */6 * * *",
+    "0 */1 * * *",
+    "0 3 * * *",
+    "*/5 * * * *",
+]
+
+
+# ==================== Worker 部署（含 cron 循环剥除） ====================
+
+WORKER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "worker")
+WRANGLER_TOML = os.path.join(WORKER_DIR, "wrangler.toml")
+CRON_TRIGGERS_RE = re.compile(
+    r'(?P<indent>[ \t]*)\[triggers\]\s*\n(?P<inner>(?:[ \t]*crons\s*=\s*\[[^\]]*\]\s*\n)+)'
+)
+
+
+def _read_crons_from_toml() -> list[str]:
+    """从 wrangler.toml 解析 [triggers].crons 列表。"""
+    with open(WRANGLER_TOML, "r", encoding="utf-8") as f:
+        content = f.read()
+    m = CRON_TRIGGERS_RE.search(content)
+    if not m:
+        return []
+    inner = m.group("inner")
+    crons = re.findall(r'"([^"]+)"', inner)
+    return crons
+
+
+def _drop_last_cron_in_toml() -> str | None:
+    """从 wrangler.toml 的 [triggers].crons 列表剥除最后一条，返回被剥的 cron 表达式；
+    列表为空或不存在 [triggers] 段则返回 None。修改后写回文件。"""
+    with open(WRANGLER_TOML, "r", encoding="utf-8") as f:
+        content = f.read()
+    m = CRON_TRIGGERS_RE.search(content)
+    if not m:
+        return None
+    inner = m.group("inner")
+    crons = re.findall(r'"([^"]+)"', inner)
+    if not crons:
+        return None
+    dropped = crons[-1]
+    new_inner_lines = []
+    remaining = list(crons[:-1])
+    for cron in remaining:
+        # 保留 crons = [ "a", "b", ...] 格式
+        if not new_inner_lines:
+            new_inner_lines.append(f'crons = ["{cron}"')
+        else:
+            new_inner_lines.append(f'                "{cron}"')
+    if remaining:
+        new_inner_lines[-1] = new_inner_lines[-1] + '"'  # 闭合 ]
+    else:
+        # 列表为空：保留 crons = []
+        new_inner_lines = ["crons = []"]
+    # 替换 inner
+    new_inner = "\n".join(new_inner_lines) + "\n"
+    new_content = content[: m.start("inner")] + new_inner + content[m.end("inner"):]
+    with open(WRANGLER_TOML, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    return dropped
+
+
+def _set_crons_in_toml(crons: list[str]) -> None:
+    """按给定的 cron 列表重写 wrangler.toml 的 [triggers].crons 段。"""
+    with open(WRANGLER_TOML, "r", encoding="utf-8") as f:
+        content = f.read()
+    if crons:
+        inner = 'crons = [' + ", ".join(f'"{c}"' for c in crons) + "]\n"
+    else:
+        inner = "crons = []\n"
+    m = CRON_TRIGGERS_RE.search(content)
+    if m:
+        new_content = content[: m.start("inner")] + inner + content[m.end("inner"):]
+    else:
+        # 没有 [triggers] 段，在文件末尾添加
+        new_content = content.rstrip() + "\n\n[triggers]\n" + inner
+    with open(WRANGLER_TOML, "w", encoding="utf-8") as f:
+        f.write(new_content)
+
+
+def _apply_version_crons(target: list[str]) -> list[str]:
+    """按 VERSION 裁剪 cron：lite 仅保留模型发现（其他 3 条被 index-lite.ts 不注册）。"""
+    env_version = os.environ.get("VERSION", "latest").strip().lower()
+    if env_version == "lite":
+        return [target[0]] if target else []
+    return list(target)
+
+
+def run_worker_deploy() -> None:
+    """调 wrangler deploy 部署 Worker；失败时按需剥 wrangler.toml 末位 cron 重试。
+
+    防御 CF 账户级 Cron Triggers 上限（Free 5 条）：如果 4 条 cron 超限（未来 CF
+    调低上限），deploy 失败时自动剥末位一条重试；剥到 0 条仍失败则 fail。
+
+    wrangler.toml 在 deploy 前备份原内容，deploy 完成后（无论成功失败）还原，
+    避免 CI 过程中临时修改的文件污染 git 状态。
+    """
+    import subprocess
+    print(f"\n部署 Worker（含 cron 同步）...")
+
+    # 备份原 wrangler.toml
+    with open(WRANGLER_TOML, "r", encoding="utf-8") as f:
+        original_content = f.read()
+    print(f"  已备份原 wrangler.toml（{len(original_content)} 字节）")
+
+    target_crons = _apply_version_crons(WORKER_CRON_EXPRESSIONS)
+    env_version = os.environ.get("VERSION", "latest").strip().lower()
+    if env_version == "lite":
+        print(f"  VERSION=lite：注入 1 条 cron（仅模型发现）")
+    else:
+        print(f"  VERSION={env_version}：注入 {len(target_crons)} 条 cron（全量）")
+
+    last_error = ""
+    try:
+        while target_crons is not None:
+            _set_crons_in_toml(target_crons)
+            try:
+                result = subprocess.run(
+                    [
+                        "npx", "wrangler", "deploy", "--config", "wrangler.toml",
+                    ],
+                    cwd=WORKER_DIR,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired:
+                fail("wrangler deploy 超时（>600s）")
+            if result.returncode == 0:
+                print(f"  ✓ Worker 部署成功（含 {len(target_crons)} 条 cron）")
+                return
+            out = (result.stdout or "") + (result.stderr or "")
+            for line in out.splitlines():
+                if any(s in line for s in ("https://", "commit_message", "commit_hash", "commit_dirty")):
+                    continue
+                print(f"    {line}")
+            last_error = out.strip().splitlines()[-1] if out.strip() else "unknown error"
+            if not target_crons:
+                break
+            dropped = target_crons.pop()
+            print(f"  ✗ deploy 失败（{last_error}）；已剥 cron {dropped}，剩余 {len(target_crons)} 条重试")
+        fail(f"wrangler deploy 反复失败（即使 cron 全剥仍不通过）: {last_error}")
+    finally:
+        # 无论成功失败，还原 wrangler.toml
+        with open(WRANGLER_TOML, "w", encoding="utf-8") as f:
+            f.write(original_content)
+        print(f"  已还原 wrangler.toml")
+
+
 # ==================== 程序主入口 ====================
 
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
-    if phase not in ("pre", "post", "post-deploy", "check"):
-        fail("用法: python3 deploy/init.py [pre|post|post-deploy|check]")
+    if phase not in ("pre", "post", "post-deploy", "check", "worker-deploy"):
+        fail("用法: python3 deploy/init.py [pre|post|post-deploy|check|worker-deploy]")
 
     if phase == "check":
         run_check()
@@ -483,6 +641,9 @@ def main():
 
     elif phase == "post-deploy":
         sync_env_and_bindings(d1_id, kv_id, hyperdrive_id, db_type)
+
+    elif phase == "worker-deploy":
+        run_worker_deploy()
 
     print(f"\n✓ [{phase}] 阶段顺利完成！")
 

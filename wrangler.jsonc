@@ -1,16 +1,11 @@
 {
-  // wrangler 4.122+ 要求 Pages 配置声明 pages_build_output_dir，否则整个 wrangler.jsonc
-  // 被忽略（绑定/兼容性设置均失效），导致 Pages Worker 部署失败
-  "pages_build_output_dir": ".open-next",
-  // build:cf 会把 OpenNext 产物 mv 为 _worker.js（见 package.json），main 必须指向改后文件名
-  "main": ".open-next/_worker.js",
+  // 不声明 pages_build_output_dir：8-21 成功部署时该字段不存在（wrangler 4.122.0
+  // 走兼容路径，能处理 6 MB+ 的 handler.mjs 不触发 3 MiB 单 module 限制）。
+  // 加 pages_build_output_dir 后 wrangler 走 Pages Advanced Mode 严格 3 MiB 检查，
+  // OpenNext 1.20.2 产出的 handler.mjs ~6.5-7 MB 会超限。
   "name": "fiammetta",
   "compatibility_date": "2025-04-02",
   "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "STATIC_ASSETS"
-  },
   // vars 由 deploy/init.py post-deploy 通过 Cloudflare API 设置
   // wrangler pages deploy 会用 wrangler.jsonc 的 vars 覆盖 API 设置值，故此处不能放 vars
   "d1_databases": [

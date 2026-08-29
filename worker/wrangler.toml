@@ -32,18 +32,19 @@ id = "placeholder-kv-id"  # 部署时由 Terraform/CI 替换
 binding = "HYPERDRIVE"
 id = "placeholder-hyperdrive-id"  # 部署时由 CI 替换
 
-# Cron 定时任务（4 条：Cloudflare Workers 免费计划账户级 Cron Triggers 上限为 5，
-# 且代理拉取/健康检查仅 Docker 部署生效（pullProxyGroups 对 DEPLOY_PLATFORM!=docker
-# 直接空返回），CF 上保留只会在配额内空转）
-# 每小时：Key 用量重置检查
+# Cron 定时任务（4 条：Cloudflare Workers 免费计划账户级 Cron Triggers 上限为 5；
+# 代理拉取/健康检查仅 Docker 部署生效，CF 上保留会在配额内空转但不超限）
 # 每 6 小时：平台模型发现
+# 每小时：API Key 用量重置检查
 # 每天凌晨 3 点：日志归档 + 加密配置备份推送（同一槽位组合执行；
-#   备份需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY，未配置自动跳过。
-#   原独立槽位 3:17 因配额上限移除，两任务操作不同表、waitUntil 独立执行）
-# 每 5 分钟：出站代理健康检查（仅 Docker 部署且未禁用时生效）
+#   备份需 BACKUP_WEBHOOK_URL + BACKUP_ENCRYPTION_KEY，未配置自动跳过）
+# 每 5 分钟：出站代理健康检查（仅 Docker 部署生效，CF 上空转但仍占配额）
+# 4 条 ≤ 5 条账户级上限，正常 deploy 一次成功；如某天 CF 调整上限导致超限，
+# deploy.yml Deploy Worker step 由 init.py worker-deploy 阶段自动剥末位一条重试。
+[triggers]
+crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *", "*/5 * * * *"]
+
 [observability]
 enabled = true
 head_sampling_rate = 1
 
-[triggers]
-crons = ["0 */6 * * *", "0 */1 * * *", "0 3 * * *", "*/5 * * * *"]

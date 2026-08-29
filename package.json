@@ -48,7 +48,7 @@
     "recharts": "^3.10.0",
     "swr": "^2.5.0",
     "tailwind-merge": "^3.6.0",
-    "undici": "^7.29.0"
+    "undici": "^8.10.0"
   },
   "optionalDependencies": {
     "mariadb": "^3.5.3",
@@ -80,7 +80,7 @@
     "typescript-eslint": "^8.65.0",
     "vitepress": "^1.6.4",
     "vitest": "^4.1.10",
-    "wrangler": "^4.113.0"
+    "wrangler": "4.122.0"
   },
   "overrides": {
     "cloudflare": "4.4.1",

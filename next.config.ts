@@ -97,7 +97,9 @@ const nextConfig: NextConfig = {
     ];
   },
   // Turbopack（Next.js 16 默认）：未使用的方言由 prepare-db.mjs 生成的 stub 文件自动解析；
-  // Cloudflare 构建时 mariadb（TCP 驱动）alias 到空 stub（Cloudflare 不支持 mariadb）。
+  // Cloudflare 构建时 mariadb（TCP 驱动）+ @/lib/upstream-proxy（workerd 不支持 SOCKS/HTTP
+  // proxy 出网，整个模块在 CF 上无意义）alias 到空 stub，让 Pages Function bundle 不打包
+  // 这两个模块及其传递依赖（fetch-socks/undici 等）。
   // 注意 resolveAlias 值为字符串，本地文件用相对项目根的路径（绝对路径会被当成 relative import）。
   turbopack: {
     ...(isCFDeploy
@@ -105,6 +107,7 @@ const nextConfig: NextConfig = {
           resolveAlias: {
             mariadb: "./scripts/empty-mariadb.ts",
             "@prisma/adapter-mariadb": "./scripts/empty-mariadb.ts",
+            "@/lib/upstream-proxy": "./scripts/empty-upstream-proxy.ts",
           },
         }
       : {}),
@@ -126,8 +129,14 @@ const nextConfig: NextConfig = {
     ...(isCFDeploy ? [] : [...prismaStack, ...mariadbStack]),
   ],
   // Webpack（--webpack 模式）：alias 未使用的方言到空 stub
+  // CF 部署额外 alias @/lib/upstream-proxy → scripts/empty-upstream-proxy.ts：
+  // workerd 不支持 SOCKS/HTTP proxy 出网，整个模块在 CF 上无意义，替换为 no-op stub
+  // 让 Pages Function bundle 不打包出站代理 + fetch-socks + undici 等传递依赖。
   webpack: (config) => {
-    const alias = getPrismaAlias();
+    const alias: Record<string, string> = { ...getPrismaAlias() };
+    if (isCFDeploy) {
+      alias["@/lib/upstream-proxy"] = resolve(__dirname, "scripts/empty-upstream-proxy.ts");
+    }
     if (Object.keys(alias).length > 0) {
       config.resolve = config.resolve || {};
       config.resolve.alias = { ...config.resolve.alias, ...alias };
