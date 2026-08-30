@@ -259,3 +259,24 @@ CREATE INDEX IF NOT EXISTS "notification_history_sent_at_idx" ON "notification_h
 CREATE INDEX IF NOT EXISTS "notification_history_channel_id_sent_at_idx" ON "notification_history"("channel_id", "sent_at");
 CREATE INDEX IF NOT EXISTS "notification_history_event_sent_at_idx" ON "notification_history"("event", "sent_at");
 
+
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "device_registrations" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "device_name" TEXT NOT NULL,
+    "uuid" TEXT NOT NULL,
+    "platform" TEXT NOT NULL,
+    "address" TEXT,
+    "app_version" TEXT,
+    "first_seen_at" INTEGER NOT NULL DEFAULT 0,
+    "last_seen_at" INTEGER NOT NULL DEFAULT 0,
+    "boot_count" INTEGER NOT NULL DEFAULT 0,
+    "created_at" INTEGER NOT NULL DEFAULT 0,
+    "updated_at" INTEGER NOT NULL DEFAULT 0
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "device_registrations_device_name_key" ON "device_registrations"("device_name");
+CREATE UNIQUE INDEX IF NOT EXISTS "device_registrations_uuid_key" ON "device_registrations"("uuid");
+CREATE INDEX IF NOT EXISTS "device_registrations_platform_idx" ON "device_registrations"("platform");
+CREATE INDEX IF NOT EXISTS "device_registrations_last_seen_at_idx" ON "device_registrations"("last_seen_at");

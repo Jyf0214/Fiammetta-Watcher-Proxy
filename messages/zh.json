@@ -146,7 +146,28 @@
     "dmPreviewConfirm": "确认导入",
     "dmPreviewCancel": "取消",
     "dmPreviewEmpty": "文件中没有可导入的数据",
-    "administrator": "管理员"
+    "administrator": "管理员",
+    "devices": "设备",
+    "devicesDesc": "启动时自动注册的设备列表，按 NODE_NAME 识别（未设置时回退部署平台名）。每个设备有稳定的 UUID，重启后复用"
+  },
+  "devices": {
+    "colName": "设备名",
+    "colPlatform": "平台",
+    "colUuid": "UUID",
+    "colVersion": "版本",
+    "colFirstSeen": "首次注册",
+    "colLastSeen": "最近启动",
+    "colBootCount": "启动次数",
+    "colActions": "操作",
+    "loadFailed": "加载设备列表失败",
+    "deleteSuccess": "设备已移除",
+    "deleteFailed": "移除设备失败",
+    "deleteConfirmTitle": "确认移除该设备？",
+    "deleteConfirmDesc": "设备 \"{name}\" 将被移除。下次启动时会重新注册并生成新的 UUID。",
+    "emptyTitle": "暂无设备记录",
+    "emptyDesc": "设备在 Docker 容器启动时自动注册。多实例部署时可通过 NODE_NAME 区分。",
+    "cfStubTitle": "Cloudflare 部署不支持设备管理",
+    "cfStubDesc": "设备注册功能在 Cloudflare 部署下被 stub —— 相关数据层未打入 Pages Function bundle。请使用 Docker / EdgeOne / Vercel 部署来管理设备。"
   },
   "platform": {
     "name": "平台名称",

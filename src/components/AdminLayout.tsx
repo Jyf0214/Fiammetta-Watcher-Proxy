@@ -26,6 +26,7 @@ import {
   FlaskConical,
   Bell,
   Archive,
+  Cpu,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -54,6 +55,7 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "notifications", icon: Bell, href: "/admin/notifications", group: "system", order: 14 },
   { key: "backup", icon: Archive, href: "/admin/backup", group: "system", order: 15 },
   { key: "playground", icon: FlaskConical, href: "/admin/playground", group: "manage", order: 6 },
+  { key: "devices", icon: Cpu, href: "/admin/devices", group: "system", order: 16 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）
@@ -229,6 +231,7 @@ function TopHeader({
     "/admin/notifications": "notifications",
     "/admin/backup": "backup",
     "/admin/upstream-proxy/[id]": "upstreamProxy",
+    "/admin/devices": "devices",
   };
 
   const breadcrumbKey = breadcrumbMap[pathname] ?? "dashboard";
