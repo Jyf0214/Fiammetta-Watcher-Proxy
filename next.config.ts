@@ -108,6 +108,7 @@ const nextConfig: NextConfig = {
             mariadb: "./scripts/empty-mariadb.ts",
             "@prisma/adapter-mariadb": "./scripts/empty-mariadb.ts",
             "@/lib/upstream-proxy": "./scripts/empty-upstream-proxy.ts",
+            "@/lib/device-registration": "./scripts/empty-device-registration.ts",
           },
         }
       : {}),
@@ -132,10 +133,14 @@ const nextConfig: NextConfig = {
   // CF 部署额外 alias @/lib/upstream-proxy → scripts/empty-upstream-proxy.ts：
   // workerd 不支持 SOCKS/HTTP proxy 出网，整个模块在 CF 上无意义，替换为 no-op stub
   // 让 Pages Function bundle 不打包出站代理 + fetch-socks + undici 等传递依赖。
+  // 同时 alias @/lib/device-registration → scripts/empty-device-registration.ts：
+  // 设备注册不属于 CF 部署形态（Worker/Pages 全部 stub），不引入即可让 Pages
+  // Function bundle 不拉入设备注册相关的数据库表读写代码。
   webpack: (config) => {
     const alias: Record<string, string> = { ...getPrismaAlias() };
     if (isCFDeploy) {
       alias["@/lib/upstream-proxy"] = resolve(__dirname, "scripts/empty-upstream-proxy.ts");
+      alias["@/lib/device-registration"] = resolve(__dirname, "scripts/empty-device-registration.ts");
     }
     if (Object.keys(alias).length > 0) {
       config.resolve = config.resolve || {};

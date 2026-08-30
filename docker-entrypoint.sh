@@ -53,5 +53,13 @@ export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=192"
 node --check .build/scheduler.cjs || { echo "[启动] 错误：定时器进程产物缺失或损坏（.build/scheduler.cjs）"; exit 1; }
 node .build/scheduler.cjs &
 
+# ==================== 启动期设备注册 ====================
+# Docker 容器启动时按 NODE_NAME 注册/复用设备 UUID（管理后台"设备管理"页可见）。
+# 仅 Docker 部署生效：EdgeOne/Vercel/本地/CF 都不调（CF 部署无 .build/register-device.cjs）。
+# 同步执行（前台）而非 waitUntil：注册失败需在启动期可见，且仅一次轻量读写（毫秒级）。
+echo "[启动] 注册设备（按 NODE_NAME）..."
+node --check .build/register-device.cjs || { echo "[启动] 错误：设备注册进程产物缺失或损坏（.build/register-device.cjs）"; exit 1; }
+node .build/register-device.cjs
+
 echo "[启动] 启动应用..."
 exec node server.js

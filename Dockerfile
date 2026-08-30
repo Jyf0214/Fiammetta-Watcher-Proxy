@@ -31,11 +31,12 @@ RUN npm ci --ignore-scripts --legacy-peer-deps
 # 构建环境无 CI=true，prepare-db.mjs 不会执行 db push，表结构由容器启动时同步）
 COPY --chown=nextjs:nodejs . .
 
-# 独立定时器进程：先生成 Prisma client 再打包 scheduler.cjs，最后 next build
+# 独立定时器进程：先生成 Prisma client 再打包 scheduler.cjs 与 register-device.cjs，最后 next build
 #（build 的 prebuild 钩子会再跑一次 prepare-db，幂等）。定时器不依赖 instrumentation
 # ——instrumentation 会把调度器链编入 Cloudflare Edge Worker，导致 Pages Function
 # 体积超限，2026-08-18 已改为独立进程方案（docker-entrypoint 启动 .build/scheduler.cjs）
-RUN node scripts/prepare-db.mjs && node scripts/build-scheduler.mjs && npm run build
+# .build/register-device.cjs：启动期按 NODE_NAME 注册/复用设备 UUID，仅 Docker 部署生效
+RUN node scripts/prepare-db.mjs && node scripts/build-scheduler.mjs && node scripts/build-register-device.mjs && npm run build
 
 # ==================== 运行阶段 ====================
 FROM node:22-alpine AS runner

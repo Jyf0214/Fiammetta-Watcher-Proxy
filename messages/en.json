@@ -146,7 +146,28 @@
     "dmPreviewConfirm": "Confirm Import",
     "dmPreviewCancel": "Cancel",
     "dmPreviewEmpty": "No importable data found in this file",
-    "administrator": "Administrator"
+    "administrator": "Administrator",
+    "devices": "Devices",
+    "devicesDesc": "Devices registered on startup, identified by NODE_NAME (with platform-name fallback). Each device has a stable UUID, reused across restarts"
+  },
+  "devices": {
+    "colName": "Device Name",
+    "colPlatform": "Platform",
+    "colUuid": "UUID",
+    "colVersion": "Version",
+    "colFirstSeen": "First Seen",
+    "colLastSeen": "Last Seen",
+    "colBootCount": "Boots",
+    "colActions": "Actions",
+    "loadFailed": "Failed to load devices",
+    "deleteSuccess": "Device removed",
+    "deleteFailed": "Failed to remove device",
+    "deleteConfirmTitle": "Remove this device?",
+    "deleteConfirmDesc": "Device \"{name}\" will be removed. It will re-register on next startup with a fresh UUID.",
+    "emptyTitle": "No devices yet",
+    "emptyDesc": "Devices are registered automatically when Docker containers start. Set NODE_NAME to distinguish multi-instance deployments.",
+    "cfStubTitle": "Not available on Cloudflare",
+    "cfStubDesc": "Device registration is stubbed on Cloudflare deployments — the data layer is omitted from the Pages Function bundle. Use a Docker / EdgeOne / Vercel deployment to manage devices."
   },
   "platform": {
     "name": "Platform Name",

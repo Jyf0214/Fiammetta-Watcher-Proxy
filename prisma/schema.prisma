@@ -258,3 +258,39 @@ model notificationHistory {
   @@index([event, sentAt])
   @@map("notification_history")
 }
+
+// ==================== 设备注册（启动时按 NODE_NAME 注册/复用 UUID）================
+//
+// 用途：每次服务实例启动时，根据环境变量 NODE_NAME（或回退部署平台名）查表：
+//   - 命中则复用该记录的 UUID（重启后设备档案稳定）
+//   - 未命中则插入新行（设备名 + 新 UUID + 平台名 + 首次注册时间）
+//
+// 部署矩阵：
+//   - Docker / Docker-lite：容器启动时 entrypoint 调用一次
+//   - EdgeOne / Vercel / 本地开发：不在启动期调用；管理后台可见空表
+//   - Cloudflare：CF stub alias 让业务层零访问，物理表存在但不读写
+model deviceRegistrations {
+  id          String   @id
+  // 设备名（清洗后的 NODE_NAME 或部署平台回退名；按此唯一索引做幂等查重）
+  deviceName  String   @unique @map("device_name")
+  // 设备 UUID：首次注册时生成，重启按 device_name 复用
+  uuid        String   @unique
+  // 来源平台（edgeone/vercel/docker/cf/local），便于管理后台按平台筛选
+  platform    String
+  // 设备 IP 标识：Docker/EdgeOne 部署可取到容器/源站 IP；CF Workers 取 clientIP；本地开发为 local
+  address     String?
+  // 部署版本（package.json version），便于追踪运行实例版本
+  appVersion  String?  @map("app_version")
+  // 首次注册时间（Unix 秒）
+  firstSeenAt Int      @default(0) @map("first_seen_at")
+  // 最近一次启动时间（Unix 秒；每次启动更新为 now）
+  lastSeenAt  Int      @default(0) @map("last_seen_at")
+  // 启动次数（命中既有记录累加）
+  bootCount   Int      @default(0) @map("boot_count")
+  createdAt   Int      @default(0) @map("created_at")
+  updatedAt   Int      @default(0) @map("updated_at")
+
+  @@index([platform])
+  @@index([lastSeenAt])
+  @@map("device_registrations")
+}
