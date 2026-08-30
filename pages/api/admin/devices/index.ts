@@ -19,13 +19,30 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createDb } from "@/lib/prisma";
-import { getAdminFromRequest } from "@/lib/admin-auth";
+import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
+import { getClientIp } from "../auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+function now(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // CF 部署下设备管理整体不可用（启动期 registerDevice alias 为 stub，本 API 也随之
+  // 关闭）：与前端页 stub 提示保持一致，避免管理后台在 CF 部署下暴露空表
+  // （device_registrations 表 schema 同步在 init.sql，但 CF 不发起注册）
+  if (process.env.DEPLOY_PLATFORM === "cf") {
+    res.status(503).json({ success: false, error: "Cloudflare 部署不支持设备管理" });
+    return;
+  }
+
   const admin = await getAdminFromRequest(req);
   if (!admin) {
     res.status(401).json({ success: false, error: "未授权" });
@@ -89,6 +106,25 @@ export default async function handler(
         res.status(404).json({ success: false, error: "设备记录不存在" });
         return;
       }
+      const ip = getClientIp(req);
+      const currentTime = now();
+      // 写审计日志：与 keys/DELETE 一致，破坏性操作留痕
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: getAuditAdminId(admin as AuthResult),
+          action: "delete_device",
+          detail: JSON.stringify({
+            target: id,
+            deviceId: id,
+            deviceName: existing.deviceName,
+            uuid: existing.uuid,
+            platform: existing.platform,
+          }),
+          ip,
+          createdAt: currentTime,
+        },
+      });
       await db.deviceRegistrations.delete({ where: { id } });
       return res.status(200).json({
         success: true,

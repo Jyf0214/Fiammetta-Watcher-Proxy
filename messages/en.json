@@ -447,6 +447,7 @@
     "actionCreateApiKey": "Create API Key",
     "actionUpdateApiKey": "Update API Key",
     "actionDeleteApiKey": "Delete API Key",
+    "actionDeleteDevice": "Delete Device",
     "actionTogglePlatformKey": "Toggle Platform Key",
     "actionCreateSystemKey": "Create System Key",
     "actionUpdateSystemKey": "Update System Key",

@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Popconfirm, Alert, message, type TableColumnsType } from "antd";
+import { Popconfirm, Alert, Tag, message, type TableColumnsType } from "antd";
 import { Trash2, Server, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
@@ -127,6 +127,7 @@ export default function DevicesPage() {
       key: "platform",
       width: 110,
       render: (platform: string) => {
+        // antd Tag 内置色板，避免 Tailwind JIT 动态 className 失效
         const colors: Record<string, string> = {
           docker: "blue",
           edgeone: "geekblue",
@@ -135,11 +136,9 @@ export default function DevicesPage() {
           local: "default",
         };
         return (
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-${colors[platform] || "default"}-50 text-${colors[platform] || "default"}-700`}
-          >
+          <Tag color={colors[platform] || "default"} className="!m-0">
             {platform}
-          </span>
+          </Tag>
         );
       },
     },

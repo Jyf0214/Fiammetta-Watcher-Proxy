@@ -447,6 +447,7 @@
     "actionCreateApiKey": "创建 API Key",
     "actionUpdateApiKey": "更新 API Key",
     "actionDeleteApiKey": "删除 API Key",
+    "actionDeleteDevice": "删除设备",
     "actionTogglePlatformKey": "切换平台密钥",
     "actionCreateSystemKey": "创建系统密钥",
     "actionUpdateSystemKey": "更新系统密钥",

@@ -111,39 +111,18 @@ async function doRegister(address: string | null): Promise<DeviceRegistrationRes
   try {
     const db = await createDb();
 
-    // 按 deviceName 唯一索引查重；命中则复用 UUID 并累加 bootCount/刷新 lastSeenAt
-    const existing = await db.deviceRegistrations.findUnique({
-      where: { deviceName },
-    });
-
-    if (existing) {
-      const updated = await db.deviceRegistrations.update({
-        where: { id: existing.id },
-        data: {
-          lastSeenAt: nowSec,
-          bootCount: existing.bootCount + 1,
-          // address 与 appVersion 在重启间可能变化（容器 IP 不固定 / 部署新版本），
-          // 每次启动用最新值覆盖
-          address: address ?? existing.address,
-          appVersion: appVersion ?? existing.appVersion,
-          updatedAt: nowSec,
-        },
-      });
-      console.log(
-        `[device-registration] 复用既有设备: ${deviceName} uuid=${updated.uuid} bootCount=${updated.bootCount}`
-      );
-      return {
-        registered: true,
-        uuid: updated.uuid,
-        id: updated.id,
-        deviceName: updated.deviceName,
-        platform: updated.platform,
-      };
-    }
-
+    // upsert：单条 SQL 同时完成"查重/插入/更新"，消除 findUnique+create 间的
+    // TOCTOU 窗口（多实例同 deviceName 并发启动时，DB 层 UNIQUE 约束 + upsert
+    // 语义兜底，不会出现"两条记录"或"抛 P2002 导致启动失败"）。
+    //
+    // Prisma 7 的 increment 在 update 内部翻译为 `bootCount = bootCount + 1`，
+    // 由数据库保证原子累加（SQLite/D1 串行写、PostgreSQL/MySQL 行锁），无
+    // read-modify-write 竞争。address/appVersion 每次启动用最新值覆盖是预期
+    // 行为（容器 IP 不固定 / 部署新版本）。
     const newUuid = crypto.randomUUID();
-    const created = await db.deviceRegistrations.create({
-      data: {
+    const result = await db.deviceRegistrations.upsert({
+      where: { deviceName },
+      create: {
         id: crypto.randomUUID(),
         deviceName,
         uuid: newUuid,
@@ -156,14 +135,27 @@ async function doRegister(address: string | null): Promise<DeviceRegistrationRes
         createdAt: nowSec,
         updatedAt: nowSec,
       },
+      update: {
+        lastSeenAt: nowSec,
+        bootCount: { increment: 1 },
+        address: address ?? null,
+        appVersion: appVersion ?? null,
+        updatedAt: nowSec,
+      },
     });
-    console.log(`[device-registration] 新设备已注册: ${deviceName} uuid=${created.uuid} platform=${platform}`);
+    if (result.bootCount === 1) {
+      console.log(`[device-registration] 新设备已注册: ${deviceName} uuid=${result.uuid} platform=${platform}`);
+    } else {
+      console.log(
+        `[device-registration] 复用既有设备: ${deviceName} uuid=${result.uuid} bootCount=${result.bootCount}`
+      );
+    }
     return {
       registered: true,
-      uuid: created.uuid,
-      id: created.id,
-      deviceName: created.deviceName,
-      platform: created.platform,
+      uuid: result.uuid,
+      id: result.id,
+      deviceName: result.deviceName,
+      platform: result.platform,
     };
   } catch (err) {
     // 注册失败不阻塞启动：仅记日志。设备档案属增强信息，DB 瞬时不可用时
