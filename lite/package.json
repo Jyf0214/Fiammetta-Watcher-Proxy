@@ -14,7 +14,7 @@
     "@tidbcloud/prisma-adapter": "^6.17.0",
     "@tidbcloud/serverless": "^0.3.0",
     "dotenv": "^17.4.2",
-    "mariadb": "^3.4.5",
+    "mariadb": "^3.5.4",
     "next": "^16.2.11",
     "pg": "^8.22.0",
     "prisma": "^7.9.0",
