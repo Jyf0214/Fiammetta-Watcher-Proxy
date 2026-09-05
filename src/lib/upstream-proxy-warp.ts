@@ -284,6 +284,68 @@ export function isWarpEffectivelyEnabled(config: WarpConfig | null): boolean {
 }
 
 // ============================================================
+// 设备级控制：device_registrations.warp_enabled
+// ============================================================
+
+/**
+ * 按 deviceName 查本设备的 warp 启用状态。
+ *
+ * 设计语义（多实例 + 设备自治）：
+ * - 每台设备启动时按 NODE_NAME 查自己行（device_registrations.device_name 唯一索引）
+ * - 该设备 warp_enabled=true → 该设备实例可拉起 warp-cli
+ * - 该设备 warp_enabled=false → 该设备实例即使 system:upstream_proxy_warp.enabled=true
+ *   也不应拉起（管理后台独立控制每台设备）
+ * - 设备未注册（DEPLOY_PLATFORM != docker / CF / 设备记录被删）→ 返回 false
+ *   （保守：未注册 = 不拉起 warp，与"未授权"语义一致）
+ *
+ * 复用 warp config 30s 内容缓存：device 启用变更通过 PATCH API 写库后，主进程
+ * 5s polling tick 拉到新值自动 reconcile（无需跨进程 IPC）。
+ */
+export async function isThisDeviceWarpEnabled(
+  env?: WorkerEnv | Record<string, unknown>
+): Promise<boolean> {
+  // 非 Docker 部署根本无 warp-cli，一刀切
+  if (process.env.DEPLOY_PLATFORM !== "docker") return false;
+  // 复用 resolveNodeName（与 device-registration.ts 同源）：保证 deviceName 一致
+  let deviceName: string | null;
+  try {
+    const { resolveNodeName } = await import("@/lib/node-name");
+    deviceName = resolveNodeName();
+  } catch {
+    return false;
+  }
+  if (!deviceName) return false;
+  try {
+    const db = await createDb(env as never);
+    const row = await db.deviceRegistrations.findUnique({
+      where: { deviceName },
+      select: { warpEnabled: true },
+    });
+    return row?.warpEnabled === true;
+  } catch {
+    // 查表失败保守返回 false：不阻塞业务，宁可 warp 不可用也不误启
+    return false;
+  }
+}
+
+/**
+ * 组合判定：本设备 warp 是否应实际启？
+ * 三层 AND 关系：
+ *   1. 部署形态（仅 Docker）
+ *   2. 全局 config 启用 + 用户双勾选 + 政策版本一致（isWarpEffectivelyEnabled）
+ *   3. 本设备 device_registrations.warp_enabled=true
+ * 任一不满足返回 false。
+ */
+export async function shouldStartWarpOnThisDevice(
+  env?: WorkerEnv | Record<string, unknown>
+): Promise<boolean> {
+  if (process.env.DEPLOY_PLATFORM !== "docker") return false;
+  const cfg = await readWarpConfig(env);
+  if (!isWarpEffectivelyEnabled(cfg)) return false;
+  return await isThisDeviceWarpEnabled(env);
+}
+
+// ============================================================
 // 进程管理：主应用内 child_process.spawn 管理 warp-cli / warp-svc
 // ============================================================
 
@@ -302,6 +364,63 @@ function isDockerDeployment(): boolean {
 /** 当前是否已就绪（pid 存在且进程未退出） */
 export function isWarpProcessRunning(): boolean {
   return warpProcess !== null && warpProcess.exitCode === null && warpProcess.signalCode === null;
+}
+
+/**
+ * 依据当前 shouldStartWarpOnThisDevice() 状态自动启/停 warp 子进程。
+ *
+ * 设计语义（设备级 reconcile）：
+ * - 调用方：register-device.cjs 启动注册后；scheduler.cjs 健康检查 polling tick；
+ *   warp.tsx 用户 PATCH /api/admin/upstream-proxy/warp 写库后。
+ * - 决策表：
+ *     shouldStart=true  & 进程已跑  → noop
+ *     shouldStart=true  & 进程未跑  → startWarpProcess
+ *     shouldStart=false & 进程已跑  → stopWarpProcess
+ *     shouldStart=false & 进程未跑  → noop
+ * - 任一异常（spawn 失败 / 查表失败）仅记日志不抛错：reconcile 失败不应阻塞
+ *   scheduler tick 或 register-device 主流程。
+ */
+export async function reconcileWarp(): Promise<{
+  action: "start" | "stop" | "noop";
+  reason: string;
+  ok: boolean;
+  error?: string;
+}> {
+  let shouldStart: boolean;
+  try {
+    shouldStart = await shouldStartWarpOnThisDevice();
+  } catch (err) {
+    console.warn(
+      `[upstream-proxy-warp] reconcile: shouldStartWarpOnThisDevice 异常: ${(err as Error)?.message ?? String(err)}`
+    );
+    return { action: "noop", reason: "决策异常", ok: false, error: String(err) };
+  }
+  const running = isWarpProcessRunning();
+  if (shouldStart && !running) {
+    const cfg = await readWarpConfig();
+    if (!cfg) return { action: "noop", reason: "config 缺失", ok: false };
+    const r = await startWarpProcess(cfg);
+    return {
+      action: "start",
+      reason: "本设备 warp_enabled=true 且 config 已启用",
+      ok: r.ok,
+      error: r.error,
+    };
+  }
+  if (!shouldStart && running) {
+    const r = await stopWarpProcess();
+    return {
+      action: "stop",
+      reason: "本设备 warp_enabled=false 或 config 未启用",
+      ok: r.ok,
+      error: r.error,
+    };
+  }
+  return {
+    action: "noop",
+    reason: shouldStart ? "已运行" : "无需启动",
+    ok: true,
+  };
 }
 
 /** 获取当前 warp 子进程 PID（未启动返回 null） */

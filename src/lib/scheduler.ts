@@ -24,6 +24,7 @@ import {
   PROXY_HEALTH_INTERVAL_MIN_RANGE,
 } from "./upstream-proxy";
 import { purgeHistory } from "./notification-store";
+import { reconcileWarp, tickWarpHealth } from "./upstream-proxy-warp";
 
 /** 供测试与文档断言健康检查间隔允许范围（与 upstream-proxy 常量一致） */
 export { PROXY_HEALTH_INTERVAL_MIN_RANGE };
@@ -253,6 +254,25 @@ export const DOCKER_TASKS: ScheduledTask[] = [
       isScheduledProxyHealthDisabled()
         ? Promise.resolve({})
         : runProxyHealthCheck(db, env),
+  },
+  {
+    name: "warp-reconcile",
+    // 与 proxy-health 同周期：管理后台改 device warp_enabled 或 warp config
+    // 启用态后，最迟一个健康检查周期内本设备 reconcile（启/停 warp-cli）。
+    // 容器启动时 register-device.cjs 已先做一次 reconcile（首启零延迟），
+    // 此处仅承担"运行期配置变更同步"。
+    spec: () => {
+      const intervalMin = getHealthCheckIntervalMin();
+      return { ...healthCheckSpec(intervalMin), minIntervalMs: intervalMin * 60_000 };
+    },
+    // reconcile 失败仅记日志不抛错；tickWarpHealth 同周期回写 warp-svc RSS/port
+    run: async () => {
+      const r = await reconcileWarp();
+      await tickWarpHealth();
+      if (r.action !== "noop") {
+        console.log(`[scheduler] warp-reconcile: action=${r.action} ok=${r.ok} reason=${r.reason}${r.error ? ` error=${r.error}` : ""}`);
+      }
+    },
   },
   {
     name: "proxy-pull",

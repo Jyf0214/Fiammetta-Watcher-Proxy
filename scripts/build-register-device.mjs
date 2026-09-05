@@ -52,8 +52,12 @@ export default module;`,
 };
 
 // 入口包装：registerDevice 是单飞函数，import 后立刻调用一次即可。
+// 设备注册成功后调 reconcileWarp()：按 device_registrations.warp_enabled + warp config
+// 决定是否拉起/停掉本设备 warp-cli 子进程。设备级 reconcile 在此一次性完成，
+// 后续 scheduler.cjs 健康检查 tick 也会再调（持续同步远端变更）。
 const ENTRY_SOURCE = `
 import { registerDevice } from "./src/lib/device-registration";
+import { reconcileWarp } from "./src/lib/upstream-proxy-warp";
 
 (async () => {
   // 容器内本机 IP 取不到时 address 传 null（与管理后台可见 null 一致）。
@@ -65,6 +69,9 @@ import { registerDevice } from "./src/lib/device-registration";
   } else {
     console.log("[register-device] 跳过注册（详见日志）");
   }
+  // 设备注册后立即按本机策略启/停 warp（不阻塞主流程：reconcile 失败仅记日志）
+  const r = await reconcileWarp();
+  console.log(\`[register-device] warp reconcile: action=\${r.action} ok=\${r.ok} reason=\${r.reason}\${r.error ? \` error=\${r.error}\` : ""}\`);
   // 无论成功失败都正常退出——注册失败不应阻塞容器启动
   process.exit(0);
 })().catch((err) => {

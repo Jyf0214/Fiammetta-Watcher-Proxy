@@ -272,6 +272,10 @@ CREATE TABLE IF NOT EXISTS "device_registrations" (
     "first_seen_at" INTEGER NOT NULL DEFAULT 0,
     "last_seen_at" INTEGER NOT NULL DEFAULT 0,
     "boot_count" INTEGER NOT NULL DEFAULT 0,
+    -- 本机 Cloudflare Warp 启用开关（与 5 方言 schema 同步）
+    "warp_enabled" INTEGER NOT NULL DEFAULT 0,
+    "warp_enabled_at" INTEGER NOT NULL DEFAULT 0,
+    "warp_enabled_by" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

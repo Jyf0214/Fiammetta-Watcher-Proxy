@@ -1,20 +1,14 @@
 /**
- * GET /api/admin/devices — 获取设备注册列表
+ * GET    /api/admin/devices                     — 设备注册列表（分页）
+ * DELETE /api/admin/devices?id=xxx             — 删除单条设备记录
+ * PATCH  /api/admin/devices                     — 更新单条设备的 warp_enabled
+ *   body: { id: string, warpEnabled: boolean }
  *
- * 返回所有 device_registrations 记录，按 lastSeenAt 倒序。
+ * POST   /api/admin/devices/bulk-warp           — 当前可见页批量设置 warp 启用
+ *   body: { ids: string[], warpEnabled: boolean }
+ *   按"仅当前可见页"原则，调用方先 GET 拿当前页 ids，再 POST 批量
  *
- * 查询参数：
- * - page: 页码，默认 1
- * - pageSize: 每页条数，默认 50，最大 100
- *
- * DELETE /api/admin/devices — 删除单条设备记录
- *   query.id: 必填，device_registrations.id
- *
- * 部署矩阵：
- *   - EdgeOne / Vercel / 本地 / Docker：正常返回数据
- *   - Cloudflare：CF 构建 alias @/lib/device-registration → stub 阻止启动期
- *     注册；本 API 在 CF 部署下仍可查询（device_registrations 表存在），但通常
- *     为空。前端页 CF 部署显示 stub 提示。
+ * 部署矩阵：CF 部署整体 503（启动期 registerDevice alias 为 stub，设备表为空）
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -22,6 +16,7 @@ import { createDb } from "@/lib/prisma";
 import { getAdminFromRequest, getAuditAdminId, type AuthResult } from "@/lib/admin-auth";
 import { getClientIp } from "../auth";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
+import { checkCsrfOrigin } from "@/lib/admin-security";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -37,7 +32,6 @@ export default async function handler(
 ) {
   // CF 部署下设备管理整体不可用（启动期 registerDevice alias 为 stub，本 API 也随之
   // 关闭）：与前端页 stub 提示保持一致，避免管理后台在 CF 部署下暴露空表
-  // （device_registrations 表 schema 同步在 init.sql，但 CF 不发起注册）
   if (process.env.DEPLOY_PLATFORM === "cf") {
     res.status(503).json({ success: false, error: "Cloudflare 部署不支持设备管理" });
     return;
@@ -84,6 +78,9 @@ export default async function handler(
             firstSeenAt: new Date(d.firstSeenAt * 1000).toISOString(),
             lastSeenAt: new Date(d.lastSeenAt * 1000).toISOString(),
             bootCount: d.bootCount,
+            warpEnabled: d.warpEnabled,
+            warpEnabledAt: new Date(d.warpEnabledAt * 1000).toISOString(),
+            warpEnabledBy: d.warpEnabledBy,
           })),
           total,
           page,
@@ -132,7 +129,117 @@ export default async function handler(
       });
     }
 
-    res.setHeader("Allow", "GET, DELETE");
+    if (req.method === "PATCH") {
+      if (!checkCsrfOrigin(req, res)) return;
+      const body = (req.body ?? {}) as { id?: unknown; warpEnabled?: unknown };
+      const id = typeof body.id === "string" ? body.id : "";
+      const warpEnabled = body.warpEnabled;
+      if (!id) {
+        res.status(400).json({ success: false, error: "缺少 id 参数" });
+        return;
+      }
+      if (typeof warpEnabled !== "boolean") {
+        res.status(400).json({ success: false, error: "warpEnabled 必须为 boolean" });
+        return;
+      }
+      const existing = await db.deviceRegistrations.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ success: false, error: "设备记录不存在" });
+        return;
+      }
+      const currentTime = now();
+      const operatorId = getAuditAdminId(admin as AuthResult);
+      await db.deviceRegistrations.update({
+        where: { id },
+        data: {
+          warpEnabled,
+          warpEnabledAt: currentTime,
+          warpEnabledBy: operatorId,
+          updatedAt: currentTime,
+        },
+      });
+      // 写审计日志：便于追踪谁在何时切了哪台设备的 warp
+      const ip = getClientIp(req);
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: operatorId,
+          action: "toggle_device_warp",
+          detail: JSON.stringify({
+            target: id,
+            deviceId: id,
+            deviceName: existing.deviceName,
+            warpEnabled,
+          }),
+          ip,
+          createdAt: currentTime,
+        },
+      });
+      return res.status(200).json({
+        success: true,
+        data: {
+          id,
+          deviceName: existing.deviceName,
+          warpEnabled,
+          warpEnabledAt: new Date(currentTime * 1000).toISOString(),
+        },
+      });
+    }
+
+    if (req.method === "POST" && req.query.action === "bulk-warp") {
+      if (!checkCsrfOrigin(req, res)) return;
+      const body = (req.body ?? {}) as { ids?: unknown; warpEnabled?: unknown };
+      const ids = Array.isArray(body.ids)
+        ? body.ids.filter((x): x is string => typeof x === "string" && x.length > 0)
+        : [];
+      const warpEnabled = body.warpEnabled;
+      if (ids.length === 0) {
+        res.status(400).json({ success: false, error: "ids 不能为空" });
+        return;
+      }
+      if (ids.length > 500) {
+        res.status(400).json({ success: false, error: "单批最多 500 台" });
+        return;
+      }
+      if (typeof warpEnabled !== "boolean") {
+        res.status(400).json({ success: false, error: "warpEnabled 必须为 boolean" });
+        return;
+      }
+      const currentTime = now();
+      const operatorId = getAuditAdminId(admin as AuthResult);
+      // 一次 updateMany 比逐条 update 高效：单条 SQL + 单条审计
+      const result = await db.deviceRegistrations.updateMany({
+        where: { id: { in: ids } },
+        data: {
+          warpEnabled,
+          warpEnabledAt: currentTime,
+          warpEnabledBy: operatorId,
+          updatedAt: currentTime,
+        },
+      });
+      const ip = getClientIp(req);
+      await db.auditLogs.create({
+        data: {
+          id: generateId(),
+          adminId: operatorId,
+          action: "bulk_toggle_device_warp",
+          detail: JSON.stringify({
+            target: "bulk",
+            count: result.count,
+            ids,
+            warpEnabled,
+          }),
+          ip,
+          createdAt: currentTime,
+        },
+      });
+      return res.status(200).json({
+        success: true,
+        data: { updated: result.count, warpEnabled },
+      });
+    }
+
+    res.setHeader("Allow", "GET, POST, PATCH, DELETE");
     res.status(405).json({ success: false, error: "Method Not Allowed" });
   } catch (err) {
     console.error("[devices] 操作失败:", err);

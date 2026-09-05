@@ -14,8 +14,16 @@
  */
 
 import { useState, useEffect } from "react";
-import { Popconfirm, Alert, Tag, message, type TableColumnsType } from "antd";
-import { Trash2, Server, ShieldOff } from "lucide-react";
+import {
+  Popconfirm,
+  Alert,
+  Tag,
+  message,
+  Switch,
+  Space,
+  type TableColumnsType,
+} from "antd";
+import { Trash2, Server, ShieldOff, Zap, ZapOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -38,6 +46,9 @@ interface DeviceItem {
   firstSeenAt: string;
   lastSeenAt: string;
   bootCount: number;
+  warpEnabled: boolean;
+  warpEnabledAt: string;
+  warpEnabledBy: string | null;
 }
 
 /** CF 部署标志（构建期内联）。"cf" 时整页 stub，不请求 API */
@@ -81,6 +92,53 @@ export default function DevicesPage() {
       }
     } catch {
       message.error(t("devices:deleteFailed"));
+    }
+  };
+
+  // 单台设备 Warp 开关：PATCH 写库后由 scheduler.cjs warp-reconcile 在最近一个
+  // 健康检查周期（默认 5 分钟）内自动 reconcile；UI 立即刷新显示
+  const handleToggleWarp = async (id: string, next: boolean) => {
+    try {
+      const res = await fetch("/api/admin/devices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, warpEnabled: next }),
+      });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        message.success(t("devices:warpToggleSuccess"));
+        void mutate();
+      } else {
+        message.error(data.error || t("devices:warpToggleFailed"));
+      }
+    } catch {
+      message.error(t("devices:warpToggleFailed"));
+    }
+  };
+
+  // 当前可见页批量：POST /api/admin/devices?action=bulk-warp
+  // 一次 updateMany + 一次审计；上限 500 台
+  const handleBulkWarp = async (warpEnabled: boolean) => {
+    if (devices.length === 0) {
+      message.warning(t("devices:emptyTitle"));
+      return;
+    }
+    const ids = devices.map((d) => d.id);
+    try {
+      const res = await fetch("/api/admin/devices?action=bulk-warp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, warpEnabled }),
+      });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        message.success(t("devices:warpBulkSuccess", { count: data.data?.updated ?? ids.length }));
+        void mutate();
+      } else {
+        message.error(data.error || t("devices:warpBulkFailed"));
+      }
+    } catch {
+      message.error(t("devices:warpBulkFailed"));
     }
   };
 
@@ -187,6 +245,42 @@ export default function DevicesPage() {
       ),
     },
     {
+      // 设备级 Warp 启用开关：管理后台独立控制每台设备是否拉起 warp-cli；
+      // 切换后由 scheduler.cjs warp-reconcile 在最近一个健康检查周期
+      //（默认 5 分钟）内 reconcile，UI 立即刷新显示 DB 状态
+      title: t("devices:colWarpEnabled"),
+      dataIndex: "warpEnabled",
+      key: "warpEnabled",
+      width: 110,
+      render: (enabled: boolean, record: DeviceItem) => (
+        <Switch
+          size="small"
+          checked={enabled}
+          checkedChildren={
+            <span className="flex items-center gap-1 text-[10px]">
+              <Zap className="w-3 h-3" />
+              {t("devices:warpEnabled")}
+            </span>
+          }
+          unCheckedChildren={
+            <span className="flex items-center gap-1 text-[10px] text-zinc-400">
+              <ZapOff className="w-3 h-3" />
+              {t("devices:warpDisabled")}
+            </span>
+          }
+          onChange={(next) => void handleToggleWarp(record.id, next)}
+        />
+      ),
+    },
+    {
+      title: t("devices:colWarpEnabledAt"),
+      dataIndex: "warpEnabledAt",
+      key: "warpEnabledAt",
+      width: 170,
+      responsive: ["lg"],
+      render: (s: string) => formatDateTime(s),
+    },
+    {
       title: t("devices:colActions"),
       key: "actions",
       width: 90,
@@ -219,6 +313,42 @@ export default function DevicesPage() {
           title={t("devices")}
           description={t("devicesDesc")}
           icon={<Server size={20} className="text-zinc-500 dark:text-zinc-400" />}
+          extra={
+            // 批量开关仅在有设备时显示；空表 / CF stub 不渲染
+            total > 0 ? (
+              <Space>
+                <Popconfirm
+                  title={t("devices:warpBulkConfirmTitle")}
+                  description={t("devices:warpBulkConfirmDesc", {
+                    count: devices.length,
+                    warpEnabled: true,
+                  })}
+                  okText={t("devices:warpBulkOn")}
+                  cancelText={t("common:cancel")}
+                  onConfirm={() => void handleBulkWarp(true)}
+                >
+                  <Button variant="primary" size="sm" icon={<Zap className="w-3.5 h-3.5" />}>
+                    {t("devices:warpBulkOn")}
+                  </Button>
+                </Popconfirm>
+                <Popconfirm
+                  title={t("devices:warpBulkConfirmTitle")}
+                  description={t("devices:warpBulkConfirmDesc", {
+                    count: devices.length,
+                    warpEnabled: false,
+                  })}
+                  okText={t("devices:warpBulkOff")}
+                  cancelText={t("common:cancel")}
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => void handleBulkWarp(false)}
+                >
+                  <Button variant="default" size="sm" icon={<ZapOff className="w-3.5 h-3.5" />}>
+                    {t("devices:warpBulkOff")}
+                  </Button>
+                </Popconfirm>
+              </Space>
+            ) : undefined
+          }
         />
         <AsyncBoundary isLoading={isLoading} error={error ? new Error(error.message) : null}>
           <ProCard>

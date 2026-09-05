@@ -289,6 +289,14 @@ model deviceRegistrations {
   lastSeenAt  Int      @default(0) @map("last_seen_at")
   // 启动次数（命中既有记录累加）
   bootCount   Int      @default(0) @map("boot_count")
+  // 本机 Cloudflare Warp 启用开关：管理后台可独立控制每台设备是否拉起 warp-cli；
+  // 新设备默认 false（需管理后台显式开启）。非 Docker 部署 / 未配 warp config 时无效，
+  // 启动期主进程先查 system:upstream_proxy_warp.enabled（全局默认），再查本字段（设备级覆盖）
+  warpEnabled        Boolean @default(false) @map("warp_enabled")
+  // 本机 warp 上次切换时间（Unix 秒）：管理后台 UI 展示 + 排错定位
+  warpEnabledAt      Int     @default(0) @map("warp_enabled_at")
+  // 本机 warp 上次切换操作人（admin 标识，便于审计追踪）
+  warpEnabledBy      String? @map("warp_enabled_by")
   createdAt   Int      @default(0) @map("created_at")
   updatedAt   Int      @default(0) @map("updated_at")
 

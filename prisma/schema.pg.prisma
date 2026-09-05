@@ -291,6 +291,9 @@ model deviceRegistrations {
   lastSeenAt  Int      @default(0) @map("last_seen_at")
   // 启动次数（命中既有记录累加）
   bootCount   Int      @default(0) @map("boot_count")
+  warpEnabled        Boolean @default(false) @map("warp_enabled")
+  warpEnabledAt      Int     @default(0) @map("warp_enabled_at")
+  warpEnabledBy      String? @map("warp_enabled_by")
   createdAt   Int      @default(0) @map("created_at")
   updatedAt   Int      @default(0) @map("updated_at")
 
