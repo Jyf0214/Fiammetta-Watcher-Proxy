@@ -50,8 +50,10 @@ ENV ENVIRONMENT=production
 ENV DEPLOY_PLATFORM=docker
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# wget 用于健康检查
-RUN apk add --no-cache wget
+# wget 用于健康检查；cloudflare-warp 提供可选出站代理（Local proxy mode 暴露
+# 127.0.0.1:40000，无须 NET_ADMIN / /dev/net/tun，保留 cap_drop: ALL 加固）。
+# 仅在用户启用 Cloudflare Warp 出站代理时使用（src/lib/upstream-proxy-warp.ts）
+RUN apk add --no-cache wget cloudflare-warp
 
 # 创建非 root 用户（与 builder 阶段相同 UID/GID）
 RUN addgroup --system --gid 1001 nodejs && \

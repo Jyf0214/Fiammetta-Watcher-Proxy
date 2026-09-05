@@ -40,6 +40,11 @@
 
 import { createDb, type Database } from "@/lib/prisma";
 import type { WorkerEnv } from "../../worker/src/config";
+import {
+  readWarpConfig,
+  isWarpEffectivelyEnabled,
+  isWarpProcessRunning,
+} from "@/lib/upstream-proxy-warp";
 
 // type-only import：打包期擦除，边缘运行时（workerd）不加载 undici 实现
 import type { Dispatcher } from "undici";
@@ -1080,6 +1085,35 @@ async function withHealthLock<T>(
 // 缓存动态 import Promise，避免每请求一次 import 开销
 let socksImportPromise: Promise<any> | null = null;
 let undiciImportPromise: Promise<any> | null = null;
+
+/**
+ * Warp 兜底：组禁用 / 组无代理时尝试走 warp（容器内 warp-svc @ 127.0.0.1:40000）。
+ *
+ * 调用条件（全部满足）：
+ * 1. process.env.DEPLOY_PLATFORM === "docker"（非 Docker 部署无 warp-cli）
+ * 2. configs 表 system:upstream_proxy_warp.enabled=true + 双勾选 + 政策版本一致
+ * 3. 主进程内 warp 子进程在跑（isWarpProcessRunning）
+ *
+ * 失败时返回 null，业务走直连（原有行为）。
+ */
+async function tryWarpFallback(): Promise<UpstreamProxySelection | null> {
+  if (process.env.DEPLOY_PLATFORM !== "docker") return null;
+  if (!isWarpProcessRunning()) return null;
+  try {
+    const cfg = await readWarpConfig();
+    if (!cfg || !isWarpEffectivelyEnabled(cfg)) return null;
+    const url = `socks5://${cfg.host}:${cfg.port}`;
+    const dispatcher = await getAgent(url);
+    return { dispatcher, url, error: undefined };
+  } catch (err) {
+    // 任何异常（含 socksDispatcher 内部失败）不阻断业务，返回 null 走直连
+    console.warn(
+      `[upstream-proxy] warp 兜底失败: ${(err as Error)?.message ?? String(err)}`
+    );
+    return null;
+  }
+}
+
 async function getAgent(url: string): Promise<Dispatcher> {
   let agent: Dispatcher | undefined = proxyAgents.get(url);
   if (!agent) {
@@ -1584,13 +1618,17 @@ export async function getUpstreamProxy(
 
   const group = resolveTargetGroup(config, platformId);
   if (!group) {
-    // 目标组被禁用：返回直连，同时回收该组代理连接（keepUrls 不含禁用组）
+    // 目标组被禁用：先尝试 warp 兜底，未启用时直连
+    const warpSel = await tryWarpFallback();
+    if (warpSel) return warpSel;
     await syncStaleAgentsOnce(config, pool);
     return { dispatcher: null, url: null };
   }
   const groupUrls = [...new Set([...group.urls, ...(pool[group.name] ?? [])])];
   if (groupUrls.length === 0) {
-    // 组内无代理（如拉取尚未成功）：返回直连，同时保持代理池与其他组同步
+    // 组内无代理（如拉取尚未成功）：先尝试 warp 兜底，未启用时直连
+    const warpSel = await tryWarpFallback();
+    if (warpSel) return warpSel;
     await syncStaleAgentsOnce(config, pool);
     return { dispatcher: null, url: null };
   }

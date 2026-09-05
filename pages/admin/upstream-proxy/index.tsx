@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Input, InputNumber, Select, Alert, message } from "antd";
+import { Input, InputNumber, Select, Alert, message, Modal, Checkbox, Tag } from "antd";
 import { Button } from "@/components/ui/Button";
 import { AsyncBoundary } from "@/components/ui/AsyncBoundary";
 import { useTranslation } from "react-i18next";
 import "@/lib/i18n";
-import { RefreshCw, Save } from "lucide-react";
+import { Cloud, RefreshCw, Save } from "lucide-react";
 import { useApi, UNAUTHORIZED_MESSAGE } from "@/hooks/use-api";
 import AdminLayout from "@/components/AdminLayout";
 import {
@@ -80,6 +80,116 @@ export default function UpstreamProxyPage() {
 
   const deployPlatform = process.env.NEXT_PUBLIC_DEPLOY_PLATFORM || "";
   const isDocker = deployPlatform === "docker";
+
+  // ─── Cloudflare Warp 启用前置弹窗 state（仅 Docker 部署显示） ───
+  const [warpEnabled, setWarpEnabled] = useState(false);
+  const [warpEffective, setWarpEffective] = useState(false);
+  const [warpPid, setWarpPid] = useState<number | null>(null);
+  const [warpDbStatus, setWarpDbStatus] = useState<{
+    health: "ok" | "unhealthy" | "stopped";
+    rssBytes: number | null;
+    checkedAt: number;
+    error: string | null;
+  } | null>(null);
+  const [warpModalOpen, setWarpModalOpen] = useState(false);
+  const [trafficAck, setTrafficAck] = useState(false);
+  const [privacyAck, setPrivacyAck] = useState(false);
+  const [warpPrivacyUrl, setWarpPrivacyUrl] = useState(
+    "https://www.cloudflare.com/privacypolicy/"
+  );
+  const [warpTermsUrl, setWarpTermsUrl] = useState(
+    "https://www.cloudflare.com/terms/"
+  );
+  const [warpToggling, setWarpToggling] = useState(false);
+
+  /** 拉取 warp 状态（开启弹窗时 / 关闭弹窗后回刷） */
+  const refreshWarp = async (): Promise<void> => {
+    if (!isDocker) return;
+    try {
+      const r = await fetch("/api/admin/upstream-proxy/warp");
+      const body = (await r.json()) as Record<string, any> | null;
+      if (body?.success) {
+        setWarpEnabled(body.data?.enabled === true);
+        setWarpEffective(body.data?.effectiveEnabled === true);
+        setWarpPid(typeof body.data?.pid === "number" ? body.data.pid : null);
+        setWarpDbStatus(body.data?.dbStatus ?? null);
+        if (typeof body.data?.privacyPolicyUrl === "string") {
+          setWarpPrivacyUrl(body.data.privacyPolicyUrl);
+        }
+        if (typeof body.data?.termsUrl === "string") {
+          setWarpTermsUrl(body.data.termsUrl);
+        }
+      }
+    } catch {
+      // 静默：拉取失败不影响其他功能
+    }
+  };
+
+  useEffect(() => {
+    if (!isDocker) return;
+    // setState 全部在 async 回调（fetch resolve 后），不在 effect body 同步触发；
+    // 此处 fire-and-forget 触发初始化拉取，无同步 setState
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshWarp();
+  }, [isDocker]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submitEnableWarp = async (): Promise<void> => {
+    if (!trafficAck || !privacyAck) return;
+    setWarpToggling(true);
+    try {
+      const r = await fetch("/api/admin/upstream-proxy/warp", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: true,
+          consent: {
+            trafficViaCloudflare: true,
+            privacyPolicyRead: true,
+          },
+        }),
+      });
+      const body = (await r.json()) as Record<string, any> | null;
+      if (body?.success) {
+        message.success(t("upstreamProxyWarpEnabled"));
+        setWarpEnabled(true);
+        setWarpEffective(body.data?.effectiveEnabled === true);
+        setWarpPid(typeof body.data?.pid === "number" ? body.data.pid : null);
+        setWarpModalOpen(false);
+        setTrafficAck(false);
+        setPrivacyAck(false);
+        await refreshWarp();
+      } else {
+        message.error(body?.error ?? t("common:error"));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setWarpToggling(false);
+    }
+  };
+
+  const submitDisableWarp = async (): Promise<void> => {
+    setWarpToggling(true);
+    try {
+      const r = await fetch("/api/admin/upstream-proxy/warp", {
+        method: "DELETE",
+      });
+      const body = (await r.json()) as Record<string, any> | null;
+      if (body?.success) {
+        message.success(t("upstreamProxyWarpDisabled"));
+        setWarpEnabled(false);
+        setWarpEffective(false);
+        setWarpPid(null);
+        await refreshWarp();
+      } else {
+        message.error(body?.error ?? t("common:error"));
+      }
+    } catch {
+      message.error(t("common:error"));
+    } finally {
+      setWarpToggling(false);
+    }
+  };
 
   /** 组请求可用率源数据（stats API 返回的按代理聚合统计，url → 分类计数） */
   const [trafficStats, setTrafficStats] = useState<Record<string, { total: number; ok: number }> | null>(null);
@@ -448,6 +558,123 @@ export default function UpstreamProxyPage() {
           loading={isValidating}
           className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 overflow-hidden"
         />
+
+        {/* Cloudflare Warp 内置代理（仅 Docker 部署显示） */}
+        {isDocker && (
+          <div className="mt-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Cloud size={16} className="text-zinc-400 shrink-0" />
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate">
+                  {t("upstreamProxyWarpCardTitle")}
+                </span>
+                {warpEffective ? (
+                  <Tag color="green" className="shrink-0">
+                    {t("upstreamProxyWarpStatusEnabled")}
+                  </Tag>
+                ) : warpEnabled ? (
+                  <Tag color="orange" className="shrink-0">
+                    {t("upstreamProxyWarpStatusConsentOutdated")}
+                  </Tag>
+                ) : (
+                  <Tag className="shrink-0">{t("upstreamProxyWarpStatusDisabled")}</Tag>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {warpEffective ? (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={submitDisableWarp}
+                    loading={warpToggling}
+                    disabled={warpToggling}
+                  >
+                    {t("upstreamProxyWarpDisable")}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setTrafficAck(false);
+                      setPrivacyAck(false);
+                      setWarpModalOpen(true);
+                    }}
+                  >
+                    {t("upstreamProxyWarpEnable")}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+              {t("upstreamProxyWarpCardDescription")}
+            </p>
+            {warpDbStatus && (
+              <p className="text-[11px] text-zinc-400 font-mono">
+                {t("upstreamProxyWarpStatusLabel")}: {warpDbStatus.health}
+                {warpPid !== null && ` · PID ${warpPid}`}
+                {warpDbStatus.rssBytes !== null &&
+                  ` · RSS ${(warpDbStatus.rssBytes / 1024 / 1024).toFixed(1)} MB`}
+                {warpDbStatus.error && ` · ${warpDbStatus.error}`}
+              </p>
+            )}
+          </div>
+        )}
+
+        <Modal
+          open={warpModalOpen}
+          onCancel={() => {
+            if (warpToggling) return;
+            setWarpModalOpen(false);
+            setTrafficAck(false);
+            setPrivacyAck(false);
+          }}
+          title={t("upstreamProxyWarpModalTitle")}
+          okText={t("upstreamProxyWarpConfirmEnable")}
+          cancelText={t("common:cancel")}
+          okButtonProps={{ disabled: !trafficAck || !privacyAck, loading: warpToggling }}
+          onOk={submitEnableWarp}
+          destroyOnClose
+        >
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-3 leading-relaxed">
+            {t("upstreamProxyWarpModalDescription")}
+          </p>
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-3 leading-relaxed">
+            <a
+              href={warpPrivacyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 dark:text-emerald-400 underline"
+            >
+              {t("upstreamProxyWarpPrivacyLink")}
+            </a>
+            <span className="mx-2 text-zinc-400">·</span>
+            <a
+              href={warpTermsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 dark:text-emerald-400 underline"
+            >
+              {t("upstreamProxyWarpTermsLink")}
+            </a>
+          </p>
+          <div className="space-y-2 mt-4">
+            <Checkbox
+              checked={trafficAck}
+              onChange={(e) => setTrafficAck(e.target.checked)}
+              disabled={warpToggling}
+            >
+              {t("upstreamProxyWarpTrafficAck")}
+            </Checkbox>
+            <Checkbox
+              checked={privacyAck}
+              onChange={(e) => setPrivacyAck(e.target.checked)}
+              disabled={warpToggling}
+            >
+              {t("upstreamProxyWarpPrivacyAck")}
+            </Checkbox>
+          </div>
+        </Modal>
 
         {/* 全局设置：代理应用范围 + 健康检查地址（组配置在各组详情页编辑） */}
         <div className="mt-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">

@@ -166,4 +166,6 @@ npm run test         # 运行测试
 
 本项目仅提供 API 请求转发功能，不对通过本项目转发的任何请求内容、响应内容或使用行为承担法律责任。使用者应自行确保其使用方式符合所连接平台的服务条款及相关法律法规。
 
+本项目可选内置 **Cloudflare Warp** 作为出站代理（仅 Docker 部署，**默认关闭**）。启用后，本项目发往上游 LLM 平台的请求将经由 Cloudflare 网络转发，Cloudflare, Inc. 将作为该部分流量的网络提供商，相关数据按其 [Cloudflare 隐私政策](https://www.cloudflare.com/privacypolicy/) 与 [服务条款](https://www.cloudflare.com/terms/) 处理。启用前需在管理后台显式确认两项须知（"请求会经 Cloudflare 网络转发" 与 "已查看 Cloudflare 隐私政策"），未确认不允许启用。**Cloudflare Warp 与本项目无任何关联、赞助或授权关系**，本项目不为其服务承担任何责任。
+
 本项目按「现状」提供，不作任何明示或暗示的保证。作者不对因使用本项目而产生的任何直接或间接损失承担责任。
