@@ -60,6 +60,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # wget 备用（健康检查用 node fetch，无需额外安装）
 
+# cloudflared（community edge/testing 仓库，alpine 官方包）提供 Cloudflare Tunnel
+# 出站 QUIC/WebSocket，无需任何容器特权；启用与否由管理后台按设备控制
+#（src/lib/upstream-tunnel.ts + src/lib/upstream-proxy-warp.ts）。
+# 仅在用户启用对应功能时由主进程 child_process.spawn 拉起
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
+    apk add --no-cache cloudflared && \
+    sed -i '/edge\/testing/d' /etc/apk/repositories
+
 # 创建非 root 用户（与 builder 阶段相同 UID/GID）
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \

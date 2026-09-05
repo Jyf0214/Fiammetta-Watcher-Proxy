@@ -52,8 +52,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # wget 用于健康检查；cloudflare-warp 提供可选出站代理（Local proxy mode 暴露
 # 127.0.0.1:40000，无须 NET_ADMIN / /dev/net/tun，保留 cap_drop: ALL 加固）。
-# 仅在用户启用 Cloudflare Warp 出站代理时使用（src/lib/upstream-proxy-warp.ts）
-RUN apk add --no-cache wget cloudflare-warp
+# cloudflared（community edge/testing 仓库，alpine 官方包）提供 Cloudflare Tunnel
+# 出站 QUIC/WebSocket，无需任何容器特权；启用与否由管理后台按设备控制
+#（src/lib/upstream-tunnel.ts + src/lib/upstream-proxy-warp.ts）。
+# 仅在用户启用对应功能时由主进程 child_process.spawn 拉起
+RUN apk add --no-cache wget cloudflare-warp && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
+    apk add --no-cache cloudflared && \
+    sed -i '/edge\/testing/d' /etc/apk/repositories
 
 # 创建非 root 用户（与 builder 阶段相同 UID/GID）
 RUN addgroup --system --gid 1001 nodejs && \
