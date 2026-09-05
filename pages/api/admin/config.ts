@@ -13,6 +13,7 @@ import { checkCsrfOrigin } from "@/lib/admin-security";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { invalidateRouterCache } from "../../../worker/src/router";
 import {
+  invalidateUpstreamProxyCache,
   UPSTREAM_PROXY_CONFIG_KEY,
   UPSTREAM_PROXY_HEALTH_KEY,
   UPSTREAM_PROXY_POOL_KEY,
@@ -187,6 +188,17 @@ export default async function handler(
       });
       // auto_model_id / auto_model_selected 等系统配置变更后主动刷新路由缓存
       invalidateRouterCache();
+      // 出站代理配置/池/健康三表任一变更后失效本进程缓存，强制下次请求重读
+      // （多实例下仅本进程即时生效，其他实例按 120s TTL 自然刷新；消除管理员
+      // 改动「禁用某组 / 改平台绑定 / 改健康检查 URL」后其他实例最长 2 分钟
+      // 仍按旧值路由/拉取/检查的窗口）
+      if (
+        body.key === UPSTREAM_PROXY_CONFIG_KEY ||
+        body.key === UPSTREAM_PROXY_POOL_KEY ||
+        body.key === UPSTREAM_PROXY_HEALTH_KEY
+      ) {
+        invalidateUpstreamProxyCache();
+      }
 
       res.status(200).json({ success: true, message: "配置已更新" });
       return;

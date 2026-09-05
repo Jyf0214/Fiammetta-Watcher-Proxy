@@ -61,6 +61,11 @@ export const UPSTREAM_PROXY_CHECK_LOCK_KEY = "system:upstream_proxy_check_lock";
  *  一轮检查数百批（每批 20 并发 × 10s 超时 ≈ 最坏 3.3 分钟/批间隔），
  *  正常完成前不会过期 */
 const CHECK_LOCK_TTL_SEC = 15 * 60;
+/** 拉取锁键：与健康检查独立——拉取是短时多源 HTTP 拉取（数秒~数十秒），
+ *  跨实例互斥避免多实例并发拉取双写 pool 行（TiDB 1205）；TTL 短至 2 分钟
+ *  即可覆盖最坏全部源超时（15s × N 源），实例崩溃残留上限可控 */
+export const UPSTREAM_PROXY_PULL_LOCK_KEY = "system:upstream_proxy_pull_lock";
+const PULL_LOCK_TTL_SEC = 2 * 60;
 /** 默认健康检查探测地址（HTTP 204，轻量；可选国内可达的 Cloudflare 联通性端点） */
 export const DEFAULT_PROXY_HEALTH_CHECK_URL = "https://cp.cloudflare.com/generate_204";
 /** 默认健康检查间隔（分钟）：与调度器 proxy-health 任务默认频率一致 */
@@ -213,6 +218,25 @@ let cachedHealth: ProxyHealthMap | null = null;
 /** health 缓存失效信号：同 cachedPoolValue（秒级 updatedAt 同秒双保存失效） */
 let cachedHealthValue: string | null = null;
 let lastHealthRefresh = 0;
+
+/**
+ * 主动失效出站代理三态缓存（config / pool / health）
+ *
+ * 管理后台 PUT /api/admin/config 写入 system:upstream_proxy* 系列 key 后调用，
+ * 强制本进程下一次读穿透到 DB（value 比对前置为不等则重读）。
+ * 多实例下仅失效本进程；其他实例仍按 120s TTL 自然刷新。
+ * 与 router.ts 的 invalidateRouterCache 同语义——出站代理配置变更后让路由层
+ * 立即感知新组/平台绑定/平台白名单
+ */
+export function invalidateUpstreamProxyCache(): void {
+  lastConfigRefresh = 0;
+  lastPoolRefresh = 0;
+  lastHealthRefresh = 0;
+  cachedConfigValue = null;
+  cachedPoolValue = null;
+  cachedHealthValue = null;
+}
+
 /** url → ProxyAgent 池：配置集合变化时释放不再使用的代理 */
 const proxyAgents = new Map<string, Dispatcher>();
 /** round-robin 轮询游标（仅全部候选异常时回退轮询使用） */
@@ -1310,8 +1334,22 @@ export async function pullProxyGroups(
     return pullInFlight;
   }
 
+  let acquiredPull: { owner: string; value: string } | null = null;
+
   const flight = (async (): Promise<Record<string, ProxyPullGroupResult>> => {
     try {
+      // 跨实例互斥（仅定时模式）：configs 表拉取锁（与健康检查锁同模式）。
+      // 多实例 cron 定时拉取并发时仅一个实例执行拉取，其余实例直接返回
+      // （pool 表不会被并发 upsert 触发 1205 + 各实例 fetch 重复消耗源站带宽）。
+      // 手动模式不走锁——管理页「立即拉取」是用户主动行为，并发跨实例执行
+      // 影响小（pool 内容幂等），且锁被 cron 持有时手动模式应绕过锁立即
+      // 响应用户操作。抢锁移入 flight IIFE 内部：先赋值 pullInFlight 让
+      // 同实例并发复用 Promise，避免两次抢锁（A 抢成功 + B 抢失败 → 都被
+      // 算作并发拉取触发 mock 调用，但 B 抢锁失败返回 {} 破坏复用语义）
+      if (!options.manual) {
+        acquiredPull = await acquirePullLock(db, env);
+        if (!acquiredPull) return {};
+      }
       const config = await readProxyConfig(db, env);
       if (!config) return {};
       const nowSec = Math.floor(Date.now() / 1000);
@@ -1751,6 +1789,19 @@ export function getDegradedProxyUrls(): string[] {
 /**
  * 业务请求网络层失败回标记：连续失败达阈值的代理进入进程内黑名单
  * （跳过轮询）并写入健康度表，供管理页展示
+ *
+ * 多实例并发：用 updateMany where value=oldValue 做乐观锁（CAS），避免
+ * 多实例各自基于不同快照 read-modify-write 整表覆盖（withHealthLock 注释
+ * line 1027 已说明其仅进程内互斥，多实例需外部互斥）。CAS 失败 = 其他实例
+ * 刚写入，丢弃旧快照重读最新值再合并（最多 3 次重试，防止雪崩）。
+ * 进程内黑名单仅在 DB 写成功后才加入——DB 瞬时故障时不会让本实例过激
+ * 跳过 url 而其他实例仍正常使用，避免「某代理持续不可用但其他实例看不到
+ * 原因」的脏黑名单
+ *
+ * 行不存在处理：首次启用出站代理、cron 未跑过或健康表被清空时 DB 行缺失，
+ * 此时 updateMany where value=oldValue 永远不匹配（count=0）；检测
+ * cachedHealthValue === null 后改用 create——确保连续失败时 markProxyFailure
+ * 仍能落库（unique 冲突 → 行已被其他实例 create，下次重试走 CAS 路径）
  */
 export async function markProxyFailure(
   db: D1Database | Database,
@@ -1763,21 +1814,62 @@ export async function markProxyFailure(
   if (count < PROXY_FAIL_THRESHOLD) return;
   if (unhealthyUrls.has(url)) return;
 
-  unhealthyUrls.add(url);
-  try {
-    // 锁内读改写：多个代理同时失败时各自写整表会并发 upsert 同一行
-    //（TiDB 1205）且互相覆盖——串行化后每个失败条目都基于最新表状态合并
-    await withHealthLock(db, env, (health) => {
-      health[url] = {
-        status: "fail",
-        latencyMs: 0,
-        checkedAt: Math.floor(Date.now() / 1000),
-        failCount: count,
-      };
-    });
-  } catch (err) {
-    console.error("[upstream-proxy] 标记代理失败状态写入失败:", err);
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const oldHealth = await readProxyHealth(db, env);
+    const newHealth: ProxyHealthMap = JSON.parse(JSON.stringify(oldHealth));
+    newHealth[url] = {
+      status: "fail",
+      latencyMs: 0,
+      checkedAt: nowSec,
+      failCount: count,
+    };
+    const oldValue = JSON.stringify(oldHealth);
+    const newValue = JSON.stringify(newHealth);
+    // 行不存在（首次部署 / 健康表被清空）：cachedHealthValue 被 readProxyHealth
+    // 设为 null；updateMany where value=... 永远不匹配 → 改用 create
+    const isNewRow = cachedHealthValue === null;
+    try {
+      if (isNewRow) {
+        try {
+          await prisma.configs.create({
+            data: {
+              id: crypto.randomUUID(),
+              key: UPSTREAM_PROXY_HEALTH_KEY,
+              value: newValue,
+              updatedAt: nowSec,
+            },
+          });
+        } catch {
+          // 行已被其他实例 create（unique 冲突）：下次重试走 CAS 路径
+          continue;
+        }
+      } else {
+        const res = await prisma.configs.updateMany({
+          where: { key: UPSTREAM_PROXY_HEALTH_KEY, value: oldValue },
+          data: { value: newValue, updatedAt: nowSec },
+        });
+        if (res.count !== 1) {
+          // CAS 失败：值已被其他实例修改，下次重试基于最新快照合并
+          continue;
+        }
+      }
+      // 写成功：才把 url 加入本进程黑名单（避免写失败时的过激黑名单）
+      unhealthyUrls.add(url);
+      // 同步本地缓存：让本进程后续 read 命中最新 value
+      cachedHealth = newHealth;
+      cachedHealthValue = newValue;
+      lastHealthRefresh = Date.now();
+      return;
+    } catch (err) {
+      console.error("[upstream-proxy] 标记代理失败状态写入失败:", err);
+      return;
+    }
   }
+  console.error(
+    `[upstream-proxy] markProxyFailure CAS 失败达上限，本次失败标记丢弃: ${url}`
+  );
 }
 
 /**
@@ -1866,6 +1958,93 @@ async function acquireCheckLock(
   });
   const verify = await readCheckLock(db, env);
   return verify?.owner === owner ? { owner, value } : null;
+}
+
+// ===== 拉取锁（跨实例互斥，避免多实例并发拉取双写 pool 行） =====
+
+/** 拉取锁：仅 owner/startedAt/expiresAt，无进度——拉取是短时任务无需落库进度 */
+interface PullLock {
+  owner: string;
+  startedAt: number;
+  expiresAt: number;
+}
+
+async function readPullLock(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<PullLock | null> {
+  try {
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    const row = await prisma.configs.findFirst({
+      where: { key: UPSTREAM_PROXY_PULL_LOCK_KEY },
+      select: { value: true },
+    });
+    if (!row?.value) return null;
+    const lock = JSON.parse(row.value) as PullLock;
+    return typeof lock.owner === "string" && typeof lock.expiresAt === "number" ? lock : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 抢占拉取锁：锁不存在/过期时写入自己的锁并回读验证 owner——并发 upsert
+ * 由「最后写者胜 + 回读验证」兜底（与 acquireCheckLock 同模式）。已被其他
+ * 实例持有且未过期时返回 null（其他实例正在拉取，本实例跳过本次拉取）。
+ * 返回 { owner, value }（成功）或 null（占用中/失败）
+ */
+async function acquirePullLock(
+  db: D1Database | Database,
+  env?: WorkerEnv
+): Promise<{ owner: string; value: string } | null> {
+  const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+  const existing = await readPullLock(db, env);
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (existing && existing.expiresAt > nowSec) return null;
+
+  const owner = crypto.randomUUID();
+  const lock: PullLock = {
+    owner,
+    startedAt: nowSec,
+    expiresAt: nowSec + PULL_LOCK_TTL_SEC,
+  };
+  const value = JSON.stringify(lock);
+  await prisma.configs.upsert({
+    where: { key: UPSTREAM_PROXY_PULL_LOCK_KEY },
+    create: {
+      id: crypto.randomUUID(),
+      key: UPSTREAM_PROXY_PULL_LOCK_KEY,
+      value,
+      updatedAt: nowSec,
+    },
+    update: { value, updatedAt: nowSec },
+  });
+  const verify = await readPullLock(db, env);
+  return verify?.owner === owner ? { owner, value } : null;
+}
+
+/**
+ * 释放拉取锁：CAS 校验 owner 后写 cleared 状态（expiresAt=0 让
+ * acquirePullLock 立即可抢占）；失败 = 锁已易主（极少数极端情况：owner
+ * 撞 UUID 概率近乎 0 + TTL 内多次抢占），静默忽略
+ */
+async function releasePullLock(
+  db: D1Database | Database,
+  env: WorkerEnv | undefined,
+  expectedValue: string
+): Promise<void> {
+  try {
+    const prisma = await createDb({ DB: db, DB_TYPE: env?.DB_TYPE });
+    await prisma.configs.updateMany({
+      where: { key: UPSTREAM_PROXY_PULL_LOCK_KEY, value: expectedValue },
+      data: {
+        value: JSON.stringify({ owner: "", startedAt: 0, expiresAt: 0 }),
+        updatedAt: Math.floor(Date.now() / 1000),
+      },
+    });
+  } catch (err) {
+    console.error("[upstream-proxy] 拉取锁释放失败:", err);
+  }
 }
 
 /**
