@@ -19,6 +19,7 @@ import {
   FORBIDDEN_FORWARD_HEADERS,
 } from "./proxy-constants";
 import { parseExtraHeaders } from "../forward-headers";
+import type { PlatformType } from "../../../lib/types";
 
 /**
  * 过滤下游透传头：只保留合法 header 名并丢弃黑名单头
@@ -46,8 +47,14 @@ export function filterForwardHeaders(
 export interface UpstreamHeaderOptions {
   /** 当前使用的平台上游 Key 明文 */
   platformKey: string;
-  /** 上游是否为 Anthropic 协议（官方 Anthropic / GitHub Copilot / Vercel AI 网关等） */
-  upstreamIsAnthropic: boolean;
+  /**
+   * 本次请求实际使用的上游协议（来自 selectProtocolForRequest）。
+   * 仅 anthropic 用 x-api-key + anthropic-version；其他协议（openai/azure/custom/gemini）
+   * 一律 Bearer。
+   *
+   * 向后兼容：旧调用方仍可传 boolean（true = anthropic）；新代码请传 PlatformType。
+   */
+  upstreamProtocol: PlatformType | boolean;
   /** Content-Type：multipart 请求必须保留原始 boundary，JSON 请求传 application/json */
   contentType: string;
   /** 已过滤的下游透传头 */
@@ -67,11 +74,20 @@ export interface UpstreamHeaderOptions {
  * 对象键覆盖顺序与本函数返回值相同）。
  */
 export function buildUpstreamFetchHeaders(opts: UpstreamHeaderOptions): Record<string, string> {
+  // 向后兼容：boolean → 协议字符串
+  const protocol: PlatformType =
+    typeof opts.upstreamProtocol === "boolean"
+      ? opts.upstreamProtocol
+        ? "anthropic"
+        : "openai"
+      : opts.upstreamProtocol;
+  const upstreamIsAnthropic = protocol === "anthropic";
+
   const headers: Record<string, string> = {
     "Content-Type": opts.contentType,
     // Anthropic 协议上游：x-api-key + anthropic-version（extraHeaders 可覆盖为
     // Authorization 等，GitHub Copilot 等 OAuth 网关需用户自行配置）
-    ...(opts.upstreamIsAnthropic
+    ...(upstreamIsAnthropic
       ? { "x-api-key": opts.platformKey, "anthropic-version": "2023-06-01" }
       : { Authorization: `Bearer ${opts.platformKey}` }),
     ...opts.forwardHeaders,
@@ -92,23 +108,48 @@ export function buildUpstreamFetchHeaders(opts: UpstreamHeaderOptions): Record<s
  *   转换为 Gemini 格式，模型名作为 URL 段携带）。流式请求调用方需在 fetch 时
  *   额外追加 ?alt=sse 查询参数；本函数不预设以避免与已有查询参数冲突
  * - 其余端点 baseUrl + 原样路径
+ *
+ * @param upstreamProtocol  本次请求实际使用的协议（来自 selectProtocolForRequest）。
+ *                          为保持对老调用方（仅传 boolean 标志）的向后兼容，
+ *                          当传 boolean 时按历史规则处理（true = anthropic）；
+ *                          推荐新调用方传 PlatformType 字符串。
  */
 export function resolveUpstreamUrl(
   baseUrl: string,
   upstreamPath: string,
-  upstreamIsAnthropic: boolean,
-  upstreamIsGemini: boolean = false,
-  targetModel: string | null = null
+  upstreamProtocol: PlatformType | boolean,
+  targetModel?: string | null,
+  /**
+   * 旧版 Gemini 标志：仅当 upstreamProtocol 为 boolean 时生效。
+   * 新代码请传协议枚举（"gemini"），本参数将在 v2 移除。
+   */
+  legacyIsGemini: boolean = false
 ): string {
+  // 向后兼容：把 boolean 折叠回协议字符串
+  const protocol: PlatformType =
+    typeof upstreamProtocol === "boolean"
+      ? upstreamProtocol
+        ? "anthropic"
+        : legacyIsGemini
+          ? "gemini"
+          : "openai"
+      : upstreamProtocol;
+
   const base = baseUrl.replace(/\/+$/, "");
-  if (upstreamIsAnthropic) return `${base}/v1/messages`;
-  if (upstreamIsGemini) {
+  if (protocol === "anthropic") return `${base}/v1/messages`;
+  if (protocol === "gemini") {
     // Gemini API 路径段：models/{model}，模型名原始透传（不做 URL 编码——Gemini
     // 模型 ID 均为 ASCII 安全字符如 gemini-2.0-flash / models/gemini-2.5-pro）
     // 严格白名单防御路径注入：即便 targetModel 来自内部 router/平台映射，
     // 一旦未来允许外部配置平台/自定义模型名，含 /、?、# 等会破坏 URL 语义。
     // 不通过白名单时直接 throw，调用方以 500 透传，避免静默落到 "unknown" 模糊化错误。
-    const modelSegment = targetModel ?? "unknown";
+    // 流式端点必须是 :streamGenerateContent（:generateContent 文档上不接受 ?alt=sse 流式）。
+    // 切换由 buildUpstreamFetchUrl 负责（同一函数三端共享），resolveUpstreamUrl 不感知
+    // 流式语义——避免在该底层函数里引入"是否流式"参数把三端调用方搞乱
+    const modelSegment = targetModel ?? null;
+    if (!modelSegment) {
+      throw new Error("Gemini 协议上游必须提供 targetModel 才能构造 URL");
+    }
     if (!/^[A-Za-z0-9._:-]+$/.test(modelSegment)) {
       throw new Error(
         `Gemini 模型名含非法字符，拒绝构造上游 URL：${JSON.stringify(modelSegment)}`
@@ -116,5 +157,77 @@ export function resolveUpstreamUrl(
     }
     return `${base}/v1beta/models/${modelSegment}:generateContent`;
   }
+  // azure/custom/openai 等：baseUrl + 原样路径
   return `${base}${upstreamPath}`;
+}
+
+/**
+ * 在 resolveUpstreamUrl 之上叠加协议特定的鉴权/查询参数 + 流式端点路径，三端统一调用。
+ *
+ * - Gemini 协议：
+ *   - API Key 通过查询参数 ?key=... 传递（不能用 Authorization Bearer）。
+ *   - 流式端点必须用 :streamGenerateContent（Gemini 文档明确要求；
+ *     :generateContent 配合 ?alt=sse 上游会返回非预期格式或 404）。
+ *   - 非流式 :generateContent。
+ *   - ?alt=sse 与 ?key 的相对顺序固定：流式 ?alt=sse&key=...，非流式 ?key=...。
+ *   - 用 encodeURIComponent 防止 Key 含特殊字符（实测 Key 常含 + / =）。
+ * - 其余协议：直接返回 resolveUpstreamUrl 的结果，鉴权由 buildUpstreamFetchHeaders 处理。
+ *
+ * 错误情形（Gemini 缺 targetModel / 模型名含非法字符）由 resolveUpstreamUrl throw；
+ * 本函数只做字符串拼接，参数合法性由上游保证。
+ */
+export function buildUpstreamFetchUrl(
+  baseUrl: string,
+  upstreamPath: string,
+  upstreamProtocol: PlatformType | boolean,
+  targetModel: string,
+  /** 当前使用的平台上游 Key 明文：仅 Gemini 协议会注入查询参数；其他协议忽略 */
+  currentKey: string,
+  /** 是否流式请求：Gemini 协议据此切换 :streamGenerateContent / :generateContent 端点与 ?alt=sse */
+  isStream: boolean,
+  /**
+   * 旧版 Gemini 标志：仅当 upstreamProtocol 为 boolean 时生效。
+   * 新代码请传 PlatformType 字符串（"gemini"），本参数将在 v2 移除。
+   */
+  legacyIsGemini: boolean = false
+): string {
+  // 向后兼容 boolean
+  const protocol: PlatformType =
+    typeof upstreamProtocol === "boolean"
+      ? upstreamProtocol
+        ? "anthropic"
+        : legacyIsGemini
+          ? "gemini"
+          : "openai"
+      : upstreamProtocol;
+
+  // Gemini 协议在 resolveUpstreamUrl 之上做端点切换：流式 → :streamGenerateContent
+  if (protocol === "gemini") {
+    // 与 resolveUpstreamUrl 共享同一段白名单逻辑（这里直接重做以避免引入额外参数）
+    const modelSegment = targetModel ?? null;
+    if (!modelSegment) {
+      throw new Error("Gemini 协议上游必须提供 targetModel 才能构造 URL");
+    }
+    if (!/^[A-Za-z0-9._:-]+$/.test(modelSegment)) {
+      throw new Error(
+        `Gemini 模型名含非法字符，拒绝构造上游 URL：${JSON.stringify(modelSegment)}`
+      );
+    }
+    const base = baseUrl.replace(/\/+$/, "");
+    const action = isStream ? "streamGenerateContent" : "generateContent";
+    const upstreamUrl = `${base}/v1beta/models/${modelSegment}:${action}`;
+    const keySegment = `key=${encodeURIComponent(currentKey)}`;
+    return isStream
+      ? `${upstreamUrl}?alt=sse&${keySegment}`
+      : `${upstreamUrl}?${keySegment}`;
+  }
+
+  // 非 Gemini：走 resolveUpstreamUrl（鉴权由 buildUpstreamFetchHeaders 处理）
+  return resolveUpstreamUrl(
+    baseUrl,
+    upstreamPath,
+    upstreamProtocol,
+    targetModel,
+    legacyIsGemini
+  );
 }

@@ -14,6 +14,7 @@ import { getAdminFromRequest, getAuditAdminId } from "@/lib/admin-auth";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../../worker/src/platform-keys";
+import { resolvePlatformProtocols, type PlatformType } from "../../../../lib/types";
 import { resetCircuitBreaker } from "../../../../worker/src/load-balancer";
 import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { getClientIp } from "../auth";
@@ -172,7 +173,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       }
     }
 
-    const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic"] as const;
+    const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic", "gemini"] as const;
     if (
       body.type !== undefined &&
       !VALID_PLATFORM_TYPES.includes(body.type)
@@ -203,6 +204,11 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
       return res.status(404).json({ success: false, error: "平台不存在" });
     }
 
+    // 计算最终 type（前端可能不传 type，PUT 部分更新保留旧 type）
+    const finalType: PlatformType = body.type !== undefined
+      ? (VALID_PLATFORM_TYPES.includes(body.type) ? body.type : existing.type as PlatformType)
+      : (existing.type as PlatformType);
+
     // 构建更新数据（仅包含传入的字段）
     // name 只做 trim，不做 escapeHtml（React 前端渲染会自动转义，
     // 存库转义会对已转义文本二次转义 → &amp;amp; 不可逆累积损坏）
@@ -211,6 +217,57 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse, id: string) 
     if (body.baseUrl !== undefined) updateData.baseUrl = body.baseUrl;
     if (body.type !== undefined) updateData.type = body.type;
     if (body.enabled !== undefined) updateData.enabled = !!body.enabled;
+
+    // 单平台多协议：types 字段在 PUT 里也参与解析。规则同 POST（首项必须 = finalType）
+    if (body.types !== undefined && body.types !== null) {
+      const raw = body.types;
+      const arr: unknown[] = Array.isArray(raw)
+        ? raw
+        : typeof raw === "string"
+          ? (() => {
+              try {
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch {
+                return [];
+              }
+            })()
+          : [];
+      const nextTypes: PlatformType[] = [];
+      for (const item of arr) {
+        if (VALID_PLATFORM_TYPES.includes(item as PlatformType)) {
+          const p = item as PlatformType;
+          if (!nextTypes.includes(p)) nextTypes.push(p);
+        }
+      }
+      // 整组非法 → 沿用库中已有 types（不允许 PUT 把整组清空成「无协议」导致 422）
+      if (nextTypes.length === 0) {
+        const fallback = resolvePlatformProtocols(existing.types ?? null, finalType);
+        updateData.types = JSON.stringify(fallback);
+      } else {
+        // 首选协议对齐 finalType（type 与 types[0] 一致是平台型协议枚举的不变量）
+        const aligned: PlatformType[] =
+          nextTypes[0] === finalType
+            ? nextTypes
+            : [finalType, ...nextTypes.filter((p) => p !== finalType)];
+        updateData.types = JSON.stringify(aligned);
+        // type 字段未显式传入但对齐后首项变了 → 同步更新 type 保持不变量
+        if (body.type === undefined && aligned[0] !== existing.type) {
+          updateData.type = aligned[0];
+        }
+      }
+    } else if (body.type !== undefined && body.type !== existing.type) {
+      // 客户端 PUT 仅改 type 不传 types：必须强制重写 types 把新 type 提到首项，
+      // 否则 types 与 type 不一致（如 type=gemini + types=["openai"]），router 会把
+      // 「首选协议声明 gemini」的请求发到 openai 兼容上游。修复契约违反的关键路径。
+      // 复用库中 types 的其余协议，只把 finalType 提到首项。
+      const existingTypes = resolvePlatformProtocols(existing.types ?? null, existing.type as PlatformType);
+      const aligned: PlatformType[] = [
+        finalType,
+        ...existingTypes.filter((p) => p !== finalType),
+      ];
+      updateData.types = JSON.stringify(aligned);
+    }
     if (body.priority !== undefined) updateData.priority = body.priority;
     if (body.weight !== undefined) updateData.weight = body.weight;
     if (body.rpmLimit !== undefined)

@@ -8,6 +8,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
+import type { PlatformType } from "../../../lib/types";
 import { validateApiKey, type ApiKeyRecord } from "../../../worker/src/auth";
 import { routeRequest, refreshCache, getPlatformCache, getPlatformModelCache, freezeAutoModel, isAutoModelRequest, getPlatformsForModel } from "../../../worker/src/router";
 import { getNextKey, getRandomKeyExcept, banKey, recordKeyError, loadWhitelist, loadKeyStatusFromKV, isPlatformWhitelisted } from "../../../worker/src/platform-keys";
@@ -31,9 +32,10 @@ import {
 import { extractMultipartField } from "../../../worker/src/proxy-core/request-body";
 import {
   filterForwardHeaders,
-  resolveUpstreamUrl,
   buildUpstreamFetchHeaders,
+  buildUpstreamFetchUrl,
 } from "../../../worker/src/proxy-core/forward-context";
+import { selectProtocolForRequest } from "../../../lib/proxy-core/protocol-selector";
 import {
   buildModelsListPayload,
   resolveModelDetailOwner,
@@ -403,12 +405,21 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 不变量：此处 curKey 恒非空——进入循环前已由上方初始选择保证；循环内仅有的
     // 两条 continue 路径（同平台换 Key / 换平台）都以非空 Key 赋值后才继续
 
-    // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
-    // 认证用 x-api-key + anthropic-version
-    const upstreamIsAnthropic = cur.type === "anthropic";
     // chat↔responses 互转已移除，下游端点与上游端点原样透传
     const effectiveTargetApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
     const effectiveUpstreamPath = config.upstreamPath;
+
+    // 单平台多协议：按下游端点 + 模型名从 cur.types[] 中挑选实际协议。
+    // types 缺失时回退为 [type]，等价于历史单一 type 行为。
+    const currentProtocols = cur.types && cur.types.length > 0 ? cur.types : [cur.type];
+    const upstreamProtocol = selectProtocolForRequest({
+      types: currentProtocols,
+      upstreamPath: effectiveUpstreamPath,
+      targetModel: tgt,
+    });
+    // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
+    // 认证用 x-api-key + anthropic-version
+    const upstreamIsAnthropic = upstreamProtocol === "anthropic";
 
     // 模板先作用于原始 OpenAI 请求体；Anthropic 分支随后转换——转换白名单会剥离
     // 模板中的 OpenAI 专属字段（stream_options/n/response_format 等），避免严格后端 422
@@ -454,8 +465,16 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") downstreamHeaders.set(k, v);
     const fwd = filterForwardHeaders(extractForwardableHeaders(downstreamHeaders, cur.forwardHeaders));
 
-    // 上游 URL 构造统一走共享 resolveUpstreamUrl（三端同规则）
-    const url = resolveUpstreamUrl(cur.baseUrl, effectiveUpstreamPath, upstreamIsAnthropic);
+    // 上游 URL 构造统一走共享 buildUpstreamFetchUrl（三端同规则），
+    // 内含 Gemini 协议 ?key= / ?alt=sse 注入，lite/Worker 共用同一函数
+    const url = buildUpstreamFetchUrl(
+      cur.baseUrl,
+      effectiveUpstreamPath,
+      upstreamProtocol,
+      tgt,
+      curKey,
+      isStream
+    );
     const check = isSafeUpstreamUrl(cur.baseUrl);
     if (!check.safe) {
       void recordRequestLog({ keyId: apiKey.id, keyName: apiKey.name, platformId: cur.id, model: requestedModel, endpoint: config.upstreamPath, method: "POST", status: 400, tokens: 0, promptTokens: 0, completionTokens: 0, ttft: 0, duration: Date.now() - startTime, isError: true, errorMessage: `上游 URL 不安全: ${check.reason}`, ipAddress: clientInfo.ipAddress, userAgent: clientInfo.userAgent, db: dummyDb, env }).catch(() => {});
@@ -471,7 +490,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // < extraHeaders < 自定义 UA，三端同序），再包 Headers 供 fetch 使用
     const headers = new Headers(buildUpstreamFetchHeaders({
       platformKey: curKey,
-      upstreamIsAnthropic,
+      upstreamProtocol,
       contentType: multipart ? multipart.contentType : "application/json",
       forwardHeaders: fwd,
       extraHeaders: cur.extraHeaders,
@@ -548,7 +567,7 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
     // 注意：redirect:"manual" 后 3xx 不再进入此分支，落入下方不可重试分支透传
     let isEmptyResponse = false;
     if (upRes.status >= 200 && upRes.status < 300) {
-      const handled = await handleUpstreamResponsePages(upRes, cur, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo);
+      const handled = await handleUpstreamResponsePages(upRes, cur, upstreamProtocol, apiKey, requestedModel, config, isStream, startTime, env, est, anthropicInputEstimate, logTag, res, upstreamController, upstreamTimeoutId, proxy?.url ?? undefined, curKey, clientInfo);
       if (handled !== EMPTY_UPSTREAM_RESPONSE) return;
       isEmptyResponse = true;
     }
@@ -693,9 +712,9 @@ async function proxyV1RequestPages(req: NextApiRequest, res: NextApiResponse, co
   }
 }
 
-async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
+async function handleUpstreamResponsePages(upRes: Response, platform: { id: string; name: string; type?: string }, /** 本次请求实际使用的协议（来自 selectProtocolForRequest）；多协议下与 platform.type 可能不同 */ upstreamProtocol: PlatformType, apiKey: ApiKeyRecord, model: string, config: ProxyConfig, isStream: boolean, start: number, env: WorkerEnv & { KV?: KVNamespace; DB?: D1Database }, est: number, anthropicInputEstimate: number, tag: string, res: NextApiResponse, upstreamController: AbortController, upstreamTimeoutId: ReturnType<typeof setTimeout>, proxyUrl?: string, /** 本次请求使用的上游平台 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数；不传则跳过密钥级处理 */ platformKey?: string, /** 客户端 IP/UA（下游请求头提取）：所有日志分支落库来源信息 */ clientInfo?: { ipAddress?: string; userAgent?: string }): Promise<void | typeof EMPTY_UPSTREAM_RESPONSE> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
-  const upstreamIsAnthropic = platform.type === "anthropic";
+  const upstreamIsAnthropic = upstreamProtocol === "anthropic";
   if (isStream) {
     const s = upRes.body;
     if (!s) { clearTimeout(upstreamTimeoutId); try { await recordFailure(platform.id, dummyDb, env); } catch {} sendV1Error(res, config, 500, "上游未返回流式响应", "server_error"); return; }

@@ -44,9 +44,10 @@ import {
 } from "./proxy-core/request-body";
 import {
   filterForwardHeaders,
-  resolveUpstreamUrl,
   buildUpstreamFetchHeaders,
+  buildUpstreamFetchUrl,
 } from "./proxy-core/forward-context";
+import { selectProtocolForRequest } from "../../lib/proxy-core/protocol-selector";
 import {
   createAnthropicStreamTransformer,
   createOpenAIStreamTransformer,
@@ -75,6 +76,7 @@ import {
 } from "../../lib/gemini";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
+import type { PlatformType } from "../../lib/types";
 
 // ==================== 上游错误脱敏 ====================
 // extractUpstreamErrorMessage / sanitizeUpstreamMessage / sanitizeUpstreamError
@@ -443,18 +445,24 @@ export async function proxyV1Request(
       return buildProxyErrorResponse(config, 500, `平台 "${currentPlatform.name}" 无可用 API Key`, "server_error");
     }
 
-    // 上游为 Anthropic 协议（官方 Anthropic / GitHub Copilot / Vercel AI 网关）：
-    // 请求体转回 /v1/messages 格式，URL 指向 /v1/messages，认证用 x-api-key + anthropic-version
-    const upstreamIsAnthropic = currentPlatform.type === "anthropic";
-    // 上游为 Gemini 原生协议（Google Generative AI / Vertex AI Express）：
-    // 请求体转为 contents[]/parts[] 格式，URL 指向 /v1beta/models/{model}:generateContent，
-    // 认证用 ?key=API_KEY 查询参数
-    const upstreamIsGemini = currentPlatform.type === "gemini";
-
     // chat↔responses 互转已移除（语义不可转换）：下游端点与上游端点原样透传，
     // effectiveTargetApi 仅用于选择命中的模板类型（responses 端点只命中 responses 模板）
     const effectiveTargetApi = config.upstreamPath === "/responses" ? "responses" as const : "chat" as const;
     const effectiveUpstreamPath = config.upstreamPath;
+
+    // 单平台多协议：按下游端点 + 模型名从 currentPlatform.types[] 中挑选实际协议。
+    // 旧数据（types 缺失）由 router/读路径解析为 [type]，等价于历史单一 type 行为。
+    // currentTargetModel 此时已是 router 选定（含 modelMaps 别名解析）的目标模型名。
+    const currentProtocols = currentPlatform.types && currentPlatform.types.length > 0
+      ? currentPlatform.types
+      : [currentPlatform.type];
+    const upstreamProtocol = selectProtocolForRequest({
+      types: currentProtocols,
+      upstreamPath: effectiveUpstreamPath,
+      targetModel: currentTargetModel,
+    });
+    const upstreamIsAnthropic = upstreamProtocol === "anthropic";
+    const upstreamIsGemini = upstreamProtocol === "gemini";
 
     // 构建上游请求体：模板先作用于原始 OpenAI 请求体。
     // Anthropic 分支随后转换——convertOpenAIRequest 白名单会剥离模板中的 OpenAI 专属字段
@@ -517,18 +525,14 @@ export async function proxyV1Request(
       extractForwardableHeaders(request.headers, currentPlatform.forwardHeaders)
     );
 
-    const upstreamUrl = resolveUpstreamUrl(
+    const finalUpstreamUrl = buildUpstreamFetchUrl(
       currentPlatform.baseUrl,
       effectiveUpstreamPath,
-      upstreamIsAnthropic,
-      upstreamIsGemini,
-      currentTargetModel
+      upstreamProtocol,
+      currentTargetModel,
+      currentKey,
+      effectiveIsStream
     );
-    // Gemini 协议上游：API Key 通过查询参数 ?key=... 传递（不能用 Authorization
-    // Bearer）；流式请求额外追加 ?alt=sse 让上游返回 SSE 而非 JSON 数组
-    const finalUpstreamUrl = upstreamIsGemini
-      ? `${upstreamUrl}${effectiveIsStream ? "?alt=sse&" : "?"}key=${encodeURIComponent(currentKey)}`
-      : upstreamUrl;
 
     // SSRF 防护：校验上游 URL
     const urlCheck = isSafeUpstreamUrl(currentPlatform.baseUrl);
@@ -574,7 +578,7 @@ export async function proxyV1Request(
       // < extraHeaders < 自定义 UA，三端同序）
       const headers = buildUpstreamFetchHeaders({
         platformKey: currentKey,
-        upstreamIsAnthropic,
+        upstreamProtocol,
         contentType: multipart ? multipart.contentType : "application/json",
         forwardHeaders,
         extraHeaders: currentPlatform.extraHeaders,
@@ -649,6 +653,7 @@ export async function proxyV1Request(
       const handled = await handleUpstreamResponse(
         upstreamResponse,
         currentPlatform,
+        upstreamProtocol,
         apiKey,
         currentKey,
         requestedModel,
@@ -1004,6 +1009,8 @@ export async function proxyV1Request(
 async function handleUpstreamResponse(
   upstreamResponse: Response,
   platform: { id: string; name: string; type?: string },
+  /** 本次请求实际使用的协议（来自 selectProtocolForRequest）；多协议下与 platform.type 可能不同 */
+  upstreamProtocol: PlatformType,
   apiKey: ApiKeyRecord,
   /** 当前使用的平台上游 Key 明文：流内密钥类错误（429/401/402/403）时封禁+计数 */
   currentKey: string,
@@ -1024,7 +1031,7 @@ async function handleUpstreamResponse(
   // 提取 WorkerEnv 部分，供内部函数调用
   const workerEnv: WorkerEnv = { DB_TYPE: env.DB_TYPE };
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
-  const upstreamIsAnthropic = platform.type === "anthropic";
+  const upstreamIsAnthropic = upstreamProtocol === "anthropic";
   // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;
@@ -1161,7 +1168,7 @@ async function handleUpstreamResponse(
     let pipeline: ReadableStream<Uint8Array> = guardedStream;
     if (upstreamIsAnthropic) {
       pipeline = pipeline.pipeThrough(createOpenAIStreamTransformer());
-    } else if (platform.type === "gemini") {
+    } else if (upstreamProtocol === "gemini") {
       pipeline = pipeline.pipeThrough(createGeminiStreamToOpenAITransformer(requestedModel));
     }
     const pipedStream = pipeline.pipeThrough(transformer);
@@ -1335,7 +1342,7 @@ async function handleUpstreamResponse(
   // Gemini 协议上游标识：响应阶段同样需要转换。流式分支另有独立 transformer
   // 处理（PR-B 暂未实现流式 Gemini，调用流式上游会拿到原 Gemini SSE 透传给客户端
   // ——属 P2 后续）。此处仅在非流式分支用。
-  const upstreamIsGeminiResponse = platform.type === "gemini";
+  const upstreamIsGeminiResponse = upstreamProtocol === "gemini";
 
   // 上游为 Anthropic 协议：先转成 OpenAI 内部格式（usage 提取与下游转换共用同一对象）；
   // Gemini 协议：转成 OpenAI chat.completions 形态（PR-B 范围），流式分支未实现

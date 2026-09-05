@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS "platforms" (
     "base_url" TEXT NOT NULL,
     "api_keys" TEXT NOT NULL,
     "type" TEXT NOT NULL DEFAULT 'openai',
+    "types" TEXT NOT NULL DEFAULT '[]',
     "preset_id" TEXT,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "priority" INTEGER NOT NULL DEFAULT 0,

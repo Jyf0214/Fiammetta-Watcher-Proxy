@@ -14,10 +14,38 @@ import {
   AlertCircle,
   Settings,
   Link2,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { NamedApiKey } from "@/lib/platform";
 import { BrandAvatar, StatusDot, type Platform } from "@/components/platform/PlatformList";
+import type { PlatformType } from "@/lib/types";
+
+/** 单平台多协议：把 form 里的"首选单选 + 附加多选"合并为 types[] 提交给 API。
+ *  首选协议 = type（始终放数组第一位），附加协议 = additionalTypes（去重、首项剔除）。
+ *  返回值形态与 lib/types.ts PlatformProtocol[] 一致；空数组时回退到 [type]。 */
+function buildPlatformTypesForSubmit(
+  type: PlatformType | undefined,
+  additionalTypes: PlatformType[] | undefined
+): PlatformType[] {
+  const primary: PlatformType = (type as PlatformType) || "openai";
+  const extras = (additionalTypes ?? []).filter(
+    (p): p is PlatformType =>
+      p !== primary &&
+      (p === "openai" || p === "azure" || p === "custom" || p === "anthropic" || p === "gemini")
+  );
+  // 去重保序
+  const seen = new Set<PlatformType>();
+  const result: PlatformType[] = [];
+  for (const p of [primary, ...extras]) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  }
+  return result;
+}
 
 /**
  * 单把密钥编辑行 — memo 化：页面层回调全部为稳定引用，密钥输入每次击键
@@ -448,8 +476,110 @@ export function PlatformConfigForm({
                               { value: "anthropic", label: t("typeAnthropic") },
                               { value: "azure", label: t("typeAzure") },
                               { value: "custom", label: t("typeCustom") },
+                              { value: "gemini", label: t("typeGemini") },
                             ]}
                           />
+                        </Form.Item>
+                        <Form.Item
+                          shouldUpdate={(prev, curr) =>
+                            prev.type !== curr.type ||
+                            JSON.stringify(prev.additionalTypes) !== JSON.stringify(curr.additionalTypes)
+                          }
+                          noStyle
+                        >
+                          {({ getFieldValue, setFieldValue }) => {
+                            const primary = getFieldValue("type") as PlatformType | undefined;
+                            const addExtras = (delta: { value: string; label: string }[]) => {
+                              const cur = (getFieldValue("additionalTypes") as PlatformType[] | undefined) ?? [];
+                              const next: PlatformType[] = [];
+                              const seen = new Set<PlatformType>();
+                              for (const p of [...cur, ...delta.map((d) => d.value as PlatformType)]) {
+                                if (p !== primary && !seen.has(p)) {
+                                  seen.add(p);
+                                  next.push(p);
+                                }
+                              }
+                              setFieldValue("additionalTypes", next);
+                            };
+                            const removeExtra = (p: PlatformType) => {
+                              const cur = (getFieldValue("additionalTypes") as PlatformType[] | undefined) ?? [];
+                              setFieldValue(
+                                "additionalTypes",
+                                cur.filter((x) => x !== p)
+                              );
+                            };
+                            const moveExtra = (p: PlatformType, dir: -1 | 1) => {
+                              const cur = (getFieldValue("additionalTypes") as PlatformType[] | undefined) ?? [];
+                              const idx = cur.indexOf(p);
+                              if (idx < 0) return;
+                              const swap = idx + dir;
+                              if (swap < 0 || swap >= cur.length) return;
+                              const next = [...cur];
+                              [next[idx], next[swap]] = [next[swap], next[idx]];
+                              setFieldValue("additionalTypes", next);
+                            };
+                            const extras = (getFieldValue("additionalTypes") as PlatformType[] | undefined) ?? [];
+                            return (
+                              <Form.Item
+                                name="additionalTypes"
+                                label={t("additionalTypes")}
+                                extra={<span className={itemDesc}>{t("additionalTypesDesc")}</span>}
+                                className="!mt-5"
+                              >
+                                <Select
+                                  mode="multiple"
+                                  placeholder={t("additionalTypesPlaceholder")}
+                                  value={extras}
+                                  onChange={(_v, option) => addExtras(option as { value: string; label: string }[])}
+                                  tagRender={(props) => {
+                                    const value = props.value as PlatformType;
+                                    const idx = extras.indexOf(value);
+                                    const labelText =
+                                      value === "openai" ? t("typeOpenai") :
+                                      value === "anthropic" ? t("typeAnthropic") :
+                                      value === "azure" ? t("typeAzure") :
+                                      value === "custom" ? t("typeCustom") :
+                                      value === "gemini" ? t("typeGemini") : value;
+                                    return (
+                                      <span
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60 mr-1"
+                                      >
+                                        <span className="text-[10px] text-blue-500/80 dark:text-blue-400/80 tabular-nums">{idx + 1}</span>
+                                        <span>{labelText}</span>
+                                        <button
+                                          type="button"
+                                          aria-label="up"
+                                          onMouseDown={(e) => { e.preventDefault(); moveExtra(value, -1); }}
+                                          disabled={idx <= 0}
+                                          className="ml-0.5 text-blue-500 hover:text-blue-700 disabled:opacity-30"
+                                        ><ArrowUp size={10} /></button>
+                                        <button
+                                          type="button"
+                                          aria-label="down"
+                                          onMouseDown={(e) => { e.preventDefault(); moveExtra(value, 1); }}
+                                          disabled={idx < 0 || idx >= extras.length - 1}
+                                          className="text-blue-500 hover:text-blue-700 disabled:opacity-30"
+                                        ><ArrowDown size={10} /></button>
+                                        <button
+                                          type="button"
+                                          aria-label="remove"
+                                          onMouseDown={(e) => { e.preventDefault(); removeExtra(value); }}
+                                          className="ml-0.5 text-blue-500 hover:text-red-500"
+                                        >×</button>
+                                      </span>
+                                    );
+                                  }}
+                                  options={[
+                                    { value: "openai", label: t("typeOpenai") },
+                                    { value: "anthropic", label: t("typeAnthropic") },
+                                    { value: "azure", label: t("typeAzure") },
+                                    { value: "custom", label: t("typeCustom") },
+                                    { value: "gemini", label: t("typeGemini") },
+                                  ].filter((o) => o.value !== primary)}
+                                />
+                              </Form.Item>
+                            );
+                          }}
                         </Form.Item>
                       </>
                     ),
@@ -699,6 +829,7 @@ export function PlatformConfigForm({
                 { value: "anthropic", label: t("typeAnthropic") },
                 { value: "azure", label: t("typeAzure") },
                 { value: "custom", label: t("typeCustom") },
+                { value: "gemini", label: t("typeGemini") },
               ]}
             />
           </Form.Item>

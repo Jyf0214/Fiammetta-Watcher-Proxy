@@ -140,7 +140,7 @@ export default function PlatformDetailPage() {
     form.resetFields();
     // injectStreamOptions 必须显式初始化为 true（与后端 POST 缺省一致）：
     // 留空时开关渲染为关、落库却是开，表单展示与实际生效值相反
-    form.setFieldsValue({ type: "openai", priority: 0, weight: 1, injectStreamOptions: true });
+    form.setFieldsValue({ type: "openai", additionalTypes: [], priority: 0, weight: 1, injectStreamOptions: true });
     setNamedKeys([{ name: defaultKeyName(1), key: "" }]);
   }, [isNew, syncedForNew, form, defaultKeyName]);
 
@@ -150,7 +150,35 @@ export default function PlatformDetailPage() {
     if (syncedForId === id) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSyncedForId(id);
-    form.setFieldsValue({ ...platform, forwardHeaders: parseForwardHeaders(platform.forwardHeaders), extraHeaders: parseExtraHeadersText(platform.extraHeaders) });
+    // 单平台多协议：编辑模式把 types 拆成 type（首选）+ additionalTypes（附加）。
+    // types 缺失/解析失败时回退 [type]（与 lib/types.ts resolvePlatformProtocols 对齐）。
+    // types 在 API 层已被解析为 string[] 形态（前端 Platform 类型），但保守起见仍
+    // 兼容 JSON 字符串形态（旧客户端或第三方 API 直接返回字符串的场景）。
+    let primaryType: string = platform.type;
+    let additionalTypes: string[] = [];
+    if (Array.isArray(platform.types)) {
+      if (platform.types.length > 0) {
+        primaryType = platform.types[0];
+        additionalTypes = platform.types.slice(1);
+      }
+    } else if (typeof platform.types === "string") {
+      try {
+        const parsed = JSON.parse(platform.types) as string[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          primaryType = parsed[0];
+          additionalTypes = parsed.slice(1);
+        }
+      } catch {
+        // 非法 JSON → 沿用默认（仅 type）
+      }
+    }
+    form.setFieldsValue({
+      ...platform,
+      type: primaryType,
+      additionalTypes,
+      forwardHeaders: parseForwardHeaders(platform.forwardHeaders),
+      extraHeaders: parseExtraHeadersText(platform.extraHeaders),
+    });
     const parsed = parseNamedKeys(platform, t("keyNamePrefix"));
     setNamedKeys(parsed.length > 0 ? parsed : [{ name: defaultKeyName(1), key: "" }]);
   }, [platform, id, isNew, syncedForId, form, t, defaultKeyName]);
@@ -306,6 +334,27 @@ export default function PlatformDetailPage() {
       }
       if (typeof values.extraHeaders === "string") {
         values.extraHeaders = serializeExtraHeaders(values.extraHeaders);
+      }
+      // 单平台多协议：把 type + additionalTypes 合并为 types[] 提交给 API。
+      // 服务端会做首项对齐校验（types[0] === type），这里只负责形态组装。
+      if (values.type !== undefined) {
+        const primary = String(values.type);
+        const extras = Array.isArray(values.additionalTypes)
+          ? (values.additionalTypes as unknown[]).filter(
+              (p): p is string => typeof p === "string" && p !== primary
+            )
+          : [];
+        const seen = new Set<string>();
+        const types: string[] = [];
+        for (const p of [primary, ...extras]) {
+          if (!seen.has(p)) {
+            seen.add(p);
+            types.push(p);
+          }
+        }
+        values.types = types;
+        // additionalTypes 不应被序列化到后端（后端 schema 未定义、API 校验未识别）
+        delete values.additionalTypes;
       }
       const url = isNew ? "/api/admin/platforms" : `/api/admin/platforms/${id}`;
       const method = isNew ? "POST" : "PUT";

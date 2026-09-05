@@ -309,7 +309,7 @@ function truncateStr(val: unknown, maxLen = VARCHAR_MAX): string {
 const MIN_VALID_TS = 1704067200;
 
 /** 枚举白名单：与运行期代码实际读取的值一致 */
-const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom", "anthropic"]);
+const VALID_PLATFORM_TYPES = new Set(["openai", "azure", "custom", "anthropic", "gemini"]);
 // 含 expired：手动标记过期的 Key 导入后不得落白名单外回退 "active" 复活
 // （与 keys/[id].ts PUT 允许值 ["active", "disabled", "expired"] 保持一致）
 const VALID_KEY_STATUSES = new Set(["active", "disabled", "expired"]);
@@ -558,13 +558,52 @@ async function importPlatforms(
         platformId = generateId();
       }
       batchSeenIds.add(platformId);
+      const typeField = sanitizeEnum(p.type, VALID_PLATFORM_TYPES, "openai");
       return {
         id: platformId,
         name: p._name as string,
         baseUrl: p._baseUrl as string,
         // apiKeys 列在各方言均为长文本（LongText/Text），不截断，避免切断 JSON 导致密钥失效
         apiKeys: p._normalizedApiKeys as string,
-        type: sanitizeEnum(p.type, VALID_PLATFORM_TYPES, "openai"),
+        type: typeField,
+        // 单平台多协议：types 字段是字符串数组（首项 = type）。缺失/非法回退 [type]，
+        // 与 lib/types.ts resolvePlatformProtocols 行为一致，保证导入数据落库后
+        // router 缓存刷新立刻可用，不需回填脚本
+        types: (() => {
+          const raw = p.types;
+          if (Array.isArray(raw)) {
+            const filtered = raw.filter(
+              (x): x is "openai" | "azure" | "custom" | "anthropic" | "gemini" =>
+                typeof x === "string" && VALID_PLATFORM_TYPES.has(x)
+            );
+            if (filtered.length === 0) return JSON.stringify([typeField]);
+            const aligned =
+              filtered[0] === typeField
+                ? filtered
+                : [typeField, ...filtered.filter((x) => x !== typeField)];
+            return JSON.stringify(aligned);
+          }
+          if (typeof raw === "string") {
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                const filtered = parsed.filter(
+                  (x): x is "openai" | "azure" | "custom" | "anthropic" | "gemini" =>
+                    typeof x === "string" && VALID_PLATFORM_TYPES.has(x)
+                );
+                if (filtered.length === 0) return JSON.stringify([typeField]);
+                const aligned =
+                  filtered[0] === typeField
+                    ? filtered
+                    : [typeField, ...filtered.filter((x) => x !== typeField)];
+                return JSON.stringify(aligned);
+              }
+            } catch {
+              // 非法 JSON 字符串 → 回退
+            }
+          }
+          return JSON.stringify([typeField]);
+        })(),
         enabled: sanitizeBoolean(p.enabled, true),
         priority: sanitizeNonNegativeInt(p.priority) ?? 0,
         weight: sanitizeNonNegativeInt(p.weight) ?? 1,

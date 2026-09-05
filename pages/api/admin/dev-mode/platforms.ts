@@ -68,6 +68,15 @@ export default async function handler(
       id: p.id,
       name: p.name,
       type: p.type,
+      // 单平台多协议：开发模式面板展示完整协议列表（仅 debug 用，前端可忽略）
+      types: (() => {
+        try {
+          const parsed = JSON.parse(p.types ?? "[]") as string[];
+          return Array.isArray(parsed) ? parsed : [p.type];
+        } catch {
+          return [p.type];
+        }
+      })(),
       enabled: p.enabled,
       priority: p.priority,
       keyCount: keyCounts.get(p.id) ?? 0,

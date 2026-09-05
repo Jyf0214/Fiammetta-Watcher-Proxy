@@ -36,6 +36,8 @@ model platforms {
   baseUrl        String  @map("base_url")
   apiKeys        String @db.Text @map("api_keys")
   type           String  @default("openai")
+  // 平台支持的协议列表（JSON 字符串数组，首项 = type）；缺失/空回退 [type]
+  types          String @db.Text @default("[]") @map("types")
   // 预设来源（从预设模板创建时记录，用于图标与来源识别）
   presetId       String? @map("preset_id")
   enabled        Boolean @default(true)

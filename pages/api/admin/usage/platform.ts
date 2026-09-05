@@ -267,6 +267,15 @@ export default async function handler(
         id: p.id,
         name: p.name,
         type: p.type,
+        // 单平台多协议：用量面板展示完整协议列表（前端可忽略）
+        types: (() => {
+          try {
+            const parsed = JSON.parse(p.types ?? "[]") as string[];
+            return Array.isArray(parsed) ? parsed : [p.type];
+          } catch {
+            return [p.type];
+          }
+        })(),
         enabled: p.enabled,
         status: p.status,
         baseUrl: p.baseUrl,
@@ -285,6 +294,7 @@ export default async function handler(
         // 中性哨兵值：名称由前端按界面语言渲染（此处写死中文会泄漏到英文界面）
         name: "unknown",
         type: "unknown",
+        types: [],
         enabled: false,
         status: "unknown",
         baseUrl: "",

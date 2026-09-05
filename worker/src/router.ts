@@ -9,6 +9,7 @@
 
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
+import { resolvePlatformProtocols } from "../../lib/types";
 import {
   selectPlatform,
   cleanupStaleBreakers,
@@ -156,6 +157,9 @@ async function doRefresh(db: D1Database, env?: WorkerEnv): Promise<void> {
       apiKeys: parseApiKeys(p.apiKeys),
       apiKeyObjects: parseApiKeyObjects(p.apiKeys),
       type: p.type as PlatformConfig["type"],
+      // 单平台多协议：从 DB 读取 types JSON 字符串并解析为 PlatformProtocol[]。
+      // 旧数据（types 列不存在/为空/解析失败）由 resolvePlatformProtocols 回退到 [type]
+      types: resolvePlatformProtocols(p.types ?? null, p.type as PlatformConfig["type"]),
       enabled: p.enabled,
       priority: p.priority,
       weight: p.weight,

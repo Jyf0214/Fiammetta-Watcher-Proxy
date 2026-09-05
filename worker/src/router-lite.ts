@@ -13,6 +13,7 @@
 
 import { createDb } from "@/lib/prisma";
 import { parseApiKeys, parseApiKeyObjects } from "./platform-keys";
+import { resolvePlatformProtocols } from "../../lib/types";
 import { getConfig } from "./config";
 import type { PlatformConfig, RouteDecision, ApiType } from "@/lib/types";
 import type { WorkerEnv } from "./config";
@@ -84,6 +85,8 @@ async function doRefreshLite(db: D1Database, env?: WorkerEnv): Promise<void> {
       apiKeys: parseApiKeys(p.apiKeys),
       apiKeyObjects: parseApiKeyObjects(p.apiKeys),
       type: p.type as PlatformConfig["type"],
+      // 单平台多协议：同全量版 router.ts，types 缺失/非法时回退到 [type]
+      types: resolvePlatformProtocols(p.types ?? null, p.type as PlatformConfig["type"]),
       enabled: p.enabled,
       priority: p.priority,
       weight: p.weight,

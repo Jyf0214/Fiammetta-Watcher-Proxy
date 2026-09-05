@@ -12,6 +12,7 @@ import { checkAdminRateLimit } from "@/lib/admin-rate-limit";
 import { isSafeUrl, checkCsrfOrigin } from "@/lib/admin-security";
 import { readPlatformKeyStatus, type PlatformKeyStatus } from "@/lib/key-status";
 import { getKeyStatusesFromMemory, parseApiKeys } from "../../../worker/src/platform-keys";
+import { type PlatformType } from "../../../lib/types";
 import { getClientIp } from "./auth";
 
 /** 掩码 API 密钥（与 keys.ts 等保持一致） */
@@ -56,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
         select: {
           id: true, name: true, baseUrl: true, apiKeys: true,
-          type: true, presetId: true, enabled: true, priority: true, weight: true,
+          type: true, types: true, presetId: true, enabled: true, priority: true, weight: true,
           rpmLimit: true, tpmLimit: true, forwardHeaders: true,
           injectStreamOptions: true,
           status: true, failCount: true, lastFailAt: true, cooldownEnd: true,
@@ -95,6 +96,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...p,
         // 列表不下发密钥明文（详情编辑回填由 [id].ts 单独提供）
         apiKeys: maskApiKeysJson(p.apiKeys ?? "[]"),
+        // 单平台多协议：列表 API 把 types JSON 字符串解析为数组下发，
+        // 匹配前端 Platform 接口（types?: string[]）；旧数据/解析失败时回退 [type]
+        types: (() => {
+          try {
+            const parsed = JSON.parse(p.types ?? "[]") as unknown;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return parsed.filter((x): x is string => typeof x === "string");
+            }
+            return [p.type];
+          } catch {
+            return [p.type];
+          }
+        })(),
         keyStatuses: keyStatusesByPlatform[p.id] ?? {},
       }));
 
@@ -211,12 +225,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic"] as const;
+      const VALID_PLATFORM_TYPES = ["openai", "azure", "custom", "anthropic", "gemini"] as const;
       if (type !== undefined && !VALID_PLATFORM_TYPES.includes(type)) {
         errors.push(
           `平台类型无效，允许的值为: ${VALID_PLATFORM_TYPES.join(", ")}`
         );
       }
+
 
       if (weight !== undefined) {
         if (
@@ -334,6 +349,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const platformType = VALID_PLATFORM_TYPES.includes(type) ? type : "openai";
+
+      // 单平台多协议：types 字段是字符串数组，首项必须 === type（首选协议同步）。
+      // 兼容旧请求：types 缺失/非数组 → 视为 [type]，不报错；非法元素被静默过滤。
+      // 入参形态可以是数组本身（API JSON）或 JSON 字符串（表单回退）。
+      let normalizedTypes: PlatformType[] = [];
+      if (body.types !== undefined && body.types !== null) {
+        const raw = body.types;
+        const arr: unknown[] = Array.isArray(raw)
+          ? raw
+          : typeof raw === "string"
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+        for (const item of arr) {
+          if (VALID_PLATFORM_TYPES.includes(item as PlatformType)) {
+            const p = item as PlatformType;
+            if (!normalizedTypes.includes(p)) normalizedTypes.push(p);
+          }
+        }
+        if (normalizedTypes.length === 0) {
+          // 整组非法/非数组：与缺失同语义，回退到 [type]
+          normalizedTypes = [platformType];
+        }
+        // 首选协议对齐：首项必须等于最终生效的 type
+        if (normalizedTypes[0] !== platformType) {
+          normalizedTypes = [
+            platformType,
+            ...normalizedTypes.filter((p) => p !== platformType),
+          ];
+        }
+      } else {
+        normalizedTypes = [platformType];
+      }
       const now = Math.floor(Date.now() / 1000);
       // 与 PUT 消费一致：reuseUserAgent 布尔化，customUserAgent 空串归一为 null
       const normalizedReuseUserAgent = reuseUserAgent === true;
@@ -371,6 +425,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           baseUrl: baseUrl.trim(),
           apiKeys: JSON.stringify(parsedApiKeys),
           type: platformType,
+          types: JSON.stringify(normalizedTypes),
           enabled: true,
           priority: priority ?? 0,
           weight: weight ?? 1,
@@ -396,6 +451,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           name: name.trim(),
           baseUrl: baseUrl.trim(),
           type: platformType,
+          types: normalizedTypes,
           enabled: true,
           priority: priority ?? 0,
           weight: weight ?? 1,

@@ -35,9 +35,10 @@ import {
 } from "./proxy-core/request-body";
 import {
   filterForwardHeaders,
-  resolveUpstreamUrl,
   buildUpstreamFetchHeaders,
+  buildUpstreamFetchUrl,
 } from "./proxy-core/forward-context";
+import { selectProtocolForRequest } from "../../lib/proxy-core/protocol-selector";
 import {
   createAnthropicStreamTransformer,
   createOpenAIStreamTransformer,
@@ -55,6 +56,7 @@ import {
 import type { ProxyConfig } from "./endpoints";
 import type { ApiKeyRecord } from "./auth";
 import type { WorkerEnv } from "./config";
+import type { PlatformType } from "../../lib/types";
 
 // ==================== 上游错误脱敏 ====================
 // extractUpstreamErrorMessage / sanitizeUpstreamMessage / sanitizeUpstreamError
@@ -388,12 +390,23 @@ export async function proxyV1RequestLite(
     return buildProxyErrorResponse(config, 500, `平台 "${route.platform.name}" 无可用 API Key`, "server_error");
   }
 
-  // ── 4. 构建上游请求 ──
-  // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
-  // 认证用 x-api-key + anthropic-version
-  const upstreamIsAnthropic = route.platform.type === "anthropic";
   // chat↔responses 互转已移除，下游端点与上游端点原样透传
   const effectiveUpstreamPath = config.upstreamPath;
+
+  // ── 4. 构建上游请求 ──
+  // 单平台多协议：按下游端点 + 模型名从 route.platform.types[] 中挑选实际协议。
+  // types 缺失时回退为 [type]，等价于历史单一 type 行为。
+  const currentProtocols = route.platform.types && route.platform.types.length > 0
+    ? route.platform.types
+    : [route.platform.type];
+  const upstreamProtocol = selectProtocolForRequest({
+    types: currentProtocols,
+    upstreamPath: effectiveUpstreamPath,
+    targetModel: route.targetModel,
+  });
+  // 上游为 Anthropic 协议：请求体转回 /v1/messages 格式，URL 指向 /v1/messages，
+  // 认证用 x-api-key + anthropic-version
+  const upstreamIsAnthropic = upstreamProtocol === "anthropic";
 
   let upstreamBody: Record<string, unknown>;
   if (upstreamIsAnthropic) {
@@ -428,7 +441,14 @@ export async function proxyV1RequestLite(
     extractForwardableHeaders(request.headers, route.platform.forwardHeaders)
   );
 
-  const upstreamUrl = resolveUpstreamUrl(route.platform.baseUrl, effectiveUpstreamPath, upstreamIsAnthropic);
+  const finalUpstreamUrl = buildUpstreamFetchUrl(
+    route.platform.baseUrl,
+    effectiveUpstreamPath,
+    upstreamProtocol,
+    route.targetModel,
+    currentKey,
+    isStream
+  );
 
   // SSRF 防护：校验上游 URL
   const urlCheck = isSafeUpstreamUrl(route.platform.baseUrl);
@@ -472,14 +492,14 @@ export async function proxyV1RequestLite(
     // < extraHeaders < 自定义 UA，三端同序）
     const headers = buildUpstreamFetchHeaders({
       platformKey: currentKey,
-      upstreamIsAnthropic,
+      upstreamProtocol,
       contentType: multipart ? multipart.contentType : "application/json",
       forwardHeaders,
       extraHeaders: route.platform.extraHeaders,
       reuseUserAgent: route.platform.reuseUserAgent,
       customUserAgent: route.platform.customUserAgent,
     });
-    upstreamResponse = await fetch(upstreamUrl, {
+    upstreamResponse = await fetch(finalUpstreamUrl, {
       method: "POST",
       headers,
       body: multipart ? multipart.raw : JSON.stringify(upstreamBody),
@@ -536,6 +556,7 @@ export async function proxyV1RequestLite(
     return handleUpstreamResponseLite(
       upstreamResponse,
       route.platform,
+      upstreamProtocol,
       apiKey,
       requestedModel,
       config,
@@ -654,6 +675,8 @@ export async function proxyV1RequestLite(
 async function handleUpstreamResponseLite(
   upstreamResponse: Response,
   platform: { id: string; name: string; type?: string },
+  /** 本次请求实际使用的协议（来自 selectProtocolForRequest）；多协议下与 platform.type 可能不同 */
+  upstreamProtocol: PlatformType,
   apiKey: ApiKeyRecord,
   requestedModel: string,
   config: ProxyConfig,
@@ -672,7 +695,7 @@ async function handleUpstreamResponseLite(
   clientInfo?: { ipAddress?: string; userAgent?: string }
 ): Promise<Response> {
   // 上游是否为 Anthropic 协议：响应需先转成 OpenAI 内部格式再走 usage/下游转换管线
-  const upstreamIsAnthropic = platform.type === "anthropic";
+  const upstreamIsAnthropic = upstreamProtocol === "anthropic";
   // 流式响应（SSE）
   if (isStream) {
     const stream = upstreamResponse.body;

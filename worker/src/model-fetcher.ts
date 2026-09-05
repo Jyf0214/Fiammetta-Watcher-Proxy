@@ -17,7 +17,7 @@ import type { WorkerEnv } from "./config";
 import { parseApiKeys, parseApiKeyObjects, getNextKey } from "./platform-keys";
 import { isSafeUrl } from "@/lib/admin-security";
 import { getUpstreamProxy, markProxyFailure } from "@/lib/upstream-proxy";
-import type { PlatformConfig } from "@/lib/types";
+import { resolvePlatformProtocols, type PlatformConfig, type PlatformType } from "../../lib/types";
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -91,9 +91,20 @@ interface UpstreamModel {
 }
 
 /**
- * 从单个平台获取模型列表
+ * 按协议探测上游模型列表。
+ *
+ * 返回当前协议命中的模型 id 集合。失败（超时/非 2xx/响应体不识别）返回 null。
+ *
+ * 协议→端点：
+ * - anthropic 协议：官方 Anthropic 没有 /v1/models 端点（SDK 不提供模型发现），
+ *   但 GitHub Copilot / Vercel AI Gateway 等 Anthropic 兼容中转通常会实现
+ *   OpenAI 风格的 /v1/models。此处按 OpenAI 兼容方式探测（与 openai 协议走同一路径）。
+ * - gemini 协议：Google Generative AI ListModels 端点 /v1beta/models?key=...
+ *   返回 { models: [{ name: "models/gemini-..." }] } 形态。
+ * - openai/azure/custom：标准 /v1/models，返回 { data: [{ id }] } 形态。
  */
-async function fetchPlatformModels(
+async function fetchModelsByProtocol(
+  protocol: PlatformType,
   platform: {
     id: string;
     baseUrl: string;
@@ -103,63 +114,75 @@ async function fetchPlatformModels(
   db: D1Database,
   env?: WorkerEnv
 ): Promise<UpstreamModel[] | null> {
-  const url = `${platform.baseUrl.replace(/\/+$/, "")}/models`;
+  const base = platform.baseUrl.replace(/\/+$/, "");
+  let url: string;
+  let headers: Record<string, string>;
 
-  // SSRF 防护：模型拉取同样必须校验上游地址（此前无校验，平台 baseUrl 指向内网时
-  // 会形成盲 SSRF——响应数据入库后可经未认证 GET /v1/models 外带）。
-  // 用 isSafeUrl（含 DNS 解析层，防 AAAA-only 内网域名/DNS Rebinding）；定时任务非热路径，
-  // DNS 开销可接受；workerd 无 node:dns 时内部降级为 hostname 层
+  if (protocol === "gemini") {
+    // Gemini 协议：Key 通过 ?key= 查询参数传（不能用 Authorization Bearer）。
+    // 多 Key 时只取首个可用 Key——Gemini 上游一般单 Key 鉴权，与 OpenAI 兼容不同
+    const parsedKeys = parseApiKeys(platform.apiKeys);
+    if (parsedKeys.length === 0) return null;
+    const apiKey = parsedKeys[0];
+    url = `${base}/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    headers = {};
+  } else {
+    // openai / azure / custom / anthropic 兼容：统一走 /v1/models + Bearer
+    url = `${base}/models`;
+    headers = { Authorization: "" }; // 下面用 platformConfig 选 Key 后再补
+  }
+
+  // SSRF 防护：与原实现一致——所有协议都校验 baseUrl
   const urlCheck = await isSafeUrl(platform.baseUrl);
   if (!urlCheck.safe) {
     console.warn(
-      `[model-fetcher] 平台 ${platform.name}(${platform.id}) 上游 URL 不安全，跳过: ${urlCheck.reason}`
+      `[model-fetcher] 平台 ${platform.name}(${platform.id}) 上游 URL 不安全（${protocol}），跳过: ${urlCheck.reason}`
     );
     return null;
   }
 
-  const parsedKeys = parseApiKeys(platform.apiKeys);
-  const platformConfig: PlatformConfig = {
-    id: platform.id,
-    name: platform.name,
-    baseUrl: platform.baseUrl,
-    apiKeys: parsedKeys,
-    apiKeyObjects: parseApiKeyObjects(platform.apiKeys),
-    type: "openai",
-    enabled: true,
-    priority: 0,
-    weight: 1,
-    rpmLimit: null,
-    tpmLimit: null,
-    forwardHeaders: "[]",
-    injectStreamOptions: true,
-    status: "healthy",
-    failCount: 0,
-    lastFailAt: null,
-    cooldownEnd: null,
-  };
-
-  const apiKey = getNextKey(platformConfig);
-  if (!apiKey) return null;
-
+  // 出站代理（仅 Docker 部署）：所有协议共用同一套代理选择
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  // 出站代理选择结果需在 catch 中回标记，提升到 try 外声明（try/catch 不同块作用域）
   let proxy: Awaited<ReturnType<typeof getUpstreamProxy>> | null = null;
   let res: Response;
 
   try {
-    // 出站代理（仅 Docker 部署）：请求经代理服务器访问上游
     proxy = await getUpstreamProxy(db, env, platform.id);
+    if (protocol !== "gemini") {
+      // OpenAI 兼容路径：取第一个可用 Key 注入 Authorization
+      const platformConfig: PlatformConfig = {
+        id: platform.id,
+        name: platform.name,
+        baseUrl: platform.baseUrl,
+        apiKeys: parseApiKeys(platform.apiKeys),
+        apiKeyObjects: parseApiKeyObjects(platform.apiKeys),
+        type: protocol,
+        enabled: true,
+        priority: 0,
+        weight: 1,
+        rpmLimit: null,
+        tpmLimit: null,
+        forwardHeaders: "[]",
+        injectStreamOptions: true,
+        status: "healthy",
+        failCount: 0,
+        lastFailAt: null,
+        cooldownEnd: null,
+      };
+      const apiKey = getNextKey(platformConfig);
+      if (!apiKey) return null;
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
     res = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers,
       signal: controller.signal,
-      // 禁止跟随重定向：校验只作用于初始 URL，跟随 3xx 可能重定向到内网
+      // 禁止跟随重定向：校验只作用于初始 URL
       redirect: "manual",
       ...(proxy.dispatcher ? { dispatcher: proxy.dispatcher } : {}),
     });
   } catch (err) {
     clearTimeout(timeoutId);
-    // 网络层失败（超时除外）：回标记当前代理，连续失败达阈值后轮询跳过
     const isAbort = err instanceof DOMException && err.name === "AbortError";
     if (!isAbort && proxy?.url) void markProxyFailure(db, env, proxy.url).catch(() => {});
     return null;
@@ -167,17 +190,28 @@ async function fetchPlatformModels(
   clearTimeout(timeoutId);
 
   if (!res.ok) {
-    // 消费响应体释放连接（未读 body 会挂起 undici keep-alive 连接，长跑任务下累积泄漏）
     void res.arrayBuffer().catch(() => {});
     return null;
   }
 
   try {
     const data: any = await res.json();
-    const list: unknown[] = Array.isArray(data) ? data : data?.data;
-    if (!Array.isArray(list)) return null;
+    let list: unknown[] = [];
+    if (protocol === "gemini") {
+      // Gemini 响应：{ models: [{ name: "models/gemini-2.0-flash", ... }] }
+      if (data && Array.isArray(data.models)) {
+        list = data.models
+          .map((m: any) => (typeof m?.name === "string" ? m.name : null))
+          .filter((n: string | null): n is string => n !== null)
+          // Gemini 模型名形如 "models/gemini-2.0-flash"，去掉前缀以与其他协议 id 形态一致
+          .map((n: string) => n.replace(/^models\//, ""));
+      }
+    } else {
+      list = Array.isArray(data) ? data : data?.data;
+    }
+    if (!Array.isArray(list) || list.length === 0) return null;
 
-    const models = list
+    const models: UpstreamModel[] = list
       .filter(
         (item): item is UpstreamModel =>
           typeof item === "object" &&
@@ -190,16 +224,53 @@ async function fetchPlatformModels(
         owned_by: m.owned_by,
       }));
 
-    // 上游返回空列表视为获取失败，保留旧数据不清空
     if (models.length === 0) return null;
-
-    // 按 id 去重：个别供应商返回重复 id 时 createMany 会撞 @@unique([platformId, modelId]) 整批失败
-    const deduped = Array.from(new Map(models.map((m) => [m.id, m])).values());
-
-    return deduped;
+    return models;
   } catch {
     return null;
   }
+}
+
+/**
+ * 从单个平台按 types 顺序逐协议探测并合并去重。
+ *
+ * 合并策略：
+ * - 严格按 types 顺序探测（types[0] 优先，结果排在前面）
+ * - 同一 modelId 在多协议中均出现时保留首次命中的 owned_by
+ * - 任意协议返回 null（探测失败）不阻断其它协议；全部失败时返回 null
+ */
+async function fetchPlatformModels(
+  platform: {
+    id: string;
+    baseUrl: string;
+    apiKeys: string;
+    name: string;
+    type: string;
+    types?: string | null;
+  },
+  db: D1Database,
+  env?: WorkerEnv
+): Promise<UpstreamModel[] | null> {
+  // 解析协议列表：types 缺失/非法回退 [type]（与 router 行为一致）
+  const types = resolvePlatformProtocols(platform.types ?? null, platform.type as PlatformType);
+
+  // 按 types 顺序探测，合并去重（保序）
+  const merged: UpstreamModel[] = [];
+  const seen = new Set<string>();
+  let anySuccess = false;
+  for (const protocol of types) {
+    const models = await fetchModelsByProtocol(protocol, platform, db, env);
+    if (models === null) continue;
+    anySuccess = true;
+    for (const m of models) {
+      if (!seen.has(m.id)) {
+        seen.add(m.id);
+        merged.push(m);
+      }
+    }
+  }
+  if (!anySuccess) return null;
+  return merged;
 }
 
 /**
@@ -217,6 +288,8 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
         name: true,
         baseUrl: true,
         apiKeys: true,
+        type: true,
+        types: true,
       },
     });
 
@@ -225,7 +298,7 @@ export async function fetchAllPlatformModels(db: D1Database, env?: WorkerEnv): P
     let totalModels = 0;
     let successCount = 0;
 
-    type PlatformSelect = { id: string; name: string; baseUrl: string; apiKeys: string };
+    type PlatformSelect = { id: string; name: string; baseUrl: string; apiKeys: string; type: string; types: string };
     type ExistingModel = { modelId: string; enabled: boolean; source: string };
 
     const results = await Promise.allSettled(

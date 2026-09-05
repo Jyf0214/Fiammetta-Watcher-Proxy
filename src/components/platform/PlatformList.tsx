@@ -19,6 +19,9 @@ export interface Platform {
   baseUrl: string;
   apiKeys: string;
   type: string;
+  /** 单平台多协议支持的协议列表（API 返回时已为数组形态；旧数据缺失时为 undefined，
+   *  视作 [type]）。数组首项即 type（首选协议）。 */
+  types?: string[];
   presetId?: string | null;
   enabled: boolean;
   priority: number;
