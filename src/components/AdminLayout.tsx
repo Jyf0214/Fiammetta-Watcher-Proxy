@@ -27,6 +27,7 @@ import {
   Bell,
   Archive,
   Cpu,
+  Cable,
 } from "lucide-react";
 import { message } from "antd";
 import "@/lib/i18n";
@@ -56,6 +57,7 @@ const defaultMenuItems: SidebarItem[] = [
   { key: "backup", icon: Archive, href: "/admin/backup", group: "system", order: 15 },
   { key: "playground", icon: FlaskConical, href: "/admin/playground", group: "manage", order: 6 },
   { key: "devices", icon: Cpu, href: "/admin/devices", group: "system", order: 16 },
+  { key: "tunnels", icon: Cable, href: "/admin/tunnels", group: "system", order: 17 },
 ];
 
 // 注册默认菜单项（模块加载时执行一次）

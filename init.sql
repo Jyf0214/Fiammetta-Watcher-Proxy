@@ -276,6 +276,10 @@ CREATE TABLE IF NOT EXISTS "device_registrations" (
     "warp_enabled" INTEGER NOT NULL DEFAULT 0,
     "warp_enabled_at" INTEGER NOT NULL DEFAULT 0,
     "warp_enabled_by" TEXT,
+    -- 本设备 Cloudflare Tunnel 启动 token + 启动时间 + 启动操作人（与 5 方言 schema 同步）
+    "tunnel_token" TEXT,
+    "tunnel_started_at" INTEGER NOT NULL DEFAULT 0,
+    "tunnel_started_by" TEXT,
     "created_at" INTEGER NOT NULL DEFAULT 0,
     "updated_at" INTEGER NOT NULL DEFAULT 0
 );

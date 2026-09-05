@@ -292,6 +292,9 @@ model deviceRegistrations {
   warpEnabled        Boolean @default(false) @map("warp_enabled")
   warpEnabledAt      Int     @default(0) @map("warp_enabled_at")
   warpEnabledBy      String? @map("warp_enabled_by")
+  tunnelToken        String? @map("tunnel_token")
+  tunnelStartedAt    Int     @default(0) @map("tunnel_started_at")
+  tunnelStartedBy    String? @map("tunnel_started_by")
   createdAt   Int      @default(0) @map("created_at")
   updatedAt   Int      @default(0) @map("updated_at")
 

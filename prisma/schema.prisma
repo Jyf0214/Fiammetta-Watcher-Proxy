@@ -297,6 +297,14 @@ model deviceRegistrations {
   warpEnabledAt      Int     @default(0) @map("warp_enabled_at")
   // 本机 warp 上次切换操作人（admin 标识，便于审计追踪）
   warpEnabledBy      String? @map("warp_enabled_by")
+  // 本设备 Cloudflare Tunnel 启动 token（base64 JWT，从 Cloudflare Zero Trust 复制）：
+  // 每台设备独立 1 个 token，null/空=未启用；启动 cloudflared tunnel run --token <tunnelToken>
+  // 不写日志、不返回 API（避免泄露）；明文存储（cloudflared 自身也用明文 token）
+  tunnelToken        String? @map("tunnel_token")
+  // 本设备 tunnel 上次启动时间（Unix 秒）：管理后台 UI 展示
+  tunnelStartedAt    Int     @default(0) @map("tunnel_started_at")
+  // 本设备 tunnel 上次启动操作人（admin 标识，便于审计追踪）
+  tunnelStartedBy    String? @map("tunnel_started_by")
   createdAt   Int      @default(0) @map("created_at")
   updatedAt   Int      @default(0) @map("updated_at")
 

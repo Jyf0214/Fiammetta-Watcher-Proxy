@@ -21,9 +21,11 @@ import {
   message,
   Switch,
   Space,
+  Modal,
+  Input,
   type TableColumnsType,
 } from "antd";
-import { Trash2, Server, ShieldOff, Zap, ZapOff } from "lucide-react";
+import { Trash2, Server, ShieldOff, Zap, ZapOff, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -49,6 +51,11 @@ interface DeviceItem {
   warpEnabled: boolean;
   warpEnabledAt: string;
   warpEnabledBy: string | null;
+  /** Cloudflare Tunnel 启动 token：脱敏后的前 8 字符 + "..." 或 null */
+  hasToken?: boolean;
+  tokenSummary?: string | null;
+  tunnelStartedAt?: number;
+  tunnelStartedBy?: string | null;
 }
 
 /** CF 部署标志（构建期内联）。"cf" 时整页 stub，不请求 API */
@@ -139,6 +146,67 @@ export default function DevicesPage() {
       }
     } catch {
       message.error(t("devices:warpBulkFailed"));
+    }
+  };
+
+  // 单台设备 Tunnel Token 设置：PUT /api/admin/tunnels/[id] body: { token }
+  // 仅设 token 本身，不启进程（启动由独立按钮触发）
+  const [tunnelModal, setTunnelModal] = useState<{ id: string; name: string } | null>(null);
+  const [tunnelTokenInput, setTunnelTokenInput] = useState("");
+  const [tunnelSaving, setTunnelSaving] = useState(false);
+
+  const openTunnelModal = (id: string, name: string) => {
+    setTunnelModal({ id, name });
+    setTunnelTokenInput("");
+  };
+
+  const submitTunnelToken = async () => {
+    if (!tunnelModal) return;
+    const token = tunnelTokenInput.trim();
+    if (!token) {
+      message.error(t("devices:tunnelTokenRequired"));
+      return;
+    }
+    setTunnelSaving(true);
+    try {
+      const res = await fetch(`/api/admin/tunnels/${encodeURIComponent(tunnelModal.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        message.success(t("devices:tunnelTokenSet"));
+        setTunnelModal(null);
+        setTunnelTokenInput("");
+        void mutate();
+      } else {
+        message.error(data.error ?? t("devices:tunnelTokenFailed"));
+      }
+    } catch {
+      message.error(t("devices:tunnelTokenFailed"));
+    } finally {
+      setTunnelSaving(false);
+    }
+  };
+
+  // 清空 Token：PUT body: { token: null }
+  const clearTunnelToken = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/tunnels/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: null }),
+      });
+      const data: Record<string, any> = await res.json();
+      if (data.success) {
+        message.success(t("devices:tunnelTokenCleared"));
+        void mutate();
+      } else {
+        message.error(data.error ?? t("devices:tunnelTokenFailed"));
+      }
+    } catch {
+      message.error(t("devices:tunnelTokenFailed"));
     }
   };
 
@@ -281,6 +349,35 @@ export default function DevicesPage() {
       render: (s: string) => formatDateTime(s),
     },
     {
+      // 设备级 Cloudflare Tunnel Token：脱敏后前 8 字符 + "..." 或"未设"
+      // 整页隧道管理走 /admin/tunnels；本列入口按钮触发 Modal 填入完整 token
+      title: t("devices:colTunnelToken"),
+      dataIndex: "hasToken",
+      key: "tunnelToken",
+      width: 240,
+      render: (hasToken: boolean | undefined, record: DeviceItem) => (
+        <Space size="small">
+          {hasToken ? (
+            <code className="text-xs font-mono text-zinc-700 dark:text-zinc-300">
+              {record.tokenSummary ?? "***"}
+            </code>
+          ) : (
+            <Tag color="default" className="!m-0">
+              {t("devices:tunnelNoToken")}
+            </Tag>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            icon={<KeyRound className="w-3.5 h-3.5" />}
+            onClick={() => openTunnelModal(record.id, record.deviceName)}
+            aria-label={t("devices:tunnelSetToken")}
+          />
+        </Space>
+      ),
+    },
+    {
       title: t("devices:colActions"),
       key: "actions",
       width: 90,
@@ -308,6 +405,57 @@ export default function DevicesPage() {
 
   return (
     <AdminLayout>
+      <Modal
+        open={tunnelModal !== null}
+        title={t("devices:tunnelSetTokenTitle", { name: tunnelModal?.name ?? "" })}
+        okText={t("common:save")}
+        cancelText={t("common:cancel")}
+        okButtonProps={{ loading: tunnelSaving, disabled: !tunnelTokenInput.trim() }}
+        onOk={submitTunnelToken}
+        onCancel={() => {
+          if (tunnelSaving) return;
+          setTunnelModal(null);
+          setTunnelTokenInput("");
+        }}
+        destroyOnClose
+      >
+        <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-3 leading-relaxed">
+          {t("devices:tunnelSetTokenDesc")}
+        </p>
+        <Input.Password
+          value={tunnelTokenInput}
+          onChange={(e) => setTunnelTokenInput(e.target.value)}
+          placeholder="eyJhIjoi..."
+          autoComplete="off"
+          disabled={tunnelSaving}
+        />
+        {tunnelModal && (
+          <div className="mt-3 flex justify-end">
+            <Popconfirm
+              title={t("devices:tunnelClearConfirmTitle")}
+              description={t("devices:tunnelClearConfirmDesc", { name: tunnelModal.name })}
+              okText={t("common:confirm")}
+              cancelText={t("common:cancel")}
+              okButtonProps={{ danger: true }}
+              onConfirm={() => {
+                const id = tunnelModal.id;
+                setTunnelModal(null);
+                setTunnelTokenInput("");
+                void clearTunnelToken(id);
+              }}
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 className="w-3 h-3 text-red-500" />}
+                disabled={tunnelSaving}
+              >
+                {t("devices:tunnelClearToken")}
+              </Button>
+            </Popconfirm>
+          </div>
+        )}
+      </Modal>
       <PageContainer>
         <PageHeader
           title={t("devices")}
